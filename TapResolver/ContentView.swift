@@ -223,3 +223,4 @@ struct BeaconListItem: View {
 #Preview {
     ContentView()
 }
+
