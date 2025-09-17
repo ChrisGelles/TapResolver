@@ -8,17 +8,33 @@
 import SwiftUI
 
 struct ContentView: View {
+
+    @StateObject private var beaconDotStore = BeaconDotStore()
+    @StateObject private var mapTransform  = MapTransformStore()
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 // Map stack (centered)
                 MapContainer()
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                    // Keep screen center up to date for conversions
+                    .onAppear {
+                        mapTransform.screenCenter = CGPoint(x: geo.size.width / 2,
+                                                            y: geo.size.height / 2)
+                    }
+                    .onChange(of: geo.size) { newSize in
+                        mapTransform.screenCenter = CGPoint(x: newSize.width / 2,
+                                                            y: newSize.height / 2)
+                    }
 
                 // HUD overlay (full-screen, non-blocking outside drawers)
                 HUDContainer()
             }
             .ignoresSafeArea()
+            // Provide shared stores
+            .environmentObject(beaconDotStore)
+            .environmentObject(mapTransform)
         }
     }
 }
@@ -31,6 +47,9 @@ struct MapContainer: View {
         zoomStep: 1.25
     )
 
+    @EnvironmentObject private var beaconDotStore: BeaconDotStore
+    @EnvironmentObject private var mapTransform: MapTransformStore
+
     // MARK: - Image
     private var uiImage: UIImage? {
         UIImage(named: "myFirstFloor_v03-metric")
@@ -41,10 +60,19 @@ struct MapContainer: View {
             if let uiImage {
                 let mapSize = CGSize(width: uiImage.size.width, height: uiImage.size.height)
 
+                // keep transform store in sync with the map
+                updateTransformBindings(mapSize: mapSize)
+
                 ZStack {
                     // LAYERS
                     MapImage(uiImage: uiImage).zIndex(10)
                     MeasureLines().frame(width: mapSize.width, height: mapSize.height).zIndex(20)
+
+                    // DOTS: draw in map-local coords so they transform with the map
+                    BeaconOverlayDots()
+                        .frame(width: mapSize.width, height: mapSize.height)
+                        .zIndex(30)
+
                     BeaconOverlay().frame(width: mapSize.width, height: mapSize.height).zIndex(30)
                     UserNavigation().frame(width: mapSize.width, height: mapSize.height).zIndex(35)
                     MeterLabels().frame(width: mapSize.width, height: mapSize.height).zIndex(40)
@@ -76,6 +104,30 @@ struct MapContainer: View {
         }
         .drawingGroup() // optional: offload compositing
         .allowsHitTesting(true) // Map must be interactive
+    }
+
+    // Keep MapTransformStore synchronized with current transform + size
+    @ViewBuilder
+    private func updateTransformBindings(mapSize: CGSize) -> some View {
+        // Bind once and update when values change
+        Color.clear
+            .onAppear {
+                mapTransform.mapSize = mapSize
+                pushTransform()
+            }
+            .onChange(of: gestures.totalScale) { _ in pushTransform() }
+            .onChange(of: gestures.totalRotation) { _ in pushTransform() }
+            .onChange(of: gestures.totalOffset) { _ in pushTransform() }
+            .onChange(of: mapSize) { new in
+                mapTransform.mapSize = new
+                pushTransform()
+            }
+    }
+
+    private func pushTransform() {
+        mapTransform.totalScale = gestures.totalScale
+        mapTransform.totalRotationRadians = CGFloat(gestures.totalRotation.radians)
+        mapTransform.totalOffset = gestures.totalOffset
     }
 }
 
@@ -114,6 +166,9 @@ struct HUDContainer: View {
 }
 
 struct BeaconDrawer: View {
+    @EnvironmentObject private var beaconDotStore: BeaconDotStore
+    @EnvironmentObject private var mapTransform: MapTransformStore
+
     @State private var isOpen = false
     @State private var phaseOneDone = false
 
@@ -170,8 +225,16 @@ struct BeaconDrawer: View {
         return ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(sorted, id: \.self) { name in
-                    BeaconListItem(beaconName: name)
-                        .frame(height: 44)
+                    BeaconListItem(beaconName: name) { globalTapPoint, color in
+                        // 1) shift 20 px to the LEFT of the tap (as requested)
+                        let shifted = CGPoint(x: globalTapPoint.x - 20, y: globalTapPoint.y)
+                        // 2) convert to MAP-LOCAL coords using current transform
+                        let mapPoint = mapTransform.screenToMap(shifted)
+                        // 3) add dot + close drawer
+                        beaconDotStore.addDot(mapPoint: mapPoint, color: color)
+                        closeDrawer()
+                    }
+                    .frame(height: 44)
                 }
             }
             .padding(.bottom, 8)
@@ -200,6 +263,7 @@ struct BeaconDrawer: View {
 
 struct BeaconListItem: View {
     let beaconName: String
+    var onSelect: ((CGPoint, Color) -> Void)? = nil
 
     private var beaconColor: Color {
         let hash = beaconName.hash
@@ -209,18 +273,29 @@ struct BeaconListItem: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Circle().fill(beaconColor).frame(width: 12, height: 12)
+            Circle()
+                .fill(beaconColor)
+                .frame(width: 12, height: 12)
+
             Text(beaconName)
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundColor(.primary)
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(beaconColor.opacity(0.2))
+        )
         .contentShape(Rectangle())
+        // capture tap in GLOBAL space and pass to callback
+        .onTapGesture(coordinateSpace: .global) { globalPoint in
+            print("Tapped beacon: \(beaconName) at global \(globalPoint)")
+            onSelect?(globalPoint, beaconColor)
+        }
     }
 }
 
 #Preview {
     ContentView()
 }
-
