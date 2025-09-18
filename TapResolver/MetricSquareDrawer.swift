@@ -170,11 +170,15 @@ struct MetricSquareDrawer: View {
                 print("⚠️ Square add ignored: mapTransform not ready (mapSize == .zero)")
                 return
             }
-            let center = CGPoint(x: mapTransform.mapSize.width / 2,
-                                 y: mapTransform.mapSize.height / 2)
+
+            // 🎯 Drop at the map-local point that corresponds to the SCREEN CENTER
+            let targetScreen = mapTransform.screenCenter
+            let centerOnMap  = mapTransform.screenToMap(targetScreen)
+
             let color = nextColor(for: squares.squares.count)
-            squares.add(at: center, color: color)
-            print("▢ Square added @ map \(Int(center.x)),\(Int(center.y)))")
+            squares.add(at: centerOnMap, color: color)
+
+            print("▢ Square added @ map \(Int(centerOnMap.x)),\(Int(centerOnMap.y)) from screen center")
         } label: {
             HStack(spacing: 10) {
                 ZStack {
