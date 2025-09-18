@@ -11,7 +11,7 @@
 import SwiftUI
 import CoreGraphics
 
-// MARK: - A single dot view
+// MARK: - A single dot view (with white ring)
 public struct BeaconDot: View {
     public let color: Color
     public var size: CGFloat = 20
@@ -22,18 +22,13 @@ public struct BeaconDot: View {
     }
 
     public var body: some View {
-        ZStack {
-            // White ring
-            Circle()
-                .stroke(Color.white, lineWidth: 3)
-                .frame(width: size + 6, height: size + 6) // ring slightly larger than fill
-
-            // Fill
-            Circle()
-                .fill(color)
-                .frame(width: size, height: size)
-        }
-        .accessibilityHidden(true)
+        Circle()
+            .fill(color)
+            .frame(width: size, height: size)
+            .overlay(
+                Circle().stroke(Color.white, lineWidth: 2)
+            )
+            .accessibilityHidden(true)
     }
 }
 
@@ -157,7 +152,6 @@ public struct BeaconOverlayDots: View {
                    alignment: .center)
             .contentShape(Circle()) // small circular hit shape around dot (+5px)
             .position(x: dot.mapPoint.x, y: dot.mapPoint.y)
-            // Normal priority so map pan/zoom/rotate still work elsewhere.
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in

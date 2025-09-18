@@ -26,7 +26,7 @@ final class MapGestureHandler: ObservableObject {
     @Published var gestureRotation: Angle = .degrees(0)
     @Published var gestureTranslation: CGSize = .zero
 
-    // Notify listeners when totals change (e.g., TransformProcessor)
+    // Notify listeners when totals change (optional external wiring)
     var onTotalsChanged: ((CGFloat, Double, CGSize) -> Void)?
 
     init(minScale: CGFloat = 0.5, maxScale: CGFloat = 4.0, zoomStep: CGFloat = 1.25) {
@@ -65,13 +65,11 @@ final class MapGestureHandler: ObservableObject {
         gestureRotation = .degrees(0)
         steadyOffset = .zero
         gestureTranslation = .zero
-        emitTotals() // keep TransformProcessor / MapTransformStore in sync
+        emitTotals()
     }
 
-    
     // MARK: - Gestures
 
-    // Combine pan + pinch + rotate without overloading a single view modifier
     var combinedGesture: some Gesture {
         panGesture()
             .simultaneously(with: pinchGesture())
@@ -126,9 +124,7 @@ final class MapGestureHandler: ObservableObject {
 
     // MARK: - Utils
 
-    private func clamp<T: Comparable>(_ x: T, _ a: T, _ b: T) -> T {
-        min(max(x, a), b)
-    }
+    private func clamp<T: Comparable>(_ x: T, _ a: T, _ b: T) -> T { min(max(x, a), b) }
 
     private func emitTotals() {
         onTotalsChanged?(totalScale, totalRotation.radians, totalOffset)
