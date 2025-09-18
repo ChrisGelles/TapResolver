@@ -7,10 +7,16 @@
 
 import SwiftUI
 
+// MARK: - Map reset notification
+extension Notification.Name {
+    static let resetMapTransform = Notification.Name("ResetMapTransform")
+}
+
 struct ContentView: View {
 
     @StateObject private var beaconDotStore = BeaconDotStore()
     @StateObject private var mapTransform  = MapTransformStore()
+    @StateObject private var transformProcessor = TransformProcessor() // bound on appear
 
     var body: some View {
         GeometryReader { geo in
@@ -18,14 +24,16 @@ struct ContentView: View {
                 // Map stack (centered)
                 MapContainer()
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
-                    // Keep screen center up to date for conversions
                     .onAppear {
-                        mapTransform.screenCenter = CGPoint(x: geo.size.width / 2,
-                                                            y: geo.size.height / 2)
+                        // Hook up processor to the shared transform store
+                        transformProcessor.bind(to: mapTransform)
+                        // Keep screen center up to date for conversions
+                        transformProcessor.setScreenCenter(CGPoint(x: geo.size.width / 2,
+                                                                   y: geo.size.height / 2))
                     }
                     .onChange(of: geo.size) { newSize in
-                        mapTransform.screenCenter = CGPoint(x: newSize.width / 2,
-                                                            y: newSize.height / 2)
+                        transformProcessor.setScreenCenter(CGPoint(x: newSize.width / 2,
+                                                                   y: newSize.height / 2))
                     }
 
                 // HUD overlay (full-screen, non-blocking outside drawers)
@@ -34,19 +42,20 @@ struct ContentView: View {
             .ignoresSafeArea()
             .environmentObject(beaconDotStore)
             .environmentObject(mapTransform)
+            .environmentObject(transformProcessor)
         }
     }
 }
 
 struct MapContainer: View {
-    // Gesture/state controller (your existing handler)
+    // Gesture/state controller
     @StateObject private var gestures = MapGestureHandler(
         minScale: 0.5,
         maxScale: 4.0,
         zoomStep: 1.25
     )
 
-    @EnvironmentObject private var mapTransform: MapTransformStore
+    @EnvironmentObject private var transformProcessor: TransformProcessor
 
     // MARK: - Image
     private var uiImage: UIImage? {
@@ -58,8 +67,8 @@ struct MapContainer: View {
             if let uiImage {
                 let mapSize = CGSize(width: uiImage.size.width, height: uiImage.size.height)
 
-                // keep transform store in sync with the map
-                updateTransformBindings(mapSize: mapSize)
+                // One-time/lightweight wiring & map metadata
+                setupTransformProcessing(mapSize: mapSize)
 
                 ZStack {
                     // LAYERS
@@ -96,6 +105,13 @@ struct MapContainer: View {
                 .onTapGesture(coordinateSpace: .local) { location in
                     print("Tapped MapContainer at X:\(location.x), Y:\(location.y) (map size: \(Int(mapSize.width))x\(Int(mapSize.height)))")
                 }
+                
+                // inside MapContainer.body chain, after your gestures and tap handlers:
+                .onReceive(NotificationCenter.default.publisher(for: .resetMapTransform)) { _ in
+                    gestures.resetTransform()
+                }
+
+                
             } else {
                 Color.red // fallback
             }
@@ -104,30 +120,27 @@ struct MapContainer: View {
         .allowsHitTesting(true) // Map must be interactive
     }
 
-    // Keep MapTransformStore synchronized with current transform + size
+    // MARK: - Wiring & metadata
     @ViewBuilder
-    private func updateTransformBindings(mapSize: CGSize) -> some View {
+    private func setupTransformProcessing(mapSize: CGSize) -> some View {
         Color.clear
             .onAppear {
-                mapTransform.mapSize = mapSize
-                pushTransform()
+                // Tell the processor the map’s intrinsic size
+                transformProcessor.setMapSize(mapSize)
+                // Wire gesture totals into the processor
+                gestures.onTotalsChanged = { scale, rotationRadians, offset in
+                    transformProcessor.enqueueCandidate(scale: scale,
+                                                        rotationRadians: rotationRadians,
+                                                        offset: offset)
+                }
             }
-            .onChange(of: gestures.totalScale) { _ in pushTransform() }
-            .onChange(of: gestures.totalRotation) { _ in pushTransform() }
-            .onChange(of: gestures.totalOffset) { _ in pushTransform() }
             .onChange(of: mapSize) { new in
-                mapTransform.mapSize = new
-                pushTransform()
+                transformProcessor.setMapSize(new)
             }
-    }
-
-    private func pushTransform() {
-        mapTransform.totalScale = gestures.totalScale
-        mapTransform.totalRotationRadians = CGFloat(gestures.totalRotation.radians)
-        mapTransform.totalOffset = gestures.totalOffset
     }
 }
 
+// The rest of your small views are unchanged
 struct MapImage: View {
     let uiImage: UIImage
     var body: some View {
@@ -142,22 +155,40 @@ struct BeaconOverlay: View { var body: some View { Color.clear } }
 struct UserNavigation: View { var body: some View { Color.clear } }
 struct MeterLabels: View { var body: some View { Color.clear } }
 
-// HUDContainer remains here; BeaconDrawer is now in its own file
+// HUDContainer remains here; BeaconDrawer is in its own file
 struct HUDContainer: View {
     var body: some View {
         ZStack {
             Color.clear.ignoresSafeArea().allowsHitTesting(false)
-            VStack {
+
+            VStack(spacing: 8) {
                 HStack {
                     Spacer()
-                    BeaconDrawer() // lives in BeaconDrawer.swift
-                        .padding(.top, 60)     // below status bar / black bar
-                        .padding(.trailing, 0) // closer to right edge
+                    // Right-side vertical stack: Drawer + Reset
+                    VStack(alignment: .trailing, spacing: 8) {
+                        BeaconDrawer()
+                            .padding(.top, 60)
+                            .padding(.trailing, 0)
+
+                        // Reset View button
+                        Button {
+                            NotificationCenter.default.post(name: .resetMapTransform, object: nil)
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise.circle") // pick from the list above
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundColor(.primary)
+                                .padding(10)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                        .accessibilityLabel("Reset map view")
+                        .buttonStyle(.plain)
+                        .allowsHitTesting(true)
+                    }
                 }
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            .allowsHitTesting(true) // the only interactive thing in the HUD
+            .allowsHitTesting(true) // the HUD’s interactive bits
         }
         .zIndex(100)
     }

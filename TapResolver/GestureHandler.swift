@@ -26,6 +26,9 @@ final class MapGestureHandler: ObservableObject {
     @Published var gestureRotation: Angle = .degrees(0)
     @Published var gestureTranslation: CGSize = .zero
 
+    // Notify listeners when totals change (e.g., TransformProcessor)
+    var onTotalsChanged: ((CGFloat, Double, CGSize) -> Void)?
+
     init(minScale: CGFloat = 0.5, maxScale: CGFloat = 4.0, zoomStep: CGFloat = 1.25) {
         self.minScale = minScale
         self.maxScale = maxScale
@@ -52,8 +55,20 @@ final class MapGestureHandler: ObservableObject {
 
     func doubleTapZoom() {
         steadyScale = clamp(steadyScale * zoomStep, minScale, maxScale)
+        emitTotals()
     }
 
+    func resetTransform() {
+        steadyScale = 1.0
+        gestureScale = 1.0
+        steadyRotation = .degrees(0)
+        gestureRotation = .degrees(0)
+        steadyOffset = .zero
+        gestureTranslation = .zero
+        emitTotals() // keep TransformProcessor / MapTransformStore in sync
+    }
+
+    
     // MARK: - Gestures
 
     // Combine pan + pinch + rotate without overloading a single view modifier
@@ -68,12 +83,14 @@ final class MapGestureHandler: ObservableObject {
             .onChanged { [weak self] value in
                 guard let self else { return }
                 self.gestureTranslation = value.translation
+                self.emitTotals()
             }
             .onEnded { [weak self] value in
                 guard let self else { return }
                 self.steadyOffset.width += value.translation.width
                 self.steadyOffset.height += value.translation.height
                 self.gestureTranslation = .zero
+                self.emitTotals()
             }
     }
 
@@ -82,11 +99,13 @@ final class MapGestureHandler: ObservableObject {
             .onChanged { [weak self] value in
                 guard let self else { return }
                 self.gestureScale = value
+                self.emitTotals()
             }
             .onEnded { [weak self] value in
                 guard let self else { return }
                 self.steadyScale = clamp(self.steadyScale * value, self.minScale, self.maxScale)
                 self.gestureScale = 1.0
+                self.emitTotals()
             }
     }
 
@@ -95,11 +114,13 @@ final class MapGestureHandler: ObservableObject {
             .onChanged { [weak self] angle in
                 guard let self else { return }
                 self.gestureRotation = angle
+                self.emitTotals()
             }
             .onEnded { [weak self] angle in
                 guard let self else { return }
                 self.steadyRotation += angle
                 self.gestureRotation = .degrees(0)
+                self.emitTotals()
             }
     }
 
@@ -108,5 +129,8 @@ final class MapGestureHandler: ObservableObject {
     private func clamp<T: Comparable>(_ x: T, _ a: T, _ b: T) -> T {
         min(max(x, a), b)
     }
-}
 
+    private func emitTotals() {
+        onTotalsChanged?(totalScale, totalRotation.radians, totalOffset)
+    }
+}
