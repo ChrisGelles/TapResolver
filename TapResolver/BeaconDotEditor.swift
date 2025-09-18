@@ -105,6 +105,8 @@ public final class BeaconDotStore: ObservableObject {
             print("Added dot for \(beaconID) @ map (\(Int(mapPoint.x)), \(Int(mapPoint.y)))")
         }
     }
+    
+    //screenTranslationToMap
 
     /// Update a dot's map-local position (used while dragging).
     public func updateDot(id: UUID, to newPoint: CGPoint) {
@@ -142,6 +144,7 @@ public struct BeaconOverlayDots: View {
         private let hitPadding: CGFloat = 5   // dot’s hit area = size + 5px each side
 
         @State private var startPoint: CGPoint? = nil
+        @State private var startScreen: CGPoint? = nil
 
         var body: some View {
             ZStack {
@@ -153,7 +156,7 @@ public struct BeaconOverlayDots: View {
             .contentShape(Circle()) // small circular hit shape around dot (+5px)
             .position(x: dot.mapPoint.x, y: dot.mapPoint.y)
             .gesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 6)
                     .onChanged { value in
                         if startPoint == nil { startPoint = dot.mapPoint }
                         // Convert the screen translation -> map-local delta and apply

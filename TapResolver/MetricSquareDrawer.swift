@@ -31,6 +31,7 @@ final class HUDPanelsState: ObservableObject {
 
 // MARK: - Squares Store (map-local positions)
 final class MetricSquareStore: ObservableObject {
+    @Published var isInteracting: Bool = false
     struct Square: Identifiable, Equatable {
         let id = UUID()
         var color: Color
@@ -165,6 +166,15 @@ struct MetricSquareDrawer: View {
     private var addRow: some View {
         Button {
             guard squares.squares.count < squares.maxSquares else { return }
+            guard mapTransform.mapSize != .zero else {
+                print("⚠️ Square add ignored: mapTransform not ready (mapSize == .zero)")
+                return
+            }
+            let center = CGPoint(x: mapTransform.mapSize.width / 2,
+                                 y: mapTransform.mapSize.height / 2)
+            let color = nextColor(for: squares.squares.count)
+            squares.add(at: center, color: color)
+            print("▢ Square added @ map \(Int(center.x)),\(Int(center.y)))")
         } label: {
             HStack(spacing: 10) {
                 ZStack {
@@ -183,22 +193,8 @@ struct MetricSquareDrawer: View {
             .padding(.horizontal, 4)
             .contentShape(Rectangle())
         }
-        .simultaneousGesture(
-            TapGesture()
-                .onEnded {
-                    // Place near screen center (like beacons fallback)
-                    let sc = mapTransform.screenCenter
-                    let shifted = CGPoint(x: sc.x - 20, y: sc.y)
-                    let mapPoint = mapTransform.screenToMap(shifted)
-                    let color = nextColor(for: squares.squares.count)
-                    squares.add(at: mapPoint, color: color)
-                }
-        )
-        .buttonStyle(.plain)
-        .disabled(squares.squares.count >= squares.maxSquares)
-        .opacity(squares.squares.count >= squares.maxSquares ? 0.5 : 1)
     }
-
+        
     private func squareRow(_ sq: MetricSquareStore.Square) -> some View {
         HStack(spacing: 8) {
             // 20pt color swatch
@@ -276,8 +272,8 @@ struct MetricSquaresOverlay: View {
                 DraggableResizableSquare(square: sq, isInteractive: hud.isSquareOpen)
             }
         }
-        // Only interactive when the squares drawer is open
-        .allowsHitTesting(hud.isSquareOpen)
+        // REMOVED: container-level allowsHitTesting to avoid swallowing map gestures.
+        // Each square body/handle already gates its own hit-testing via isInteractive.
     }
 
     // A single square with center-drag & corner-resize
@@ -291,6 +287,8 @@ struct MetricSquaresOverlay: View {
         // Drag state
         @State private var startCenter: CGPoint? = nil
         @State private var startSide: CGFloat? = nil
+        
+        private let handleHitRadius: CGFloat = 16 // > 12pt visual to ease grabbing
 
         var body: some View {
             ZStack {
@@ -305,7 +303,7 @@ struct MetricSquaresOverlay: View {
                     .position(x: square.center.x, y: square.center.y)
                     .contentShape(Rectangle())
                     .allowsHitTesting(isInteractive)
-                    .gesture(centerDragGesture().simultaneously(with: emptyGesture()))
+                    .gesture(centerDragGesture())
 
                 // Corner handles (visible only if interactive)
                 if isInteractive {
@@ -324,11 +322,18 @@ struct MetricSquaresOverlay: View {
         }
 
         // MARK: gestures
-
         private func centerDragGesture() -> some Gesture {
-            DragGesture(minimumDistance: 0)
+            DragGesture(minimumDistance: 4)
                 .onChanged { value in
-                    if startCenter == nil { startCenter = square.center }
+                    let start = value.startLocation
+                    let corners = Corner.allCases.map { point(for: $0, center: square.center, side: square.side) }
+                    let nearAHandle = corners.contains { hypot($0.x - start.x, $0.y - start.y) <= handleHitRadius }
+                    if nearAHandle { return }
+
+                    if startCenter == nil {
+                        startCenter = square.center
+                        squares.isInteracting = true
+                    }
                     let dMap = mapTransform.screenTranslationToMap(value.translation)
                     let base = startCenter ?? square.center
                     let newCenter = CGPoint(x: base.x + dMap.x, y: base.y + dMap.y)
@@ -336,35 +341,34 @@ struct MetricSquaresOverlay: View {
                 }
                 .onEnded { _ in
                     startCenter = nil
+                    squares.isInteracting = false
                 }
         }
 
-        // uniform scaling using opposite corner as anchor
         private func cornerResizeGesture(corner: Corner) -> some Gesture {
-            DragGesture(minimumDistance: 0)
+            DragGesture(minimumDistance: 6)
                 .onChanged { value in
                     if startCenter == nil || startSide == nil {
                         startCenter = square.center
                         startSide = square.side
+                        squares.isInteracting = true
                     }
                     let center0 = startCenter ?? square.center
                     let side0 = startSide ?? square.side
 
-                    let half0 = side0 / 2
                     let startCorner = point(for: corner, center: center0, side: side0)
                     let anchorCorner = point(for: corner.opposite, center: center0, side: side0)
 
-                    // Translate drag from screen to map-local
                     let dMap = mapTransform.screenTranslationToMap(value.translation)
                     let newCorner = CGPoint(x: startCorner.x + dMap.x, y: startCorner.y + dMap.y)
 
-                    // New side = 2 * max(|dx|, |dy|) between anchor and new corner (axis-aligned square)
+                    let moveMagnitude = max(abs(value.translation.width), abs(value.translation.height))
+                    guard moveMagnitude > 2 else { return }
+
                     let dx = abs(newCorner.x - anchorCorner.x)
                     let dy = abs(newCorner.y - anchorCorner.y)
-                    let halfNew = max(dx, dy)
-                    let sideNew = max(10, halfNew * 2)
+                    let sideNew = max(10, max(dx, dy))
 
-                    // New center is midpoint between anchor and new corner
                     let newCenter = CGPoint(
                         x: (anchorCorner.x + newCorner.x) / 2,
                         y: (anchorCorner.y + newCorner.y) / 2
@@ -375,10 +379,9 @@ struct MetricSquaresOverlay: View {
                 .onEnded { _ in
                     startCenter = nil
                     startSide = nil
+                    squares.isInteracting = false
                 }
         }
-
-        // MARK: helpers
 
         private func point(for corner: Corner, center: CGPoint, side: CGFloat) -> CGPoint {
             let h = side / 2
@@ -391,7 +394,6 @@ struct MetricSquaresOverlay: View {
         }
 
         private func emptyGesture() -> some Gesture {
-            // Helps SwiftUI compose multiple gestures cleanly
             DragGesture(minimumDistance: .infinity)
         }
 

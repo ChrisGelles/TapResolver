@@ -9,9 +9,12 @@ import SwiftUI
 
 @main
 struct TapResolverApp: App {
+    @StateObject private var mapTransform = MapTransformStore()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(mapTransform)
         }
     }
 }

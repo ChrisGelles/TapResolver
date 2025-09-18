@@ -8,52 +8,61 @@
 import SwiftUI
 import CoreGraphics
 
-// MARK: - Map reset notification
+// MARK: - Map reset notification (used by the HUD reset button)
 extension Notification.Name {
     static let resetMapTransform = Notification.Name("ResetMapTransform")
 }
 
 struct ContentView: View {
 
-    // Dots + transform stores
-    @StateObject private var beaconDotStore = BeaconDotStore()
-    @StateObject private var mapTransform  = MapTransformStore()
-
-    // HUD state + metric squares store
-    @StateObject private var hudPanels = HUDPanelsState()
-    @StateObject private var metricSquares = MetricSquareStore()
+    // Global app state objects used across views
+    @StateObject private var beaconDotStore = BeaconDotStore()   // dots (map-local)
+    @EnvironmentObject private var mapTransform: MapTransformStore
+    @StateObject private var hudPanels     = HUDPanelsState()     // drawer exclusivity
+    @StateObject private var metricSquares = MetricSquareStore()  // squares (map-local)
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                // Map stack (centered)
+                // Map stack (centered on the device screen)
                 MapContainer()
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
-                    // Keep screen center up to date for conversions
+                    // Keep the "screen center" in sync so screen<->map conversions are correct
                     .onAppear {
-                        mapTransform.screenCenter = CGPoint(x: geo.size.width / 2,
+                        mapTransform.screenCenter = CGPoint(x: geo.size.width  / 2,
                                                             y: geo.size.height / 2)
                     }
                     .onChange(of: geo.size) { newSize in
-                        mapTransform.screenCenter = CGPoint(x: newSize.width / 2,
+                        mapTransform.screenCenter = CGPoint(x: newSize.width  / 2,
                                                             y: newSize.height / 2)
                     }
 
-                // HUD overlay (full-screen, non-blocking outside drawers)
+                // HUD overlay (drawers + reset) — non-blocking outside its own controls
                 HUDContainer()
             }
             .ignoresSafeArea()
-            // Environment for overlays + drawers
+            // Inject environment objects once at the root so all children can use them
             .environmentObject(beaconDotStore)
-            .environmentObject(mapTransform)
             .environmentObject(hudPanels)
             .environmentObject(metricSquares)
         }
     }
 }
 
+// MARK: - The host view for the map image + overlays + gesture transforms
 struct MapContainer: View {
-    // Gesture/state controller
+    private var uiImage: UIImage? { UIImage(named: "myFirstFloor_v03-metric") }
+
+    var body: some View {
+        if let uiImage {
+            MapCanvas(uiImage: uiImage)
+        } else {
+            Color.red
+        }
+    }
+}
+
+private struct MapCanvas: View {
     @StateObject private var gestures = MapGestureHandler(
         minScale: 0.5,
         maxScale: 4.0,
@@ -61,109 +70,127 @@ struct MapContainer: View {
     )
 
     @EnvironmentObject private var mapTransform: MapTransformStore
+    @EnvironmentObject private var metricSquares: MetricSquareStore
 
-    // MARK: - Image
-    private var uiImage: UIImage? {
-        UIImage(named: "myFirstFloor_v03-metric")
-    }
+    let uiImage: UIImage
 
     var body: some View {
-        Group {
-            if let uiImage {
-                let mapSize = CGSize(width: uiImage.size.width, height: uiImage.size.height)
+        let mapSize = CGSize(width: uiImage.size.width, height: uiImage.size.height)
 
-                // keep transform store in sync with the map
-                updateTransformBindings(mapSize: mapSize)
+        syncTransformStore(mapSize: mapSize)
 
-                ZStack {
-                    // LAYERS
-                    MapImage(uiImage: uiImage)                                   // z = 10
-                        .zIndex(10)
+        return ZStack {
+            // Base map image (z = 10)
+            MapImage(uiImage: uiImage)
+                .zIndex(10)
 
-                    MeasureLines()
-                        .frame(width: mapSize.width, height: mapSize.height)       // z = 20
-                        .zIndex(20)
-
-                    // DOTS: draw in map-local coords so they transform with the map
-                    BeaconOverlayDots()
-                        .frame(width: mapSize.width, height: mapSize.height)       // z = 28
-                        .zIndex(28)
-
-                    // SQUARES: between dots and BeaconOverlay
-                    MetricSquaresOverlay()
-                        .frame(width: mapSize.width, height: mapSize.height)       // z = 29
-                        .zIndex(29)
-
-                    BeaconOverlay()
-                        .frame(width: mapSize.width, height: mapSize.height)       // z = 30
-                        .zIndex(30)
-
-                    UserNavigation()
-                        .frame(width: mapSize.width, height: mapSize.height)       // z = 35
-                        .zIndex(35)
-
-                    MeterLabels()
-                        .frame(width: mapSize.width, height: mapSize.height)       // z = 40
-                        .zIndex(40)
-                }
+            // Optional measurement layer (z = 20)
+            MeasureLines()
                 .frame(width: mapSize.width, height: mapSize.height)
-                // Apply transforms (scale -> rotate -> translate)
-                .scaleEffect(gestures.totalScale, anchor: .center)
-                .rotationEffect(gestures.totalRotation)
-                .offset(
-                    x: gestures.totalOffset.width,
-                    y: gestures.totalOffset.height
-                )
-                // Attach combined gestures
-                .gesture(gestures.combinedGesture)
-                // Double-tap to zoom in
-                .onTapGesture(count: 2) {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        gestures.doubleTapZoom()
-                    }
-                }
-                // Reset listener (from HUD)
-                .onReceive(NotificationCenter.default.publisher(for: .resetMapTransform)) { _ in
-                    gestures.resetTransform()
-                }
-                // Tap logger (local coords)
-                .contentShape(Rectangle())
-                .onTapGesture(coordinateSpace: .local) { location in
-                    print("Tapped MapContainer at X:\(location.x), Y:\(location.y) (map size: \(Int(mapSize.width))x\(Int(mapSize.height)))")
-                }
-            } else {
-                Color.red // fallback
+                .zIndex(20)
+            // Shield map gestures while a square is being dragged/resized,
+            // but keep the squares themselves interactive (they render above this).
+            if metricSquares.isInteracting {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: .infinity))
+                    .zIndex(27) // below dots(28) and squares(29), above map(10)/measure(20)
+            }
+
+            // Dots rendered in map-local coords (z = 28)
+            BeaconOverlayDots()
+                .frame(width: mapSize.width, height: mapSize.height)
+                .zIndex(28)
+
+            // >>> INSERTED: MetricSquaresOverlay between dots (z=28) and BeaconOverlay (z=30)
+            MetricSquaresOverlay()
+                .frame(width: mapSize.width, height: mapSize.height)
+                .zIndex(29)
+
+            // Your other overlays on top (z >= 30)
+            BeaconOverlay()
+                .frame(width: mapSize.width, height: mapSize.height)
+                .zIndex(30)
+
+            UserNavigation()
+                .frame(width: mapSize.width, height: mapSize.height)
+                .zIndex(35)
+
+            MeterLabels()
+                .frame(width: mapSize.width, height: mapSize.height)
+                .zIndex(40)
+        }
+        .frame(width: mapSize.width, height: mapSize.height)
+
+        .onAppear {
+            // Eagerly initialize the transform store so drawers can convert immediately.
+            mapTransform.mapSize = mapSize
+            mapTransform.totalScale = gestures.totalScale
+            mapTransform.totalRotationRadians = CGFloat(gestures.totalRotation.radians)
+            mapTransform.totalOffset = gestures.totalOffset
+
+            // 🔧 Wire live updates from gestures -> transform store every frame
+            gestures.onTotalsChanged = { scale, rotationRadians, offset in
+                mapTransform.totalScale = scale
+                mapTransform.totalRotationRadians = rotationRadians
+                mapTransform.totalOffset = offset
+            }
+            
+            print("MapCanvas mapTransform:", ObjectIdentifier(mapTransform),
+                  "mapSize:", mapTransform.mapSize)
+        }
+
+        // Apply transforms (scale → rotate → translate)
+        .scaleEffect(gestures.totalScale, anchor: .center)
+        .rotationEffect(gestures.totalRotation)
+        .offset(x: gestures.totalOffset.width, y: gestures.totalOffset.height)
+
+        // Gestures; disable while a square is interacting
+        .gesture(gestures.combinedGesture)
+        //.disabled(metricSquares.isInteracting)
+
+        .onTapGesture(count: 2) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                gestures.doubleTapZoom()
             }
         }
-        .drawingGroup() // optional: offload compositing
-        .allowsHitTesting(true) // Map must be interactive
+        .onReceive(NotificationCenter.default.publisher(for: .resetMapTransform)) { _ in
+            gestures.resetTransform()
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(coordinateSpace: .local) { location in
+            print("Tapped MapContainer @ X:\(Int(location.x)) Y:\(Int(location.y))  " +
+                  "(map size: \(Int(mapSize.width))x\(Int(mapSize.height)))")
+        }
+        .drawingGroup()
+        .allowsHitTesting(true)
     }
 
-    // Keep MapTransformStore synchronized with current transform + size
+    // MARK: - Keep MapTransformStore in sync (size + current composite transform)
     @ViewBuilder
-    private func updateTransformBindings(mapSize: CGSize) -> some View {
+    private func syncTransformStore(mapSize: CGSize) -> some View {
         Color.clear
             .onAppear {
                 mapTransform.mapSize = mapSize
-                pushTransform()
+                pushTransformTotals()
             }
-            .onChange(of: gestures.totalScale) { _ in pushTransform() }
-            .onChange(of: gestures.totalRotation) { _ in pushTransform() }
-            .onChange(of: gestures.totalOffset) { _ in pushTransform() }
-            .onChange(of: mapSize) { new in
-                mapTransform.mapSize = new
-                pushTransform()
+            .onChange(of: gestures.totalScale)   { _ in pushTransformTotals() }
+            .onChange(of: gestures.totalRotation){ _ in pushTransformTotals() }
+            .onChange(of: gestures.totalOffset)  { _ in pushTransformTotals() }
+            .onChange(of: mapSize)               { _ in
+                mapTransform.mapSize = mapSize
+                pushTransformTotals()
             }
     }
 
-    private func pushTransform() {
+    private func pushTransformTotals() {
         mapTransform.totalScale = gestures.totalScale
         mapTransform.totalRotationRadians = CGFloat(gestures.totalRotation.radians)
         mapTransform.totalOffset = gestures.totalOffset
     }
 }
 
-// Basic layers (placeholders for now)
+// Basic layers kept intact
 struct MapImage: View {
     let uiImage: UIImage
     var body: some View {
@@ -172,30 +199,25 @@ struct MapImage: View {
             .frame(width: uiImage.size.width, height: uiImage.size.height)
     }
 }
-
 struct MeasureLines: View { var body: some View { Color.clear } }
 struct BeaconOverlay: View { var body: some View { Color.clear } }
 struct UserNavigation: View { var body: some View { Color.clear } }
 struct MeterLabels: View { var body: some View { Color.clear } }
 
-// HUD with drawers and a reset button
+// HUD container unchanged except for including both drawers (as you already have)
 struct HUDContainer: View {
     var body: some View {
         ZStack {
             Color.clear.ignoresSafeArea().allowsHitTesting(false)
+            CrosshairHUDOverlay() // shows crosshairs at screen center when beacons drawer is open
             VStack(spacing: 8) {
                 HStack {
                     Spacer()
                     VStack(alignment: .trailing, spacing: 8) {
-                        // Metric Squares drawer
                         MetricSquareDrawer()
                             .padding(.top, 60)
                             .padding(.trailing, 0)
-
-                        // Beacons drawer
                         BeaconDrawer()
-
-                        // Reset View button
                         Button {
                             NotificationCenter.default.post(name: .resetMapTransform, object: nil)
                         } label: {
@@ -213,7 +235,7 @@ struct HUDContainer: View {
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            .allowsHitTesting(true) // the HUD’s interactive bits
+            .allowsHitTesting(true)
         }
         .zIndex(100)
     }

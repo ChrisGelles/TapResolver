@@ -5,11 +5,18 @@
 
 import SwiftUI
 import CoreGraphics
+// One shared screen-space tweak for crosshair and dot-drop alignment
+// +x = right, +y = down (screen points)
+enum CrosshairConfig {
+    static var screenOffset = CGPoint(x: 100, y: 100)
+}
 
 struct BeaconDrawer: View {
     @EnvironmentObject private var beaconDotStore: BeaconDotStore
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var hud: HUDPanelsState
+    
+    private let crosshairScreenOffset = CGPoint(x: 0, y: 0) // tweak here: +x=right, +y=down (in screen pts)
 
     private let collapsedWidth: CGFloat = 56
     private let expandedWidth: CGFloat = 160
@@ -29,10 +36,36 @@ struct BeaconDrawer: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(mockBeacons.sorted(), id: \.self) { name in
                         BeaconListItem(beaconName: name) { globalTapPoint, color in
-                            let shifted = CGPoint(x: globalTapPoint.x - 20, y: globalTapPoint.y)
-                            let mapPoint = mapTransform.screenToMap(shifted)
+                            // Ensure map transform is initialized
+                            guard mapTransform.mapSize != .zero else {
+                                print("⚠️ Beacon add ignored: mapTransform not ready (mapSize == .zero)")
+                                return
+                            }
+
+                            let targetScreen = mapTransform.screenCenter
+                            let mapPoint = mapTransform.screenToMap(targetScreen)
+
+                            /*
+                            // Target = SCREEN CENTER (+ shared tweak), then convert to MAP-LOCAL
+                            let targetScreen = CGPoint(
+                                x: mapTransform.screenCenter.x + CrosshairConfig.screenOffset.x,
+                                y: mapTransform.screenCenter.y + CrosshairConfig.screenOffset.y
+                            )
+                            
+                            // Target = SCREEN CENTER (+ tweak), then convert to MAP-LOCAL
+                           let targetScreen = CGPoint(
+                                x: mapTransform.screenCenter.x + crosshairScreenOffset.x,
+                                y: mapTransform.screenCenter.y + crosshairScreenOffset.y
+                            )
+                            
+                            let mapPoint = mapTransform.screenToMap(targetScreen)
+                             */
+                            
+                            // Toggle the dot for this beacon at that map-local position
                             beaconDotStore.toggleDot(for: name, mapPoint: mapPoint, color: color)
+
                             hud.isBeaconOpen = false // close after selection
+
                         }
                         .frame(height: 44)
                         .padding(.leading, 8)
@@ -110,5 +143,46 @@ struct BeaconListItem: View {
         .onTapGesture(coordinateSpace: .global) { globalPoint in
             onSelect?(globalPoint, beaconColor)
         }
+    }
+}
+
+
+// MARK: - Full-screen HUD crosshair overlay (shows when Beacon drawer is open)
+struct CrosshairHUDOverlay: View {
+    @EnvironmentObject private var hud: HUDPanelsState
+    @EnvironmentObject private var mapTransform: MapTransformStore
+
+    var body: some View {
+        GeometryReader { _ in
+            let p = mapTransform.screenCenter   // screen-space center
+            let r: CGFloat = 12                 // radius of the circle guide
+
+            ZStack {
+                // 1 px-stroked circle (1pt stroke in iOS points)
+                Circle()
+                    .stroke(Color.black, lineWidth: 1)
+                    .frame(width: r * 2, height: r * 2)
+                    .position(x: p.x, y: p.y)
+
+                // Horizontal line
+                Path { path in
+                    path.move(to: CGPoint(x: p.x - r * 1.6, y: p.y))
+                    path.addLine(to: CGPoint(x: p.x + r * 1.6, y: p.y))
+                }
+                .stroke(Color.black, lineWidth: 1)
+
+                // Vertical line
+                Path { path in
+                    path.move(to: CGPoint(x: p.x, y: p.y - r * 1.6))
+                    path.addLine(to: CGPoint(x: p.x, y: p.y + r * 1.6))
+                }
+                .stroke(Color.black, lineWidth: 1)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)                    // never intercept gestures
+        .opacity(hud.isBeaconOpen ? 1.0 : 0.0)      // visible only when beacon drawer open
+        .animation(.easeInOut(duration: 0.15), value: hud.isBeaconOpen)
     }
 }
