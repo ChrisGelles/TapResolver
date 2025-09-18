@@ -32,7 +32,6 @@ struct ContentView: View {
                 HUDContainer()
             }
             .ignoresSafeArea()
-            // Provide shared stores
             .environmentObject(beaconDotStore)
             .environmentObject(mapTransform)
         }
@@ -40,14 +39,13 @@ struct ContentView: View {
 }
 
 struct MapContainer: View {
-    // Gesture/state controller (modularized)
+    // Gesture/state controller (your existing handler)
     @StateObject private var gestures = MapGestureHandler(
         minScale: 0.5,
         maxScale: 4.0,
         zoomStep: 1.25
     )
 
-    @EnvironmentObject private var beaconDotStore: BeaconDotStore
     @EnvironmentObject private var mapTransform: MapTransformStore
 
     // MARK: - Image
@@ -109,7 +107,6 @@ struct MapContainer: View {
     // Keep MapTransformStore synchronized with current transform + size
     @ViewBuilder
     private func updateTransformBindings(mapSize: CGSize) -> some View {
-        // Bind once and update when values change
         Color.clear
             .onAppear {
                 mapTransform.mapSize = mapSize
@@ -226,12 +223,13 @@ struct BeaconDrawer: View {
             LazyVStack(spacing: 0) {
                 ForEach(sorted, id: \.self) { name in
                     BeaconListItem(beaconName: name) { globalTapPoint, color in
-                        // 1) shift 20 px to the LEFT of the tap (as requested)
+                        // 1) 20 px left of tap (in GLOBAL coords)
                         let shifted = CGPoint(x: globalTapPoint.x - 20, y: globalTapPoint.y)
-                        // 2) convert to MAP-LOCAL coords using current transform
+                        // 2) Convert to MAP-LOCAL coords using current transform
                         let mapPoint = mapTransform.screenToMap(shifted)
-                        // 3) add dot + close drawer
-                        beaconDotStore.addDot(mapPoint: mapPoint, color: color)
+                        // 3) Toggle the dot for this beacon
+                        beaconDotStore.toggleDot(for: name, mapPoint: mapPoint, color: color)
+                        // 4) Close the drawer
                         closeDrawer()
                     }
                     .frame(height: 44)
@@ -290,7 +288,6 @@ struct BeaconListItem: View {
         .contentShape(Rectangle())
         // capture tap in GLOBAL space and pass to callback
         .onTapGesture(coordinateSpace: .global) { globalPoint in
-            print("Tapped beacon: \(beaconName) at global \(globalPoint)")
             onSelect?(globalPoint, beaconColor)
         }
     }
