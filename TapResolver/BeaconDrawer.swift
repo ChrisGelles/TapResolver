@@ -5,8 +5,8 @@
 
 import SwiftUI
 import CoreGraphics
+
 // One shared screen-space tweak for crosshair and dot-drop alignment
-// +x = right, +y = down (screen points)
 enum CrosshairConfig {
     static var screenOffset = CGPoint(x: 100, y: 100)
 }
@@ -15,16 +15,12 @@ struct BeaconDrawer: View {
     @EnvironmentObject private var beaconDotStore: BeaconDotStore
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var hud: HUDPanelsState
-    
-    private let crosshairScreenOffset = CGPoint(x: 0, y: 0) // tweak here: +x=right, +y=down (in screen pts)
+    @EnvironmentObject private var beaconLists: BeaconListsStore   // uses shared lists
 
+    private let crosshairScreenOffset = CGPoint(x: 0, y: 0)
     private let collapsedWidth: CGFloat = 56
     private let expandedWidth: CGFloat = 160
     private let topBarHeight: CGFloat = 48
-
-    private let mockBeacons = [
-        "12-rowdySquirrel","15-frostyIbis","08-bouncyPenguin","23-sparklyDolphin","31-gigglyGiraffe"
-    ]
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -34,39 +30,23 @@ struct BeaconDrawer: View {
             // List
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(mockBeacons.sorted(), id: \.self) { name in
-                        BeaconListItem(beaconName: name) { globalTapPoint, color in
-                            // Ensure map transform is initialized
-                            guard mapTransform.mapSize != .zero else {
-                                print("⚠️ Beacon add ignored: mapTransform not ready (mapSize == .zero)")
-                                return
+                    ForEach(beaconLists.beacons.sorted(), id: \.self) { name in
+                        BeaconListItem(
+                            beaconName: name,
+                            onSelect: { _, color in
+                                guard mapTransform.mapSize != .zero else {
+                                    print("⚠️ Beacon add ignored: mapTransform not ready (mapSize == .zero)")
+                                    return
+                                }
+                                let targetScreen = mapTransform.screenCenter
+                                let mapPoint = mapTransform.screenToMap(targetScreen)
+                                beaconDotStore.toggleDot(for: name, mapPoint: mapPoint, color: color)
+                                hud.isBeaconOpen = false // close after selection
+                            },
+                            onDemote: {
+                                beaconLists.demoteToMorgue(name)
                             }
-
-                            let targetScreen = mapTransform.screenCenter
-                            let mapPoint = mapTransform.screenToMap(targetScreen)
-
-                            /*
-                            // Target = SCREEN CENTER (+ shared tweak), then convert to MAP-LOCAL
-                            let targetScreen = CGPoint(
-                                x: mapTransform.screenCenter.x + CrosshairConfig.screenOffset.x,
-                                y: mapTransform.screenCenter.y + CrosshairConfig.screenOffset.y
-                            )
-                            
-                            // Target = SCREEN CENTER (+ tweak), then convert to MAP-LOCAL
-                           let targetScreen = CGPoint(
-                                x: mapTransform.screenCenter.x + crosshairScreenOffset.x,
-                                y: mapTransform.screenCenter.y + crosshairScreenOffset.y
-                            )
-                            
-                            let mapPoint = mapTransform.screenToMap(targetScreen)
-                             */
-                            
-                            // Toggle the dot for this beacon at that map-local position
-                            beaconDotStore.toggleDot(for: name, mapPoint: mapPoint, color: color)
-
-                            hud.isBeaconOpen = false // close after selection
-
-                        }
+                        )
                         .frame(height: 44)
                         .padding(.leading, 8)
                     }
@@ -88,7 +68,7 @@ struct BeaconDrawer: View {
                     if hud.isBeaconOpen {
                         hud.closeAll()
                     } else {
-                        hud.openBeacon()  // <- closes squares drawer
+                        hud.openBeacon()
                     }
                 } label: {
                     Image(systemName: "chevron.right")
@@ -114,10 +94,11 @@ struct BeaconDrawer: View {
     }
 }
 
-// Row with global-tap callback
+// Row with capsule (tap to drop dot) + trailing demote button
 struct BeaconListItem: View {
     let beaconName: String
     var onSelect: ((CGPoint, Color) -> Void)? = nil
+    var onDemote: (() -> Void)? = nil
 
     private var beaconColor: Color {
         let hash = beaconName.hash
@@ -126,26 +107,40 @@ struct BeaconListItem: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Circle().fill(beaconColor).frame(width: 12, height: 12)
-            Text(beaconName)
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
-                .foregroundColor(.primary)
+        HStack(spacing: 8) {
+            // Capsule button (same behavior/visual as before)
+            HStack(spacing: 10) {
+                Circle().fill(beaconColor).frame(width: 12, height: 12)
+                Text(beaconName)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundColor(.primary)
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(beaconColor.opacity(0.2))
+            )
+            .contentShape(Rectangle())
+            .onTapGesture(coordinateSpace: .global) { globalPoint in
+                onSelect?(globalPoint, beaconColor)
+            }
+
             Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(beaconColor.opacity(0.2))
-        )
-        .contentShape(Rectangle())
-        .onTapGesture(coordinateSpace: .global) { globalPoint in
-            onSelect?(globalPoint, beaconColor)
+
+            // Demote button (green arrow down)
+            Button(action: { onDemote?() }) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.red)
+                    .frame(width: 24, height: 24)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Send to Morgue")
         }
     }
 }
-
 
 // MARK: - Full-screen HUD crosshair overlay (shows when Beacon drawer is open)
 struct CrosshairHUDOverlay: View {

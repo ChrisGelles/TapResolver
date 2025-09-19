@@ -20,6 +20,9 @@ struct ContentView: View {
     @EnvironmentObject private var mapTransform: MapTransformStore
     @StateObject private var hudPanels     = HUDPanelsState()     // drawer exclusivity
     @StateObject private var metricSquares = MetricSquareStore()  // squares (map-local)
+    @StateObject private var squareMetrics = SquareMetrics()
+    @StateObject private var beaconLists   = BeaconListsStore()   // ← added
+
 
     var body: some View {
         GeometryReader { geo in
@@ -45,6 +48,8 @@ struct ContentView: View {
             .environmentObject(beaconDotStore)
             .environmentObject(hudPanels)
             .environmentObject(metricSquares)
+            .environmentObject(squareMetrics)
+            .environmentObject(beaconLists)    // ← added
         }
     }
 }
@@ -94,18 +99,18 @@ private struct MapCanvas: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: .infinity))
-                    .zIndex(27) // below dots(28) and squares(29), above map(10)/measure(20)
+                    .zIndex(25) // below dots(28) and squares(29), above map(10)/measure(20)
             }
-
-            // Dots rendered in map-local coords (z = 28)
-            BeaconOverlayDots()
-                .frame(width: mapSize.width, height: mapSize.height)
-                .zIndex(28)
 
             // >>> INSERTED: MetricSquaresOverlay between dots (z=28) and BeaconOverlay (z=30)
             MetricSquaresOverlay()
                 .frame(width: mapSize.width, height: mapSize.height)
-                .zIndex(29)
+                .zIndex(25)
+            
+            // Dots rendered in map-local coords (z = 28)
+            BeaconOverlayDots()
+                .frame(width: mapSize.width, height: mapSize.height)
+                .zIndex(28)
 
             // Your other overlays on top (z >= 30)
             BeaconOverlay()
@@ -218,6 +223,7 @@ struct HUDContainer: View {
                             .padding(.top, 60)
                             .padding(.trailing, 0)
                         BeaconDrawer()
+                        MorgueDrawer()                  // ← added, sits next to Beacon drawer
                         Button {
                             NotificationCenter.default.post(name: .resetMapTransform, object: nil)
                         } label: {
@@ -226,10 +232,11 @@ struct HUDContainer: View {
                                 .foregroundColor(.primary)
                                 .padding(10)
                                 .background(.ultraThinMaterial, in: Circle())
-                        }
-                        .accessibilityLabel("Reset map view")
-                        .buttonStyle(.plain)
-                        .allowsHitTesting(true)
+                          }
+                            .accessibilityLabel("Reset map view")
+                            .buttonStyle(.plain)
+                            .allowsHitTesting(true)
+                            
                     }
                 }
                 Spacer()

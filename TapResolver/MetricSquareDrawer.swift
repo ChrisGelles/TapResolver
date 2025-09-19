@@ -8,26 +8,38 @@
 import SwiftUI
 import CoreGraphics
 
+
 // MARK: - HUD panel state for mutual exclusivity (shared)
 final class HUDPanelsState: ObservableObject {
     @Published var isBeaconOpen: Bool = false
     @Published var isSquareOpen: Bool = false
+    @Published var isMorgueOpen: Bool = false   // ← added
 
     func openBeacon() {
         isBeaconOpen = true
         isSquareOpen = false
+        isMorgueOpen = false
     }
 
     func openSquares() {
         isSquareOpen = true
         isBeaconOpen = false
+        isMorgueOpen = false
+    }
+
+    func openMorgue() {                         // ← added
+        isMorgueOpen = true
+        isBeaconOpen = false
+        isSquareOpen = false
     }
 
     func closeAll() {
         isBeaconOpen = false
         isSquareOpen = false
+        isMorgueOpen = false
     }
 }
+
 
 // MARK: - Squares Store (map-local positions)
 final class MetricSquareStore: ObservableObject {
@@ -73,8 +85,38 @@ final class MetricSquareStore: ObservableObject {
     }
 }
 
-// MARK: - Drawer
+// MARK: - Square metrics (per-square pixel side length + optional meters)
+final class SquareMetrics: ObservableObject {
+    struct Entry: Identifiable {
+        let id: UUID
+        var pixelSide: CGFloat      // side length in MAP-LOCAL units (image space “pixels”)
+        var meters: Double?         // optional, for later
+    }
 
+    @Published private(set) var entries: [UUID: Entry] = [:]
+
+    func updatePixelSide(for id: UUID, side: CGFloat) {
+        if var e = entries[id] {
+            e.pixelSide = side
+            entries[id] = e
+        } else {
+            entries[id] = Entry(id: id, pixelSide: side, meters: nil)
+        }
+    }
+
+    func setMeters(for id: UUID, meters: Double) {
+        if var e = entries[id] {
+            e.meters = meters
+            entries[id] = e
+        } else {
+            entries[id] = Entry(id: id, pixelSide: 0, meters: meters)
+        }
+    }
+
+    func entry(for id: UUID) -> Entry? { entries[id] }
+}
+
+// MARK: - Drawer
 struct MetricSquareDrawer: View {
     @EnvironmentObject private var hud: HUDPanelsState
     @EnvironmentObject private var squares: MetricSquareStore
@@ -269,6 +311,8 @@ struct MetricSquaresOverlay: View {
     @EnvironmentObject private var hud: HUDPanelsState
     @EnvironmentObject private var squares: MetricSquareStore
     @EnvironmentObject private var mapTransform: MapTransformStore
+    @EnvironmentObject private var squareMetrics: SquareMetrics
+
 
     var body: some View {
         ZStack {
@@ -287,18 +331,25 @@ struct MetricSquaresOverlay: View {
 
         @EnvironmentObject private var squares: MetricSquareStore
         @EnvironmentObject private var mapTransform: MapTransformStore
+        @EnvironmentObject private var squareMetrics: SquareMetrics
 
         // Drag state
         @State private var startCenter: CGPoint? = nil
         @State private var startSide: CGFloat? = nil
         
-        private let handleHitRadius: CGFloat = 16 // > 12pt visual to ease grabbing
+        @State private var startCorner0: CGPoint? = nil   // corner being dragged at gesture start (map-local)
+        @State private var anchorCorner0: CGPoint? = nil  // opposite (fixed) corner at gesture start (map-local)
+
+        @EnvironmentObject private var hud: HUDPanelsState // to gate move vs scale modes
+
+        
+        private let handleHitRadius: CGFloat = 10 // > 12pt visual to ease grabbing
 
         var body: some View {
             ZStack {
                 // Body (transparent fill + stroke)
                 Rectangle()
-                    .fill(Color.clear)
+                    .fill(square.color.opacity(0.3))    // ← 30% opacity fill
                     .frame(width: square.side, height: square.side)
                     .overlay(
                         Rectangle()
@@ -306,11 +357,13 @@ struct MetricSquaresOverlay: View {
                     )
                     .position(x: square.center.x, y: square.center.y)
                     .contentShape(Rectangle())
-                    .allowsHitTesting(isInteractive)
+                    // Move-only when drawer is CLOSED; disable when open (scale-only mode).
+                    .allowsHitTesting(isInteractive && !hud.isSquareOpen)
+                    //.allowsHitTesting(isInteractive)
                     .gesture(centerDragGesture())
 
-                // Corner handles (visible only if interactive)
-                if isInteractive {
+                // Corner handles: visible & interactive only when the drawer is OPEN (scale-only mode)
+                if isInteractive && hud.isSquareOpen {
                     ForEach(Corner.allCases, id: \.self) { corner in
                         let cornerPoint = point(for: corner, center: square.center, side: square.side)
                         Circle()
@@ -319,15 +372,16 @@ struct MetricSquaresOverlay: View {
                             .frame(width: 12, height: 12)
                             .position(x: cornerPoint.x, y: cornerPoint.y)
                             .contentShape(Circle())
-                            .gesture(cornerResizeGesture(corner: corner))
+                            .highPriorityGesture(cornerResizeGesture(corner: corner)) // ensure handle wins
                     }
                 }
+
             }
         }
 
         // MARK: gestures
         private func centerDragGesture() -> some Gesture {
-            DragGesture(minimumDistance: 4)
+            DragGesture(minimumDistance: 4, coordinateSpace: .global)
                 .onChanged { value in
                     let start = value.startLocation
                     let corners = Corner.allCases.map { point(for: $0, center: square.center, side: square.side) }
@@ -345,48 +399,68 @@ struct MetricSquaresOverlay: View {
                 }
                 .onEnded { _ in
                     startCenter = nil
-                    squares.isInteracting = false
+                    squares.isInteracting = true
                 }
         }
 
         private func cornerResizeGesture(corner: Corner) -> some Gesture {
-            DragGesture(minimumDistance: 6)
+            DragGesture(minimumDistance: 6, coordinateSpace: .global)
                 .onChanged { value in
-                    if startCenter == nil || startSide == nil {
+                    // Initialize once at gesture begin
+                    if startCenter == nil || startSide == nil || startCorner0 == nil || anchorCorner0 == nil {
                         startCenter = square.center
-                        startSide = square.side
-                        squares.isInteracting = true
+                        startSide   = square.side
+                        startCorner0 = point(for: corner, center: square.center, side: square.side)
+                        anchorCorner0 = point(for: corner.opposite, center: square.center, side: square.side)
+                        squares.isInteracting = true // block map gestures via your shield
                     }
-                    let center0 = startCenter ?? square.center
-                    let side0 = startSide ?? square.side
 
-                    let startCorner = point(for: corner, center: center0, side: side0)
-                    let anchorCorner = point(for: corner.opposite, center: center0, side: side0)
+                    guard
+                        let sc0 = startCorner0,
+                        let ac0 = anchorCorner0,
+                        let side0 = startSide
+                    else { return }
 
+                    // Move the dragged corner using screen->map translation
                     let dMap = mapTransform.screenTranslationToMap(value.translation)
-                    let newCorner = CGPoint(x: startCorner.x + dMap.x, y: startCorner.y + dMap.y)
+                    let newCorner = CGPoint(x: sc0.x + dMap.x, y: sc0.y + dMap.y)
 
+                    // Dead-zone to avoid accidental resize on tiny jitters
                     let moveMagnitude = max(abs(value.translation.width), abs(value.translation.height))
                     guard moveMagnitude > 2 else { return }
 
-                    let dx = abs(newCorner.x - anchorCorner.x)
-                    let dy = abs(newCorner.y - anchorCorner.y)
+                    // Uniform side: distance between anchor & newCorner
+                    let dx = abs(newCorner.x - ac0.x)
+                    let dy = abs(newCorner.y - ac0.y)
                     let sideNew = max(10, max(dx, dy))
 
+                    // Center is the midpoint between fixed anchor and newCorner
                     let newCenter = CGPoint(
-                        x: (anchorCorner.x + newCorner.x) / 2,
-                        y: (anchorCorner.y + newCorner.y) / 2
+                        x: (ac0.x + newCorner.x) / 2,
+                        y: (ac0.y + newCorner.y) / 2
                     )
 
                     squares.updateSideAndCenter(id: square.id, side: sideNew, center: newCenter)
                 }
                 .onEnded { _ in
+                    // Read the final side length from the source of truth (store)
+                    if let final = squares.squares.first(where: { $0.id == square.id }) {
+                        // Persist pixel side length (map-local units)
+                        squareMetrics.updatePixelSide(for: final.id, side: final.side)
+
+                        // Console log on release
+                        print("▢ Square \(final.id) — side (map px): \(Int(final.side))")
+                    }
                     startCenter = nil
                     startSide = nil
+                    startCorner0 = nil
+                    anchorCorner0 = nil
                     squares.isInteracting = false
                 }
+
         }
 
+        
         private func point(for corner: Corner, center: CGPoint, side: CGFloat) -> CGPoint {
             let h = side / 2
             switch corner {
