@@ -24,6 +24,32 @@ struct ContentView: View {
     @StateObject private var beaconLists   = BeaconListsStore()   // ← added
     @StateObject private var btScanner     = BluetoothScanner()       // ← Bluetooth scanner
 
+    // One-shot scan window (seconds) used on app open
+    private let INITIAL_SCAN_WINDOW_SEC: TimeInterval = 2.0
+
+    /// Kick off a brief BLE scan, then stop, dump table, and ingest discovered devices.
+    private func runInitialScan() {
+        // Start immediately (safe if not powered on; we'll re-try shortly)
+        btScanner.start()
+
+        // Re-try shortly in case the central wasn’t powered on yet
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.btScanner.start()
+        }
+
+        // Stop after the window, print a snapshot table, and ingest into lists
+        DispatchQueue.main.asyncAfter(deadline: .now() + INITIAL_SCAN_WINDOW_SEC) {
+            self.btScanner.dumpSummaryTable()
+            self.btScanner.stop()
+
+            // Ingest each unique device by (name, id)
+            for d in self.btScanner.devices {
+                self.beaconLists.ingest(deviceName: d.name, id: d.id)
+            }
+        }
+    }
+
+    
 
     var body: some View {
         GeometryReader { geo in
@@ -256,13 +282,22 @@ struct HUDContainer: View {
 
 private struct BluetoothScanButton: View {
     @EnvironmentObject private var btScanner: BluetoothScanner
+    @EnvironmentObject private var beaconLists: BeaconListsStore
 
     var body: some View {
         Button {
-            // Make sure scanning is running (safe to call repeatedly)
-            btScanner.start()
-            // Dump a snapshot table of what we’ve seen so far
-            btScanner.dumpSummaryTable()
+            // 1) Run a clean snapshot scan for N seconds (see BluetoothScanner.defaultSnapshotSeconds)
+            btScanner.snapshotScan { [weak btScanner, weak beaconLists] in
+                guard let scanner = btScanner, let lists = beaconLists else { return }
+
+                // 2) After snapshot completes, (re)build lists from what we saw
+                for d in scanner.devices {
+                    lists.ingest(deviceName: d.name, id: d.id)
+                }
+
+                // 3) Optional: print a neat table once per snapshot
+                scanner.dumpSummaryTable()
+            }
         } label: {
             Image(systemName: "dot.radiowaves.left.and.right")
                 .font(.system(size: 22, weight: .semibold))
@@ -270,12 +305,11 @@ private struct BluetoothScanButton: View {
                 .padding(10)
                 .background(.ultraThinMaterial, in: Circle())
         }
-        .accessibilityLabel("Scan Bluetooth & print table")
+        .accessibilityLabel("Scan Bluetooth (2-second snapshot) & update lists")
         .buttonStyle(.plain)
         .allowsHitTesting(true)
     }
 }
-
 
 #Preview {
     ContentView()
