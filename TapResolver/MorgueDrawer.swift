@@ -5,45 +5,6 @@
 
 import SwiftUI
 
-// Shared lists store for Beacon + Morgue
-final class BeaconListsStore: ObservableObject {
-    @Published var beacons: [String] = [
-        "12-rowdySquirrel","15-frostyIbis","08-bouncyPenguin","23-sparklyDolphin","31-gigglyGiraffe"
-    ]
-
-    @Published var morgue: [String] = [
-        "AA-headlessRooster",      // pattern 1
-        "42-dustyWalrus",          // pattern 2
-        "Desk Speaker",
-        "Lobby TV",
-        "Elevator Panel",
-        "Vending-01",
-        "Printer-2FL",
-        "DoorLock-East",
-        "HVAC-Node-7",
-        "RaspberryPi-Blue"
-    ]
-
-    func promoteToBeacons(_ name: String) {
-        if let i = morgue.firstIndex(of: name) {
-            morgue.remove(at: i)
-        }
-        if !beacons.contains(name) {
-            beacons.append(name)
-        }
-    }
-
-    // NEW: send from Beacon list down to Morgue (newest first)
-    func demoteToMorgue(_ name: String) {
-        if let i = beacons.firstIndex(of: name) {
-            beacons.remove(at: i)
-        }
-        if !morgue.contains(name) {
-            morgue.insert(name, at: 0) // newest at top
-        }
-    }
-}
-
 struct MorgueDrawer: View {
     @EnvironmentObject private var hud: HUDPanelsState
     @EnvironmentObject private var beaconLists: BeaconListsStore

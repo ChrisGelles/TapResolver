@@ -22,6 +22,7 @@ struct ContentView: View {
     @StateObject private var metricSquares = MetricSquareStore()  // squares (map-local)
     @StateObject private var squareMetrics = SquareMetrics()
     @StateObject private var beaconLists   = BeaconListsStore()   // ← added
+    @StateObject private var btScanner     = BluetoothScanner()       // ← Bluetooth scanner
 
 
     var body: some View {
@@ -50,6 +51,7 @@ struct ContentView: View {
             .environmentObject(metricSquares)
             .environmentObject(squareMetrics)
             .environmentObject(beaconLists)    // ← added
+            .environmentObject(btScanner)
         }
     }
 }
@@ -232,12 +234,16 @@ struct HUDContainer: View {
                                 .foregroundColor(.primary)
                                 .padding(10)
                                 .background(.ultraThinMaterial, in: Circle())
-                          }
-                            .accessibilityLabel("Reset map view")
-                            .buttonStyle(.plain)
-                            .allowsHitTesting(true)
-                            
+                        }
+                        .accessibilityLabel("Reset map view")
+                        .buttonStyle(.plain)
+                        .allowsHitTesting(true)
+                        
+                        // Radio waves button: start scan + dump snapshot to console
+                        BluetoothScanButton()
+
                     }
+                    
                 }
                 Spacer()
             }
@@ -247,6 +253,29 @@ struct HUDContainer: View {
         .zIndex(100)
     }
 }
+
+private struct BluetoothScanButton: View {
+    @EnvironmentObject private var btScanner: BluetoothScanner
+
+    var body: some View {
+        Button {
+            // Make sure scanning is running (safe to call repeatedly)
+            btScanner.start()
+            // Dump a snapshot table of what we’ve seen so far
+            btScanner.dumpSummaryTable()
+        } label: {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(.primary)
+                .padding(10)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .accessibilityLabel("Scan Bluetooth & print table")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
 
 #Preview {
     ContentView()
