@@ -275,6 +275,11 @@ struct HUDContainer: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .allowsHitTesting(true)
+            
+            // Numeric keypad for square meters (only visible when editing)
+            NumericKeypadOverlay()
+                .zIndex(200)                  // above everything in the HUD
+                .allowsHitTesting(true)       // it must receive touches when shown
         }
         .zIndex(100)
     }

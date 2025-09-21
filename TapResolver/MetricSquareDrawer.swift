@@ -134,7 +134,14 @@ final class SquareMetrics: ObservableObject {
         var pixelSide: CGFloat
         var meters: Double?
     }
+    
+    struct ActiveEdit: Identifiable {
+        let id: UUID
+        var text: String
+    }
+    
     @Published private(set) var entries: [UUID: Entry] = [:]
+    @Published var activeEdit: ActiveEdit? = nil
     func updatePixelSide(for id: UUID, side: CGFloat) {
         if var e = entries[id] { e.pixelSide = side; entries[id] = e }
         else { entries[id] = Entry(id: id, pixelSide: side, meters: nil) }
@@ -144,6 +151,23 @@ final class SquareMetrics: ObservableObject {
         else { entries[id] = Entry(id: id, pixelSide: 0, meters: meters) }
     }
     func entry(for id: UUID) -> Entry? { entries[id] }
+    
+    func displayMetersText(for id: UUID) -> String {
+        guard let entry = entries[id] else { return "1m" }
+        if let meters = entry.meters {
+            // Remove unnecessary decimal places (1.0 -> 1, 1.5 -> 1.5)
+            let formatted = String(format: "%g", meters)
+            return "\(formatted)m"
+        } else {
+            return "\(Int(entry.pixelSide))px"
+        }
+    }
+    
+    func commitMetersText(_ text: String, for id: UUID) {
+        if let meters = Double(text) {
+            setMeters(for: id, meters: meters)
+        }
+    }
 }
 
 // MARK: - Drawer
@@ -151,6 +175,7 @@ struct MetricSquareDrawer: View {
     @EnvironmentObject private var hud: HUDPanelsState
     @EnvironmentObject private var squares: MetricSquareStore
     @EnvironmentObject private var mapTransform: MapTransformStore
+    @EnvironmentObject private var squareMetrics: SquareMetrics
 
     private let collapsedWidth: CGFloat = 56
     private let expandedWidth: CGFloat = 180
@@ -243,8 +268,8 @@ struct MetricSquareDrawer: View {
                 }
                 Text("Add square")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.primary)
-                Spacer(minLength: 0)
+                    .foregroundColor(.white)
+                //Spacer(minLength: 0)
             }
             .padding(.horizontal, 4)
             .contentShape(Rectangle())
@@ -258,12 +283,24 @@ struct MetricSquareDrawer: View {
                 .frame(width: 20, height: 20)
                 .cornerRadius(3)
 
-            Text("Square")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.primary)
-
-            Spacer()
-
+            Button {
+                // Seed with existing meters (no trailing "m")
+                let existing = squareMetrics.entry(for: sq.id)?.meters ?? 1.0
+                let seed = String(format: "%g", existing) // compact 1, 1.5, 0.25, etc.
+                squareMetrics.activeEdit = .init(id: sq.id, text: seed)
+            } label: {
+                 Text(squareMetrics.displayMetersText(for: sq.id))
+                     .font(.system(size: 10, weight: .medium, design: .monospaced))
+                     .foregroundColor(.white)
+                     .padding(.horizontal, 4)
+                     .padding(.vertical, 7)
+                     .background(Color.black.opacity(0.5))
+                     .cornerRadius(6)
+                     .fixedSize(horizontal: true, vertical: false)
+             }
+             .buttonStyle(.plain)
+             .frame(maxWidth: 60, alignment: .leading) // Constrain width to prevent pushing buttons off
+            
             // 🔒 Lock toggle
             Button {
                 squares.toggleLock(id: sq.id)
@@ -303,8 +340,8 @@ struct MetricSquareDrawer: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Delete square")
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 2)
+        .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.white.opacity(0.08))
@@ -483,5 +520,102 @@ struct MetricSquaresOverlay: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Full-screen numeric keypad overlay (appears when squareMetrics.activeEdit != nil)
+struct NumericKeypadOverlay: View {
+    @EnvironmentObject private var squareMetrics: SquareMetrics
+
+    private let keyRows: [[String]] = [
+        ["1","2","3"],
+        ["4","5","6"],
+        ["7","8","9"],
+        [".","0","⌫"]
+    ]
+
+    var body: some View {
+        // Only render when editing
+        if let edit = squareMetrics.activeEdit {
+            ZStack {
+                // Dim backdrop (tap to dismiss without commit)
+                Color.black.opacity(0.35)
+                    .ignoresSafeArea()
+                    .onTapGesture { squareMetrics.activeEdit = nil }
+
+                // Keypad panel pinned to bottom
+                VStack(spacing: 10) {
+                    // Display the current numeric text buffer (monospaced)
+                    Text(edit.text.isEmpty ? " " : edit.text)
+                        .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(.top, 12)
+
+                    VStack(spacing: 8) {
+                        ForEach(0..<keyRows.count, id: \.self) { r in
+                            HStack(spacing: 8) {
+                                ForEach(keyRows[r], id: \.self) { key in
+                                    Button { tap(key: key) } label: {
+                                        Text(key)
+                                            .font(.system(size: 20, weight: .medium))
+                                            .frame(width: 68, height: 44)
+                                            .background(Color.white.opacity(0.12))
+                                            .foregroundColor(.white)
+                                            .cornerRadius(8)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        // Enter row
+                        HStack {
+                            Button {
+                                // Commit and dismiss
+                                let id = edit.id
+                                let text = edit.text
+                                squareMetrics.commitMetersText(text, for: id)
+                                squareMetrics.activeEdit = nil
+                            } label: {
+                                Text("Enter")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .frame(maxWidth: .infinity, minHeight: 46)
+                                    .background(Color.white.opacity(0.2))
+                                    .foregroundColor(.white)
+                                    .cornerRadius(10)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 16)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(14)
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+            .transition(.opacity)
+            .zIndex(200)
+            .allowsHitTesting(true)
+        }
+    }
+
+    private func tap(key: String) {
+        guard var edit = squareMetrics.activeEdit else { return }
+        switch key {
+        case "⌫":
+            if !edit.text.isEmpty { edit.text.removeLast() }
+        case ".":
+            if !edit.text.contains(".") { edit.text.append(".") }
+        default:
+            // digits
+            if key.allSatisfy({ $0.isNumber }) {
+                // prevent leading zero spam like "000"
+                if edit.text == "0" { edit.text = key }
+                else { edit.text.append(contentsOf: key) }
+            }
+        }
+        squareMetrics.activeEdit = edit
     }
 }
