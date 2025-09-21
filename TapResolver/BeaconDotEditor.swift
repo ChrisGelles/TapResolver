@@ -89,6 +89,7 @@ public final class BeaconDotStore: ObservableObject {
     // MARK: persistence keys
     private let dotsKey   = "BeaconDots_v1"
     private let locksKey  = "BeaconLocks_v1"
+    private let lockedDotsKey = "LockedBeaconDots_v1"
 
     public init() {
         load()
@@ -125,6 +126,35 @@ public final class BeaconDotStore: ObservableObject {
         dots.removeAll()
         save()
     }
+    
+    /// Clear dots for unlocked beacons only (preserves locked beacons)
+    public func clearUnlockedDots() {
+        dots.removeAll { !isLocked($0.beaconID) }
+        save()
+    }
+    
+    /// Get only the locked beacon dots
+    public func lockedDots() -> [Dot] {
+        return dots.filter { isLocked($0.beaconID) }
+    }
+    
+    /// Restore locked beacon dots from storage (called on app launch)
+    public func restoreLockedDots() {
+        // First load locks to know which beacons are locked
+        loadLocks()
+        
+        // Then load only the locked dots
+        if let data = UserDefaults.standard.data(forKey: lockedDotsKey),
+           let dto = try? JSONDecoder().decode([DotDTO].self, from: data) {
+            let lockedDots = dto.map { Dot(beaconID: $0.beaconID,
+                                          color: beaconColor(for: $0.beaconID),
+                                          mapPoint: CGPoint(x: $0.x, y: $0.y)) }
+            
+            // Clear current dots and restore only locked ones
+            dots.removeAll()
+            dots.append(contentsOf: lockedDots)
+        }
+    }
 
     // MARK: - Lock API
 
@@ -151,10 +181,19 @@ public final class BeaconDotStore: ObservableObject {
     }
 
     private func save() {
+        // Save all dots (for backward compatibility)
         let dto = dots.map { DotDTO(beaconID: $0.beaconID, x: $0.mapPoint.x, y: $0.mapPoint.y) }
         if let data = try? JSONEncoder().encode(dto) {
             UserDefaults.standard.set(data, forKey: dotsKey)
         }
+        
+        // Save only locked dots (new behavior)
+        let lockedDots = dots.filter { isLocked($0.beaconID) }
+        let lockedDTO = lockedDots.map { DotDTO(beaconID: $0.beaconID, x: $0.mapPoint.x, y: $0.mapPoint.y) }
+        if let lockedData = try? JSONEncoder().encode(lockedDTO) {
+            UserDefaults.standard.set(lockedData, forKey: lockedDotsKey)
+        }
+        
         saveLocks()
     }
 
@@ -173,7 +212,10 @@ public final class BeaconDotStore: ObservableObject {
                                       mapPoint: CGPoint(x: $0.x, y: $0.y)) }
         }
 
-        // Locks
+        loadLocks()
+    }
+    
+    private func loadLocks() {
         if let data = UserDefaults.standard.data(forKey: locksKey),
            let dto = try? JSONDecoder().decode(LocksDTO.self, from: data) {
             self.locked = dto.locks

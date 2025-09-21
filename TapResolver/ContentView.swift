@@ -32,7 +32,7 @@ struct ContentView: View {
         // Start immediately (safe if not powered on; we'll re-try shortly)
         btScanner.start()
 
-        // Re-try shortly in case the central wasn’t powered on yet
+        // Re-try shortly in case the central wasn't powered on yet
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             self.btScanner.start()
         }
@@ -42,11 +42,33 @@ struct ContentView: View {
             self.btScanner.dumpSummaryTable()
             self.btScanner.stop()
 
+            // Clear unlocked beacons and morgue before ingesting new devices
+            self.refreshBeaconLists()
+            
             // Ingest each unique device by (name, id)
             for d in self.btScanner.devices {
                 self.beaconLists.ingest(deviceName: d.name, id: d.id)
             }
         }
+    }
+    
+    /// Refresh beacon lists by clearing unlocked beacons and morgue
+    private func refreshBeaconLists() {
+        // Get locked beacon names from beaconDotStore
+        let lockedBeaconNames = beaconDotStore.locked.keys.filter { beaconDotStore.isLocked($0) }
+        
+        // Clear unlocked beacons and morgue
+        beaconLists.clearUnlockedBeacons(lockedBeaconNames: lockedBeaconNames)
+        beaconLists.morgue.removeAll()
+    }
+    
+    /// Load locked items on app launch (beacons and squares)
+    private func loadLockedItems() {
+        // Restore locked beacon dots and their positions
+        beaconDotStore.restoreLockedDots()
+        
+        // Squares are already loaded by their respective stores in init()
+        // No additional action needed for squares
     }
 
     
@@ -78,6 +100,13 @@ struct ContentView: View {
             .environmentObject(squareMetrics)
             .environmentObject(beaconLists)    // ← added
             .environmentObject(btScanner)
+            .onAppear {
+                // App Launch Sequence: Load locked items first
+                loadLockedItems()
+                
+                // Then run initial scan to discover new devices
+                runInitialScan()
+            }
         }
     }
 }
@@ -288,19 +317,25 @@ struct HUDContainer: View {
 private struct BluetoothScanButton: View {
     @EnvironmentObject private var btScanner: BluetoothScanner
     @EnvironmentObject private var beaconLists: BeaconListsStore
+    @EnvironmentObject private var beaconDotStore: BeaconDotStore
 
     var body: some View {
         Button {
             // 1) Run a clean snapshot scan for N seconds (see BluetoothScanner.defaultSnapshotSeconds)
-            btScanner.snapshotScan { [weak btScanner, weak beaconLists] in
-                guard let scanner = btScanner, let lists = beaconLists else { return }
+            btScanner.snapshotScan { [weak btScanner, weak beaconLists, weak beaconDotStore] in
+                guard let scanner = btScanner, let lists = beaconLists, let dotStore = beaconDotStore else { return }
 
-                // 2) After snapshot completes, (re)build lists from what we saw
+                // 2) Clear unlocked beacons and morgue before ingesting new devices
+                let lockedBeaconNames = dotStore.locked.keys.filter { dotStore.isLocked($0) }
+                lists.clearUnlockedBeacons(lockedBeaconNames: lockedBeaconNames)
+                lists.morgue.removeAll()
+
+                // 3) After snapshot completes, (re)build lists from what we saw
                 for d in scanner.devices {
                     lists.ingest(deviceName: d.name, id: d.id)
                 }
 
-                // 3) Optional: print a neat table once per snapshot
+                // 4) Optional: print a neat table once per snapshot
                 scanner.dumpSummaryTable()
             }
         } label: {

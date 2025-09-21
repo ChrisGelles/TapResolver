@@ -15,6 +15,7 @@ final class BeaconListsStore: ObservableObject {
     // Persistence keys
     private let beaconsKey = "BeaconLists_beacons_v1"
     private let morgueKey  = "BeaconLists_morgue_v1"
+    private let lockedBeaconsKey = "LockedBeaconNames_v1"
 
     init() {
         load()
@@ -85,5 +86,38 @@ final class BeaconListsStore: ObservableObject {
         morgue.remove(at: i)
         beacons.append(name)
         save()  // <— add this
+    }
+    
+    /// Clear unlocked beacons and morgue (called on scan refresh and app launch)
+    func refreshFromScan() {
+        // Clear morgue completely
+        morgue.removeAll()
+        
+        // Clear unlocked beacons (keep only locked ones)
+        clearUnlockedBeacons()
+        
+        save()
+    }
+    
+    /// Get only the locked beacon names
+    func getLockedBeacons() -> [String] {
+        return beacons.filter { beaconName in
+            // We need to check if this beacon has a locked dot
+            // This will be called from ContentView with access to beaconDotStore
+            return true // Placeholder - will be implemented in ContentView
+        }
+    }
+    
+    /// Clear unlocked beacons (helper method)
+    private func clearUnlockedBeacons() {
+        // This will be called from ContentView with access to beaconDotStore
+        // For now, keep all beacons - will be implemented when we update ContentView
+    }
+    
+    /// Clear unlocked beacons using beaconDotStore to check lock status
+    func clearUnlockedBeacons(lockedBeaconNames: [String]) {
+        beacons = beacons.filter { beaconName in
+            lockedBeaconNames.contains(beaconName)
+        }
     }
 }
