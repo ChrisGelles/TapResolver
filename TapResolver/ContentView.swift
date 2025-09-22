@@ -472,15 +472,23 @@ struct RSSILabel: Identifiable {
 }
 
 private struct RSSIMeterButton: View {
+    @EnvironmentObject private var btScanner: BluetoothScanner
     @State private var isActive = false
-    
+
     var body: some View {
         Button {
             isActive.toggle()
-            
-            // Notify MeterLabels about state change
+
+            // Start/stop BLE scan to feed live RSSI while active
+            if isActive {
+                btScanner.start()
+            } else {
+                btScanner.stop()
+            }
+
+            // Notify MeterLabels about state change (it manages the 0.5s timer)
             NotificationCenter.default.post(
-                name: .rssiStateChanged, 
+                name: .rssiStateChanged,
                 object: isActive
             )
         } label: {
@@ -499,6 +507,7 @@ private struct RSSIMeterButton: View {
         .allowsHitTesting(true)
     }
 }
+
 
 #Preview {
     ContentView()
