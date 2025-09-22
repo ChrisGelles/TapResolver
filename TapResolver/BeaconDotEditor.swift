@@ -73,6 +73,13 @@ public final class MapTransformStore: ObservableObject {
     }
 }
 
+// MARK: - Elevation editing state
+public struct ActiveElevationEdit: Identifiable {
+    public let id = UUID()
+    public let beaconID: String
+    public var text: String
+}
+
 // MARK: - Store of dots (map-local positions) + Locks + Persistence
 public final class BeaconDotStore: ObservableObject {
     public struct Dot: Identifiable {
@@ -80,16 +87,22 @@ public final class BeaconDotStore: ObservableObject {
         public let beaconID: String     // one dot per beacon
         public let color: Color
         public var mapPoint: CGPoint    // map-local (untransformed) coords
+        public var elevation: Double = 0.75  // elevation in meters, default 0.75
     }
 
     @Published public private(set) var dots: [Dot] = []
     // beaconID -> locked?
     @Published private(set) var locked: [String: Bool] = [:]
+    // beaconID -> elevation
+    @Published private(set) var elevations: [String: Double] = [:]
+    // Active elevation editing state
+    @Published public var activeElevationEdit: ActiveElevationEdit? = nil
 
     // MARK: persistence keys
     private let dotsKey   = "BeaconDots_v1"
     private let locksKey  = "BeaconLocks_v1"
     private let lockedDotsKey = "LockedBeaconDots_v1"
+    private let elevationsKey = "BeaconElevations_v1"
 
     public init() {
         load()
@@ -138,22 +151,60 @@ public final class BeaconDotStore: ObservableObject {
         return dots.filter { isLocked($0.beaconID) }
     }
     
-    /// Restore locked beacon dots from storage (called on app launch)
-    public func restoreLockedDots() {
+    /// Restore all beacon dots from storage (called on app launch)
+    public func restoreAllDots() {
         // First load locks to know which beacons are locked
         loadLocks()
         
-        // Then load only the locked dots
-        if let data = UserDefaults.standard.data(forKey: lockedDotsKey),
+        // Load all dots from the main storage
+        if let data = UserDefaults.standard.data(forKey: dotsKey),
            let dto = try? JSONDecoder().decode([DotDTO].self, from: data) {
-            let lockedDots = dto.map { Dot(beaconID: $0.beaconID,
-                                          color: beaconColor(for: $0.beaconID),
-                                          mapPoint: CGPoint(x: $0.x, y: $0.y)) }
+            let allDots = dto.map { dotDTO in
+                var dot = Dot(beaconID: dotDTO.beaconID,
+                             color: beaconColor(for: dotDTO.beaconID),
+                             mapPoint: CGPoint(x: dotDTO.x, y: dotDTO.y))
+                dot.elevation = dotDTO.elevation
+                return dot
+            }
             
-            // Clear current dots and restore only locked ones
+            // Clear current dots and restore all previously saved ones
             dots.removeAll()
-            dots.append(contentsOf: lockedDots)
+            dots.append(contentsOf: allDots)
+            
+            // Restore elevation values for all dots
+            for dot in allDots {
+                elevations[dot.beaconID] = dot.elevation
+            }
         }
+    }
+    
+    // MARK: - Elevation API
+    
+    public func setElevation(for beaconID: String, elevation: Double) {
+        elevations[beaconID] = elevation
+        saveElevations()
+    }
+    
+    public func getElevation(for beaconID: String) -> Double {
+        return elevations[beaconID] ?? 0.75
+    }
+    
+    public func startElevationEdit(for beaconID: String) {
+        let current = getElevation(for: beaconID)
+        let seed = String(format: "%g", current)
+        activeElevationEdit = ActiveElevationEdit(beaconID: beaconID, text: seed)
+    }
+    
+    public func commitElevationText(_ text: String, for beaconID: String) {
+        if let elevation = Double(text) {
+            setElevation(for: beaconID, elevation: elevation)
+        }
+    }
+    
+    public func displayElevationText(for beaconID: String) -> String {
+        let elevation = getElevation(for: beaconID)
+        let formatted = String(format: "%g", elevation)
+        return "\(formatted)m"
     }
 
     // MARK: - Lock API
@@ -166,6 +217,7 @@ public final class BeaconDotStore: ObservableObject {
         let newVal = !(locked[beaconID] ?? false)
         locked[beaconID] = newVal
         saveLocks()
+        save() // Also save dot data when locking/unlocking
     }
 
     // MARK: - Persistence
@@ -174,6 +226,7 @@ public final class BeaconDotStore: ObservableObject {
         let beaconID: String
         let x: CGFloat
         let y: CGFloat
+        let elevation: Double
     }
 
     private struct LocksDTO: Codable {
@@ -182,14 +235,14 @@ public final class BeaconDotStore: ObservableObject {
 
     private func save() {
         // Save all dots (for backward compatibility)
-        let dto = dots.map { DotDTO(beaconID: $0.beaconID, x: $0.mapPoint.x, y: $0.mapPoint.y) }
+        let dto = dots.map { DotDTO(beaconID: $0.beaconID, x: $0.mapPoint.x, y: $0.mapPoint.y, elevation: getElevation(for: $0.beaconID)) }
         if let data = try? JSONEncoder().encode(dto) {
             UserDefaults.standard.set(data, forKey: dotsKey)
         }
         
         // Save only locked dots (new behavior)
         let lockedDots = dots.filter { isLocked($0.beaconID) }
-        let lockedDTO = lockedDots.map { DotDTO(beaconID: $0.beaconID, x: $0.mapPoint.x, y: $0.mapPoint.y) }
+        let lockedDTO = lockedDots.map { DotDTO(beaconID: $0.beaconID, x: $0.mapPoint.x, y: $0.mapPoint.y, elevation: getElevation(for: $0.beaconID)) }
         if let lockedData = try? JSONEncoder().encode(lockedDTO) {
             UserDefaults.standard.set(lockedData, forKey: lockedDotsKey)
         }
@@ -207,18 +260,40 @@ public final class BeaconDotStore: ObservableObject {
         // Dots
         if let data = UserDefaults.standard.data(forKey: dotsKey),
            let dto = try? JSONDecoder().decode([DotDTO].self, from: data) {
-            self.dots = dto.map { Dot(beaconID: $0.beaconID,
-                                      color: beaconColor(for: $0.beaconID),
-                                      mapPoint: CGPoint(x: $0.x, y: $0.y)) }
+            self.dots = dto.map { dotDTO in
+                var dot = Dot(beaconID: dotDTO.beaconID,
+                             color: beaconColor(for: dotDTO.beaconID),
+                             mapPoint: CGPoint(x: dotDTO.x, y: dotDTO.y))
+                // Handle backward compatibility - if elevation exists in DTO, use it
+                if dotDTO.elevation != 0.75 || elevations[dotDTO.beaconID] == nil {
+                    dot.elevation = dotDTO.elevation
+                    elevations[dotDTO.beaconID] = dotDTO.elevation
+                }
+                return dot
+            }
         }
 
         loadLocks()
+        loadElevations()
     }
     
     private func loadLocks() {
         if let data = UserDefaults.standard.data(forKey: locksKey),
            let dto = try? JSONDecoder().decode(LocksDTO.self, from: data) {
             self.locked = dto.locks
+        }
+    }
+    
+    private func saveElevations() {
+        if let data = try? JSONEncoder().encode(elevations) {
+            UserDefaults.standard.set(data, forKey: elevationsKey)
+        }
+    }
+    
+    private func loadElevations() {
+        if let data = UserDefaults.standard.data(forKey: elevationsKey),
+           let loaded = try? JSONDecoder().decode([String: Double].self, from: data) {
+            self.elevations = loaded
         }
     }
 

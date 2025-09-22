@@ -64,8 +64,12 @@ struct ContentView: View {
     
     /// Load locked items on app launch (beacons and squares)
     private func loadLockedItems() {
-        // Restore locked beacon dots and their positions
-        beaconDotStore.restoreLockedDots()
+        // Restore all previously saved beacon dots and their positions
+        beaconDotStore.restoreAllDots()
+        
+        // Also restore locked beacon names to the beacon list
+        let lockedBeaconNames = beaconDotStore.locked.keys.filter { beaconDotStore.isLocked($0) }
+        beaconLists.beacons = lockedBeaconNames
         
         // Squares are already loaded by their respective stores in init()
         // No additional action needed for squares
@@ -309,6 +313,11 @@ struct HUDContainer: View {
             NumericKeypadOverlay()
                 .zIndex(200)                  // above everything in the HUD
                 .allowsHitTesting(true)       // it must receive touches when shown
+            
+            // Elevation keypad for beacons (only visible when editing)
+            BeaconElevationKeypadOverlay()
+                .zIndex(200)
+                .allowsHitTesting(true)
         }
         .zIndex(100)
     }

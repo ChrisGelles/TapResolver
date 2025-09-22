@@ -35,6 +35,7 @@ struct BeaconDrawer: View {
                         BeaconListItem(
                             beaconName: name,
                             isLocked: locked,
+                            elevationText: beaconDotStore.displayElevationText(for: name),
                             onSelect: { _, color in
                                 guard mapTransform.mapSize != .zero else {
                                     print("⚠️ Beacon add ignored: mapTransform not ready (mapSize == .zero)")
@@ -50,6 +51,9 @@ struct BeaconDrawer: View {
                             },
                             onDemote: {
                                 beaconLists.demoteToMorgue(name)
+                            },
+                            onEditElevation: {
+                                beaconDotStore.startElevationEdit(for: name)
                             }
                         )
                         .frame(height: 44)
@@ -102,13 +106,15 @@ struct BeaconDrawer: View {
     }
 }
 
-// Row with capsule (tap to drop dot) + Lock + Demote
+// Row with capsule (tap to drop dot) + Elevation + Lock + Demote
 struct BeaconListItem: View {
     let beaconName: String
     let isLocked: Bool
+    let elevationText: String
     var onSelect: ((CGPoint, Color) -> Void)? = nil
     var onToggleLock: (() -> Void)? = nil
     var onDemote: (() -> Void)? = nil
+    var onEditElevation: (() -> Void)? = nil
 
     private var beaconColor: Color {
         let hash = beaconName.hash
@@ -117,26 +123,41 @@ struct BeaconListItem: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Capsule (tap to add/remove dot)
-            HStack(spacing: 10) {
+        HStack(spacing: 4) {
+            // Capsule (tap to add/remove dot) - disabled when locked
+            HStack(spacing: 6) {
                 Circle().fill(beaconColor).frame(width: 12, height: 12)
                 Text(beaconName)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
                     .foregroundColor(.primary)
+                    .frame(width: 32)
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 3)
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(beaconColor.opacity(0.2))
+                    .fill(beaconColor.opacity(isLocked ? 0.1 : 0.2))
             )
             .contentShape(Rectangle())
             .onTapGesture(coordinateSpace: .global) { globalPoint in
+                guard !isLocked else { return } // Block when locked
                 onSelect?(globalPoint, beaconColor)
             }
+            .disabled(isLocked) // Visual feedback when locked
 
-            Spacer(minLength: 0)
+            // Elevation textfield
+            Button {
+                onEditElevation?()
+            } label: {
+                Text(elevationText)
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 4)
+                    .background(Color.black.opacity(0.5))
+                    .cornerRadius(4)
+            }
+            .buttonStyle(.plain)
 
             // 🔒 Lock toggle
             Button(action: { onToggleLock?() }) {
@@ -193,5 +214,94 @@ struct CrosshairHUDOverlay: View {
         .allowsHitTesting(false)
         .opacity(hud.isBeaconOpen ? 1.0 : 0.0)
         .animation(.easeInOut(duration: 0.15), value: hud.isBeaconOpen)
+    }
+}
+
+// MARK: - Elevation keypad overlay
+struct BeaconElevationKeypadOverlay: View {
+    @EnvironmentObject private var beaconDotStore: BeaconDotStore
+
+    private let keyRows: [[String]] = [
+        ["1","2","3"],
+        ["4","5","6"],
+        ["7","8","9"],
+        [".","0","⌫"]
+    ]
+
+    var body: some View {
+        if let edit = beaconDotStore.activeElevationEdit {
+            ZStack {
+                Color.black.opacity(0.35)
+                    .ignoresSafeArea()
+                    .onTapGesture { beaconDotStore.activeElevationEdit = nil }
+
+                VStack(spacing: 10) {
+                    Text(edit.text.isEmpty ? " " : edit.text)
+                        .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(.top, 12)
+
+                    VStack(spacing: 8) {
+                        ForEach(0..<keyRows.count, id: \.self) { r in
+                            HStack(spacing: 8) {
+                                ForEach(keyRows[r], id: \.self) { key in
+                                    Button { tap(key: key) } label: {
+                                        Text(key)
+                                            .font(.system(size: 20, weight: .medium))
+                                            .frame(width: 68, height: 44)
+                                            .background(Color.white.opacity(0.12))
+                                            .foregroundColor(.white)
+                                            .cornerRadius(8)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        HStack {
+                            Button {
+                                let beaconID = edit.beaconID
+                                let text = edit.text
+                                beaconDotStore.commitElevationText(text, for: beaconID)
+                                beaconDotStore.activeElevationEdit = nil
+                            } label: {
+                                Text("Enter")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .frame(maxWidth: .infinity, minHeight: 46)
+                                    .background(Color.white.opacity(0.2))
+                                    .foregroundColor(.white)
+                                    .cornerRadius(10)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 16)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(14)
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+            .transition(.opacity)
+            .zIndex(200)
+            .allowsHitTesting(true)
+        }
+    }
+
+    private func tap(key: String) {
+        guard var edit = beaconDotStore.activeElevationEdit else { return }
+        switch key {
+        case "⌫":
+            if !edit.text.isEmpty { edit.text.removeLast() }
+        case ".":
+            if !edit.text.contains(".") { edit.text.append(".") }
+        default:
+            if key.allSatisfy({ $0.isNumber }) {
+                if edit.text == "0" { edit.text = key }
+                else { edit.text.append(contentsOf: key) }
+            }
+        }
+        beaconDotStore.activeElevationEdit = edit
     }
 }
