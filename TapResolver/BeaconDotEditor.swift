@@ -71,6 +71,25 @@ public final class MapTransformStore: ObservableObject {
                              y: ss * v.x + c * v.y)
         return CGPoint(x: vUnrot.x / s, y: vUnrot.y / s)
     }
+    
+    /// Convert MAP-LOCAL point to GLOBAL (screen) point
+    public func mapToScreen(_ M: CGPoint) -> CGPoint {
+        let s = max(totalScale, 0.0001)
+        let O = CGPoint(x: totalOffset.width, y: totalOffset.height)
+        let Cscreen = screenCenter
+        let Cmap = CGPoint(x: mapSize.width / 2, y: mapSize.height / 2)
+        
+        let v = CGPoint(x: M.x - Cmap.x, y: M.y - Cmap.y)
+        let vScaled = CGPoint(x: v.x * s, y: v.y * s)
+        
+        let theta = totalRotationRadians
+        let c = cos(theta), ss = sin(theta)
+        let vRot = CGPoint(x: c * vScaled.x - ss * vScaled.y,
+                          y: ss * vScaled.x + c * vScaled.y)
+        
+        return CGPoint(x: Cscreen.x + vRot.x + O.x,
+                      y: Cscreen.y + vRot.y + O.y)
+    }
 }
 
 // MARK: - Elevation editing state
