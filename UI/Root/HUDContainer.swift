@@ -36,12 +36,12 @@ struct HUDContainer: View {
             .allowsHitTesting(true)
             
             // Numeric keypad for square meters (only visible when editing)
-            NumericKeypadOverlay()
+            SquareMetersKeypadInterface()
                 .zIndex(200)                  // above everything in the HUD
                 .allowsHitTesting(true)       // it must receive touches when shown
             
             // Elevation keypad for beacons (only visible when editing)
-            BeaconElevationKeypadOverlay()
+            NumericKeypadInterface()
                 .zIndex(200)
                 .allowsHitTesting(true)
         }

@@ -8,6 +8,9 @@
 import SwiftUI
 
 struct HUDContainer: View {
+    @EnvironmentObject private var beaconDotStore: BeaconDotStore
+    @EnvironmentObject private var squareMetrics: SquareMetrics
+    
     var body: some View {
         ZStack {
             Color.clear.ignoresSafeArea().allowsHitTesting(false)
@@ -35,17 +38,41 @@ struct HUDContainer: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .allowsHitTesting(true)
             
-            // Numeric keypad for square meters (only visible when editing)
-            NumericKeypadOverlay()
-                .zIndex(200)                  // above everything in the HUD
-                .allowsHitTesting(true)       // it must receive touches when shown
-            
-            // Elevation keypad for beacons (only visible when editing)
-            BeaconElevationKeypadOverlay()
-                .zIndex(200)
-                .allowsHitTesting(true)
         }
         .zIndex(100)
+        .overlay(
+            // Numeric keypad overlays - positioned in lower portion of screen
+            Group {
+                // Elevation keypad for beacons
+                if let edit = beaconDotStore.activeElevationEdit {
+                    NumericInputKeypad(
+                        title: "Elevation",
+                        initialText: edit.text,
+                        onCommit: { text in
+                            beaconDotStore.commitElevationText(text, for: edit.beaconID)
+                        },
+                        onDismiss: {
+                            beaconDotStore.activeElevationEdit = nil
+                        }
+                    )
+                }
+                // Meters keypad for squares
+                else if let edit = squareMetrics.activeEdit {
+                    NumericInputKeypad(
+                        title: "Meters",
+                        initialText: edit.text,
+                        onCommit: { text in
+                            squareMetrics.commitMetersText(text, for: edit.id)
+                        },
+                        onDismiss: {
+                            squareMetrics.activeEdit = nil
+                        }
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .zIndex(200)
+        )
     }
 }
 

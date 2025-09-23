@@ -48,6 +48,7 @@ struct BeaconDrawer: View {
                                 beaconLists.demoteToMorgue(name)
                             },
                             onEditElevation: {
+                                // Start elevation editing directly in this drawer
                                 beaconDotStore.startElevationEdit(for: name)
                             }
                         )
