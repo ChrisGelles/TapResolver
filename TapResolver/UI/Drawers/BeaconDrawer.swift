@@ -51,6 +51,8 @@ struct BeaconDrawer: View {
                                 beaconDotStore.startElevationEdit(for: name)
                             }
                         )
+                        .frame(height: 44)
+                        .padding(.leading, 8)
                     }
                 }
                 .padding(.top, topBarHeight + 6)
@@ -58,6 +60,8 @@ struct BeaconDrawer: View {
                 .padding(.trailing, 6)
             }
             .scrollIndicators(.hidden)
+            .opacity(hud.isBeaconOpen ? 1 : 0)          // hide visuals when closed
+            .allowsHitTesting(hud.isBeaconOpen)         // ignore touches when closed
 
             // Top bar
             HStack(spacing: 2) {
@@ -112,57 +116,51 @@ struct BeaconListItem: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // Beacon dot (tap to add/remove from map)
-            Button {
-                onSelect?(CGPoint.zero, beaconColor(for: beaconName))
-            } label: {
+
+            // Capsule button (dot + name) — disabled when locked
+            HStack(spacing: 6) {
                 Circle()
                     .fill(beaconColor(for: beaconName))
-                    .frame(width: 20, height: 20)
-                    .overlay(
-                        Circle().stroke(Color.white, lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(isLocked) // Visual feedback when locked
-
-            // Beacon name (tap to add/remove from map)
-            Button {
-                onSelect?(CGPoint.zero, beaconColor(for: beaconName))
-            } label: {
+                    .frame(width: 12, height: 12)                  // ← tweak dot size
                 Text(beaconName)
-                    .font(.system(size: 8, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(Color.black.opacity(isLocked ? 0.1 : 0.3))
-                    )
+                    .font(.system(size: 9, weight: .medium, design: .monospaced)) // ← font
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(minWidth: 0, maxWidth: 72, alignment: .leading)        // ← tweak name width
             }
-            .buttonStyle(.plain)
-            .disabled(isLocked) // Visual feedback when locked
+            .padding(.horizontal, 8)                                // ← capsule H padding
+            .padding(.vertical, 6)                                  // ← capsule V padding
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(beaconColor(for: beaconName).opacity(isLocked ? 0.10 : 0.20))
+            )
+            .contentShape(Rectangle())
+            .onTapGesture(coordinateSpace: .global) { globalPoint in
+                guard !isLocked else { return } // block when locked
+                onSelect?(globalPoint, beaconColor(for: beaconName))
+            }
+            .disabled(isLocked)
 
-            // Elevation textfield
+            // Elevation “pill” (opens keypad)
             Button {
                 onEditElevation?()
             } label: {
                 Text(elevationText)
                     .font(.system(size: 8, weight: .medium, design: .monospaced))
                     .foregroundColor(.white)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 6)                        // ← pill H padding
+                    .padding(.vertical, 4)                          // ← pill V padding
                     .background(Color.black.opacity(0.5))
                     .cornerRadius(4)
+                    .fixedSize(horizontal: true, vertical: true)
             }
             .buttonStyle(.plain)
 
             Spacer(minLength: 0)
 
             // 🔒 Lock toggle
-            Button {
-                onToggleLock?()
-            } label: {
+            Button(action: { onToggleLock?() }) {
                 Image(systemName: isLocked ? "lock.fill" : "lock.open")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(isLocked ? .yellow : .primary)
@@ -172,10 +170,8 @@ struct BeaconListItem: View {
             .buttonStyle(.plain)
             .accessibilityLabel(isLocked ? "Unlock beacon" : "Lock beacon")
 
-            // Demote button (red arrow down)
-            Button {
-                onDemote?()
-            } label: {
+            // Demote (down arrow)
+            Button(action: { onDemote?() }) {
                 Image(systemName: "arrow.down")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(.red)
@@ -183,15 +179,16 @@ struct BeaconListItem: View {
                     .background(.ultraThinMaterial, in: Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Move to morgue")
+            .accessibilityLabel("Send to Morgue")
         }
-        .padding(.horizontal, 2)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 4)                                    // ← row side padding
+        .padding(.vertical, 6)                                      // ← row vertical padding
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.white.opacity(0.08))
         )
         .contentShape(Rectangle())
+        .frame(height: 44)                                          // ← row height (matches drawer)
     }
 
     private func beaconColor(for beaconID: String) -> Color {
