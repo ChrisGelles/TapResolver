@@ -14,7 +14,7 @@ struct BeaconDrawer: View {
 
     private let crosshairScreenOffset = CGPoint(x: 0, y: 0)
     private let collapsedWidth: CGFloat = 56
-    private let expandedWidth: CGFloat = 160
+    private let expandedWidth: CGFloat = 172
     private let topBarHeight: CGFloat = 48
 
     var body: some View {
@@ -52,7 +52,7 @@ struct BeaconDrawer: View {
                             }
                         )
                         .frame(height: 44)
-                        .padding(.leading, 8)
+                        .padding(.leading, 4)
                     }
                 }
                 .padding(.top, topBarHeight + 6)
@@ -84,7 +84,7 @@ struct BeaconDrawer: View {
                 }
                 .accessibilityLabel(hud.isBeaconOpen ? "Close beacon drawer" : "Open beacon drawer")
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 8)
             .frame(height: topBarHeight)
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -115,21 +115,23 @@ struct BeaconListItem: View {
     var onEditElevation: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 2) {
 
             // Capsule button (dot + name) — disabled when locked
-            HStack(spacing: 6) {
+            HStack(spacing: 2) {
                 Circle()
                     .fill(beaconColor(for: beaconName))
                     .frame(width: 12, height: 12)                  // ← tweak dot size
+                    .padding(.leading, 6)
                 Text(beaconName)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced)) // ← font
+                    .font(.system(size: 10, weight: .medium, design: .monospaced)) // ← font
                     .foregroundColor(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(minWidth: 0, maxWidth: 72, alignment: .leading)        // ← tweak name width
+                    //.lineLimit(10)
+                    .allowsTightening(true)
+                    //.truncationMode(.tail)
+                    .frame(minWidth: 60, maxWidth: 72, alignment: .leading)        // ← tweak name width
             }
-            .padding(.horizontal, 8)                                // ← capsule H padding
+            .padding(.horizontal, 0)                                // ← capsule H padding
             .padding(.vertical, 6)                                  // ← capsule V padding
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -149,7 +151,7 @@ struct BeaconListItem: View {
                 Text(elevationText)
                     .font(.system(size: 8, weight: .medium, design: .monospaced))
                     .foregroundColor(.white)
-                    .padding(.horizontal, 6)                        // ← pill H padding
+                    .padding(.horizontal, 0)                        // ← pill H padding
                     .padding(.vertical, 4)                          // ← pill V padding
                     .background(Color.black.opacity(0.5))
                     .cornerRadius(4)
@@ -157,7 +159,7 @@ struct BeaconListItem: View {
             }
             .buttonStyle(.plain)
 
-            Spacer(minLength: 0)
+            //Spacer(minLength: 0)
 
             // 🔒 Lock toggle
             Button(action: { onToggleLock?() }) {
@@ -181,7 +183,7 @@ struct BeaconListItem: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Send to Morgue")
         }
-        .padding(.horizontal, 4)                                    // ← row side padding
+        .padding(.horizontal, 0)                                    // ← row side padding
         .padding(.vertical, 6)                                      // ← row vertical padding
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
