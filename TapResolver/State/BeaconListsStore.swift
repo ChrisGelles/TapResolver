@@ -2,8 +2,7 @@
 //  BeaconListsStore.swift
 //  TapResolver
 //
-//  Created by Chris Gelles on 9/19/25.
-//
+//  Created by restructuring on 9/19/25.
 //
 
 import Foundation
