@@ -8,6 +8,19 @@
 import SwiftUI
 import CoreGraphics
 
+// MARK: - Color extension for hex support
+extension Color {
+    init(hex: UInt, alpha: Double = 1) {
+        self.init(
+            .sRGB,
+            red: Double((hex >> 16) & 0xff) / 255,
+            green: Double((hex >> 08) & 0xff) / 255,
+            blue: Double((hex >> 00) & 0xff) / 255,
+            opacity: alpha
+        )
+    }
+}
+
 struct MapPointDrawer: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var mapTransform: MapTransformStore
@@ -30,6 +43,10 @@ struct MapPointDrawer: View {
                         MapPointListItem(
                             point: point,
                             coordinateText: mapPointStore.coordinateString(for: point),
+                            isActive: mapPointStore.isActive(point.id),
+                            onSelect: {
+                                mapPointStore.toggleActive(id: point.id)
+                            },
                             onDelete: {
                                 mapPointStore.removePoint(id: point.id)
                             }
@@ -55,7 +72,12 @@ struct MapPointDrawer: View {
                     Spacer(minLength: 0)
                 }
                 Button {
-                    if hud.isMapPointOpen { hud.closeAll() } else { hud.openMapPoint() }
+                    if hud.isMapPointOpen { 
+                        mapPointStore.deactivateAll()
+                        hud.closeAll() 
+                    } else { 
+                        hud.openMapPoint() 
+                    }
                 } label: {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 16, weight: .medium))
@@ -91,21 +113,27 @@ struct MapPointDrawer: View {
 struct MapPointListItem: View {
     let point: MapPointStore.MapPoint
     let coordinateText: String
+    let isActive: Bool
+    var onSelect: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 2) {
-            // Coordinate display in rounded rectangle
-            Text(coordinateText)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundColor(.primary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.blue.opacity(0.2))
-                )
-                .fixedSize(horizontal: true, vertical: true)
+            // Coordinate display in rounded rectangle - tappable for selection
+            Button(action: { onSelect?() }) {
+                Text(coordinateText)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(isActive ? Color(hex: 0x10fff1).opacity(0.9) : Color.blue.opacity(0.2))
+                    )
+                    .fixedSize(horizontal: true, vertical: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isActive ? "Deactivate map point" : "Activate map point")
             
             Spacer(minLength: 0)
 

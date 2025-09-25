@@ -17,9 +17,11 @@ public final class MapPointStore: ObservableObject {
     }
 
     @Published public private(set) var points: [MapPoint] = []
+    @Published public private(set) var activePointID: UUID? = nil
 
     // MARK: persistence keys
     private let pointsKey = "MapPoints_v1"
+    private let activePointKey = "MapPointsActive_v1"
 
     public init() {
         load()
@@ -39,7 +41,10 @@ public final class MapPointStore: ObservableObject {
             return false // Cannot add duplicate coordinates
         }
         
-        points.append(MapPoint(mapPoint: mapPoint))
+        let newPoint = MapPoint(mapPoint: mapPoint)
+        points.append(newPoint)
+        // Set the new point as active (deactivating any previous active point)
+        activePointID = newPoint.id
         save()
         print("Added map point @ map (\(Int(mapPoint.x)), \(Int(mapPoint.y)))")
         return true
@@ -49,6 +54,10 @@ public final class MapPointStore: ObservableObject {
     public func removePoint(id: UUID) {
         if let idx = points.firstIndex(where: { $0.id == id }) {
             points.remove(at: idx)
+            // If the removed point was active, clear the active state
+            if activePointID == id {
+                activePointID = nil
+            }
             save()
             print("Removed map point with ID \(id)")
         }
@@ -64,7 +73,31 @@ public final class MapPointStore: ObservableObject {
 
     public func clear() {
         points.removeAll()
+        activePointID = nil
         save()
+    }
+
+    /// Toggle the active state of a map point (only one can be active at a time)
+    public func toggleActive(id: UUID) {
+        if activePointID == id {
+            // Deactivate if currently active
+            activePointID = nil
+        } else {
+            // Activate this point (deactivating any other active point)
+            activePointID = id
+        }
+        save()
+    }
+
+    /// Deactivate all map points (called when drawer closes)
+    public func deactivateAll() {
+        activePointID = nil
+        save()
+    }
+
+    /// Check if a point is currently active
+    public func isActive(_ id: UUID) -> Bool {
+        return activePointID == id
     }
 
     /// Get coordinate string for display in drawer
@@ -86,6 +119,13 @@ public final class MapPointStore: ObservableObject {
         if let data = try? JSONEncoder().encode(dto) {
             UserDefaults.standard.set(data, forKey: pointsKey)
         }
+        
+        // Save active point ID
+        if let activeID = activePointID, let activeData = try? JSONEncoder().encode(activeID) {
+            UserDefaults.standard.set(activeData, forKey: activePointKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: activePointKey)
+        }
     }
 
     private func load() {
@@ -93,6 +133,17 @@ public final class MapPointStore: ObservableObject {
            let dto = try? JSONDecoder().decode([MapPointDTO].self, from: data) {
             self.points = dto.map { MapPointDTO in
                 MapPoint(mapPoint: CGPoint(x: MapPointDTO.x, y: MapPointDTO.y))
+            }
+        }
+        
+        // Load active point ID
+        if let activeData = UserDefaults.standard.data(forKey: activePointKey),
+           let activeID = try? JSONDecoder().decode(UUID.self, from: activeData) {
+            // Verify the active point still exists
+            if points.contains(where: { $0.id == activeID }) {
+                self.activePointID = activeID
+            } else {
+                self.activePointID = nil
             }
         }
     }
