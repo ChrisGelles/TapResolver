@@ -10,6 +10,9 @@ import SwiftUI
 struct HUDContainer: View {
     @EnvironmentObject private var beaconDotStore: BeaconDotStore
     @EnvironmentObject private var squareMetrics: SquareMetrics
+    @EnvironmentObject private var mapPointStore: MapPointStore
+    @EnvironmentObject private var mapTransform: MapTransformStore
+    @EnvironmentObject private var hud: HUDPanelsState
     
     var body: some View {
         ZStack {
@@ -24,6 +27,7 @@ struct HUDContainer: View {
                             .padding(.trailing, 0)
                         BeaconDrawer()
                         MorgueDrawer()                  // ← added, sits next to Beacon drawer
+                        MapPointDrawer()                // ← added, sits between Morgue and Reset
                         ResetMapButton()
                         
                         // Radio waves button: start scan + dump snapshot to console
@@ -34,6 +38,52 @@ struct HUDContainer: View {
                     
                 }
                 Spacer()
+                
+                // Bottom buttons - only show when MapPoint drawer is open
+                if hud.isMapPointOpen {
+                    HStack {
+                        // Green plus button (left)
+                        Button {
+                            guard mapTransform.mapSize != .zero else {
+                                print("⚠️ Map point add ignored: mapTransform not ready (mapSize == .zero)")
+                                return
+                            }
+                            let targetScreen = mapTransform.screenCenter
+                            let mapPoint = mapTransform.screenToMap(targetScreen)
+                            let success = mapPointStore.addPoint(at: mapPoint)
+                            if !success {
+                                print("⚠️ Cannot add map point: location already occupied")
+                            }
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 50, height: 50)
+                                .background(Color.green, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .accessibilityLabel("Add map point at crosshair location")
+                        .buttonStyle(.plain)
+                        
+                        Spacer()
+                        
+                        // Blue Log Data button (right)
+                        Button {
+                            // TODO: Implement log data functionality
+                            print("Log Data button pressed")
+                        } label: {
+                            Text("Log Data")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                .background(Color.blue, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .accessibilityLabel("Log data for current map points")
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 40)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .allowsHitTesting(true)

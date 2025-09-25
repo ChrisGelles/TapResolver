@@ -41,6 +41,9 @@ struct ContentView: View {
                                                             y: newSize.height / 2)
                     }
 
+                // Map point overlay (semi-transparent blue dots)
+                MapPointOverlay()
+                
                 // HUD overlay (drawers + reset) — non-blocking outside its own controls
                 HUDContainer()
             }

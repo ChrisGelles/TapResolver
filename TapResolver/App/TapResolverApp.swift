@@ -17,6 +17,7 @@ struct TapResolverApp: App {
     @StateObject private var squareMetrics = SquareMetrics()
     @StateObject private var beaconLists = BeaconListsStore()   // beacon lists
     @StateObject private var btScanner = BluetoothScanner()     // Bluetooth scanner
+    @StateObject private var mapPointStore = MapPointStore()    // map points (log points)
 
     var body: some Scene {
         WindowGroup {
@@ -29,6 +30,7 @@ struct TapResolverApp: App {
                 .environmentObject(squareMetrics)
                 .environmentObject(beaconLists)
                 .environmentObject(btScanner)
+                .environmentObject(mapPointStore)
         }
     }
 }

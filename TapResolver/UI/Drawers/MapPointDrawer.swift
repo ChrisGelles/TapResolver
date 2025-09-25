@@ -9,10 +9,9 @@ import SwiftUI
 import CoreGraphics
 
 struct MapPointDrawer: View {
-    @EnvironmentObject private var beaconDotStore: BeaconDotStore
+    @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var hud: HUDPanelsState
-    @EnvironmentObject private var beaconLists: BeaconListsStore
 
     private let crosshairScreenOffset = CGPoint(x: 0, y: 0)
     private let collapsedWidth: CGFloat = 56
@@ -27,31 +26,12 @@ struct MapPointDrawer: View {
             // List
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(beaconLists.beacons.sorted(), id: \.self) { name in
-                        let locked = beaconDotStore.isLocked(name)
-                        BeaconListItem(
-                            beaconName: name,
-                            isLocked: locked,
-                            elevationText: beaconDotStore.displayElevationText(for: name),
-                            onSelect: { _, color in
-                                guard mapTransform.mapSize != .zero else {
-                                    print("⚠️ Beacon add ignored: mapTransform not ready (mapSize == .zero)")
-                                    return
-                                }
-                                let targetScreen = mapTransform.screenCenter
-                                let mapPoint = mapTransform.screenToMap(targetScreen)
-                                beaconDotStore.toggleDot(for: name, mapPoint: mapPoint, color: color)
-                                hud.isBeaconOpen = false
-                            },
-                            onToggleLock: {
-                                beaconDotStore.toggleLock(name)
-                            },
-                            onDemote: {
-                                beaconLists.demoteToMorgue(name)
-                            },
-                            onEditElevation: {
-                                // Start elevation editing directly in this drawer
-                                beaconDotStore.startElevationEdit(for: name)
+                    ForEach(mapPointStore.points.sorted(by: { $0.createdDate > $1.createdDate }), id: \.id) { point in
+                        MapPointListItem(
+                            point: point,
+                            coordinateText: mapPointStore.coordinateString(for: point),
+                            onDelete: {
+                                mapPointStore.removePoint(id: point.id)
                             }
                         )
                         .frame(height: 44)
@@ -63,128 +43,82 @@ struct MapPointDrawer: View {
                 .padding(.trailing, 6)
             }
             .scrollIndicators(.hidden)
-            .opacity(hud.isBeaconOpen ? 1 : 0)          // hide visuals when closed
-            .allowsHitTesting(hud.isBeaconOpen)         // ignore touches when closed
+            .opacity(hud.isMapPointOpen ? 1 : 0)          // hide visuals when closed
+            .allowsHitTesting(hud.isMapPointOpen)         // ignore touches when closed
 
             // Top bar
             HStack(spacing: 2) {
-                if hud.isBeaconOpen {
-                    Text("Beacon List")
+                if hud.isMapPointOpen {
+                    Text("Log Points")
                         .font(.headline)
                         .foregroundColor(.primary)
                     Spacer(minLength: 0)
                 }
                 Button {
-                    if hud.isBeaconOpen { hud.closeAll() } else { hud.openBeacon() }
+                    if hud.isMapPointOpen { hud.closeAll() } else { hud.openMapPoint() }
                 } label: {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(.primary)
                         .frame(width: 40, height: 40)
                         .background(Circle().fill(Color.black.opacity(0.4)))
-                        .rotationEffect(.degrees(hud.isBeaconOpen ? 180 : 0))
+                        .rotationEffect(.degrees(hud.isMapPointOpen ? 180 : 0))
                         .contentShape(Circle())
                 }
-                .accessibilityLabel(hud.isBeaconOpen ? "Close beacon drawer" : "Open beacon drawer")
+                .accessibilityLabel(hud.isMapPointOpen ? "Close map point drawer" : "Open map point drawer")
             }
             .padding(.horizontal, 8)
             .frame(height: topBarHeight)
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .frame(
-            width: hud.isBeaconOpen ? expandedWidth : collapsedWidth,
-            height: hud.isBeaconOpen ? min(320, idealOpenHeight) : topBarHeight
+            width: hud.isMapPointOpen ? expandedWidth : collapsedWidth,
+            height: hud.isMapPointOpen ? min(320, idealOpenHeight) : topBarHeight
         )
         .clipped()
         .contentShape(Rectangle())
-        .animation(.easeInOut(duration: 0.25), value: hud.isBeaconOpen)
+        .animation(.easeInOut(duration: 0.25), value: hud.isMapPointOpen)
     }
 
     private var idealOpenHeight: CGFloat {
-        let rows = CGFloat(beaconLists.beacons.count)
+        let rows = CGFloat(mapPointStore.points.count)
         let rowsHeight = rows * 44 + (rows - 1) * 6 + 6 + 8
         let total = max(topBarHeight, min(320, topBarHeight + rowsHeight))
         return total
     }
 }
 
-struct BeaconListItem: View {
-    let beaconName: String
-    let isLocked: Bool
-    let elevationText: String
-    var onSelect: ((CGPoint, Color) -> Void)? = nil
-    var onToggleLock: (() -> Void)? = nil
-    var onDemote: (() -> Void)? = nil
-    var onEditElevation: (() -> Void)? = nil
+struct MapPointListItem: View {
+    let point: MapPointStore.MapPoint
+    let coordinateText: String
+    var onDelete: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 2) {
+            // Coordinate display in rounded rectangle
+            Text(coordinateText)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(.primary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.blue.opacity(0.2))
+                )
+                .fixedSize(horizontal: true, vertical: true)
+            
+            Spacer(minLength: 0)
 
-            // Capsule button (dot + name) — disabled when locked
-            HStack(spacing: 2) {
-                Circle()
-                    .fill(beaconColor(for: beaconName))
-                    .frame(width: 12, height: 12)                  // ← tweak dot size
-                    .padding(.leading, 6)
-                Text(beaconName)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced)) // ← font
-                    .foregroundColor(.primary)
-                    //.lineLimit(10)
-                    .allowsTightening(true)
-                    //.truncationMode(.tail)
-                    .frame(minWidth: 60, maxWidth: 72, alignment: .leading)        // ← tweak name width
-            }
-            .padding(.horizontal, 0)                                // ← capsule H padding
-            .padding(.vertical, 6)                                  // ← capsule V padding
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(beaconColor(for: beaconName).opacity(isLocked ? 0.10 : 0.20))
-            )
-            .contentShape(Rectangle())
-            .onTapGesture(coordinateSpace: .global) { globalPoint in
-                guard !isLocked else { return } // block when locked
-                onSelect?(globalPoint, beaconColor(for: beaconName))
-            }
-            .disabled(isLocked)
-
-            // Elevation “pill” (opens keypad)
-            Button {
-                onEditElevation?()
-            } label: {
-                Text(elevationText)
-                    .font(.system(size: 8, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 0)                        // ← pill H padding
-                    .padding(.vertical, 4)                          // ← pill V padding
-                    .background(Color.black.opacity(0.5))
-                    .cornerRadius(4)
-                    .fixedSize(horizontal: true, vertical: true)
-            }
-            .buttonStyle(.plain)
-
-            //Spacer(minLength: 0)
-
-            // 🔒 Lock toggle
-            Button(action: { onToggleLock?() }) {
-                Image(systemName: isLocked ? "lock.fill" : "lock.open")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(isLocked ? .yellow : .primary)
-                    .frame(width: 24, height: 24)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isLocked ? "Unlock beacon" : "Lock beacon")
-
-            // Demote (down arrow)
-            Button(action: { onDemote?() }) {
-                Image(systemName: "arrow.down")
+            // Delete button (red X)
+            Button(action: { onDelete?() }) {
+                Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(.red)
                     .frame(width: 24, height: 24)
                     .background(.ultraThinMaterial, in: Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Send to Morgue")
+            .accessibilityLabel("Delete map point")
         }
         .padding(.horizontal, 0)                                    // ← row side padding
         .padding(.vertical, 6)                                      // ← row vertical padding
@@ -194,11 +128,5 @@ struct BeaconListItem: View {
         )
         .contentShape(Rectangle())
         .frame(height: 44)                                          // ← row height (matches drawer)
-    }
-
-    private func beaconColor(for beaconID: String) -> Color {
-        let hash = beaconID.hash
-        let hue = Double(abs(hash % 360)) / 360.0
-        return Color(hue: hue, saturation: 0.7, brightness: 0.8)
     }
 }

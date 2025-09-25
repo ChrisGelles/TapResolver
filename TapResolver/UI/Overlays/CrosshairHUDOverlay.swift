@@ -40,7 +40,7 @@ struct CrosshairHUDOverlay: View {
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
-        .opacity(hud.isBeaconOpen ? 1.0 : 0.0)
-        .animation(.easeInOut(duration: 0.15), value: hud.isBeaconOpen)
+        .opacity(hud.isBeaconOpen || hud.isMapPointOpen ? 1.0 : 0.0)
+        .animation(.easeInOut(duration: 0.15), value: hud.isBeaconOpen || hud.isMapPointOpen)
     }
 }
