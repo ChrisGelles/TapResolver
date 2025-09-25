@@ -65,6 +65,11 @@ private struct MapCanvas: View {
             BeaconOverlayDots()
                 .frame(width: mapSize.width, height: mapSize.height)
                 .zIndex(28)
+            
+            // Map Point overlay (z = 29)
+            MapPointOverlay()
+                .frame(width: mapSize.width, height: mapSize.height)
+                .zIndex(29)
 
             // Your other overlays on top (z >= 30)
             BeaconOverlay()

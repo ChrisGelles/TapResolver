@@ -16,8 +16,6 @@ struct MapPointOverlay: View {
 
     var body: some View {
         ZStack {
-            Color.clear.ignoresSafeArea().allowsHitTesting(false)
-            
             // Only show map points when the drawer is open
             if hud.isMapPointOpen {
                 ForEach(mapPointStore.points) { point in
@@ -29,8 +27,12 @@ struct MapPointOverlay: View {
                                 .stroke(Color.black, lineWidth: isActive ? 2 : 0)
                         )
                         .frame(width: 12, height: 12)
-                        .position(mapTransform.mapToScreen(point.mapPoint))
-                        .allowsHitTesting(false)
+                        .position(point.mapPoint) // Use map-local coordinates directly
+                        .allowsHitTesting(true)
+                        .onTapGesture {
+                            print("MapPoint tapped: \(point.id)")
+                            mapPointStore.selectPoint(id: point.id)
+                        }
                 }
             }
         }

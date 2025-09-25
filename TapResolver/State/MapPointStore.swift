@@ -95,6 +95,12 @@ public final class MapPointStore: ObservableObject {
         save()
     }
 
+    /// Select a point by ID (used when tapping on map dots)
+    public func selectPoint(id: UUID) {
+        activePointID = id
+        save()
+    }
+
     /// Check if a point is currently active
     public func isActive(_ id: UUID) -> Bool {
         return activePointID == id
