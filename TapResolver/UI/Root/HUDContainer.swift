@@ -27,6 +27,8 @@ struct HUDContainer: View {
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var hud: HUDPanelsState
     
+    @State private var sliderValue: Double = 10.0 // Default to 10 seconds
+    
     var body: some View {
         ZStack {
             Color.clear.ignoresSafeArea().allowsHitTesting(false)
@@ -54,45 +56,73 @@ struct HUDContainer: View {
                 
                         // Bottom buttons - only show when MapPoint drawer is open
                         if hud.isMapPointOpen {
-                            HStack {
-                                // Green plus button (left)
-                                Button {
-                                    guard mapTransform.mapSize != .zero else {
-                                        print("⚠️ Map point add ignored: mapTransform not ready (mapSize == .zero)")
-                                        return
-                                    }
-                                    let targetScreen = mapTransform.screenCenter
-                                    let mapPoint = mapTransform.screenToMap(targetScreen)
-                                    let success = mapPointStore.addPoint(at: mapPoint)
-                                    if !success {
-                                        print("⚠️ Cannot add map point: location already occupied")
-                                    }
-                                } label: {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .foregroundColor(.white)
-                                        .frame(width: 50, height: 50)
-                                        .background(Color.green, in: RoundedRectangle(cornerRadius: 12))
-                                }
-                                .accessibilityLabel("Add map point at crosshair location")
-                                .buttonStyle(.plain)
+                            VStack(spacing: 12) {
+                                // Text field showing slider value
+                                Text("\(Int(sliderValue))s")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.8))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
                                 
-                                Spacer()
-                                
-                                // Blue Log Data button (right)
-                                Button {
-                                    // TODO: Implement log data functionality
-                                    print("Log Data button pressed")
-                                } label: {
-                                    Text("Log Data")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 12)
-                                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 12))
+                                HStack {
+                                    // Green plus button (left)
+                                    Button {
+                                        guard mapTransform.mapSize != .zero else {
+                                            print("⚠️ Map point add ignored: mapTransform not ready (mapSize == .zero)")
+                                            return
+                                        }
+                                        let targetScreen = mapTransform.screenCenter
+                                        let mapPoint = mapTransform.screenToMap(targetScreen)
+                                        let success = mapPointStore.addPoint(at: mapPoint)
+                                        if !success {
+                                            print("⚠️ Cannot add map point: location already occupied")
+                                        }
+                                    } label: {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 18, weight: .semibold))
+                                            .foregroundColor(.white)
+                                            .frame(width: 50, height: 50)
+                                            .background(Color.green, in: RoundedRectangle(cornerRadius: 12))
+                                    }
+                                    .accessibilityLabel("Add map point at crosshair location")
+                                    .buttonStyle(.plain)
+                                    
+                                    // Horizontal slider (center)
+                                    VStack(spacing: 4) {
+                                        HStack {
+                                            Text("3")
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundColor(.white.opacity(0.8))
+                                            Spacer()
+                                            Text("20")
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundColor(.white.opacity(0.8))
+                                        }
+                                        .padding(.horizontal, 8)
+                                        
+                                        CustomSlider(value: $sliderValue, range: 3...20, step: 1, thumbColor: .gray, filledTrackColor: .black, unfilledTrackColor: .black)
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                                    .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                                    
+                                    // Blue Log Data button (right)
+                                    Button {
+                                        // TODO: Implement log data functionality
+                                        print("Log Data button pressed with value: \(Int(sliderValue))s")
+                                    } label: {
+                                        Text("Log Data")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 12)
+                                            .background(Color.blue, in: RoundedRectangle(cornerRadius: 12))
+                                    }
+                                    .accessibilityLabel("Log data for current map points")
+                                    .buttonStyle(.plain)
                                 }
-                                .accessibilityLabel("Log data for current map points")
-                                .buttonStyle(.plain)
                             }
                             .padding(.horizontal, 20)
                             .padding(.bottom, 40)
@@ -235,5 +265,58 @@ private struct RSSIMeterButton: View {
         .accessibilityLabel("Add live RSSI values from map beacons to map")
         .buttonStyle(.plain)
         .allowsHitTesting(true)
+    }
+}
+
+// MARK: - Custom Slider with Thumb Color Control
+import UIKit
+
+struct CustomSlider: UIViewRepresentable {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    let thumbColor: UIColor
+    let filledTrackColor: UIColor
+    let unfilledTrackColor: UIColor
+    
+    func makeUIView(context: Context) -> UISlider {
+        let slider = UISlider()
+        slider.minimumValue = Float(range.lowerBound)
+        slider.maximumValue = Float(range.upperBound)
+        slider.value = Float(value)
+        slider.thumbTintColor = thumbColor
+        slider.minimumTrackTintColor = filledTrackColor
+        slider.maximumTrackTintColor = unfilledTrackColor
+        slider.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.valueChanged(_:)),
+            for: .valueChanged
+        )
+        return slider
+    }
+    
+    func updateUIView(_ uiView: UISlider, context: Context) {
+        uiView.value = Float(value)
+        uiView.thumbTintColor = thumbColor
+        uiView.minimumTrackTintColor = filledTrackColor
+        uiView.maximumTrackTintColor = unfilledTrackColor
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject {
+        var parent: CustomSlider
+        
+        init(_ parent: CustomSlider) {
+            self.parent = parent
+        }
+        
+        @objc func valueChanged(_ sender: UISlider) {
+            // Round to nearest step
+            let steppedValue = round(sender.value / Float(parent.step)) * Float(parent.step)
+            parent.value = Double(steppedValue)
+        }
     }
 }
