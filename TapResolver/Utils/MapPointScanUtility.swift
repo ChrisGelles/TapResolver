@@ -29,11 +29,11 @@ public final class MapPointScanUtility: ObservableObject {
 
     /// Return true to exclude a device (your "Morgue" predicate).
     /// Wire this to BeaconListsStore (e.g., by beacon ID or name).
-    private let isExcluded: (_ beaconID: String, _ name: String?) -> Bool
+    public var isExcluded: (_ beaconID: String, _ name: String?) -> Bool
 
     /// Resolve static meta for a known beacon ID (position/elevation/tx/name) from BeaconDotStore.
     /// Return nil for unknown beacons (will still be logged with minimal meta).
-    private let resolveBeaconMeta: (_ beaconID: String) -> BeaconMeta?
+    public var resolveBeaconMeta: (_ beaconID: String) -> BeaconMeta?
 
     // MARK: - Published runtime state (observe from UI & Persistence)
 
@@ -51,6 +51,7 @@ public final class MapPointScanUtility: ObservableObject {
     private var wallClockStart: Date?
     private var wallClockEnd: Date?
     private var windowBins: [String: Obin] = [:] // beaconID -> Obin
+    private var excludedBeacons: Set<String> = [] // Track excluded beacons for debug output
     private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Config
@@ -268,6 +269,7 @@ public final class MapPointScanUtility: ObservableObject {
         wallClockEnd = nil
         secondsRemaining = durationSeconds
         windowBins.removeAll(keepingCapacity: true)
+        excludedBeacons.removeAll()
 
         let sid = sessionID ?? config.defaultSessionID
         activePoint = MapPointRef(pointID: pointID, mapX_m: mapX_m, mapY_m: mapY_m, userHeight_m: userHeight_m, sessionID: sid)
@@ -297,7 +299,16 @@ public final class MapPointScanUtility: ObservableObject {
     /// Ingest a single BLE advertisement. Call this from BluetoothScanner's discovery callback.
     public func ingest(beaconID: String, name: String?, rssiDbm: Int, txPowerDbm: Int?, timestamp: TimeInterval) {
         guard isScanning, activePoint != nil else { return }
-        if isExcluded(beaconID, name) { return }
+        
+        // DEBUG: Show filtering decisions
+        if isExcluded(beaconID, name) {
+            // Only show first exclusion per beacon to avoid spam
+            if windowBins[beaconID] == nil && !excludedBeacons.contains(beaconID) {
+                print("🚫 Excluding beacon: \(name ?? "Unknown") (ID: \(beaconID)) - not in active beacon list or no map dot")
+                excludedBeacons.insert(beaconID)
+            }
+            return 
+        }
         
         // DEBUG: Show first few advertisements being ingested
         if windowBins[beaconID] == nil {
@@ -311,7 +322,7 @@ public final class MapPointScanUtility: ObservableObject {
 
     // MARK: - Internals
 
-    private func finishScan() {
+    public func finishScan() {
         scanTimer?.cancel()
         scanTimer = nil
         wallClockEnd = Date()
@@ -371,7 +382,7 @@ public final class MapPointScanUtility: ObservableObject {
             let median = beacon.medianDbm ?? -999
             print("   • \(name): \(samples) samples, median RSSI: \(median) dBm")
         }
-        print("   Running aggregates total: \(runningAggregates.count) point-beacon pairs")
+        print("   Running aggregates total: \(runningAggregates.count) map point to beacon pairings")
 
         // Small UI summary
         let tops = record.beacons

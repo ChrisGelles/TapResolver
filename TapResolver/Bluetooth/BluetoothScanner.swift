@@ -165,8 +165,9 @@ extension BluetoothScanner: CBCentralManagerDelegate {
         }
         
         // Forward advertisement to scan utility for map point logging
+        // Use device name as beaconID since that's how beacons are identified in our system
         scanUtility?.ingest(
-            beaconID: id.uuidString,
+            beaconID: name,
             name: name,
             rssiDbm: rssi,
             txPowerDbm: txPower,

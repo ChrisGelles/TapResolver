@@ -26,7 +26,9 @@ struct HUDContainer: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var hud: HUDPanelsState
-    @EnvironmentObject private var scanUtility: MapPointScanUtility
+    @EnvironmentObject private var btScanner: BluetoothScanner
+    @EnvironmentObject private var beaconLists: BeaconListsStore
+    @StateObject private var beaconLogger = SimpleBeaconLogger()
     
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
     
@@ -109,33 +111,62 @@ struct HUDContainer: View {
                                     .padding(.vertical, 8)
                                     .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
                                     
-                                    // Blue Log Data button (right)
-                                    Button {
-                                        guard let activePoint = mapPointStore.activePoint else {
-                                            print("⚠️ No active map point selected")
-                                            return
-                                        }
-                                        
-                                        // Start scanning for the selected map point
-                                        scanUtility.startScan(
-                                            pointID: activePoint.id.uuidString,
-                                            mapX_m: activePoint.mapPoint.x,
-                                            mapY_m: activePoint.mapPoint.y,
-                                            userHeight_m: 1.05, // Your 5'9" device height
-                                            durationSeconds: sliderValue
-                                        )
-                                        print("🔍 Started scan for point \(activePoint.id) for \(Int(sliderValue))s")
-                                    } label: {
-                                        Text(scanUtility.isScanning ? "Scanning..." : "Log Data")
-                                            .font(.system(size: 14, weight: .semibold))
+                                    // Countdown display (if logging)
+                                    if beaconLogger.isLogging {
+                                        Text("\(Int(beaconLogger.secondsRemaining))s")
+                                            .font(.system(size: 16, weight: .bold))
                                             .foregroundColor(.white)
-                                            .padding(.horizontal, 16)
-                                            .padding(.vertical, 12)
-                                            .background(scanUtility.isScanning ? Color.green : Color.blue, in: RoundedRectangle(cornerRadius: 12))
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(Color.orange.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
                                     }
-                                    .disabled(scanUtility.isScanning || mapPointStore.activePoint == nil)
-                                    .accessibilityLabel(scanUtility.isScanning ? "Scanning in progress" : "Log data for current map point")
-                                    .buttonStyle(.plain)
+                                    
+                                    // Blue Log Data button (right)
+            Button {
+                guard let activePoint = mapPointStore.activePoint else {
+                    print("⚠️ No active map point selected")
+                    return
+                }
+                
+                if beaconLogger.isLogging {
+                    // Stop current logging session
+                    if let session = beaconLogger.stopLogging() {
+                        print("📊 Session completed:")
+                        print("   Session ID: \(session.sessionID)")
+                        print("   Map Point: \(session.mapPointID)")
+                        print("   Coordinates: (\(Int(session.coordinates.x)), \(Int(session.coordinates.y)))")
+                        print("   Duration: \(Int(session.duration))s")
+                        print("   Interval: \(Int(session.interval))ms")
+                        print("   Beacons logged: \(session.rssiPerBeacon.count)")
+                        for (beaconName, rssiValues) in session.rssiPerBeacon {
+                            print("   • \(beaconName): \(rssiValues.count) samples")
+                        }
+                    }
+                } else {
+                    // Start new logging session
+                    print("🔍 Starting beacon logging for point \(activePoint.id)")
+                    
+                    beaconLogger.startLogging(
+                        mapPointID: activePoint.id.uuidString,
+                        coordinates: (x: activePoint.mapPoint.x, y: activePoint.mapPoint.y),
+                        duration: sliderValue,
+                        intervalMs: 500, // 500ms between samples
+                        btScanner: btScanner,
+                        beaconLists: beaconLists,
+                        beaconDotStore: beaconDotStore
+                    )
+                }
+            } label: {
+                Text(beaconLogger.isLogging ? "Stop Logging" : "Log Data")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(beaconLogger.isLogging ? Color.red : Color.blue, in: RoundedRectangle(cornerRadius: 12))
+            }
+            .disabled(mapPointStore.activePoint == nil)
+            .accessibilityLabel(beaconLogger.isLogging ? "Stop logging session" : "Log data for current map point")
+            .buttonStyle(.plain)
                                 }
                             }
                             .padding(.horizontal, 20)
