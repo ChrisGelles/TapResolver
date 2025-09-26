@@ -26,6 +26,7 @@ struct HUDContainer: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var hud: HUDPanelsState
+    @EnvironmentObject private var scanUtility: MapPointScanUtility
     
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
     
@@ -110,17 +111,30 @@ struct HUDContainer: View {
                                     
                                     // Blue Log Data button (right)
                                     Button {
-                                        // TODO: Implement log data functionality
-                                        print("Log Data button pressed with value: \(Int(sliderValue))s")
+                                        guard let activePoint = mapPointStore.activePoint else {
+                                            print("⚠️ No active map point selected")
+                                            return
+                                        }
+                                        
+                                        // Start scanning for the selected map point
+                                        scanUtility.startScan(
+                                            pointID: activePoint.id.uuidString,
+                                            mapX_m: activePoint.mapPoint.x,
+                                            mapY_m: activePoint.mapPoint.y,
+                                            userHeight_m: 1.05, // Your 5'9" device height
+                                            durationSeconds: sliderValue
+                                        )
+                                        print("🔍 Started scan for point \(activePoint.id) for \(Int(sliderValue))s")
                                     } label: {
-                                        Text("Log Data")
+                                        Text(scanUtility.isScanning ? "Scanning..." : "Log Data")
                                             .font(.system(size: 14, weight: .semibold))
                                             .foregroundColor(.white)
                                             .padding(.horizontal, 16)
                                             .padding(.vertical, 12)
-                                            .background(Color.blue, in: RoundedRectangle(cornerRadius: 12))
+                                            .background(scanUtility.isScanning ? Color.green : Color.blue, in: RoundedRectangle(cornerRadius: 12))
                                     }
-                                    .accessibilityLabel("Log data for current map points")
+                                    .disabled(scanUtility.isScanning || mapPointStore.activePoint == nil)
+                                    .accessibilityLabel(scanUtility.isScanning ? "Scanning in progress" : "Log data for current map point")
                                     .buttonStyle(.plain)
                                 }
                             }

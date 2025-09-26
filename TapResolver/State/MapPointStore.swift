@@ -18,6 +18,12 @@ public final class MapPointStore: ObservableObject {
 
     @Published public private(set) var points: [MapPoint] = []
     @Published public private(set) var activePointID: UUID? = nil
+    
+    /// Get the currently active map point
+    public var activePoint: MapPoint? {
+        guard let activeID = activePointID else { return nil }
+        return points.first { $0.id == activeID }
+    }
 
     // MARK: persistence keys
     private let pointsKey = "MapPoints_v1"

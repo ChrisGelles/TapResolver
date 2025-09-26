@@ -18,6 +18,16 @@ struct TapResolverApp: App {
     @StateObject private var beaconLists = BeaconListsStore()   // beacon lists
     @StateObject private var btScanner = BluetoothScanner()     // Bluetooth scanner
     @StateObject private var mapPointStore = MapPointStore()    // map points (log points)
+    @StateObject private var scanUtility = MapPointScanUtility(
+        isExcluded: { beaconID, name in
+            // We'll implement this properly after the stores are created
+            return false
+        },
+        resolveBeaconMeta: { beaconID in
+            // We'll implement this properly after the stores are created
+            return nil
+        }
+    )
 
     var body: some Scene {
         WindowGroup {
@@ -31,7 +41,21 @@ struct TapResolverApp: App {
                 .environmentObject(beaconLists)
                 .environmentObject(btScanner)
                 .environmentObject(mapPointStore)
+                .environmentObject(scanUtility)
+                .onAppear {
+                    // Set up scanUtility with proper closures after all stores are created
+                    setupScanUtility()
+                }
         }
+    }
+    
+    private func setupScanUtility() {
+        // Set up the exclusion closure to only scan beacons that have dots in BeaconDotStore
+        // This is a simplified approach - we'll only scan beacons that are actively tracked
+        // The actual filtering will be done in the BluetoothScanner callback
+        
+        // Connect the scan utility to the Bluetooth scanner
+        btScanner.scanUtility = scanUtility
     }
 }
 

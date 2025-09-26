@@ -25,6 +25,9 @@ final class BluetoothScanner: NSObject, ObservableObject {
     private var central: CBCentralManager!
     private var deviceIndex: [UUID: Int] = [:] // quick lookup by peripheral.identifier
     private var pendingStopWork: DispatchWorkItem?
+    
+    // MARK: - Scan utility reference (set by app)
+    weak var scanUtility: MapPointScanUtility?
 
     // MARK: - Setup
     override init() {
@@ -160,6 +163,15 @@ extension BluetoothScanner: CBCentralManagerDelegate {
                 if !summary.isEmpty { print("    ⤷ \(summary)") }
             }
         }
+        
+        // Forward advertisement to scan utility for map point logging
+        scanUtility?.ingest(
+            beaconID: id.uuidString,
+            name: name,
+            rssiDbm: rssi,
+            txPowerDbm: txPower,
+            timestamp: CFAbsoluteTimeGetCurrent()
+        )
 
         if verboseLogging {
             // Comment this out entirely to eliminate update spam:
