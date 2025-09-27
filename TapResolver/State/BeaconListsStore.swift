@@ -8,6 +8,7 @@
 import Foundation
 
 final class BeaconListsStore: ObservableObject {
+    private let ctx = PersistenceContext.shared
     @Published var beacons: [String] = []
     @Published var morgue:  [String] = []
 
@@ -21,17 +22,13 @@ final class BeaconListsStore: ObservableObject {
     }
 
     private func save() {
-        UserDefaults.standard.set(beacons, forKey: beaconsKey)
-        UserDefaults.standard.set(morgue,  forKey: morgueKey)
+        ctx.write(beaconsKey, value: beacons, alsoWriteLegacy: true)
+        ctx.write(morgueKey,  value: morgue,  alsoWriteLegacy: true)
     }
 
     private func load() {
-        if let b = UserDefaults.standard.array(forKey: beaconsKey) as? [String] {
-            beacons = b
-        }
-        if let m = UserDefaults.standard.array(forKey: morgueKey) as? [String] {
-            morgue = m
-        }
+        if let b: [String] = ctx.read(beaconsKey, as: [String].self) { beacons = b }
+        if let m: [String] = ctx.read(morgueKey,  as: [String].self) { morgue  = m }
     }
     
     // Strict: "##-adjectiveAnimal" (e.g., "12-angryBeaver")

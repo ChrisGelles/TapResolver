@@ -11,6 +11,7 @@ import UIKit
 
 // MARK: - Squares Store (map-local positions) + Lock + Persistence
 final class MetricSquareStore: ObservableObject {
+    private let ctx = PersistenceContext.shared
     @Published var isInteracting: Bool = false
 
     struct Square: Identifiable, Equatable {
@@ -87,7 +88,7 @@ final class MetricSquareStore: ObservableObject {
     }
 
     private func save() {
-        let dto = squares.map { sq -> SquareDTO in
+        let dto = squares.map { sq in
             let ui = UIColor(sq.color)
             var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
             ui.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
@@ -97,14 +98,11 @@ final class MetricSquareStore: ObservableObject {
                              side: sq.side,
                              locked: sq.isLocked)
         }
-        if let data = try? JSONEncoder().encode(dto) {
-            UserDefaults.standard.set(data, forKey: squaresKey)
-        }
+        ctx.write(squaresKey, value: dto, alsoWriteLegacy: true)
     }
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: squaresKey),
-              let dto = try? JSONDecoder().decode([SquareDTO].self, from: data) else { return }
+        guard let dto: [SquareDTO] = ctx.read(squaresKey, as: [SquareDTO].self) else { return }
         self.squares = dto.map { d in
             let color = Color(hue: d.color.h, saturation: d.color.s, brightness: d.color.b, opacity: d.color.a)
             return Square(color: color,

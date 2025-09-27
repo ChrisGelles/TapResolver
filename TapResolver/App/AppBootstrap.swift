@@ -27,16 +27,23 @@ struct AppBootstrap: ViewModifier {
                 guard !Self.hasBootstrapped else { return }
                 Self.hasBootstrapped = true
 
-                // 0) Wire the scanner → utility (per-ad ingest)
+                // 0) Ensure location directories exist
+                PersistenceContext.shared.ensureLocationDirs()
+                UserDefaults.standard.set("default", forKey: "locations.lastOpened.v1")
+                
+                // 0.1) Create location.json stub if it doesn't exist
+                createLocationStubIfNeeded()
+
+                // 1) Wire the scanner → utility (per-ad ingest)
                 scanner.scanUtility = scanUtility
 
-                // 1) Configure the utility's closures (exclusion + metadata)
+                // 2) Configure the utility's closures (exclusion + metadata)
                 configureScanUtilityClosures()
 
-                // 2) Restore persisted state
+                // 3) Restore persisted state
                 loadLockedItems()
 
-                // 3) Run one-time snapshot scan + rebuild lists
+                // 4) Run one-time snapshot scan + rebuild lists
                 runInitialScan()
             }
     }
@@ -118,6 +125,27 @@ struct AppBootstrap: ViewModifier {
                 posZ_m: store.getElevation(for: beaconID),
                 txPowerSettingDbm: store.getTxPower(for: beaconID)
             )
+        }
+    }
+    
+    /// Create a location.json stub for future use
+    private func createLocationStubIfNeeded() {
+        struct LocationStub: Codable {
+            let id: String
+            let name: String
+            let createdISO: String
+            let updatedISO: String
+        }
+        
+        let ctx = PersistenceContext.shared
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: ctx.locationJSON.path) {
+            let now = ISO8601DateFormatter().string(from: Date())
+            let stub = LocationStub(id: ctx.locationID, name: "Default Location", createdISO: now, updatedISO: now)
+            if let data = try? JSONEncoder().encode(stub) {
+                try? data.write(to: ctx.locationJSON, options: .atomic)
+                print("📁 Created location.json stub at \(ctx.locationJSON.path)")
+            }
         }
     }
 }

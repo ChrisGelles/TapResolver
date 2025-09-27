@@ -8,6 +8,7 @@
 import Foundation
 
 enum ScanPersistence {
+    private static let _ctx = PersistenceContext.shared
     static func saveSession(_ session: BeaconLogSession) {
         do {
             let enc = JSONEncoder()
@@ -29,6 +30,13 @@ enum ScanPersistence {
             let data = try enc.encode(session)
             try data.write(to: url, options: .atomic)
             print("💾 Saved scan session to \(url.path)")
+            
+            // New per-location path
+            _ctx.ensureLocationDirs()
+            let newBase = session.sessionID.isEmpty ? ISO8601DateFormatter().string(from: session.startTime) : session.sessionID
+            let newURL = _ctx.scansNewDir.appendingPathComponent("\(newBase).json")
+            try data.write(to: newURL, options: .atomic)
+            print("💾 Also saved scan session to \(newURL.path)")
         } catch {
             print("❌ Failed to save scan session: \(error)")
         }

@@ -17,6 +17,7 @@ public struct ActiveElevationEdit: Identifiable {
 
 // MARK: - Store of dots (map-local positions) + Locks + Persistence
 public final class BeaconDotStore: ObservableObject {
+    private let ctx = PersistenceContext.shared
     public struct Dot: Identifiable {
         public let id = UUID()
         public let beaconID: String     // one dot per beacon
@@ -190,7 +191,8 @@ public final class BeaconDotStore: ObservableObject {
         // Save all dots (for backward compatibility)
         let dto = dots.map { DotDTO(beaconID: $0.beaconID, x: $0.mapPoint.x, y: $0.mapPoint.y, elevation: getElevation(for: $0.beaconID)) }
         if let data = try? JSONEncoder().encode(dto) {
-            UserDefaults.standard.set(data, forKey: dotsKey)
+            UserDefaults.standard.set(data, forKey: dotsKey) // legacy
+            ctx.write(dotsKey, value: dto, alsoWriteLegacy: true)
         }
         
         // Save only locked dots (new behavior)
@@ -204,15 +206,13 @@ public final class BeaconDotStore: ObservableObject {
     }
 
     private func saveLocks() {
-        if let data = try? JSONEncoder().encode(LocksDTO(locks: locked)) {
-            UserDefaults.standard.set(data, forKey: locksKey)
-        }
+        let payload = LocksDTO(locks: locked)
+        ctx.write(locksKey, value: payload, alsoWriteLegacy: true)
     }
 
     private func load() {
         // Dots
-        if let data = UserDefaults.standard.data(forKey: dotsKey),
-           let dto = try? JSONDecoder().decode([DotDTO].self, from: data) {
+        if let dto: [DotDTO] = ctx.read(dotsKey, as: [DotDTO].self) {
             self.dots = dto.map { dotDTO in
                 var dot = Dot(beaconID: dotDTO.beaconID,
                              color: beaconColor(for: dotDTO.beaconID),
@@ -232,36 +232,29 @@ public final class BeaconDotStore: ObservableObject {
     }
     
     private func loadLocks() {
-        if let data = UserDefaults.standard.data(forKey: locksKey),
-           let dto = try? JSONDecoder().decode(LocksDTO.self, from: data) {
-            self.locked = dto.locks
+        if let locksDTO: LocksDTO = ctx.read(locksKey, as: LocksDTO.self) {
+            self.locked = locksDTO.locks
         }
     }
     
     private func saveElevations() {
-        if let data = try? JSONEncoder().encode(elevations) {
-            UserDefaults.standard.set(data, forKey: elevationsKey)
-        }
+        ctx.write(elevationsKey, value: elevations, alsoWriteLegacy: true)
     }
     
     private func loadElevations() {
-        if let data = UserDefaults.standard.data(forKey: elevationsKey),
-           let loaded = try? JSONDecoder().decode([String: Double].self, from: data) {
-            self.elevations = loaded
+        if let e: [String: Double] = ctx.read(elevationsKey, as: [String: Double].self) {
+            self.elevations = e
         }
     }
     
     private func loadTxPower() {
-        if let data = UserDefaults.standard.data(forKey: txPowerKey),
-           let loaded = try? JSONDecoder().decode([String: Int].self, from: data) {
-            self.txPowerByID = loaded
+        if let t: [String: Int] = ctx.read(txPowerKey, as: [String: Int].self) {
+            self.txPowerByID = t
         }
     }
     
     private func saveTxPower() {
-        if let data = try? JSONEncoder().encode(txPowerByID) {
-            UserDefaults.standard.set(data, forKey: txPowerKey)
-        }
+        ctx.write(txPowerKey, value: txPowerByID, alsoWriteLegacy: true)
     }
 
     private func beaconColor(for beaconID: String) -> Color {

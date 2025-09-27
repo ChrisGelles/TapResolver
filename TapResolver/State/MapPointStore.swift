@@ -10,6 +10,7 @@ import CoreGraphics
 
 // MARK: - Store of Map Points (log points) with map-local positions
 public final class MapPointStore: ObservableObject {
+    private let ctx = PersistenceContext.shared
     public struct MapPoint: Identifiable {
         public let id = UUID()
         public var mapPoint: CGPoint    // map-local (untransformed) coords
@@ -128,35 +129,24 @@ public final class MapPointStore: ObservableObject {
 
     private func save() {
         let dto = points.map { MapPointDTO(id: $0.id, x: $0.mapPoint.x, y: $0.mapPoint.y, createdDate: $0.createdDate) }
-        if let data = try? JSONEncoder().encode(dto) {
-            UserDefaults.standard.set(data, forKey: pointsKey)
-        }
-        
-        // Save active point ID
-        if let activeID = activePointID, let activeData = try? JSONEncoder().encode(activeID) {
-            UserDefaults.standard.set(activeData, forKey: activePointKey)
+        ctx.write(pointsKey, value: dto, alsoWriteLegacy: true)
+        if let activeID = activePointID {
+            ctx.write(activePointKey, value: activeID, alsoWriteLegacy: true)
         } else {
+            // keep legacy behavior: clear legacy key if needed
             UserDefaults.standard.removeObject(forKey: activePointKey)
+            UserDefaults.standard.removeObject(forKey: ctx.key(activePointKey))
         }
     }
 
     private func load() {
-        if let data = UserDefaults.standard.data(forKey: pointsKey),
-           let dto = try? JSONDecoder().decode([MapPointDTO].self, from: data) {
+        if let dto: [MapPointDTO] = ctx.read(pointsKey, as: [MapPointDTO].self) {
             self.points = dto.map { MapPointDTO in
                 MapPoint(mapPoint: CGPoint(x: MapPointDTO.x, y: MapPointDTO.y))
             }
         }
-        
-        // Load active point ID
-        if let activeData = UserDefaults.standard.data(forKey: activePointKey),
-           let activeID = try? JSONDecoder().decode(UUID.self, from: activeData) {
-            // Verify the active point still exists
-            if points.contains(where: { $0.id == activeID }) {
-                self.activePointID = activeID
-            } else {
-                self.activePointID = nil
-            }
+        if let activeID: UUID = ctx.read(activePointKey, as: UUID.self) {
+            self.activePointID = points.contains(where: { $0.id == activeID }) ? activeID : nil
         }
     }
 }
