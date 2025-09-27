@@ -35,6 +35,7 @@ struct HUDContainer: View {
     @EnvironmentObject private var btScanner: BluetoothScanner
     @EnvironmentObject private var beaconLists: BeaconListsStore
     @EnvironmentObject private var scanUtility: MapPointScanUtility
+    @EnvironmentObject private var locationManager: LocationManager
     @StateObject private var beaconLogger = SimpleBeaconLogger()
     
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
