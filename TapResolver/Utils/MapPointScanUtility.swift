@@ -64,6 +64,13 @@ public final class MapPointScanUtility: ObservableObject {
         public init() {}
     }
     @Published public var config = Config()
+    
+    public struct Quality {
+        public var minSamples = 10
+        public var minPacketsPerSecond = 0.8
+        public init() {}
+    }
+    @Published public var quality = Quality()
 
     // MARK: - Shared model types (public so Persistence can use them)
 
@@ -380,12 +387,19 @@ public final class MapPointScanUtility: ObservableObject {
             let name = beacon.beacon.name ?? "Unknown"
             let samples = beacon.samples
             let median = beacon.medianDbm ?? -999
-            print("   • \(name): \(samples) samples, median RSSI: \(median) dBm")
+            let pps = duration > 0 ? Double(samples)/duration : 0
+            print("   • \(name): \(samples) samples, median RSSI: \(median) dBm, \(String(format: "%.2f", pps)) pkt/s")
         }
         print("   Running aggregates total: \(runningAggregates.count) map point to beacon pairings")
 
-        // Small UI summary
-        let tops = record.beacons
+        // Small UI summary - filter by quality thresholds first
+        let filtered = record.beacons.filter { b in
+            // keep only beacons with enough data
+            let samples = b.samples
+            let pps = duration > 0 ? Double(samples)/duration : 0
+            return samples >= quality.minSamples && pps >= quality.minPacketsPerSecond
+        }
+        let tops = filtered
             .sorted { ($0.medianDbm ?? -200) > ($1.medianDbm ?? -200) }
             .prefix(6)
             .map { ScanSummary.TopBeacon(beaconID: $0.beacon.beaconID, name: $0.beacon.name, medianDbm: $0.medianDbm, samples: $0.samples) }

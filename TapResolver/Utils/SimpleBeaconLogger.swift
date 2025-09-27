@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import UIKit
 
 // MARK: - Data Structures
 
@@ -80,6 +81,13 @@ struct BeaconLogSession: Codable {
     let obinsPerBeacon: [String: [Int]]   // beaconID -> 71 counts
     let statsPerBeacon: [String: BeaconStats]
     
+    // Device/app context
+    let deviceModel: String
+    let osVersion: String
+    let appVersion: String
+    let userHeight_m: Double?
+    let mode: String?   // "walking" | "reading" | nil
+    
     // Convenience computed property for coordinates
     var coordinates: (x: Double, y: Double) {
         return (x: coordinatesX, y: coordinatesY)
@@ -106,6 +114,13 @@ final class SimpleBeaconLogger: ObservableObject {
     private var obins: [String: Obin] = [:]
     private var timer: Timer?
     private var countdownTimer: Timer?
+    
+    // Device/app context
+    private var _deviceModel = ""
+    private var _osVersion = ""
+    private var _appVersion = ""
+    private var _userHeightM: Double?
+    private var _mode: String?
     
     // MARK: - Dependencies (will be injected)
     private var btScanner: BluetoothScanner?
@@ -151,6 +166,17 @@ final class SimpleBeaconLogger: ObservableObject {
         self.obins = [:]
         self.secondsRemaining = duration
         self.isLogging = true
+        
+        // Capture device/app context
+        let deviceModel = UIDevice.current.model + " " + UIDevice.current.systemName
+        let osVersion = UIDevice.current.systemVersion
+        let appVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0") +
+                        " (" + (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?") + ")"
+        self._deviceModel = deviceModel
+        self._osVersion = osVersion
+        self._appVersion = appVersion
+        self._userHeightM = 1.05 // Default user height assumption
+        self._mode = nil // Optional mode
         
         // Attach per-ad ingest
         btScanner.simpleLogger = self
@@ -221,7 +247,12 @@ final class SimpleBeaconLogger: ObservableObject {
             startTime: startTime,
             endTime: endTime,
             obinsPerBeacon: obinArrays,
-            statsPerBeacon: stats
+            statsPerBeacon: stats,
+            deviceModel: _deviceModel,
+            osVersion: _osVersion,
+            appVersion: _appVersion,
+            userHeight_m: _userHeightM,
+            mode: _mode
         )
         lastSession = session
         

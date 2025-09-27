@@ -28,9 +28,11 @@ struct HUDContainer: View {
     @EnvironmentObject private var hud: HUDPanelsState
     @EnvironmentObject private var btScanner: BluetoothScanner
     @EnvironmentObject private var beaconLists: BeaconListsStore
+    @EnvironmentObject private var scanUtility: MapPointScanUtility
     @StateObject private var beaconLogger = SimpleBeaconLogger()
     
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
+    @State private var didExport = false
     
     var body: some View {
         ZStack {
@@ -168,6 +170,22 @@ struct HUDContainer: View {
             .disabled(mapPointStore.activePoint == nil)
             .accessibilityLabel(beaconLogger.isLogging ? "Stop logging session" : "Log data for current map point")
             .buttonStyle(.plain)
+            
+            // Export button for last scan record
+            if let record = scanUtility.lastScanRecord {
+                Button("Export Last Scan JSON") {
+                    MapPointScanPersistence.saveRecord(record)
+                    didExport = true
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.green.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
+                .alert("Exported", isPresented: $didExport) { 
+                    Button("OK", role: .cancel) {} 
+                }
+            }
                                 }
                             }
                             .padding(.horizontal, 20)
