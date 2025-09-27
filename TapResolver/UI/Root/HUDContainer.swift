@@ -139,7 +139,8 @@ struct HUDContainer: View {
                         print("   Interval: \(Int(session.interval))ms")
                         print("   Beacons logged: \(session.obinsPerBeacon.count)")
                         for (beaconName, stats) in session.statsPerBeacon {
-                            print("   • \(beaconName): \(stats.samples) samples, median: \(stats.medianDbm ?? -999) dBm")
+                            let medianText = stats.medianDbm != nil ? "\(stats.medianDbm!) dBm" : "insufficient data"
+                            print("   • \(beaconName): \(stats.samples) samples, median: \(medianText), \(String(format: "%.1f", stats.packetsPerSecond)) pkt/s")
                         }
                     }
                 } else {

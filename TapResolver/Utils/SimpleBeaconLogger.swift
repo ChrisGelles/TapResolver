@@ -59,6 +59,7 @@ fileprivate struct Obin: Codable {
 
 struct BeaconStats: Codable {
     let samples: Int
+    let packetsPerSecond: Double
     let medianDbm: Int?
     let p10Dbm: Int?
     let p90Dbm: Int?
@@ -186,15 +187,26 @@ final class SimpleBeaconLogger: ObservableObject {
         // Build obins payload
         var obinArrays: [String: [Int]] = [:]
         var stats: [String: BeaconStats] = [:]
+        let durationSec = endTime.timeIntervalSince(startTime)
+        let minSamples = 10  // tweak later if you want
+
         for (beaconID, o) in obins {
             obinArrays[beaconID] = o.counts
-            let med = o.medianDbm
+            let pps = durationSec > 0 ? Double(o.total) / durationSec : 0.0
+
+            // Guard: if too few samples, don't trust dispersion stats yet
+            let med = (o.total >= minSamples) ? o.medianDbm : nil
+            let p10 = (o.total >= minSamples) ? o.p10Dbm : nil
+            let p90 = (o.total >= minSamples) ? o.p90Dbm : nil
+            let mad = (o.total >= minSamples) ? o.madDb(relativeTo: med) : nil
+
             let s = BeaconStats(
                 samples: o.total,
+                packetsPerSecond: pps,
                 medianDbm: med,
-                p10Dbm: o.p10Dbm,
-                p90Dbm: o.p90Dbm,
-                madDb: o.madDb(relativeTo: med)
+                p10Dbm: p10,
+                p90Dbm: p90,
+                madDb: mad
             )
             stats[beaconID] = s
         }
@@ -212,6 +224,9 @@ final class SimpleBeaconLogger: ObservableObject {
             statsPerBeacon: stats
         )
         lastSession = session
+        
+        // Save session to JSON
+        ScanPersistence.saveSession(session)
         
         // Cleanup
         obins.removeAll()
