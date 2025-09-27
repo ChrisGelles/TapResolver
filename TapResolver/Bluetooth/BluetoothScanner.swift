@@ -26,8 +26,9 @@ final class BluetoothScanner: NSObject, ObservableObject {
     private var deviceIndex: [UUID: Int] = [:] // quick lookup by peripheral.identifier
     private var pendingStopWork: DispatchWorkItem?
     
-    // MARK: - Scan utility reference (set by app)
+    // MARK: - Scan utility references (set by app)
     weak var scanUtility: MapPointScanUtility?
+    weak var simpleLogger: SimpleBeaconLogger?   // ← NEW
 
     // MARK: - Setup
     override init() {
@@ -135,13 +136,14 @@ extension BluetoothScanner: CBCentralManagerDelegate {
         }
     }
 
+    @MainActor
     func centralManager(_ central: CBCentralManager,
                         didDiscover peripheral: CBPeripheral,
                         advertisementData: [String : Any],
                         rssi RSSI: NSNumber) {
 
         let id = peripheral.identifier
-        let name = (peripheral.name?.isEmpty == false ? peripheral.name! : "Unknown")
+        let name = displayName(from: advertisementData, peripheral: peripheral)
         let rssi = RSSI.intValue
         let txPower = (advertisementData[CBAdvertisementDataTxPowerLevelKey] as? NSNumber)?.intValue
         let summary = summarize(advertisementData)
@@ -173,6 +175,15 @@ extension BluetoothScanner: CBCentralManagerDelegate {
             txPowerDbm: txPower,
             timestamp: CFAbsoluteTimeGetCurrent()
         )
+        
+        if simpleLogger?.isLogging == true {
+            simpleLogger?.ingest(
+                beaconID: name,
+                rssiDbm: rssi,
+                txPowerDbm: txPower,
+                timestamp: CFAbsoluteTimeGetCurrent()
+            )
+        }
 
         if verboseLogging {
             // Comment this out entirely to eliminate update spam:
@@ -238,5 +249,18 @@ extension BluetoothScanner {
             print(row)
         }
         print("----------------------------------------\n")
+    }
+}
+
+private extension BluetoothScanner {
+    func displayName(from advertisementData: [String: Any], peripheral: CBPeripheral) -> String {
+        // Prefer advertised local name if present; fallback to peripheral.name; then a generic.
+        if let local = advertisementData[CBAdvertisementDataLocalNameKey] as? String, !local.isEmpty {
+            return local
+        }
+        if let pname = peripheral.name, !pname.isEmpty {
+            return pname
+        }
+        return "Unknown"
     }
 }

@@ -10,16 +10,74 @@ import Combine
 
 // MARK: - Data Structures
 
+// Compact histogram of RSSI (−100...−30 dBm, 1 dB bins)
+fileprivate struct Obin: Codable {
+    static let minDbm = -100, maxDbm = -30, step = 1
+    var counts = Array(repeating: 0, count: 71) // inclusive range: -100...-30
+
+    mutating func add(_ rssi: Int) {
+        guard rssi >= Self.minDbm, rssi <= Self.maxDbm else { return }
+        let idx = (rssi - Self.minDbm) / Self.step
+        counts[idx] &+= 1
+    }
+    var total: Int { counts.reduce(0, +) }
+
+    // Quantile (0...1) using cumulative counts
+    func quantileDbm(_ q: Double) -> Int? {
+        let n = total; guard n > 0 else { return nil }
+        let target = Int(Double(n - 1) * q)
+        var cum = 0
+        for (i, c) in counts.enumerated() {
+            cum += c
+            if cum > target { return Self.minDbm + i * Self.step }
+        }
+        return nil
+    }
+    var medianDbm: Int? { quantileDbm(0.5) }
+    var p10Dbm:   Int? { quantileDbm(0.10) }
+    var p90Dbm:   Int? { quantileDbm(0.90) }
+
+    func madDb(relativeTo median: Int?) -> Double? {
+        guard let m = median, total > 0 else { return nil }
+        // Build deviation histogram
+        var devs: [Int:Int] = [:]
+        for (i, c) in counts.enumerated() where c > 0 {
+            let v = Self.minDbm + i * Self.step
+            let d = abs(v - m)
+            devs[d, default: 0] &+= c
+        }
+        // Median of deviations
+        let target = (total - 1) / 2
+        var cum = 0
+        for d in devs.keys.sorted() {
+            cum += devs[d]!
+            if cum > target { return Double(d) }
+        }
+        return nil
+    }
+}
+
+struct BeaconStats: Codable {
+    let samples: Int
+    let medianDbm: Int?
+    let p10Dbm: Int?
+    let p90Dbm: Int?
+    let madDb: Double?
+}
+
 struct BeaconLogSession: Codable {
     let sessionID: String
     let duration: TimeInterval
     let mapPointID: String
     let coordinatesX: Double
     let coordinatesY: Double
-    let interval: TimeInterval // milliseconds between snapshots
-    let rssiPerBeacon: [String: [Int]] // beaconName: [rssi1, rssi2, ...]
+    let interval: TimeInterval // ms between snapshots (kept for compatibility)
     let startTime: Date
     let endTime: Date
+
+    // NEW: compact data
+    let obinsPerBeacon: [String: [Int]]   // beaconID -> 71 counts
+    let statsPerBeacon: [String: BeaconStats]
     
     // Convenience computed property for coordinates
     var coordinates: (x: Double, y: Double) {
@@ -44,7 +102,7 @@ final class SimpleBeaconLogger: ObservableObject {
     private var duration: TimeInterval = 0
     private var interval: TimeInterval = 0 // milliseconds
     private var startTime: Date = Date()
-    private var rssiData: [String: [Int]] = [:]
+    private var obins: [String: Obin] = [:]
     private var timer: Timer?
     private var countdownTimer: Timer?
     
@@ -54,6 +112,16 @@ final class SimpleBeaconLogger: ObservableObject {
     private var beaconDotStore: BeaconDotStore?
     
     // MARK: - Public Interface
+    
+    func ingest(beaconID: String, rssiDbm: Int, txPowerDbm: Int?, timestamp: TimeInterval) {
+        guard isLogging else { return }
+        // Only collect for beacons that are "active" (same rule as before)
+        // If you want to filter here via BeaconLists/BeaconDots, you can—right now
+        // BluetoothScanner already filters by name you care about.
+        var b = obins[beaconID] ?? Obin()
+        b.add(rssiDbm)
+        obins[beaconID] = b
+    }
     
     /// Start logging beacon data for a map point
     func startLogging(
@@ -79,9 +147,12 @@ final class SimpleBeaconLogger: ObservableObject {
         self.duration = duration
         self.interval = intervalMs / 1000.0 // Convert ms to seconds
         self.startTime = Date()
-        self.rssiData = [:]
+        self.obins = [:]
         self.secondsRemaining = duration
         self.isLogging = true
+        
+        // Attach per-ad ingest
+        btScanner.simpleLogger = self
         
         print("🔍 Started beacon logging session: \(sessionID)")
         print("   Map Point: \(mapPointID) at (\(Int(coordinates.x)), \(Int(coordinates.y)))")
@@ -112,25 +183,44 @@ final class SimpleBeaconLogger: ObservableObject {
         let endTime = Date()
         isLogging = false
         
-        // Create session data
+        // Build obins payload
+        var obinArrays: [String: [Int]] = [:]
+        var stats: [String: BeaconStats] = [:]
+        for (beaconID, o) in obins {
+            obinArrays[beaconID] = o.counts
+            let med = o.medianDbm
+            let s = BeaconStats(
+                samples: o.total,
+                medianDbm: med,
+                p10Dbm: o.p10Dbm,
+                p90Dbm: o.p90Dbm,
+                madDb: o.madDb(relativeTo: med)
+            )
+            stats[beaconID] = s
+        }
+        
         let session = BeaconLogSession(
             sessionID: sessionID,
             duration: duration,
             mapPointID: mapPointID,
             coordinatesX: coordinates.x,
             coordinatesY: coordinates.y,
-            interval: interval * 1000.0, // Convert back to milliseconds
-            rssiPerBeacon: rssiData,
+            interval: interval * 1000.0,
             startTime: startTime,
-            endTime: endTime
+            endTime: endTime,
+            obinsPerBeacon: obinArrays,
+            statsPerBeacon: stats
         )
-        
         lastSession = session
         
+        // Cleanup
+        obins.removeAll()
+        btScanner?.simpleLogger = nil
+        
         print("✅ Completed beacon logging session: \(sessionID)")
-        print("   Collected data for \(rssiData.count) beacons")
-        for (beaconName, rssiValues) in rssiData {
-            print("   • \(beaconName): \(rssiValues.count) samples")
+        print("   Collected data for \(obinArrays.count) beacons")
+        for (beaconName, stats) in stats {
+            print("   • \(beaconName): \(stats.samples) samples, median: \(stats.medianDbm ?? -999) dBm")
         }
         
         return session
@@ -176,16 +266,13 @@ final class SimpleBeaconLogger: ObservableObject {
         // Collect RSSI data for each active beacon
         for beaconName in activeBeacons {
             if let device = btScanner.devices.first(where: { $0.name == beaconName }) {
-                // Initialize array if needed
-                if rssiData[beaconName] == nil {
-                    rssiData[beaconName] = []
-                }
-                
-                // Add RSSI value
-                rssiData[beaconName]?.append(device.rssi)
+                // Add RSSI value to obin
+                var b = obins[beaconName] ?? Obin()
+                b.add(device.rssi)
+                obins[beaconName] = b
                 
                 // Debug output for first few samples
-                if let count = rssiData[beaconName]?.count, count <= 3 {
+                if let count = obins[beaconName]?.total, count <= 3 {
                     print("📡 Collected RSSI: \(beaconName) = \(device.rssi) dBm (sample \(count))")
                 }
             }

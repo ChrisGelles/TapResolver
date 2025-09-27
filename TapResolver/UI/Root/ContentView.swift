@@ -52,7 +52,16 @@ struct ContentView: View {
             .environmentObject(squareMetrics)
             .environmentObject(beaconLists)    // ← added
             .environmentObject(btScanner)
-            .appBootstrap()
+            .appBootstrap(
+                scanner: btScanner,
+                beaconDots: beaconDotStore,
+                squares: metricSquares,
+                lists: beaconLists,
+                scanUtility: MapPointScanUtility(
+                    isExcluded: { _, _ in true },
+                    resolveBeaconMeta: { _ in MapPointScanUtility.BeaconMeta(beaconID: "", name: "", posX_m: nil, posY_m: nil, posZ_m: nil, txPowerSettingDbm: nil) }
+                )
+            )
         }
     }
 }

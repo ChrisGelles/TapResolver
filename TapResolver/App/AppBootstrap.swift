@@ -7,21 +7,36 @@
 
 import SwiftUI
 
+
 struct AppBootstrap: ViewModifier {
-    @EnvironmentObject private var scanner: BluetoothScanner
-    @EnvironmentObject private var beaconDots: BeaconDotStore
-    @EnvironmentObject private var squares: MetricSquareStore
-    @EnvironmentObject private var lists: BeaconListsStore
+    let scanner: BluetoothScanner
+    let beaconDots: BeaconDotStore
+    let squares: MetricSquareStore
+    let lists: BeaconListsStore
+    let scanUtility: MapPointScanUtility
 
     private let initialScanWindow: TimeInterval = 2.0
+
+    // Run-once guard to prevent double wiring on scene changes
+    private static var hasBootstrapped = false
 
     func body(content: Content) -> some View {
         content
             .onAppear {
-                // 1) Restore persisted state
+                // Prevent double running on scene activations
+                guard !Self.hasBootstrapped else { return }
+                Self.hasBootstrapped = true
+
+                // 0) Wire the scanner → utility (per-ad ingest)
+                scanner.scanUtility = scanUtility
+
+                // 1) Configure the utility's closures (exclusion + metadata)
+                configureScanUtilityClosures()
+
+                // 2) Restore persisted state
                 loadLockedItems()
-                
-                // 2) Run one-time snapshot scan + rebuild lists
+
+                // 3) Run one-time snapshot scan + rebuild lists
                 runInitialScan()
             }
     }
@@ -73,8 +88,53 @@ struct AppBootstrap: ViewModifier {
         lists.clearUnlockedBeacons(lockedBeaconNames: lockedBeaconNames)
         lists.morgue.removeAll()
     }
+    
+    private func configureScanUtilityClosures() {
+        // Exclude anything NOT in Beacon Drawer or without a dot
+        scanUtility.isExcluded = { [weak lists, weak beaconDots] beaconID, name in
+            guard let lists = lists, let beaconDots = beaconDots else { return true }
+            guard let name = name, !name.isEmpty else { return true }
+            guard lists.beacons.contains(name) else { return true }
+            guard beaconDots.dots.contains(where: { $0.beaconID == name }) else { return true }
+            return false
+        }
+
+        // Provide meta for known beacons (x,y,z,label, tx if added later)
+        scanUtility.resolveBeaconMeta = { [weak beaconDots] beaconID in
+            guard let dots = beaconDots?.dots,
+                  let dot = dots.first(where: { $0.beaconID == beaconID }) else {
+                return MapPointScanUtility.BeaconMeta(
+                    beaconID: beaconID, name: beaconID,
+                    posX_m: nil, posY_m: nil, posZ_m: nil,
+                    txPowerSettingDbm: nil
+                )
+            }
+            return MapPointScanUtility.BeaconMeta(
+                beaconID: beaconID,
+                name: beaconID,
+                posX_m: Double(dot.mapPoint.x),
+                posY_m: Double(dot.mapPoint.y),
+                posZ_m: beaconDots?.getElevation(for: beaconID),
+                txPowerSettingDbm: nil
+            )
+        }
+    }
 }
 
 extension View {
-    func appBootstrap() -> some View { self.modifier(AppBootstrap()) }
+    func appBootstrap(
+        scanner: BluetoothScanner,
+        beaconDots: BeaconDotStore,
+        squares: MetricSquareStore,
+        lists: BeaconListsStore,
+        scanUtility: MapPointScanUtility
+    ) -> some View {
+        self.modifier(AppBootstrap(
+            scanner: scanner,
+            beaconDots: beaconDots,
+            squares: squares,
+            lists: lists,
+            scanUtility: scanUtility
+        ))
+    }
 }

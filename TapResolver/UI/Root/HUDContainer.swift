@@ -137,9 +137,9 @@ struct HUDContainer: View {
                         print("   Coordinates: (\(Int(session.coordinates.x)), \(Int(session.coordinates.y)))")
                         print("   Duration: \(Int(session.duration))s")
                         print("   Interval: \(Int(session.interval))ms")
-                        print("   Beacons logged: \(session.rssiPerBeacon.count)")
-                        for (beaconName, rssiValues) in session.rssiPerBeacon {
-                            print("   • \(beaconName): \(rssiValues.count) samples")
+                        print("   Beacons logged: \(session.obinsPerBeacon.count)")
+                        for (beaconName, stats) in session.statsPerBeacon {
+                            print("   • \(beaconName): \(stats.samples) samples, median: \(stats.medianDbm ?? -999) dBm")
                         }
                     }
                 } else {
