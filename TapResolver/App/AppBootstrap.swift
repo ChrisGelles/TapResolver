@@ -99,23 +99,24 @@ struct AppBootstrap: ViewModifier {
             return false
         }
 
-        // Provide meta for known beacons (x,y,z,label, tx if added later)
+        // Provide meta for known beacons (x,y,z,label, tx power)
         scanUtility.resolveBeaconMeta = { [weak beaconDots] beaconID in
-            guard let dots = beaconDots?.dots,
-                  let dot = dots.first(where: { $0.beaconID == beaconID }) else {
+            guard let store = beaconDots,
+                  let dot = store.dots.first(where: { $0.beaconID == beaconID }) else {
                 return MapPointScanUtility.BeaconMeta(
                     beaconID: beaconID, name: beaconID,
                     posX_m: nil, posY_m: nil, posZ_m: nil,
                     txPowerSettingDbm: nil
                 )
             }
+
             return MapPointScanUtility.BeaconMeta(
                 beaconID: beaconID,
                 name: beaconID,
                 posX_m: Double(dot.mapPoint.x),
                 posY_m: Double(dot.mapPoint.y),
-                posZ_m: beaconDots?.getElevation(for: beaconID),
-                txPowerSettingDbm: nil
+                posZ_m: store.getElevation(for: beaconID),
+                txPowerSettingDbm: store.getTxPower(for: beaconID)
             )
         }
     }

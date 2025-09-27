@@ -71,6 +71,9 @@ public final class MapPointScanUtility: ObservableObject {
         public init() {}
     }
     @Published public var quality = Quality()
+    
+    // MARK: - Debug Settings
+    private let verboseDebug = true
 
     // MARK: - Shared model types (public so Persistence can use them)
 
@@ -379,18 +382,20 @@ public final class MapPointScanUtility: ObservableObject {
         lastScanRecord = record
 
         // DEBUG: Print scan results to console
-        print("🔍 SCAN COMPLETE:")
-        print("   Point ID: \(point.pointID)")
-        print("   Duration: \(String(format: "%.1f", duration))s")
-        print("   Beacons found: \(aggregates.count)")
-        for beacon in aggregates.prefix(5) {
-            let name = beacon.beacon.name ?? "Unknown"
-            let samples = beacon.samples
-            let median = beacon.medianDbm ?? -999
-            let pps = duration > 0 ? Double(samples)/duration : 0
-            print("   • \(name): \(samples) samples, median RSSI: \(median) dBm, \(String(format: "%.2f", pps)) pkt/s")
+        if verboseDebug {
+            print("🔍 SCAN COMPLETE:")
+            print("   Point ID: \(point.pointID)")
+            print("   Duration: \(String(format: "%.1f", duration))s")
+            print("   Beacons found: \(aggregates.count)")
+            for beacon in aggregates.prefix(5) {
+                let name = beacon.beacon.name ?? "Unknown"
+                let samples = beacon.samples
+                let median = beacon.medianDbm ?? -999
+                let pps = duration > 0 ? Double(samples)/duration : 0
+                print("   • \(name): \(samples) samples, median RSSI: \(median) dBm, \(String(format: "%.2f", pps)) pkt/s")
+            }
+            print("   Running aggregates total: \(runningAggregates.count) map point to beacon pairings")
         }
-        print("   Running aggregates total: \(runningAggregates.count) map point to beacon pairings")
 
         // Small UI summary - filter by quality thresholds first
         let filtered = record.beacons.filter { b in

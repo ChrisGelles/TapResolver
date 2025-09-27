@@ -5,6 +5,7 @@
 
 import SwiftUI
 import CoreGraphics
+import Combine
 
 struct BeaconDrawer: View {
     @EnvironmentObject private var beaconDotStore: BeaconDotStore
@@ -14,7 +15,7 @@ struct BeaconDrawer: View {
 
     private let crosshairScreenOffset = CGPoint(x: 0, y: 0)
     private let collapsedWidth: CGFloat = 56
-    private let expandedWidth: CGFloat = 172
+    private let expandedWidth: CGFloat = 220
     private let topBarHeight: CGFloat = 48
 
     var body: some View {
@@ -31,6 +32,8 @@ struct BeaconDrawer: View {
                             beaconName: name,
                             isLocked: locked,
                             elevationText: beaconDotStore.displayElevationText(for: name),
+                            txPowerText: txPowerDisplayText(for: name),
+                            isSelected: false,
                             onSelect: { _, color in
                                 guard mapTransform.mapSize != .zero else {
                                     print("⚠️ Beacon add ignored: mapTransform not ready (mapSize == .zero)")
@@ -50,10 +53,13 @@ struct BeaconDrawer: View {
                             onEditElevation: {
                                 // Start elevation editing directly in this drawer
                                 beaconDotStore.startElevationEdit(for: name)
+                            },
+                            onSelectForTxPower: {
+                                NotificationCenter.default.post(name: .beaconSelectedForTxPower, object: name)
                             }
                         )
                         .frame(height: 44)
-                        .padding(.leading, 4)
+                        .padding(.leading, 8)
                     }
                 }
                 .padding(.top, topBarHeight + 6)
@@ -104,16 +110,27 @@ struct BeaconDrawer: View {
         let total = max(topBarHeight, min(320, topBarHeight + rowsHeight))
         return total
     }
+    
+    private func txPowerDisplayText(for beaconID: String) -> String {
+        if let txPower = beaconDotStore.getTxPower(for: beaconID) {
+            return "\(txPower)dBm"
+        } else {
+            return "Tx"
+        }
+    }
 }
 
 struct BeaconListItem: View {
     let beaconName: String
     let isLocked: Bool
     let elevationText: String
+    let txPowerText: String
+    let isSelected: Bool
     var onSelect: ((CGPoint, Color) -> Void)? = nil
     var onToggleLock: (() -> Void)? = nil
     var onDemote: (() -> Void)? = nil
     var onEditElevation: (() -> Void)? = nil
+    var onSelectForTxPower: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 2) {
@@ -140,12 +157,16 @@ struct BeaconListItem: View {
             )
             .contentShape(Rectangle())
             .onTapGesture(coordinateSpace: .global) { globalPoint in
-                guard !isLocked else { return } // block when locked
-                onSelect?(globalPoint, beaconColor(for: beaconName))
+                if isLocked {
+                    // When locked, select for Tx Power editing
+                    onSelectForTxPower?()
+                } else {
+                    // When unlocked, add/remove dot
+                    onSelect?(globalPoint, beaconColor(for: beaconName))
+                }
             }
-            .disabled(isLocked)
 
-            // Elevation “pill” (opens keypad)
+            // Elevation "pill" (opens keypad)
             Button {
                 onEditElevation?()
             } label: {
@@ -160,7 +181,20 @@ struct BeaconListItem: View {
             }
             .buttonStyle(.plain)
 
-            //Spacer(minLength: 0)
+            // Tx Power "pill" (opens Tx Power selection)
+            Button {
+                onSelectForTxPower?()
+            } label: {
+                Text(txPowerText)
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 0)                        // ← pill H padding
+                    .padding(.vertical, 4)                          // ← pill V padding
+                    .background(isSelected ? Color.blue.opacity(0.7) : Color.black.opacity(0.5))
+                    .cornerRadius(4)
+                    .fixedSize(horizontal: true, vertical: true)
+            }
+            .buttonStyle(.plain)
 
             // 🔒 Lock toggle
             Button(action: { onToggleLock?() }) {

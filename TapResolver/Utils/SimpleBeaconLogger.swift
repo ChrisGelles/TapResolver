@@ -131,9 +131,11 @@ final class SimpleBeaconLogger: ObservableObject {
     
     func ingest(beaconID: String, rssiDbm: Int, txPowerDbm: Int?, timestamp: TimeInterval) {
         guard isLogging else { return }
-        // Only collect for beacons that are "active" (same rule as before)
-        // If you want to filter here via BeaconLists/BeaconDots, you can—right now
-        // BluetoothScanner already filters by name you care about.
+        
+        // Filter to only beacons in the Beacon Drawer (exclude morgue devices)
+        guard let beaconLists = beaconLists,
+              beaconLists.beacons.contains(beaconID) else { return }
+        
         var b = obins[beaconID] ?? Obin()
         b.add(rssiDbm)
         obins[beaconID] = b
@@ -265,8 +267,12 @@ final class SimpleBeaconLogger: ObservableObject {
         
         print("✅ Completed beacon logging session: \(sessionID)")
         print("   Collected data for \(obinArrays.count) beacons")
-        for (beaconName, stats) in stats {
-            print("   • \(beaconName): \(stats.samples) samples, median: \(stats.medianDbm ?? -999) dBm")
+        for (beaconName, s) in stats.sorted(by: { $0.key < $1.key }) {
+            if s.samples < 10 {
+                print("   • \(beaconName): \(s.samples) samples — insufficient data (<10)")
+            } else {
+                print("   • \(beaconName): \(s.samples) samples, median: \(s.medianDbm ?? -999) dBm, \(String(format: "%.2f", s.packetsPerSecond)) pkt/s")
+            }
         }
         
         return session
@@ -309,14 +315,9 @@ final class SimpleBeaconLogger: ObservableObject {
             beaconDotStore.dots.contains { $0.beaconID == beaconName }
         }
         
-        // Collect RSSI data for each active beacon
+        // Debug output only (per-advertisement path is now the source of truth)
         for beaconName in activeBeacons {
             if let device = btScanner.devices.first(where: { $0.name == beaconName }) {
-                // Add RSSI value to obin
-                var b = obins[beaconName] ?? Obin()
-                b.add(device.rssi)
-                obins[beaconName] = b
-                
                 // Debug output for first few samples
                 if let count = obins[beaconName]?.total, count <= 3 {
                     print("📡 Collected RSSI: \(beaconName) = \(device.rssi) dBm (sample \(count))")

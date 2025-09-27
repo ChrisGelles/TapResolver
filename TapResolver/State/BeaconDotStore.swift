@@ -30,6 +30,8 @@ public final class BeaconDotStore: ObservableObject {
     @Published private(set) var locked: [String: Bool] = [:]
     // beaconID -> elevation
     @Published private(set) var elevations: [String: Double] = [:]
+    // beaconID -> txPower dBm
+    @Published var txPowerByID: [String: Int] = [:]
     // Active elevation editing state
     @Published public var activeElevationEdit: ActiveElevationEdit? = nil
 
@@ -38,6 +40,7 @@ public final class BeaconDotStore: ObservableObject {
     private let locksKey  = "BeaconLocks_v1"
     private let lockedDotsKey = "LockedBeaconDots_v1"
     private let elevationsKey = "BeaconElevations_v1"
+    private let txPowerKey = "BeaconDots_txPowerByID_v1"
 
     public init() {
         load()
@@ -141,6 +144,21 @@ public final class BeaconDotStore: ObservableObject {
         let formatted = String(format: "%g", elevation)
         return "\(formatted)m"
     }
+    
+    // MARK: - Tx Power API
+    
+    public func setTxPower(for beaconID: String, dbm: Int?) {
+        if let v = dbm {
+            txPowerByID[beaconID] = v
+        } else {
+            txPowerByID.removeValue(forKey: beaconID)
+        }
+        saveTxPower()
+    }
+    
+    public func getTxPower(for beaconID: String) -> Int? {
+        return txPowerByID[beaconID]
+    }
 
     // MARK: - Lock API
 
@@ -210,6 +228,7 @@ public final class BeaconDotStore: ObservableObject {
 
         loadLocks()
         loadElevations()
+        loadTxPower()
     }
     
     private func loadLocks() {
@@ -229,6 +248,19 @@ public final class BeaconDotStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: elevationsKey),
            let loaded = try? JSONDecoder().decode([String: Double].self, from: data) {
             self.elevations = loaded
+        }
+    }
+    
+    private func loadTxPower() {
+        if let data = UserDefaults.standard.data(forKey: txPowerKey),
+           let loaded = try? JSONDecoder().decode([String: Int].self, from: data) {
+            self.txPowerByID = loaded
+        }
+    }
+    
+    private func saveTxPower() {
+        if let data = try? JSONEncoder().encode(txPowerByID) {
+            UserDefaults.standard.set(data, forKey: txPowerKey)
         }
     }
 

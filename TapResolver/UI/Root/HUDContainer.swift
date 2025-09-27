@@ -6,6 +6,12 @@
 //
 
 import SwiftUI
+import Combine
+
+// MARK: - Notification Extensions
+extension Notification.Name {
+    static let beaconSelectedForTxPower = Notification.Name("beaconSelectedForTxPower")
+}
 
 // MARK: - Color extension for hex support
 extension Color {
@@ -33,6 +39,7 @@ struct HUDContainer: View {
     
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
     @State private var didExport = false
+    @State private var selectedBeaconForTxPower: String? = nil
     
     var body: some View {
         ZStack {
@@ -230,6 +237,30 @@ struct HUDContainer: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .zIndex(200)
         )
+        .overlay(
+            // Tx Power selection interface - positioned in bottom right
+            Group {
+                if let selectedBeacon = selectedBeaconForTxPower {
+                    TxPowerSelectionView(
+                        beaconID: selectedBeacon,
+                        onSelectTxPower: { txPower in
+                            beaconDotStore.setTxPower(for: selectedBeacon, dbm: txPower)
+                            selectedBeaconForTxPower = nil
+                        },
+                        onDismiss: {
+                            selectedBeaconForTxPower = nil
+                        }
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            .zIndex(300)
+        )
+        .onReceive(NotificationCenter.default.publisher(for: .beaconSelectedForTxPower)) { notification in
+            if let beaconID = notification.object as? String {
+                selectedBeaconForTxPower = beaconID
+            }
+        }
     }
 }
 
@@ -382,5 +413,67 @@ struct CustomSlider: UIViewRepresentable {
             let steppedValue = round(sender.value / Float(parent.step)) * Float(parent.step)
             parent.value = Double(steppedValue)
         }
+    }
+}
+
+// MARK: - Tx Power Selection View
+struct TxPowerSelectionView: View {
+    let beaconID: String
+    let onSelectTxPower: (Int?) -> Void
+    let onDismiss: () -> Void
+    
+    private let txPowerOptions: [(label: String, value: Int?)] = [
+        ("8 dBm", 8),
+        ("4 dBm", 4),
+        ("0 dBm", 0),
+        ("-4 dBm", -4),
+        ("-8 dBm", -8),
+        ("-12 dBm", -12),
+        ("-16 dBm", -16),
+        ("-20 dBm", -20),
+        ("-40 dBm", -40)
+    ]
+    
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            // Title
+            Text("Tx Power")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.white)
+            
+            // Selection buttons
+            VStack(spacing: 4) {
+                ForEach(txPowerOptions, id: \.label) { option in
+                    Button(action: {
+                        onSelectTxPower(option.value)
+                    }) {
+                        Text(option.label)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.blue.opacity(0.8), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                }
+                
+                // Clear/Dismiss button
+                Button(action: {
+                    onDismiss()
+                }) {
+                    Text("Cancel")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.gray.opacity(0.8), in: RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(12)
+        .background(Color.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.trailing, 20)
+        .padding(.bottom, 40)
     }
 }
