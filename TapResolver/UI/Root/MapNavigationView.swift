@@ -11,6 +11,7 @@ struct MapNavigationView: View {
     @EnvironmentObject private var beaconLists: BeaconListsStore
     @EnvironmentObject private var btScanner: BluetoothScanner
     @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var mapPointStore: MapPointStore
 
     var body: some View {
         GeometryReader { geo in
@@ -46,6 +47,16 @@ struct MapNavigationView: View {
                     }
                 )
             )
+            .onChange(of: locationManager.currentLocationID) { _ in
+                reloadAllStores()
+            }
         }
+    }
+    
+    private func reloadAllStores() {
+        beaconDotStore.reloadForActiveLocation()
+        beaconLists.reloadForActiveLocation()
+        mapPointStore.reloadForActiveLocation()
+        metricSquares.reloadForActiveLocation()
     }
 }

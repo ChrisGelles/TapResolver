@@ -25,6 +25,11 @@ public final class MapPointStore: ObservableObject {
         guard let activeID = activePointID else { return nil }
         return points.first { $0.id == activeID }
     }
+    
+    /// Reload data for the active location
+    public func reloadForActiveLocation() {
+        load()
+    }
 
     // MARK: persistence keys
     private let pointsKey = "MapPoints_v1"

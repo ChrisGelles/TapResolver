@@ -111,4 +111,9 @@ final class MetricSquareStore: ObservableObject {
                           isLocked: d.locked)
         }
     }
+    
+    /// Reload data for the active location
+    public func reloadForActiveLocation() {
+        load()
+    }
 }

@@ -160,6 +160,11 @@ public final class BeaconDotStore: ObservableObject {
     public func getTxPower(for beaconID: String) -> Int? {
         return txPowerByID[beaconID]
     }
+    
+    /// Reload data for the active location
+    public func reloadForActiveLocation() {
+        load()
+    }
 
     // MARK: - Lock API
 

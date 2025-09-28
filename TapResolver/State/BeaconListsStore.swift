@@ -116,4 +116,9 @@ final class BeaconListsStore: ObservableObject {
             lockedBeaconNames.contains(beaconName)
         }
     }
+    
+    /// Reload data for the active location
+    public func reloadForActiveLocation() {
+        load()
+    }
 }

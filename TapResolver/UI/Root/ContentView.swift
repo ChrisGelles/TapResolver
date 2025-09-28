@@ -17,11 +17,12 @@ struct ContentView: View {
     @StateObject private var beaconLists   = BeaconListsStore()
     @StateObject private var btScanner     = BluetoothScanner()
     @StateObject private var locationManager = LocationManager()
+    @StateObject private var mapPointStore = MapPointStore()
 
     var body: some View {
         Group {
             if locationManager.showLocationMenu {
-                LocationMenuViewPlaceholder()
+                LocationMenuView()
             } else {
                 MapNavigationView()
             }
@@ -34,6 +35,7 @@ struct ContentView: View {
         .environmentObject(beaconLists)
         .environmentObject(btScanner)
         .environmentObject(locationManager)
+        .environmentObject(mapPointStore)
     }
 }
 
