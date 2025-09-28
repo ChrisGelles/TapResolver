@@ -262,6 +262,38 @@ struct HUDContainer: View {
                 selectedBeaconForTxPower = beaconID
             }
         }
+        // Escape-to-menu button (upper-left)
+        .overlay(alignment: .topLeading) {
+            LocationMenuButton()
+                .allowsHitTesting(true)
+                .zIndex(1000)
+        }
+    }
+}
+
+private struct LocationMenuButton: View {
+    @EnvironmentObject private var locationManager: LocationManager
+
+    var body: some View {
+        Button {
+            print("🎯 Location Menu button tapped!")
+            locationManager.showLocationMenu = true
+        } label: {
+            Image(systemName: "square.grid.2x2")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(.primary)
+                .imageScale(.large)
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.black.opacity(0.4)))
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 40)
+        .padding(.leading, 20)
+        //.shadow(radius: 2, y: 1)
+        .allowsHitTesting(true)
+        .accessibilityLabel("Return to Location Menu")
+        .accessibilityHint("Opens the Location Browser")
     }
 }
 
