@@ -16,6 +16,14 @@ final class BeaconListsStore: ObservableObject {
     private let beaconsKey = "BeaconLists_beacons_v1"
     private let morgueKey  = "BeaconLists_morgue_v1"
     private let lockedBeaconsKey = "LockedBeaconNames_v1"
+    
+    /// Reload data for the active location
+    public func reloadForActiveLocation() {
+        // Clear current lists to prevent cross-contamination
+        clearForLocationSwitch()
+        // Load location-specific data
+        load()
+    }
 
     init() {
         load()
@@ -38,6 +46,7 @@ final class BeaconListsStore: ObservableObject {
     )
 
     /// Base ingest that sorts into Beacons vs Morgue by name pattern.
+    /// This method is location-aware and only ingests for the current active location.
     func ingest(deviceName: String) {
         let trimmed = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -53,6 +62,13 @@ final class BeaconListsStore: ObservableObject {
             morgue.insert(trimmed, at: 0)
         }
         save()  // <— add this
+    }
+    
+    /// Clear all beacon lists for location switching
+    func clearForLocationSwitch() {
+        beacons.removeAll()
+        morgue.removeAll()
+        save()
     }
 
     /// Overload that accepts (name, id). If name is empty/Unknown, suffix a short id.

@@ -6,7 +6,7 @@ final class PersistenceContext: ObservableObject {
     static let shared = PersistenceContext()
 
     // Single-location for now; will be switched to selected locationID later.
-    @Published var locationID: String = "default"
+    @Published var locationID: String = "home"
 
     // One-time migration flag
     private let didInitDirsKey = "locations.v1.initDirs.complete"

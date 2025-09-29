@@ -193,19 +193,14 @@ public final class BeaconDotStore: ObservableObject {
     }
 
     private func save() {
-        // Save all dots (for backward compatibility)
+        // Save all dots using location-scoped persistence
         let dto = dots.map { DotDTO(beaconID: $0.beaconID, x: $0.mapPoint.x, y: $0.mapPoint.y, elevation: getElevation(for: $0.beaconID)) }
-        if let data = try? JSONEncoder().encode(dto) {
-            UserDefaults.standard.set(data, forKey: dotsKey) // legacy
-            ctx.write(dotsKey, value: dto, alsoWriteLegacy: true)
-        }
+        ctx.write(dotsKey, value: dto, alsoWriteLegacy: false)
         
         // Save only locked dots (new behavior)
         let lockedDots = dots.filter { isLocked($0.beaconID) }
         let lockedDTO = lockedDots.map { DotDTO(beaconID: $0.beaconID, x: $0.mapPoint.x, y: $0.mapPoint.y, elevation: getElevation(for: $0.beaconID)) }
-        if let lockedData = try? JSONEncoder().encode(lockedDTO) {
-            UserDefaults.standard.set(lockedData, forKey: lockedDotsKey)
-        }
+        ctx.write(lockedDotsKey, value: lockedDTO, alsoWriteLegacy: false)
         
         saveLocks()
     }
