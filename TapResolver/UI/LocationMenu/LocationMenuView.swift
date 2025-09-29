@@ -110,6 +110,10 @@ struct LocationMenuView: View {
                              title: museumTitle,
                              mapAsset: museumMapAsset,
                              thumbAsset: museumThumbAsset)
+                
+                // Ensure correct names are set
+                try? LocationImportUtils.renameLocation(id: defaultID, newName: defaultTitle)
+                try? LocationImportUtils.renameLocation(id: museumID, newName: museumTitle)
 
                 loadLocationSummaries()
             }

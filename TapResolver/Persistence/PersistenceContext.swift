@@ -13,6 +13,9 @@ final class PersistenceContext: ObservableObject {
 
     // Namespacing helper
     func key(_ base: String) -> String { "locations.\(locationID).\(base)" }
+    
+    // Convenience method for shorter key names
+    func k(_ base: String) -> String { key(base) }
 
     // File system paths
     private var docs: URL {

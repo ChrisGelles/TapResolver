@@ -15,13 +15,9 @@ enum ScanPersistence {
             enc.outputFormatting = [.prettyPrinted, .sortedKeys]
             enc.dateEncodingStrategy = .iso8601
 
-            // Folder: Documents/scans
-            let fm = FileManager.default
-            let docs = try fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            let scansDir = docs.appendingPathComponent("scans", isDirectory: true)
-            if !fm.fileExists(atPath: scansDir.path) {
-                try fm.createDirectory(at: scansDir, withIntermediateDirectories: true)
-            }
+            // Use location-scoped directory
+            _ctx.ensureLocationDirs()
+            let scansDir = _ctx.scansNewDir
 
             // Filename: sessionID.json (fallback to timestamp if empty)
             let base = session.sessionID.isEmpty ? ISO8601DateFormatter().string(from: session.startTime) : session.sessionID
@@ -30,13 +26,6 @@ enum ScanPersistence {
             let data = try enc.encode(session)
             try data.write(to: url, options: .atomic)
             print("💾 Saved scan session to \(url.path)")
-            
-            // New per-location path
-            _ctx.ensureLocationDirs()
-            let newBase = session.sessionID.isEmpty ? ISO8601DateFormatter().string(from: session.startTime) : session.sessionID
-            let newURL = _ctx.scansNewDir.appendingPathComponent("\(newBase).json")
-            try data.write(to: newURL, options: .atomic)
-            print("💾 Also saved scan session to \(newURL.path)")
         } catch {
             print("❌ Failed to save scan session: \(error)")
         }

@@ -10,13 +10,19 @@ import CoreGraphics
 
 // MARK: - The host view for the map image + overlays + gesture transforms
 struct MapContainer: View {
-    private var uiImage: UIImage? { UIImage(named: "myFirstFloor_v03-metric") }
+    let mapImage: UIImage?
 
     var body: some View {
-        if let uiImage {
-            MapCanvas(uiImage: uiImage)
+        if let mapImage {
+            MapCanvas(uiImage: mapImage)
         } else {
-            Color.red
+            // Fallback when no map image is available
+            Rectangle()
+                .fill(Color.gray.opacity(0.3))
+                .overlay(
+                    Text("No map image")
+                        .foregroundColor(.white.opacity(0.7))
+                )
         }
     }
 }

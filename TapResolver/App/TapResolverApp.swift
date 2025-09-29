@@ -44,15 +44,6 @@ struct TapResolverApp: App {
                 .environmentObject(btScanner)
                 .environmentObject(mapPointStore)
                 .environmentObject(scanUtility)
-                    .onAppear {
-                        // Seed the Sample Location from the bundled asset if it isn't there yet.
-                        LocationImportUtils.seedSampleLocationIfMissing(
-                            assetName: "myFirstFloor_v03-metric",
-                            thumbnailAssetName: "myFirstFloor_v03-metric-thumb",
-                            locationID: "default",
-                            displayName: "Chris's House"
-                        )
-                    }
                 .appBootstrap(
                     scanner: btScanner,
                     beaconDots: beaconDotStore,

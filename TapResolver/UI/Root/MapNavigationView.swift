@@ -12,19 +12,22 @@ struct MapNavigationView: View {
     @EnvironmentObject private var btScanner: BluetoothScanner
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var mapPointStore: MapPointStore
+    @EnvironmentObject private var scanUtility: MapPointScanUtility
+    
+    @State private var mapUIImage: UIImage?
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                MapContainer()
+                MapContainer(mapImage: mapUIImage)
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
                     .onAppear {
-                        mapTransform.screenCenter = CGPoint(x: geo.size.width / 2,
-                                                            y: geo.size.height / 2)
+                        mapTransform.screenCenter = CGPoint(x: geo.size.width/2, y: geo.size.height/2)
+                        loadAssetMapImage(for: locationManager.currentLocationID)
+                        reloadAllStores()
                     }
                     .onChange(of: geo.size) { newSize in
-                        mapTransform.screenCenter = CGPoint(x: newSize.width  / 2,
-                                                            y: newSize.height / 2)
+                        mapTransform.screenCenter = CGPoint(x: newSize.width/2, y: newSize.height/2)
                     }
 
                 HUDContainer()
@@ -36,27 +39,38 @@ struct MapNavigationView: View {
                 beaconDots: beaconDotStore,
                 squares: metricSquares,
                 lists: beaconLists,
-                scanUtility: MapPointScanUtility(
-                    isExcluded: { _, _ in true },
-                    resolveBeaconMeta: { _ in
-                        MapPointScanUtility.BeaconMeta(
-                            beaconID: "", name: "",
-                            posX_m: nil, posY_m: nil, posZ_m: nil,
-                            txPowerSettingDbm: nil
-                        )
-                    }
-                )
+                scanUtility: scanUtility
             )
-            .onChange(of: locationManager.currentLocationID) { _ in
+            .onChange(of: locationManager.currentLocationID) { newID in
+                loadAssetMapImage(for: newID)
                 reloadAllStores()
             }
         }
     }
     
+    /// Hard-wired asset routing (no sandbox, no importer)
+    private func loadAssetMapImage(for locationID: String) {
+        let assetName: String
+        switch locationID {
+        case "default": // Chris's House
+            assetName = "myFirstFloor_v03-metric"
+        case "museum":  // Museum Map
+            assetName = "MuseumMap-8k"
+        default:
+            // Fallback to Chris's House if unknown id
+            assetName = "myFirstFloor_v03-metric"
+        }
+        mapUIImage = UIImage(named: assetName)
+        if mapUIImage == nil {
+            print("⚠️ Map asset '\(assetName)' not found. Check Assets.xcassets.")
+        }
+    }
+    
+    /// Keep your existing per-location reload hooks; these just re-read namespaced state.
     private func reloadAllStores() {
         beaconDotStore.reloadForActiveLocation()
         beaconLists.reloadForActiveLocation()
-        mapPointStore.reloadForActiveLocation()
         metricSquares.reloadForActiveLocation()
+        mapPointStore.reloadForActiveLocation()
     }
 }
