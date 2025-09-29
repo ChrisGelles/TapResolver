@@ -8,7 +8,7 @@ final class LocationManager: ObservableObject {
     private var bag = Set<AnyCancellable>()
 
     init() {
-        let last = UserDefaults.standard.string(forKey: "locations.lastOpened.v1") ?? "default"
+        let last = UserDefaults.standard.string(forKey: "locations.lastOpened.v1") ?? "home"
         self.currentLocationID = last
 
         // Keep PersistenceContext aligned (no UX change now; enables smooth switching later).

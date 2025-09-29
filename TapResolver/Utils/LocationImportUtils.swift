@@ -1045,3 +1045,48 @@ enum LastOpenedLocation {
     static func get() -> String? { UserDefaults.standard.string(forKey: key) }
     static func set(_ id: String) { UserDefaults.standard.set(id, forKey: key) }
 }
+
+// MARK: - Location Migration Utilities
+
+enum LocationMigration {
+    static let flagKey = "migration.defaultToHome.v1.done"
+
+    static func runIfNeeded() {
+        let ud = UserDefaults.standard
+        guard ud.bool(forKey: flagKey) == false else { return }
+
+        let oldPrefix = "loc.default."
+        let newPrefix = "loc.home."
+
+        // 1) Migrate UserDefaults keys
+        for (key, value) in ud.dictionaryRepresentation() {
+            guard key.hasPrefix(oldPrefix) else { continue }
+            let newKey = newPrefix + key.dropFirst(oldPrefix.count)
+            ud.set(value, forKey: String(newKey))
+        }
+
+        // 2) Update last-opened location
+        if ud.string(forKey: "locations.lastOpened.v1") == "default" {
+            ud.set("home", forKey: "locations.lastOpened.v1")
+        }
+
+        // 3) Rename location directory if it exists
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let root = docs.appendingPathComponent("locations", isDirectory: true)
+        let oldDir = root.appendingPathComponent("default", isDirectory: true)
+        let newDir = root.appendingPathComponent("home", isDirectory: true)
+        if fm.fileExists(atPath: oldDir.path), !fm.fileExists(atPath: newDir.path) {
+            do {
+                try fm.createDirectory(at: root, withIntermediateDirectories: true)
+                try fm.moveItem(at: oldDir, to: newDir)
+            } catch {
+                print("⚠️ Could not rename default→home dir: \(error)")
+            }
+        }
+
+        ud.set(true, forKey: flagKey)
+        ud.synchronize()
+        print("✅ Migration default→home complete")
+    }
+}

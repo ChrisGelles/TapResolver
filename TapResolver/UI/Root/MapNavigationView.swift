@@ -52,7 +52,7 @@ struct MapNavigationView: View {
     private func loadAssetMapImage(for locationID: String) {
         let assetName: String
         switch locationID {
-        case "default": // Chris's House
+        case "home":    // Chris's House
             assetName = "myFirstFloor_v03-metric"
         case "museum":  // Museum Map
             assetName = "MuseumMap-8k"

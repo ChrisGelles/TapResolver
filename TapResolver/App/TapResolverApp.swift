@@ -44,6 +44,9 @@ struct TapResolverApp: App {
                 .environmentObject(btScanner)
                 .environmentObject(mapPointStore)
                 .environmentObject(scanUtility)
+                .onAppear {
+                    LocationMigration.runIfNeeded()
+                }
                 .appBootstrap(
                     scanner: btScanner,
                     beaconDots: beaconDotStore,

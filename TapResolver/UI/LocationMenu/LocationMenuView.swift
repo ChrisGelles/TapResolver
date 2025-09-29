@@ -9,8 +9,8 @@ struct LocationMenuView: View {
     @State private var showingDocumentPicker = false
 
     // Hard-coded IDs & asset names
-    private let defaultID = "default"
-    private let defaultTitle = "Chris's House"
+    private let homeID = "home"
+    private let homeTitle = "Chris's House"
     private let defaultMapAsset = "myFirstFloor_v03-metric"
     private let defaultThumbAsset = "myFirstFloor_v03-metric-thumb"
 
@@ -33,16 +33,16 @@ struct LocationMenuView: View {
                 ScrollView {
                     LazyVGrid(columns: columns, alignment: .center, spacing: 12) {
 
-                        // --- Hard-coded chiclet: Default/Sample ---
+                        // --- Hard-coded chiclet: Home/Chris's House ---
                         AssetLocationTile(
-                            title: defaultTitle,
+                            title: homeTitle,
                             imageName: defaultThumbAsset
                         ) {
-                            seedIfNeeded(id: defaultID,
-                                         title: defaultTitle,
+                            seedIfNeeded(id: homeID,
+                                         title: homeTitle,
                                          mapAsset: defaultMapAsset,
                                          thumbAsset: defaultThumbAsset)
-                            locationManager.setCurrentLocation(defaultID)
+                            locationManager.setCurrentLocation(homeID)
                             locationManager.showLocationMenu = false
                         }
 
@@ -60,7 +60,7 @@ struct LocationMenuView: View {
                         }
 
                         // --- Dynamic locations from sandbox, excluding the two hard-coded IDs ---
-                        ForEach(locationSummaries.filter { $0.id != defaultID && $0.id != museumID }) { summary in
+                        ForEach(locationSummaries.filter { $0.id != homeID && $0.id != museumID }) { summary in
                             LocationTileView(summary: summary) {
                                 locationManager.setCurrentLocation(summary.id)
                                 locationManager.showLocationMenu = false
@@ -102,8 +102,8 @@ struct LocationMenuView: View {
             }
             .onAppear {
                 // Seed both hard-coded locations idempotently.
-                seedIfNeeded(id: defaultID,
-                             title: defaultTitle,
+                seedIfNeeded(id: homeID,
+                             title: homeTitle,
                              mapAsset: defaultMapAsset,
                              thumbAsset: defaultThumbAsset)
                 seedIfNeeded(id: museumID,
@@ -112,7 +112,7 @@ struct LocationMenuView: View {
                              thumbAsset: museumThumbAsset)
                 
                 // Ensure correct names are set
-                try? LocationImportUtils.renameLocation(id: defaultID, newName: defaultTitle)
+                try? LocationImportUtils.renameLocation(id: homeID, newName: homeTitle)
                 try? LocationImportUtils.renameLocation(id: museumID, newName: museumTitle)
 
                 loadLocationSummaries()
