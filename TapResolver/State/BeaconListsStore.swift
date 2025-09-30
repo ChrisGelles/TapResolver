@@ -14,15 +14,33 @@ final class BeaconListsStore: ObservableObject {
 
     // Persistence keys
     private let beaconsKey = "BeaconLists_beacons_v1"
-    private let morgueKey  = "BeaconLists_morgue_v1"
+    // private let morgueKey  = "BeaconLists_morgue_v1"   // not persisted
     private let lockedBeaconsKey = "LockedBeaconNames_v1"
     
     /// Reload data for the active location
     public func reloadForActiveLocation() {
-        // Clear current lists to prevent cross-contamination
-        clearForLocationSwitch()
-        // Load location-specific data
+        clearAndReloadForActiveLocation()
+    }
+    
+    public func clearAndReloadForActiveLocation() {
+        beacons.removeAll()
+        morgue.removeAll()
         load()
+        reconcileWithLockedDots()
+        objectWillChange.send()
+    }
+    
+    /// Clear in-memory without saving (used right before a location switch load)
+    func flush() {
+        beacons.removeAll()
+        morgue.removeAll()
+        objectWillChange.send()
+    }
+
+    /// Load persisted list for active namespace (no reconcile, no clears)
+    func loadOnly() {
+        beacons = ctx.read(beaconsKey, as: [String].self) ?? []
+        // morgue stays in-memory only
     }
 
     init() {
@@ -30,13 +48,12 @@ final class BeaconListsStore: ObservableObject {
     }
 
     private func save() {
-        ctx.write(beaconsKey, value: beacons, alsoWriteLegacy: true)
-        ctx.write(morgueKey,  value: morgue,  alsoWriteLegacy: true)
+        ctx.write(beaconsKey, value: beacons) // namespaced-only
     }
 
     private func load() {
-        if let b: [String] = ctx.read(beaconsKey, as: [String].self) { beacons = b }
-        if let m: [String] = ctx.read(morgueKey,  as: [String].self) { morgue  = m }
+        beacons = ctx.read(beaconsKey, as: [String].self) ?? []
+        morgue.removeAll() // transient
     }
     
     // Strict: "##-adjectiveAnimal" (e.g., "12-angryBeaver")
@@ -68,7 +85,7 @@ final class BeaconListsStore: ObservableObject {
     func clearForLocationSwitch() {
         beacons.removeAll()
         morgue.removeAll()
-        save()
+        // do NOT save here
     }
 
     /// Overload that accepts (name, id). If name is empty/Unknown, suffix a short id.
@@ -133,8 +150,26 @@ final class BeaconListsStore: ObservableObject {
         }
     }
     
-    /// Reload data for the active location
-    public func reloadForActiveLocation() {
-        load()
+    // MARK: - Reconciliation with locked dots
+    func reconcileWithLockedDots(_ lockedBeaconNames: [String]? = nil) {
+        // If caller passed a list, use it; otherwise derive from BeaconDotStore via NotificationCenter or singleton
+        let names: [String]
+        if let locked = lockedBeaconNames {
+            names = locked
+        } else {
+            // Lightweight pull from BeaconDotStore if available in environment later;
+            // no-op if not available
+            names = BeaconDotRegistry.sharedLockedIDs?() ?? []
+        }
+
+        guard !names.isEmpty else { return }
+
+        // Merge any locked names that aren't already present
+        var changed = false
+        for name in names where !beacons.contains(name) {
+            beacons.append(name)
+            changed = true
+        }
+        if changed { save() }
     }
 }

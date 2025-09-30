@@ -98,7 +98,7 @@ final class MetricSquareStore: ObservableObject {
                              side: sq.side,
                              locked: sq.isLocked)
         }
-        ctx.write(squaresKey, value: dto, alsoWriteLegacy: true)
+        ctx.write(squaresKey, value: dto)
     }
 
     private func load() {
@@ -114,6 +114,18 @@ final class MetricSquareStore: ObservableObject {
     
     /// Reload data for the active location
     public func reloadForActiveLocation() {
+        clearAndReloadForActiveLocation()
+    }
+    
+    public func clearAndReloadForActiveLocation() {
+        squares.removeAll()
         load()
+        objectWillChange.send()
+    }
+    
+    func flush() {
+        // clear in-memory without saving
+        squares.removeAll()
+        objectWillChange.send()
     }
 }

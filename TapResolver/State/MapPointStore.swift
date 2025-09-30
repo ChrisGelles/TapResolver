@@ -28,7 +28,20 @@ public final class MapPointStore: ObservableObject {
     
     /// Reload data for the active location
     public func reloadForActiveLocation() {
+        clearAndReloadForActiveLocation()
+    }
+    
+    public func clearAndReloadForActiveLocation() {
+        points.removeAll()
+        activePointID = nil
         load()
+        objectWillChange.send()
+    }
+    
+    func flush() {
+        points.removeAll()
+        activePointID = nil
+        objectWillChange.send()
     }
 
     // MARK: persistence keys
@@ -134,13 +147,9 @@ public final class MapPointStore: ObservableObject {
 
     private func save() {
         let dto = points.map { MapPointDTO(id: $0.id, x: $0.mapPoint.x, y: $0.mapPoint.y, createdDate: $0.createdDate) }
-        ctx.write(pointsKey, value: dto, alsoWriteLegacy: true)
+        ctx.write(pointsKey, value: dto)
         if let activeID = activePointID {
-            ctx.write(activePointKey, value: activeID, alsoWriteLegacy: true)
-        } else {
-            // keep legacy behavior: clear legacy key if needed
-            UserDefaults.standard.removeObject(forKey: activePointKey)
-            UserDefaults.standard.removeObject(forKey: ctx.key(activePointKey))
+            ctx.write(activePointKey, value: activeID)
         }
     }
 

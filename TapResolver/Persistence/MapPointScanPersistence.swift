@@ -16,8 +16,8 @@ enum MapPointScanPersistence {
             enc.dateEncodingStrategy = .iso8601
 
             // Use location-scoped directory
-            _ctx.ensureLocationDirs()
-            let scansDir = _ctx.scansNewDir
+            let scansDir = _ctx.scansDir
+            try? FileManager.default.createDirectory(at: scansDir, withIntermediateDirectories: true)
 
             // Filename: scanID.json (fallback to timestamp if empty)
             let base = record.scanID.isEmpty ? ISO8601DateFormatter().string(from: Date()) : record.scanID

@@ -8,6 +8,12 @@
 import SwiftUI
 import CoreGraphics
 
+// A lightweight, optional hook other stores can call to read locked beacon IDs
+// without tight coupling to instances (wired in App bootstrap).
+enum BeaconDotRegistry {
+    static var sharedLockedIDs: (() -> [String])?
+}
+
 // MARK: - Elevation editing state
 public struct ActiveElevationEdit: Identifiable {
     public let id = UUID()
@@ -37,14 +43,18 @@ public final class BeaconDotStore: ObservableObject {
     @Published public var activeElevationEdit: ActiveElevationEdit? = nil
 
     // MARK: persistence keys
-    private let dotsKey   = "BeaconDots_v1"
-    private let locksKey  = "BeaconLocks_v1"
-    private let lockedDotsKey = "LockedBeaconDots_v1"
-    private let elevationsKey = "BeaconElevations_v1"
-    private let txPowerKey = "BeaconDots_txPowerByID_v1"
+    private let dotsKey        = "BeaconDots_v1"       // UserDefaults fallback for tiny payloads (optional)
+    private let locksKey       = "BeaconLocks_v1"
+    private let elevationsKey  = "BeaconElevations_v1"
+    private let txPowerKey     = "BeaconTxPower_v1"
+    private let dotsFileName   = "dots.json"           // file with coordinates
 
     public init() {
-        load()
+        // Do not load from any legacy/global path
+        loadLocks()
+        loadElevations()
+        loadTxPower()
+        loadDotsFromDisk()
     }
 
     public func dot(for beaconID: String) -> Dot? {
@@ -57,11 +67,11 @@ public final class BeaconDotStore: ObservableObject {
     public func toggleDot(for beaconID: String, mapPoint: CGPoint, color: Color) {
         if let idx = dots.firstIndex(where: { $0.beaconID == beaconID }) {
             dots.remove(at: idx)
-            save()
+            saveDotsToDisk()
             print("Removed dot for \(beaconID)")
         } else {
             dots.append(Dot(beaconID: beaconID, color: color, mapPoint: mapPoint))
-            save()
+            saveDotsToDisk()
             print("Added dot for \(beaconID) @ map (\(Int(mapPoint.x)), \(Int(mapPoint.y)))")
         }
     }
@@ -70,19 +80,19 @@ public final class BeaconDotStore: ObservableObject {
     public func updateDot(id: UUID, to newPoint: CGPoint) {
         if let idx = dots.firstIndex(where: { $0.id == id }) {
             dots[idx].mapPoint = newPoint
-            save()
+            saveDotsToDisk()
         }
     }
 
     public func clear() {
         dots.removeAll()
-        save()
+        saveDotsToDisk()
     }
     
     /// Clear dots for unlocked beacons only (preserves locked beacons)
     public func clearUnlockedDots() {
         dots.removeAll { !isLocked($0.beaconID) }
-        save()
+        saveDotsToDisk()
     }
     
     /// Get only the locked beacon dots
@@ -90,32 +100,6 @@ public final class BeaconDotStore: ObservableObject {
         return dots.filter { isLocked($0.beaconID) }
     }
     
-    /// Restore all beacon dots from storage (called on app launch)
-    public func restoreAllDots() {
-        // First load locks to know which beacons are locked
-        loadLocks()
-        
-        // Load all dots from the main storage
-        if let data = UserDefaults.standard.data(forKey: dotsKey),
-           let dto = try? JSONDecoder().decode([DotDTO].self, from: data) {
-            let allDots = dto.map { dotDTO in
-                var dot = Dot(beaconID: dotDTO.beaconID,
-                             color: beaconColor(for: dotDTO.beaconID),
-                             mapPoint: CGPoint(x: dotDTO.x, y: dotDTO.y))
-                dot.elevation = dotDTO.elevation
-                return dot
-            }
-            
-            // Clear current dots and restore all previously saved ones
-            dots.removeAll()
-            dots.append(contentsOf: allDots)
-            
-            // Restore elevation values for all dots
-            for dot in allDots {
-                elevations[dot.beaconID] = dot.elevation
-            }
-        }
-    }
     
     // MARK: - Elevation API
     
@@ -163,7 +147,28 @@ public final class BeaconDotStore: ObservableObject {
     
     /// Reload data for the active location
     public func reloadForActiveLocation() {
-        load()
+        clearAndReloadForActiveLocation()
+    }
+    
+    /// Public flush+reload for location switching
+    public func clearAndReloadForActiveLocation() {
+        // Hard flush (no save) to avoid bleed
+        dots.removeAll()
+        locked.removeAll()
+        elevations.removeAll()
+        txPowerByID.removeAll()
+
+        // Pure load for the active namespace and file
+        loadLocks()
+        loadElevations()
+        loadTxPower()
+        loadDotsFromDisk()
+        objectWillChange.send()
+    }
+    
+    /// Get the beacon IDs that are currently locked
+    public func lockedBeaconIDs() -> [String] {
+        locked.keys.filter { locked[$0] == true }
     }
 
     // MARK: - Lock API
@@ -176,85 +181,105 @@ public final class BeaconDotStore: ObservableObject {
         let newVal = !(locked[beaconID] ?? false)
         locked[beaconID] = newVal
         saveLocks()
-        save() // Also save dot data when locking/unlocking
+        saveDotsToDisk() // Also save dot data when locking/unlocking
     }
 
     // MARK: - Persistence
 
     private struct DotDTO: Codable {
         let beaconID: String
-        let x: CGFloat
-        let y: CGFloat
+        let x: Double
+        let y: Double
         let elevation: Double
+        let txPower: Int?
     }
 
-    private struct LocksDTO: Codable {
-        let locks: [String: Bool]
-    }
+    private struct LocksDTO: Codable { let locks: [String: Bool] }
 
     private func save() {
-        // Save all dots using location-scoped persistence
-        let dto = dots.map { DotDTO(beaconID: $0.beaconID, x: $0.mapPoint.x, y: $0.mapPoint.y, elevation: getElevation(for: $0.beaconID)) }
-        ctx.write(dotsKey, value: dto, alsoWriteLegacy: false)
-        
-        // Save only locked dots (new behavior)
-        let lockedDots = dots.filter { isLocked($0.beaconID) }
-        let lockedDTO = lockedDots.map { DotDTO(beaconID: $0.beaconID, x: $0.mapPoint.x, y: $0.mapPoint.y, elevation: getElevation(for: $0.beaconID)) }
-        ctx.write(lockedDotsKey, value: lockedDTO, alsoWriteLegacy: false)
-        
+        // Save dots to file (authoritative for coordinates)
+        saveDotsToDisk()
         saveLocks()
     }
 
     private func saveLocks() {
         let payload = LocksDTO(locks: locked)
-        ctx.write(locksKey, value: payload, alsoWriteLegacy: true)
+        ctx.write(locksKey, value: payload)
     }
 
     private func load() {
-        // Dots
-        if let dto: [DotDTO] = ctx.read(dotsKey, as: [DotDTO].self) {
-            self.dots = dto.map { dotDTO in
-                var dot = Dot(beaconID: dotDTO.beaconID,
-                             color: beaconColor(for: dotDTO.beaconID),
-                             mapPoint: CGPoint(x: dotDTO.x, y: dotDTO.y))
-                // Handle backward compatibility - if elevation exists in DTO, use it
-                if dotDTO.elevation != 0.75 || elevations[dotDTO.beaconID] == nil {
-                    dot.elevation = dotDTO.elevation
-                    elevations[dotDTO.beaconID] = dotDTO.elevation
-                }
-                return dot
-            }
-        }
-
         loadLocks()
         loadElevations()
         loadTxPower()
+        loadDotsFromDisk()
     }
     
     private func loadLocks() {
-        if let locksDTO: LocksDTO = ctx.read(locksKey, as: LocksDTO.self) {
-            self.locked = locksDTO.locks
+        if let dto: LocksDTO = ctx.read(locksKey, as: LocksDTO.self) {
+            locked = dto.locks
+        } else {
+            locked = [:]
         }
     }
     
     private func saveElevations() {
-        ctx.write(elevationsKey, value: elevations, alsoWriteLegacy: true)
+        ctx.write(elevationsKey, value: elevations)
     }
     
     private func loadElevations() {
-        if let e: [String: Double] = ctx.read(elevationsKey, as: [String: Double].self) {
-            self.elevations = e
-        }
+        elevations = ctx.read(elevationsKey, as: [String: Double].self) ?? [:]
     }
     
     private func loadTxPower() {
-        if let t: [String: Int] = ctx.read(txPowerKey, as: [String: Int].self) {
-            self.txPowerByID = t
-        }
+        txPowerByID = ctx.read(txPowerKey, as: [String: Int].self) ?? [:]
     }
     
     private func saveTxPower() {
-        ctx.write(txPowerKey, value: txPowerByID, alsoWriteLegacy: true)
+        ctx.write(txPowerKey, value: txPowerByID)
+    }
+    
+    // MARK: - File persistence for dot coordinates
+    private func dotsFileURL(_ ctx: PersistenceContext = .shared) -> URL {
+        ctx.locationDir.appendingPathComponent(dotsFileName, isDirectory: false)
+    }
+
+    private func saveDotsToDisk() {
+        let ctx = PersistenceContext.shared
+        try? FileManager.default.createDirectory(at: ctx.locationDir, withIntermediateDirectories: true)
+        let dtos: [DotDTO] = dots.map { d in
+            DotDTO(beaconID: d.beaconID,
+                   x: d.mapPoint.x,
+                   y: d.mapPoint.y,
+                   elevation: elevations[d.beaconID] ?? d.elevation,
+                   txPower: txPowerByID[d.beaconID])
+        }
+        do {
+            let data = try JSONEncoder().encode(dtos)
+            try data.write(to: dotsFileURL(ctx), options: .atomic)
+        } catch {
+            print("⚠️ saveDotsToDisk failed: \(error)")
+        }
+    }
+
+    private func loadDotsFromDisk() {
+        let url = dotsFileURL()
+        guard let data = try? Data(contentsOf: url) else { dots = []; return }
+        do {
+            let dtos = try JSONDecoder().decode([DotDTO].self, from: data)
+            dots = dtos.map {
+                var dot = Dot(beaconID: $0.beaconID,
+                              color: beaconColor(for: $0.beaconID),
+                              mapPoint: CGPoint(x: $0.x, y: $0.y))
+                dot.elevation = $0.elevation
+                // Rehydrate side tables too
+                elevations[$0.beaconID] = $0.elevation
+                if let p = $0.txPower { txPowerByID[$0.beaconID] = p }
+                return dot
+            }
+        } catch {
+            print("⚠️ loadDotsFromDisk failed: \(error)")
+            dots = []
+        }
     }
 
     private func beaconColor(for beaconID: String) -> Color {

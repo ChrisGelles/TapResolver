@@ -15,6 +15,7 @@ struct MapNavigationView: View {
     @EnvironmentObject private var scanUtility: MapPointScanUtility
     
     @State private var mapUIImage: UIImage?
+    @State private var overlaysReady = false
 
     var body: some View {
         GeometryReader { geo in
@@ -23,14 +24,14 @@ struct MapNavigationView: View {
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
                     .onAppear {
                         mapTransform.screenCenter = CGPoint(x: geo.size.width/2, y: geo.size.height/2)
-                        loadAssetMapImage(for: locationManager.currentLocationID)
-                        reloadAllStores()
+                        switchToLocation(locationManager.currentLocationID)
                     }
                     .onChange(of: geo.size) { newSize in
                         mapTransform.screenCenter = CGPoint(x: newSize.width/2, y: newSize.height/2)
                     }
 
                 HUDContainer()
+                    .opacity(overlaysReady ? 1 : 0)
             }
             .ignoresSafeArea()
             // Keep the same bootstrap wiring as before (moved here verbatim).
@@ -42,8 +43,7 @@ struct MapNavigationView: View {
                 scanUtility: scanUtility
             )
             .onChange(of: locationManager.currentLocationID) { newID in
-                loadAssetMapImage(for: newID)
-                reloadAllStores()
+                switchToLocation(newID)
             }
         }
     }
@@ -66,11 +66,39 @@ struct MapNavigationView: View {
         }
     }
     
-    /// Keep your existing per-location reload hooks; these just re-read namespaced state.
-    private func reloadAllStores() {
-        beaconDotStore.reloadForActiveLocation()
-        beaconLists.reloadForActiveLocation()
+    private func switchToLocation(_ id: String) {
+        // 1) Namespace first
+        PersistenceContext.shared.locationID = id
+
+        // 2) Load map image (no overlays yet)
+        overlaysReady = false
+        loadAssetMapImage(for: id)
+
+        // 3) Flush all overlays so nothing from the previous location shows
+        beaconDotStore.clearAndReloadForActiveLocation()   // loads locks/elev/txp + dots.json
+        beaconLists.flush()
+        metricSquares.flush()
+        mapPointStore.flush()
+
+        // 4) Sequential loads in order (beacons/dots -> metric square -> map points)
+        // We want "load-only" then reconcile for the lists; and dots already come from disk.
+        beaconDotStore.clearAndReloadForActiveLocation()   // loads locks/elev/txp + dots.json
+        beaconLists.loadOnly()
+        beaconLists.reconcileWithLockedDots(beaconDotStore.lockedBeaconIDs())
         metricSquares.reloadForActiveLocation()
         mapPointStore.reloadForActiveLocation()
+
+        // 5) Overlays can render now
+        overlaysReady = true
+    }
+    
+    /// Keep your existing per-location reload hooks; these just re-read namespaced state.
+    private func reloadAllStores() {
+        beaconDotStore.clearAndReloadForActiveLocation()
+        beaconLists.clearAndReloadForActiveLocation()
+        metricSquares.clearAndReloadForActiveLocation()
+        mapPointStore.clearAndReloadForActiveLocation()
+        // Keep list & dots aligned
+        beaconLists.reconcileWithLockedDots(beaconDotStore.lockedBeaconIDs())
     }
 }

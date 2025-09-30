@@ -16,8 +16,8 @@ enum ScanPersistence {
             enc.dateEncodingStrategy = .iso8601
 
             // Use location-scoped directory
-            _ctx.ensureLocationDirs()
-            let scansDir = _ctx.scansNewDir
+            let scansDir = _ctx.scansDir
+            try? FileManager.default.createDirectory(at: scansDir, withIntermediateDirectories: true)
 
             // Filename: sessionID.json (fallback to timestamp if empty)
             let base = session.sessionID.isEmpty ? ISO8601DateFormatter().string(from: session.startTime) : session.sessionID
