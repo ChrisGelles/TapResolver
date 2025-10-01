@@ -46,6 +46,7 @@ struct TapResolverApp: App {
                 .environmentObject(scanUtility)
                 .onAppear {
                     LocationMigration.runIfNeeded()
+                    squareMetrics.setMetricSquareStore(metricSquares)
                 }
                 .appBootstrap(
                     scanner: btScanner,

@@ -20,6 +20,7 @@ final class MetricSquareStore: ObservableObject {
         var center: CGPoint          // map-local center
         var side: CGFloat            // map-local side length
         var isLocked: Bool = false   // 🔒
+        var meters: Double   // Numeric input for side length in meters
     }
 
     @Published private(set) var squares: [Square] = []
@@ -34,7 +35,7 @@ final class MetricSquareStore: ObservableObject {
 
     func add(at mapPoint: CGPoint, color: Color) {
         guard squares.count < maxSquares else { return }
-        squares.append(Square(color: color, center: mapPoint, side: 80, isLocked: false))
+        squares.append(Square(color: color, center: mapPoint, side: 80, isLocked: false, meters: 1.00))
         save()
     }
 
@@ -73,6 +74,14 @@ final class MetricSquareStore: ObservableObject {
             save()
         }
     }
+    
+    func updateMeters(for id: UUID, meters: Double) {
+        if let idx = squares.firstIndex(where: { $0.id == id }) {
+            squares[idx].meters = meters
+            save()
+        }
+    }
+    
 
     // MARK: persistence helpers
     private struct ColorHSBA: Codable {
@@ -85,6 +94,7 @@ final class MetricSquareStore: ObservableObject {
         let cy: CGFloat
         let side: CGFloat
         let locked: Bool
+        let meters: Double
     }
 
     private func save() {
@@ -96,7 +106,8 @@ final class MetricSquareStore: ObservableObject {
                              color: ColorHSBA(h: h, s: s, b: b, a: a),
                              cx: sq.center.x, cy: sq.center.y,
                              side: sq.side,
-                             locked: sq.isLocked)
+                             locked: sq.isLocked,
+                             meters: sq.meters)
         }
         ctx.write(squaresKey, value: dto)
     }
@@ -108,7 +119,8 @@ final class MetricSquareStore: ObservableObject {
             return Square(color: color,
                           center: CGPoint(x: d.cx, y: d.cy),
                           side: d.side,
-                          isLocked: d.locked)
+                          isLocked: d.locked,
+                          meters: d.meters)
         }
     }
     

@@ -7,45 +7,49 @@
 
 import SwiftUI
 
-// MARK: - Square metrics (unchanged)
+// MARK: - Square metrics (delegates to MetricSquareStore)
 final class SquareMetrics: ObservableObject {
-    struct Entry: Identifiable {
-        let id: UUID
-        var pixelSide: CGFloat
-        var meters: Double?
-    }
+    private var metricSquareStore: MetricSquareStore?
     
     struct ActiveEdit: Identifiable {
         let id: UUID
         var text: String
     }
     
-    @Published private(set) var entries: [UUID: Entry] = [:]
     @Published var activeEdit: ActiveEdit? = nil
+    
     func updatePixelSide(for id: UUID, side: CGFloat) {
-        if var e = entries[id] { e.pixelSide = side; entries[id] = e }
-        else { entries[id] = Entry(id: id, pixelSide: side, meters: nil) }
+        // This is handled by MetricSquareStore directly, no local state needed
     }
-    func setMeters(for id: UUID, meters: Double) {
-        if var e = entries[id] { e.meters = meters; entries[id] = e }
-        else { entries[id] = Entry(id: id, pixelSide: 0, meters: meters) }
+    
+    func entry(for id: UUID) -> (pixelSide: CGFloat, meters: Double)? {
+        guard let store = metricSquareStore,
+              let square = store.squares.first(where: { $0.id == id }) else { return nil }
+        return (pixelSide: square.side, meters: square.meters)
     }
-    func entry(for id: UUID) -> Entry? { entries[id] }
     
     func displayMetersText(for id: UUID) -> String {
-        guard let entry = entries[id] else { return "1m" }
-        if let meters = entry.meters {
-            // Remove unnecessary decimal places (1.0 -> 1, 1.5 -> 1.5)
-            let formatted = String(format: "%g", meters)
+        // Read from MetricSquareStore
+        if let store = metricSquareStore,
+           let square = store.squares.first(where: { $0.id == id }) {
+            let formatted = String(format: "%g", square.meters)
             return "\(formatted)m"
-        } else {
-            return "\(Int(entry.pixelSide))px"
         }
+        
+        // Fallback if no store available
+        return "1m"
     }
     
     func commitMetersText(_ text: String, for id: UUID) {
-        if let meters = Double(text) {
-            setMeters(for: id, meters: meters)
-        }
+        guard let meters = Double(text) else { return }
+        
+        // Push value down into MetricSquareStore
+        metricSquareStore?.updateMeters(for: id, meters: meters)
+        activeEdit = nil
+    }
+    
+    // Method to set the MetricSquareStore reference
+    func setMetricSquareStore(_ store: MetricSquareStore) {
+        metricSquareStore = store
     }
 }

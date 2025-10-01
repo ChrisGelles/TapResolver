@@ -8,6 +8,13 @@
 import SwiftUI
 import CoreGraphics
 
+extension Notification.Name {
+    static let startNorthCalibration = Notification.Name("StartNorthCalibration")
+    static let toggleNorthCalibration = Notification.Name("ToggleNorthCalibration")
+    static let stopNorthCalibration   = Notification.Name("StopNorthCalibration")
+}
+
+
 // MARK: - Drawer
 struct MetricSquareDrawer: View {
     @EnvironmentObject private var hud: HUDPanelsState
@@ -61,13 +68,18 @@ struct MetricSquareDrawer: View {
     private var topBar: some View {
         HStack(spacing: 2) {
             if hud.isSquareOpen {
-                Text("Metric Squares")
+                Text("Map Metrics")
                     .font(.headline)
                     .foregroundColor(.primary)
                 Spacer(minLength: 0)
             }
             Button {
-                if hud.isSquareOpen { hud.closeAll() } else { hud.openSquares() }
+                if hud.isSquareOpen {
+                    hud.closeAll()
+                    NotificationCenter.default.post(name: .stopNorthCalibration, object: nil)
+                } else {
+                    hud.openSquares()
+                }
             } label: {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 16, weight: .medium))
@@ -77,42 +89,93 @@ struct MetricSquareDrawer: View {
                     .rotationEffect(.degrees(hud.isSquareOpen ? 180 : 0))
                     .contentShape(Circle())
             }
-            .accessibilityLabel(hud.isSquareOpen ? "Close squares drawer" : "Open squares drawer")
+            .accessibilityLabel(hud.isSquareOpen ? "Close Map Metrics drawer" : "Open Map Metrics drawer")
         }
         .padding(.horizontal, 12)
     }
 
     private var addRow: some View {
-        Button {
-            guard squares.squares.count < squares.maxSquares else { return }
-            guard mapTransform.mapSize != .zero else {
-                print("⚠️ Square add ignored: mapTransform not ready (mapSize == .zero)")
-                return
-            }
-            let targetScreen = mapTransform.screenCenter
-            let centerOnMap  = mapTransform.screenToMap(targetScreen)
-            let color = nextColor(for: squares.squares.count)
-            squares.add(at: centerOnMap, color: color)
-            print("▢ Square added @ map \(Int(centerOnMap.x)),\(Int(centerOnMap.y)) from screen center")
-        } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.white.opacity(0.15))
-                        .frame(width: 40, height: 40)
-                    Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.primary)
+        HStack {
+            // Add Square button
+            Button {
+                guard squares.squares.count < squares.maxSquares else { return }
+                guard mapTransform.mapSize != .zero else {
+                    print("⚠️ Square add ignored: mapTransform not ready (mapSize == .zero)")
+                    return
                 }
-                Text("Add square")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white)
-                //Spacer(minLength: 0)
+                let targetScreen = mapTransform.screenCenter
+                let centerOnMap  = mapTransform.screenToMap(targetScreen)
+                let color = nextColor(for: squares.squares.count)
+                squares.add(at: centerOnMap, color: color)
+                print("▢ Square added @ map \(Int(centerOnMap.x)),\(Int(centerOnMap.y)) from screen center")
+            } label: {
+                VStack(spacing: 4) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.white.opacity(0.15))
+                            .frame(width: 40, height: 40)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(Color.white, lineWidth: 2)
+                            )
+                        Image(systemName: "plus")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                    Text("Add Square")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(.white)
+                }
             }
-            .padding(.horizontal, 4)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 8)
+            
+            VStack(spacing: 4) {
+                Text("north")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(.white)
+                Text("0º")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 7)
+                    .background(Color.black.opacity(0.5))
+                    .cornerRadius(6)
+                    .fixedSize(horizontal: true, vertical: false)
+                Text("offset")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+            // Set Compass button (separate action)
+            Button {
+                NotificationCenter.default.post(name: .toggleNorthCalibration, object: nil)
+            } label: {
+                VStack(spacing: 4) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(0.15))
+                            .frame(width: 40, height: 40)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white, lineWidth: 2)
+                            )
+                        Image(systemName: "location.north.fill")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.white)
+                            .rotationEffect(.degrees(30)) // visual flavor; optional
+                    }
+                    Text("Set Compass")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(.white)
+                }
+            }
+            .buttonStyle(.plain)
         }
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
     }
+
 
     private func squareRow(_ sq: MetricSquareStore.Square) -> some View {
         HStack(spacing: 8) {

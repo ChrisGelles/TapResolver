@@ -11,11 +11,11 @@ struct ContentView: View {
     // State ownership unchanged:
     @StateObject private var beaconDotStore = BeaconDotStore()
     @EnvironmentObject private var mapTransform: MapTransformStore
+    @EnvironmentObject private var squareMetrics: SquareMetrics
+    @EnvironmentObject private var metricSquares: MetricSquareStore
+    @EnvironmentObject private var beaconLists: BeaconListsStore
+    @EnvironmentObject private var btScanner: BluetoothScanner
     @StateObject private var hudPanels     = HUDPanelsState()
-    @StateObject private var metricSquares = MetricSquareStore()
-    @StateObject private var squareMetrics = SquareMetrics()
-    @StateObject private var beaconLists   = BeaconListsStore()
-    @StateObject private var btScanner     = BluetoothScanner()
     @StateObject private var locationManager = LocationManager()
     @StateObject private var mapPointStore = MapPointStore()
 
@@ -30,10 +30,6 @@ struct ContentView: View {
         // Provide environments exactly as before + new locationManager
         .environmentObject(beaconDotStore)
         .environmentObject(hudPanels)
-        .environmentObject(metricSquares)
-        .environmentObject(squareMetrics)
-        .environmentObject(beaconLists)
-        .environmentObject(btScanner)
         .environmentObject(locationManager)
         .environmentObject(mapPointStore)
     }

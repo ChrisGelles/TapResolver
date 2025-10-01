@@ -13,6 +13,7 @@ final class HUDPanelsState: ObservableObject {
     @Published var isSquareOpen: Bool = false
     @Published var isMorgueOpen: Bool = false
     @Published var isMapPointOpen: Bool = false
+    @Published var isCalibratingNorth: Bool = false
 
     func openBeacon() { isBeaconOpen = true; isSquareOpen = false; isMorgueOpen = false; isMapPointOpen = false }
     func openSquares() { isSquareOpen = true; isBeaconOpen = false; isMorgueOpen = false; isMapPointOpen = false }
