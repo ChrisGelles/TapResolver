@@ -6,10 +6,10 @@
 import SwiftUI
 
 /// Full-screen HUD for North calibration.
-/// Drag to rotate; lift finger to keep the angle. No buttons.
-/// Show/hide is controlled by the parent (HUDContainer) via a boolean state.
+/// Drag to rotate; lift finger to keep the angle.
+/// The current angle is bound to the parent (persisted by SquareMetrics).
 struct CompassCalibrationOverlay: View {
-    @State private var angleDeg: CGFloat = 0          // 0° = pointing up
+    @Binding var angleDeg: Double        // +CW / -CCW, 0° = up
     @GestureState private var isDragging: Bool = false
 
     var body: some View {
@@ -24,20 +24,19 @@ struct CompassCalibrationOverlay: View {
             }
             .contentShape(Rectangle())
             .gesture(
-                DragGesture(minimumDistance: 8)   // tap alone won’t update angle
+                DragGesture(minimumDistance: 8)
                     .updating($isDragging) { _, s, _ in s = true }
                     .onChanged { value in
                         let c = CGPoint(x: geo.size.width/2, y: geo.size.height/2)
                         let dx = value.location.x - c.x
                         let dy = value.location.y - c.y
                         guard dx != 0 || dy != 0 else { return }
-                        var deg = atan2(dy, dx) * 180 / .pi + 90 // 0° is up
-                        if deg < 0 { deg += 360 }
-                        if deg >= 360 { deg -= 360 }
+
+                        // 0° is "up" → add +90° to atan2, then normalize to [-180, +180]
+                        var deg = atan2(dy, dx) * 180 / .pi + 90
+                        while deg > 180 { deg -= 360 }
+                        while deg <= -180 { deg += 360 }
                         angleDeg = deg
-                    }
-                    .onEnded { _ in
-                        // keep angleDeg as final – parent will dismiss separately
                     }
             )
         }
@@ -52,7 +51,6 @@ private struct CompassGraphic: View {
             Circle()
                 .fill(Color.black.opacity(0.35))
                 .overlay(Circle().stroke(Color.white, lineWidth: 2))
-
             CrosshairLines()
         }
     }

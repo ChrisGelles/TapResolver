@@ -6,6 +6,11 @@
 //
 
 import SwiftUI
+import Combine
+
+extension Notification.Name {
+    static let locationDidChange = Notification.Name("LocationDidChange")
+}
 
 // MARK: - Square metrics (delegates to MetricSquareStore)
 final class SquareMetrics: ObservableObject {
@@ -17,6 +22,25 @@ final class SquareMetrics: ObservableObject {
     }
     
     @Published var activeEdit: ActiveEdit? = nil
+    
+    // MARK: - Per-location North offset (degrees, +CW / -CCW)
+    @Published var northOffsetDeg: Double = 0 {
+        didSet { saveNorthOffset() }
+    }
+    
+    private var bag = Set<AnyCancellable>()
+    
+    init() {
+        // Load initial value for current location
+        reloadNorthOffset()
+        
+        // Observe location changes so we reload per-location value
+        NotificationCenter.default.publisher(for: .locationDidChange)
+            .sink { [weak self] _ in
+                self?.reloadNorthOffset()
+            }
+            .store(in: &bag)
+    }
     
     func updatePixelSide(for id: UUID, side: CGFloat) {
         // This is handled by MetricSquareStore directly, no local state needed
@@ -51,5 +75,31 @@ final class SquareMetrics: ObservableObject {
     // Method to set the MetricSquareStore reference
     func setMetricSquareStore(_ store: MetricSquareStore) {
         metricSquareStore = store
+    }
+    
+    // MARK: - North Offset Persistence
+    private func northOffsetKey(for locationID: String) -> String {
+        return "locations.\(locationID).mapMetrics.northOffsetDeg.v1"
+    }
+    
+    private func reloadNorthOffset() {
+        let loc = PersistenceContext.shared.locationID
+        let key = northOffsetKey(for: loc)
+        if UserDefaults.standard.object(forKey: key) != nil {
+            northOffsetDeg = UserDefaults.standard.double(forKey: key)
+        } else {
+            northOffsetDeg = 0
+        }
+    }
+    
+    private func saveNorthOffset() {
+        let loc = PersistenceContext.shared.locationID
+        let key = northOffsetKey(for: loc)
+        UserDefaults.standard.set(northOffsetDeg, forKey: key)
+    }
+    
+    // Public setter used by bindings (keeps @Published updates consistent)
+    func setNorthOffset(_ deg: Double) {
+        northOffsetDeg = deg
     }
 }

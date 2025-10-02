@@ -135,7 +135,7 @@ struct MetricSquareDrawer: View {
                 Text("north")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundColor(.white)
-                Text("0º")
+                Text(String(format: "%+.1fº", squareMetrics.northOffsetDeg))
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(.white)
                     .padding(.horizontal, 6)

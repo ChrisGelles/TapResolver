@@ -132,7 +132,12 @@ struct HUDContainer: View {
         .background(
             Group {
                 if hud.isCalibratingNorth {
-                    CompassCalibrationOverlay()
+                    CompassCalibrationOverlay(
+                        angleDeg: Binding(
+                            get: { squareMetrics.northOffsetDeg },
+                            set: { squareMetrics.setNorthOffset($0) }
+                        )
+                    )
                 }
             }
         )
