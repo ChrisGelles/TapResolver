@@ -20,6 +20,7 @@ struct TapResolverApp: App {
     @StateObject private var beaconLists = BeaconListsStore()   // beacon lists
     @StateObject private var btScanner = BluetoothScanner()     // Bluetooth scanner
     @StateObject private var mapPointStore = MapPointStore()    // map points (log points)
+    @StateObject private var orientationManager = CompassOrientationManager()
     @StateObject private var scanUtility = MapPointScanUtility(
         isExcluded: { beaconID, name in
             // We'll implement this properly after the stores are created
@@ -43,10 +44,12 @@ struct TapResolverApp: App {
                 .environmentObject(beaconLists)
                 .environmentObject(btScanner)
                 .environmentObject(mapPointStore)
+                .environmentObject(orientationManager)
                 .environmentObject(scanUtility)
                 .onAppear {
                     LocationMigration.runIfNeeded()
                     squareMetrics.setMetricSquareStore(metricSquares)
+                    orientationManager.start()
                 }
                 .appBootstrap(
                     scanner: btScanner,

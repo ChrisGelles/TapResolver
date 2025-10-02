@@ -60,6 +60,7 @@ struct HUDContainer: View {
                         ResetMapButton()
                         BluetoothScanButton() // snapshot scan button
                         RSSIMeterButton()
+                        FacingToggleButton()
                     }
                 }
                 Spacer()
@@ -138,6 +139,9 @@ struct HUDContainer: View {
                             set: { squareMetrics.setNorthOffset($0) }
                         )
                     )
+                }
+                if hud.showFacingOverlay {
+                    FacingOverlay()
                 }
             }
         )
@@ -536,5 +540,26 @@ struct TxPowerSelectionView: View {
         .background(Color.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
         .padding(.trailing, 20)
         .padding(.bottom, 40)
+    }
+}
+
+// MARK: - Facing Toggle Button
+
+private struct FacingToggleButton: View {
+    @EnvironmentObject private var hud: HUDPanelsState
+    
+    var body: some View {
+        Button {
+            hud.showFacingOverlay.toggle()
+        } label: {
+            Image(systemName: "location.north.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.primary)
+                .padding(10)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .accessibilityLabel("Toggle facing overlay")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
     }
 }

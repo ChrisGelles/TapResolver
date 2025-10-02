@@ -131,7 +131,11 @@ public final class CompassOrientationManager: NSObject, ObservableObject {
         let pitchRad = dm.attitude.pitch
         let rollRad = dm.attitude.roll
 
-        let yawDeg = radiansToDegrees(yawRad)
+        // Convert CoreMotion yaw to CW before use
+        let twoPi = 2.0 * .pi
+        let yawRadCW = twoPi - yawRad  // convert CCW→CW
+
+        let yawDeg = radiansToDegrees(yawRadCW)
         let pitchDeg = radiansToDegrees(pitchRad)
         let rollDeg = radiansToDegrees(rollRad)
 
@@ -150,11 +154,11 @@ public final class CompassOrientationManager: NSObject, ObservableObject {
             if let headingRad, let acc = self.headingAccuracyDegrees, acc.isFinite {
                 // Weight motion more, but pull toward CLHeading when accuracy is reasonable
                 let alpha = self.alphaForAccuracy(acc, fallback: self.motionBlend)
-                fusedRad = self.mixAngles(self.lastFusedRad ?? yawRad, yawRad, headingRad, alpha: alpha)
+                fusedRad = self.mixAngles(self.lastFusedRad ?? yawRadCW, yawRadCW, headingRad, alpha: alpha)
                 self.quality = self.qualityForAccuracy(acc)
             } else {
                 // No reliable CLHeading; use motion yaw directly
-                fusedRad = yawRad
+                fusedRad = yawRadCW
                 self.quality = .fair
             }
 
