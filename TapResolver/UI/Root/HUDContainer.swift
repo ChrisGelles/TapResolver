@@ -145,6 +145,18 @@ struct HUDContainer: View {
                 }
             }
         )
+        
+        // Bottom-left tools button shown only while calibrating north AND the Metric Square drawer is open
+        .overlay(alignment: .bottomLeading) {
+            if hud.isCalibratingNorth && hud.isSquareOpen {
+                CalibrationToolsButton {
+                    print("🛠️ Calibration Tools tapped")
+                }
+                .padding(.leading, 20)
+                .padding(.bottom, 40)
+                .zIndex(350)
+            }
+        }
 
         // Notifications for compass calibration mode
         .onReceive(NotificationCenter.default.publisher(for: .toggleNorthCalibration)) { _ in
@@ -542,6 +554,30 @@ struct TxPowerSelectionView: View {
         .padding(.bottom, 40)
     }
 }
+
+// MARK: - Calibration Tools Button (gear + wrench)
+private struct CalibrationToolsButton: View {
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            ZStack {
+                // Gear (back)
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .offset(x: -2, y: 1)
+                    .opacity(0.95)
+            }
+            .foregroundColor(.white)
+            .padding(10)
+            .background(Color.black.opacity(0.75), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Calibration tools")
+        .allowsHitTesting(true)
+    }
+}
+
 
 // MARK: - Facing Toggle Button
 
