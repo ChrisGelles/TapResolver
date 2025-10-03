@@ -7,10 +7,18 @@
 
 import SwiftUI
 
+@inline(__always)
+private func radiansCCW_to_degreesCW(_ r: Double) -> Double {
+    // Map transform is typically +CCW (math). SwiftUI rotationEffect uses +CW on screen.
+    return -(r * 180.0 / .pi)
+}
+
 /// Overlay showing user's device orientation with facing glyph
 struct FacingOverlay: View {
     @EnvironmentObject private var orientation: CompassOrientationManager
     @EnvironmentObject private var squareMetrics: SquareMetrics
+    
+    @EnvironmentObject private var mapTransform: MapTransformStore
     
     var body: some View {
         GeometryReader { geometry in
@@ -18,9 +26,13 @@ struct FacingOverlay: View {
                 (orientation.trueHeadingDegrees ?? .nan) : 
                 orientation.fusedHeadingDegrees
             
-            // CW map-facing: device + offset  (offset is +CW / −CCW, so add to get correct direction)
-            let mapFacingCW = normalizeDegrees(deviceDeg + squareMetrics.northOffsetDeg)
-            // Use CW directly for SwiftUI (no negation needed):
+            // Convert current map rotation (radians, +CCW) to CW degrees for SwiftUI
+            let mapRotationDegCW = radiansCCW_to_degreesCW(mapTransform.totalRotationRadians)
+
+            // Display-facing angle (CW): device + calibrated north offset − current map rotation
+            let mapFacingCW = normalizeDegrees(deviceDeg + squareMetrics.northOffsetDeg - mapRotationDegCW)
+
+            // Use CW directly for SwiftUI (no negation needed)
             let renderDeg = mapFacingCW
             
             let facingGlyphImage = "facing-glyph"
@@ -76,5 +88,6 @@ struct FacingOverlay: View {
         FacingOverlay()
             .environmentObject(CompassOrientationManager())
             .environmentObject(SquareMetrics())
+            .environmentObject(MapTransformStore())
     }
 }

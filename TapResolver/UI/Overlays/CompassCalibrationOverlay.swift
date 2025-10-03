@@ -5,22 +5,34 @@
 
 import SwiftUI
 
+@inline(__always)
+private func radiansCCW_to_degreesCW(_ r: Double) -> Double {
+    // Map transform is typically +CCW (math). SwiftUI's rotationEffect uses +CW on screen.
+    return -(r * 180.0 / .pi)
+}
+
 /// Full-screen HUD for North calibration.
 /// Drag to rotate; lift finger to keep the angle.
 /// The current angle is bound to the parent (persisted by SquareMetrics).
 struct CompassCalibrationOverlay: View {
     @Binding var angleDeg: Double        // +CW / -CCW, 0° = up
     @GestureState private var isDragging: Bool = false
+    
+    @EnvironmentObject private var mapTransform: MapTransformStore
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 Color.black.opacity(0.25).ignoresSafeArea()
+                
+                // Display-only: compensate for the current map rotation so the widget keeps pointing to calibrated north
+                let mapRotationDegCW = radiansCCW_to_degreesCW(mapTransform.totalRotationRadians)
+                let displayDeg = angleDeg - mapRotationDegCW
 
                 CompassGraphic()
                     .frame(width: min(geo.size.width, geo.size.height) * 0.55,
                            height: min(geo.size.width, geo.size.height) * 0.55)
-                    .rotationEffect(.degrees(angleDeg))
+                    .rotationEffect(.degrees(displayDeg))
             }
             .contentShape(Rectangle())
             .gesture(
