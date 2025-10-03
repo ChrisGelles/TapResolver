@@ -28,16 +28,44 @@ final class SquareMetrics: ObservableObject {
         didSet { saveNorthOffset() }
     }
     
+    /// Display + logging fine-tune offset for facing (degrees CW; negative = CCW)
+    @Published var facingFineTuneDeg: Double = 0 {
+        didSet { saveFacingFineTune() }
+    }
+
+    // MARK: - Facing Fine-Tune Persistence
+    private func facingFineTuneKey(for locationID: String) -> String {
+        return "locations.\(locationID).mapMetrics.facingFineTuneDeg.v1"
+    }
+
+    private func reloadFacingFineTune() {
+        let loc = PersistenceContext.shared.locationID
+        let key = facingFineTuneKey(for: loc)
+        if UserDefaults.standard.object(forKey: key) != nil {
+            facingFineTuneDeg = UserDefaults.standard.double(forKey: key)
+        } else {
+            facingFineTuneDeg = 0
+        }
+    }
+
+    private func saveFacingFineTune() {
+        let loc = PersistenceContext.shared.locationID
+        let key = facingFineTuneKey(for: loc)
+        UserDefaults.standard.set(facingFineTuneDeg, forKey: key)
+    }
+    
     private var bag = Set<AnyCancellable>()
     
     init() {
-        // Load initial value for current location
+        // Load per-location values
         reloadNorthOffset()
+        reloadFacingFineTune()
         
         // Observe location changes so we reload per-location value
         NotificationCenter.default.publisher(for: .locationDidChange)
             .sink { [weak self] _ in
                 self?.reloadNorthOffset()
+                self?.reloadFacingFineTune()
             }
             .store(in: &bag)
     }

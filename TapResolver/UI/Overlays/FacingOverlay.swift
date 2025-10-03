@@ -26,11 +26,14 @@ struct FacingOverlay: View {
                 (orientation.trueHeadingDegrees ?? .nan) : 
                 orientation.fusedHeadingDegrees
             
-            // Convert current map rotation (radians, +CCW) to CW degrees for SwiftUI
+            // Convert map rotation (radians, +CCW) to CW degrees for SwiftUI
             let mapRotationDegCW = radiansCCW_to_degreesCW(mapTransform.totalRotationRadians)
 
-            // Display-facing angle (CW): device + calibrated north offset − current map rotation
-            let mapFacingCW = normalizeDegrees(deviceDeg + squareMetrics.northOffsetDeg - mapRotationDegCW)
+            // Include per-location fine-tune offset (CW degrees; negative = CCW)
+            let fineTuneDeg = squareMetrics.facingFineTuneDeg
+
+            // Display-facing angle (CW): device + calibrated north + fine-tune − map rotation
+            let mapFacingCW = normalizeDegrees(deviceDeg + squareMetrics.northOffsetDeg + fineTuneDeg - mapRotationDegCW)
 
             // Use CW directly for SwiftUI (no negation needed)
             let renderDeg = mapFacingCW

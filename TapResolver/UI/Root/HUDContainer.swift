@@ -139,6 +139,28 @@ struct HUDContainer: View {
                             set: { squareMetrics.setNorthOffset($0) }
                         )
                     )
+                    .allowsHitTesting(!hud.isCalibratingFacing)
+                    
+                    // When tools are enabled, show the user-facing calibration overlay on top.
+                    if hud.isCalibratingFacing {
+                        UserFacingCalibrationOverlay(
+                            facingFineTuneDeg: Binding(
+                                get: { squareMetrics.facingFineTuneDeg },
+                                set: { squareMetrics.facingFineTuneDeg = $0 }
+                            )
+                        )
+                        // Bottom-right degree readout
+                        .overlay(alignment: .bottomTrailing) {
+                            Text("\(Int(squareMetrics.facingFineTuneDeg))°")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                                .padding(.trailing, 20)
+                                .padding(.bottom, 24)
+                        }
+                    }
                 }
                 if hud.showFacingOverlay {
                     FacingOverlay()
@@ -146,8 +168,27 @@ struct HUDContainer: View {
             }
         )
         
-        // Bottom-left tools button shown only while calibrating north AND the Metric Square drawer is open
+        // Tools button appears only during North calibration
         .overlay(alignment: .bottomLeading) {
+            if hud.isCalibratingNorth {
+                Button {
+                    hud.isCalibratingFacing.toggle()
+                } label: {
+                    Image(systemName: "wrench.and.screwdriver.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(10)
+                        .background(Color.black.opacity(0.6), in: Circle())
+                }
+                .padding(.leading, 20)
+                .padding(.bottom, 24)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Calibration Tools")
+            }
+        }
+        
+        // Bottom-left tools button shown only while calibrating north AND the Metric Square drawer is open
+        /*.overlay(alignment: .bottomLeading) {
             if hud.isCalibratingNorth && hud.isSquareOpen {
                 CalibrationToolsButton {
                     print("🛠️ Calibration Tools tapped")
@@ -156,7 +197,7 @@ struct HUDContainer: View {
                 .padding(.bottom, 40)
                 .zIndex(350)
             }
-        }
+        }*/
 
         // Notifications for compass calibration mode
         .onReceive(NotificationCenter.default.publisher(for: .toggleNorthCalibration)) { _ in
@@ -184,134 +225,163 @@ struct HUDContainer: View {
     // MARK: - Bottom Buttons Cluster (MapPoint logging controls)
     private var bottomButtons: some View {
         VStack(spacing: 12) {
-            // Text field showing slider value
-            Text("\(Int(sliderValue))s")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white.opacity(0.8))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-                .frame(maxWidth: .infinity, alignment: .trailing)
-
-            HStack {
-                // Green plus button (left)
-                Button {
-                    guard mapTransform.mapSize != .zero else {
-                        print("⚠️ Map point add ignored: mapTransform not ready (mapSize == .zero)")
-                        return
-                    }
-                    let targetScreen = mapTransform.screenCenter
-                    let mapPoint = mapTransform.screenToMap(targetScreen)
-                    let success = mapPointStore.addPoint(at: mapPoint)
-                    if !success {
-                        print("⚠️ Cannot add map point: location already occupied")
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(width: 50, height: 50)
-                        .background(Color.green, in: RoundedRectangle(cornerRadius: 12))
-                }
-                .accessibilityLabel("Add map point at crosshair location")
-                .buttonStyle(.plain)
-
-                // Horizontal slider (center)
-                VStack(spacing: 4) {
-                    HStack {
-                        Text("3")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.white.opacity(0.8))
-                        Spacer()
-                        Text("20")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.white.opacity(0.8))
-                    }
-                    .padding(.horizontal, 8)
-
-                    CustomSlider(value: $sliderValue, range: 3...20, step: 1, thumbColor: .gray, filledTrackColor: .black, unfilledTrackColor: .black)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-
-                // Countdown display (if logging)
-                if beaconLogger.isLogging {
-                    Text("\(Int(beaconLogger.secondsRemaining))s")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.orange.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
-                }
-
-                // Blue Log Data button (right)
-                Button {
-                    guard let activePoint = mapPointStore.activePoint else {
-                        print("⚠️ No active map point selected")
-                        return
-                    }
-
-                    if beaconLogger.isLogging {
-                        // Stop current logging session
-                        if let session = beaconLogger.stopLogging() {
-                            print("📊 Session completed:")
-                            print("   Session ID: \(session.sessionID)")
-                            print("   Map Point: \(session.mapPointID)")
-                            print("   Coordinates: (\(Int(session.coordinates.x)), \(Int(session.coordinates.y)))")
-                            print("   Duration: \(Int(session.duration))s")
-                            print("   Interval: \(Int(session.interval))ms")
-                            print("   Beacons logged: \(session.obinsPerBeacon.count)")
-                            for (beaconName, stats) in session.statsPerBeacon {
-                                let medianText = stats.medianDbm != nil ? "\(stats.medianDbm!) dBm" : "insufficient data"
-                                print("   • \(beaconName): \(stats.samples) samples, median: \(medianText), \(String(format: "%.1f", stats.packetsPerSecond)) pkt/s")
-                            }
-                        }
-                    } else {
-                        // Start new logging session
-                        print("🔍 Starting beacon logging for point \(activePoint.id)")
-
-                        beaconLogger.startLogging(
-                            mapPointID: activePoint.id.uuidString,
-                            coordinates: (x: activePoint.mapPoint.x, y: activePoint.mapPoint.y),
-                            duration: sliderValue,
-                            intervalMs: 500, // 500ms between samples
-                            btScanner: btScanner,
-                            beaconLists: beaconLists,
-                            beaconDotStore: beaconDotStore
-                        )
-                    }
-                } label: {
-                    Text(beaconLogger.isLogging ? "Stop Logging" : "Log Data")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(beaconLogger.isLogging ? Color.red : Color.blue, in: RoundedRectangle(cornerRadius: 12))
-                }
-                .disabled(mapPointStore.activePoint == nil)
-                .accessibilityLabel(beaconLogger.isLogging ? "Stop logging session" : "Log data for current map point")
-                .buttonStyle(.plain)
-
-                // Export button for last scan record
-                if let record = scanUtility.lastScanRecord {
-                    Button("Export Last Scan JSON") {
-                        MapPointScanPersistence.saveRecord(record)
-                        didExport = true
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.green.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
-                    .alert("Exported", isPresented: $didExport) {
-                        Button("OK", role: .cancel) {}
-                    }
-                }
-            }
+            sliderValueDisplay
+            bottomButtonRow
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 40)
+    }
+    
+    private var sliderValueDisplay: some View {
+        Text("\(Int(sliderValue))s")
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundColor(.white.opacity(0.8))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+            .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+    
+    private var bottomButtonRow: some View {
+        HStack {
+            addMapPointButton
+            durationSlider
+            countdownDisplay
+            logDataButton
+            exportButton
+        }
+    }
+    
+    private var addMapPointButton: some View {
+        Button {
+            guard mapTransform.mapSize != .zero else {
+                print("⚠️ Map point add ignored: mapTransform not ready (mapSize == .zero)")
+                return
+            }
+            let targetScreen = mapTransform.screenCenter
+            let mapPoint = mapTransform.screenToMap(targetScreen)
+            let success = mapPointStore.addPoint(at: mapPoint)
+            if !success {
+                print("⚠️ Cannot add map point: location already occupied")
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 50, height: 50)
+                .background(Color.green, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .accessibilityLabel("Add map point at crosshair location")
+        .buttonStyle(.plain)
+    }
+    
+    private var durationSlider: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text("3")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.8))
+                Spacer()
+                Text("20")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            .padding(.horizontal, 8)
+
+            CustomSlider(value: $sliderValue, range: 3...20, step: 1, thumbColor: .gray, filledTrackColor: .black, unfilledTrackColor: .black)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+    }
+    
+    @ViewBuilder
+    private var countdownDisplay: some View {
+        if beaconLogger.isLogging {
+            Text("\(Int(beaconLogger.secondsRemaining))s")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.orange.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+    
+    private var logDataButton: some View {
+        Button {
+            handleLogDataButtonTap()
+        } label: {
+            Text(beaconLogger.isLogging ? "Stop Logging" : "Log Data")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(beaconLogger.isLogging ? Color.red : Color.blue, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .disabled(mapPointStore.activePoint == nil)
+        .accessibilityLabel(beaconLogger.isLogging ? "Stop logging session" : "Log data for current map point")
+        .buttonStyle(.plain)
+    }
+    
+    @ViewBuilder
+    private var exportButton: some View {
+        if let record = scanUtility.lastScanRecord {
+            Button("Export Last Scan JSON") {
+                MapPointScanPersistence.saveRecord(record)
+                didExport = true
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.green.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
+            .alert("Exported", isPresented: $didExport) {
+                Button("OK", role: .cancel) {}
+            }
+        }
+    }
+    
+    private func handleLogDataButtonTap() {
+        guard let activePoint = mapPointStore.activePoint else {
+            print("⚠️ No active map point selected")
+            return
+        }
+
+        if beaconLogger.isLogging {
+            handleStopLogging()
+        } else {
+            handleStartLogging(activePoint: activePoint)
+        }
+    }
+    
+    private func handleStopLogging() {
+        if let session = beaconLogger.stopLogging() {
+            print("📊 Session completed:")
+            print("   Session ID: \(session.sessionID)")
+            print("   Map Point: \(session.mapPointID)")
+            print("   Coordinates: (\(Int(session.coordinates.x)), \(Int(session.coordinates.y)))")
+            print("   Duration: \(Int(session.duration))s")
+            print("   Interval: \(Int(session.interval))ms")
+            print("   Beacons logged: \(session.obinsPerBeacon.count)")
+            for (beaconName, stats) in session.statsPerBeacon {
+                let medianText = stats.medianDbm != nil ? "\(stats.medianDbm!) dBm" : "insufficient data"
+                print("   • \(beaconName): \(stats.samples) samples, median: \(medianText), \(String(format: "%.1f", stats.packetsPerSecond)) pkt/s")
+            }
+        }
+    }
+    
+    private func handleStartLogging(activePoint: MapPointStore.MapPoint) {
+        print("🔍 Starting beacon logging for point \(activePoint.id)")
+
+        beaconLogger.startLogging(
+            mapPointID: activePoint.id.uuidString,
+            coordinates: (x: activePoint.mapPoint.x, y: activePoint.mapPoint.y),
+            duration: sliderValue,
+            intervalMs: 500, // 500ms between samples
+            btScanner: btScanner,
+            beaconLists: beaconLists,
+            beaconDotStore: beaconDotStore
+        )
     }
 }
 

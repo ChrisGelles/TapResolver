@@ -15,6 +15,9 @@ final class HUDPanelsState: ObservableObject {
     @Published var isMapPointOpen: Bool = false
     @Published var isCalibratingNorth: Bool = false
     @Published var showFacingOverlay: Bool = true
+    
+    /// When true, show the UserFacing calibration overlay (tools layer).
+    @Published var isCalibratingFacing: Bool = false
 
     func openBeacon() { isBeaconOpen = true; isSquareOpen = false; isMorgueOpen = false; isMapPointOpen = false }
     func openSquares() { isSquareOpen = true; isBeaconOpen = false; isMorgueOpen = false; isMapPointOpen = false }
