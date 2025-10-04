@@ -18,6 +18,7 @@ struct ContentView: View {
     @StateObject private var hudPanels     = HUDPanelsState()
     @StateObject private var locationManager = LocationManager()
     @StateObject private var mapPointStore = MapPointStore()
+    @StateObject private var transformProcessor = TransformProcessor()
 
     var body: some View {
         Group {
@@ -27,11 +28,16 @@ struct ContentView: View {
                 MapNavigationView()
             }
         }
+        .onAppear {
+            transformProcessor.bind(to: mapTransform)
+            transformProcessor.passThrough = true   // keep UX identical for now
+        }
         // Provide environments exactly as before + new locationManager
         .environmentObject(beaconDotStore)
         .environmentObject(hudPanels)
         .environmentObject(locationManager)
         .environmentObject(mapPointStore)
+        .environmentObject(transformProcessor)
     }
 }
 

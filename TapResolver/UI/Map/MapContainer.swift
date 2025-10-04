@@ -35,6 +35,7 @@ private struct MapCanvas: View {
     )
 
     @EnvironmentObject private var mapTransform: MapTransformStore
+    @EnvironmentObject private var transformProcessor: TransformProcessor
     @EnvironmentObject private var metricSquares: MetricSquareStore
 
     let uiImage: UIImage
@@ -99,11 +100,13 @@ private struct MapCanvas: View {
             mapTransform.totalRotationRadians = CGFloat(gestures.totalRotation.radians)
             mapTransform.totalOffset = gestures.totalOffset
 
-            // 🔧 Wire live updates from gestures -> transform store every frame
+            // 🔧 Wire live updates from gestures -> transform processor every frame
             gestures.onTotalsChanged = { scale, rotationRadians, offset in
-                mapTransform.totalScale = scale
-                mapTransform.totalRotationRadians = rotationRadians
-                mapTransform.totalOffset = offset
+                transformProcessor.enqueueCandidate(
+                    scale: scale,
+                    rotationRadians: rotationRadians,
+                    offset: offset
+                )
             }
             
             print("MapCanvas mapTransform:", ObjectIdentifier(mapTransform),
@@ -111,9 +114,9 @@ private struct MapCanvas: View {
         }
 
         // Apply transforms (scale → rotate → translate)
-        .scaleEffect(gestures.totalScale, anchor: .center)
-        .rotationEffect(gestures.totalRotation)
-        .offset(x: gestures.totalOffset.width, y: gestures.totalOffset.height)
+        .scaleEffect(mapTransform.totalScale, anchor: .center)
+        .rotationEffect(.radians(mapTransform.totalRotationRadians))
+        .offset(mapTransform.totalOffset)
 
         // Gestures; disable while a square is interacting
         .gesture(gestures.combinedGesture)
@@ -154,9 +157,11 @@ private struct MapCanvas: View {
     }
 
     private func pushTransformTotals() {
-        mapTransform.totalScale = gestures.totalScale
-        mapTransform.totalRotationRadians = CGFloat(gestures.totalRotation.radians)
-        mapTransform.totalOffset = gestures.totalOffset
+        transformProcessor.enqueueCandidate(
+            scale: gestures.totalScale,
+            rotationRadians: gestures.totalRotation.radians,
+            offset: gestures.totalOffset
+        )
     }
 }
 

@@ -12,6 +12,9 @@ import SwiftUI
 @MainActor
 final class TransformProcessor: ObservableObject {
 
+    // Pass-through mode to preserve current behavior (no throttling yet)
+    var passThrough: Bool = true
+
     // Weak-ish reference (not retaining cycles with SwiftUI),
     // bind from ContentView on appear.
     private var mapTransform: MapTransformStore?
@@ -39,6 +42,10 @@ final class TransformProcessor: ObservableObject {
     // Call once (e.g., ContentView.onAppear)
     func bind(to store: MapTransformStore) {
         self.mapTransform = store
+        // Optional: seed last/pending with current store values to avoid an initial jump
+        self.lastScale = store.totalScale
+        self.lastRotation = store.totalRotationRadians
+        self.lastOffset = store.totalOffset
     }
 
     // View metadata setters (route through processor so the view stays dumb)
@@ -52,6 +59,17 @@ final class TransformProcessor: ObservableObject {
 
     // Main entry from GestureHandler (call very frequently)
     func enqueueCandidate(scale: CGFloat, rotationRadians: Double, offset: CGSize) {
+        // Preserve today's behavior: update the store immediately.
+        if passThrough, let mapTransform = mapTransform {
+            mapTransform.totalScale = scale
+            mapTransform.totalRotationRadians = rotationRadians
+            mapTransform.totalOffset = offset
+            lastScale = scale
+            lastRotation = rotationRadians
+            lastOffset = offset
+            return
+        }
+        
         pendingScale = scale
         pendingRotation = rotationRadians
         pendingOffset = offset
