@@ -36,7 +36,7 @@ struct CrosshairHUDOverlay: View {
                 }
                 .stroke(Color.black, lineWidth: 1)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)

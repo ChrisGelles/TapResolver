@@ -29,6 +29,7 @@ final class BluetoothScanner: NSObject, ObservableObject {
     // MARK: - Scan utility references (set by app)
     weak var scanUtility: MapPointScanUtility?
     weak var simpleLogger: SimpleBeaconLogger?   // ← NEW
+    var onDeviceNameDiscovered: ((_ name: String, _ id: UUID) -> Void)?
 
     // MARK: - Setup
     override init() {
@@ -111,7 +112,7 @@ final class BluetoothScanner: NSObject, ObservableObject {
 }
 
 // MARK: - CBCentralManagerDelegate
-extension BluetoothScanner: CBCentralManagerDelegate {
+extension BluetoothScanner: @preconcurrency CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
@@ -147,6 +148,7 @@ extension BluetoothScanner: CBCentralManagerDelegate {
         let rssi = RSSI.intValue
         let txPower = (advertisementData[CBAdvertisementDataTxPowerLevelKey] as? NSNumber)?.intValue
         let summary = summarize(advertisementData)
+        onDeviceNameDiscovered?(name, id)
 
         if let idx = deviceIndex[id] {
             devices[idx].name = name
@@ -175,15 +177,6 @@ extension BluetoothScanner: CBCentralManagerDelegate {
             txPowerDbm: txPower,
             timestamp: CFAbsoluteTimeGetCurrent()
         )
-        
-        if simpleLogger?.isLogging == true {
-            simpleLogger?.ingest(
-                beaconID: name,
-                rssiDbm: rssi,
-                txPowerDbm: txPower,
-                timestamp: CFAbsoluteTimeGetCurrent()
-            )
-        }
 
         if verboseLogging {
             // Comment this out entirely to eliminate update spam:

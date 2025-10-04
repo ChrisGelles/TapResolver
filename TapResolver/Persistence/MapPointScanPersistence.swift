@@ -9,7 +9,7 @@ import Foundation
 
 enum MapPointScanPersistence {
     private static let _ctx = PersistenceContext.shared
-    static func saveRecord(_ record: MapPointScanUtility.ScanRecord) {
+    static func saveRecord(_ record: MapPointScanUtility.ScanRecord) -> URL? {
         do {
             let enc = JSONEncoder()
             enc.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -26,8 +26,10 @@ enum MapPointScanPersistence {
             let data = try enc.encode(record)
             try data.write(to: url, options: .atomic)
             print("💾 Saved scan record to \(url.path)")
+            return url
         } catch {
             print("❌ Failed to save scan record: \(error)")
+            return nil
         }
     }
 }

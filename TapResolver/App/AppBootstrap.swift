@@ -29,6 +29,9 @@ struct AppBootstrap: ViewModifier {
 
                 createLocationStubIfNeeded()
                 scanner.scanUtility = scanUtility
+                scanner.onDeviceNameDiscovered = { name, id in
+                    lists.ingest(deviceName: name, id: id)
+                }
                 configureScanUtilityClosures()
             }
     }

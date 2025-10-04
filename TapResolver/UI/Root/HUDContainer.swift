@@ -40,6 +40,9 @@ struct HUDContainer: View {
 
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
     @State private var didExport = false
+    @State private var showFilesPicker = false
+    @State private var lastExportURL: URL? = nil
+
     @State private var selectedBeaconForTxPower: String? = nil
 
     var body: some View {
@@ -327,14 +330,29 @@ struct HUDContainer: View {
     private var exportButton: some View {
         if let record = scanUtility.lastScanRecord {
             Button("Export Last Scan JSON") {
-                MapPointScanPersistence.saveRecord(record)
-                didExport = true
+                if let url = MapPointScanPersistence.saveRecord(record) {
+                    lastExportURL = url
+                    showFilesPicker = true
+                } else {
+                    didExport = false
+                }
             }
             .font(.system(size: 12, weight: .medium))
             .foregroundColor(.white)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(Color.green.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
+            .sheet(isPresented: $showFilesPicker) {
+                Group {
+                    if let url = lastExportURL {
+                        DocumentExportPicker(fileURL: url) { success in
+                            didExport = success
+                        }
+                    } else {
+                        EmptyView()
+                    }
+                }
+            }
             .alert("Exported", isPresented: $didExport) {
                 Button("OK", role: .cancel) {}
             }
@@ -380,7 +398,8 @@ struct HUDContainer: View {
             intervalMs: 500, // 500ms between samples
             btScanner: btScanner,
             beaconLists: beaconLists,
-            beaconDotStore: beaconDotStore
+            beaconDotStore: beaconDotStore,
+            scanUtility: scanUtility
         )
     }
 }

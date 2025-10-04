@@ -23,11 +23,14 @@ struct MapNavigationView: View {
                 MapContainer(mapImage: mapUIImage)
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
                     .onAppear {
-                        mapTransform.screenCenter = CGPoint(x: geo.size.width/2, y: geo.size.height/2)
+                        let bounds = UIScreen.main.bounds
+                        mapTransform.screenCenter = CGPoint(x: bounds.midX, y: bounds.midY)
                         switchToLocation(locationManager.currentLocationID)
                     }
-                    .onChange(of: geo.size) { newSize in
-                        mapTransform.screenCenter = CGPoint(x: newSize.width/2, y: newSize.height/2)
+                    .onChange(of: geo.size) {
+                        // Re-read full-screen bounds to keep center in visual middle (not safe-area middle)
+                        let bounds = UIScreen.main.bounds
+                        mapTransform.screenCenter = CGPoint(x: bounds.midX, y: bounds.midY)
                     }
 
                 HUDContainer()

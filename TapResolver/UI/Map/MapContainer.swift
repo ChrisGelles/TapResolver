@@ -144,10 +144,10 @@ private struct MapCanvas: View {
                 mapTransform.mapSize = mapSize
                 pushTransformTotals()
             }
-            .onChange(of: gestures.totalScale)   { _ in pushTransformTotals() }
-            .onChange(of: gestures.totalRotation){ _ in pushTransformTotals() }
-            .onChange(of: gestures.totalOffset)  { _ in pushTransformTotals() }
-            .onChange(of: mapSize)               { _ in
+            .onChange(of: gestures.totalScale)   {  pushTransformTotals() }
+            .onChange(of: gestures.totalRotation){  pushTransformTotals() }
+            .onChange(of: gestures.totalOffset)  {  pushTransformTotals() }
+            .onChange(of: mapSize)               {
                 mapTransform.mapSize = mapSize
                 pushTransformTotals()
             }

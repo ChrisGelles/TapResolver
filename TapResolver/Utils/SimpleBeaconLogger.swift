@@ -129,17 +129,6 @@ final class SimpleBeaconLogger: ObservableObject {
     
     // MARK: - Public Interface
     
-    func ingest(beaconID: String, rssiDbm: Int, txPowerDbm: Int?, timestamp: TimeInterval) {
-        guard isLogging else { return }
-        
-        // Filter to only beacons in the Beacon Drawer (exclude morgue devices)
-        guard let beaconLists = beaconLists,
-              beaconLists.beacons.contains(beaconID) else { return }
-        
-        var b = obins[beaconID] ?? Obin()
-        b.add(rssiDbm)
-        obins[beaconID] = b
-    }
     
     /// Start logging beacon data for a map point
     func startLogging(
@@ -149,7 +138,8 @@ final class SimpleBeaconLogger: ObservableObject {
         intervalMs: TimeInterval,
         btScanner: BluetoothScanner,
         beaconLists: BeaconListsStore,
-        beaconDotStore: BeaconDotStore
+        beaconDotStore: BeaconDotStore,
+        scanUtility: MapPointScanUtility
     ) {
         guard !isLogging else { return }
         
@@ -180,8 +170,14 @@ final class SimpleBeaconLogger: ObservableObject {
         self._userHeightM = 1.05 // Default user height assumption
         self._mode = nil // Optional mode
         
-        // Attach per-ad ingest
-        btScanner.simpleLogger = self
+        scanUtility.startScan(
+            pointID: mapPointID,
+            mapX_m: coordinates.x,
+            mapY_m: coordinates.y,
+            userHeight_m: _userHeightM ?? 1.05,
+            sessionID: sessionID,
+            durationSeconds: duration
+        )
         
         print("🔍 Started beacon logging session: \(sessionID)")
         print("   Map Point: \(mapPointID) at (\(Int(coordinates.x)), \(Int(coordinates.y)))")
@@ -195,8 +191,53 @@ final class SimpleBeaconLogger: ObservableObject {
         // Start countdown timer
         startCountdownTimer()
         
-        // Start RSSI collection timer
-        startRSSICollectionTimer()
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.05) { [weak self] in
+            guard let self = self, let record = scanUtility.lastScanRecord else { return }
+            // Build BeaconLogSession compatible payload from ScanUtility aggregates:
+            let startTime = ISO8601DateFormatter().date(from: record.timingStartISO) ?? Date()
+            let endTime   = ISO8601DateFormatter().date(from: record.timingEndISO) ?? Date()
+
+            var obinArrays: [String: [Int]] = [:]
+            var stats: [String: BeaconStats] = [:]
+
+            for agg in record.beacons {
+                let name = agg.beacon.name ?? agg.beacon.beaconID
+                obinArrays[name] = agg.obin.counts
+                let samples = agg.samples
+                let dur = max(record.duration_s, 0.001)
+                let pps = Double(samples) / dur
+                let s = BeaconStats(
+                    samples: samples,
+                    packetsPerSecond: pps,
+                    medianDbm: agg.medianDbm,
+                    p10Dbm: agg.p10Dbm,
+                    p90Dbm: agg.p90Dbm,
+                    madDb: agg.madDb
+                )
+                stats[name] = s
+            }
+
+            let session = BeaconLogSession(
+                sessionID: self.sessionID,
+                duration: record.duration_s,
+                mapPointID: record.point.pointID,
+                coordinatesX: record.point.mapX_m,
+                coordinatesY: record.point.mapY_m,
+                interval: self.interval * 1000.0,
+                startTime: startTime,
+                endTime: endTime,
+                obinsPerBeacon: obinArrays,
+                statsPerBeacon: stats,
+                deviceModel: self._deviceModel,
+                osVersion: self._osVersion,
+                appVersion: self._appVersion,
+                userHeight_m: self._userHeightM,
+                mode: self._mode
+            )
+            self.lastSession = session
+            ScanPersistence.saveSession(session)
+            self.isLogging = false
+        }
     }
     
     /// Stop logging and return the session data
@@ -294,35 +335,4 @@ final class SimpleBeaconLogger: ObservableObject {
         }
     }
     
-    private func startRSSICollectionTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.collectRSSIData()
-            }
-        }
-        
-        // Collect first sample immediately
-        collectRSSIData()
-    }
-    
-    private func collectRSSIData() {
-        guard let btScanner = btScanner,
-              let beaconLists = beaconLists,
-              let beaconDotStore = beaconDotStore else { return }
-        
-        // Get beacons that are both listed and have dots on the map (same logic as RSSI labels)
-        let activeBeacons = beaconLists.beacons.filter { beaconName in
-            beaconDotStore.dots.contains { $0.beaconID == beaconName }
-        }
-        
-        // Debug output only (per-advertisement path is now the source of truth)
-        for beaconName in activeBeacons {
-            if let device = btScanner.devices.first(where: { $0.name == beaconName }) {
-                // Debug output for first few samples
-                if let count = obins[beaconName]?.total, count <= 3 {
-                    print("📡 Collected RSSI: \(beaconName) = \(device.rssi) dBm (sample \(count))")
-                }
-            }
-        }
-    }
 }

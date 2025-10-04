@@ -43,27 +43,19 @@ struct FacingOverlay: View {
             if deviceDeg.isFinite {
                 ZStack {
                     // Centered container
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            
-                            // Facing glyph
-                            Image(facingGlyphImage)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: glyphSize(geometry), height: glyphSize(geometry))
-                                .rotationEffect(.degrees(renderDeg))
-                                .foregroundStyle(Color.cyan)
-                                .allowsHitTesting(false)
-                            
-                            Spacer()
-                        }
-                        Spacer()
-                    }
+                    // Facing glyph (explicitly placed at exact screen center)
+                    Image(facingGlyphImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: glyphSize(geometry), height: glyphSize(geometry))
+                        .rotationEffect(.degrees(renderDeg))
+                        .foregroundStyle(Color.cyan)
+                        .allowsHitTesting(false)
+                        .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
                 }
             }
         }
+        .ignoresSafeArea()
     }
     
     // MARK: - Helper Functions
