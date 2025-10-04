@@ -59,14 +59,13 @@ final class TransformProcessor: ObservableObject {
 
     // Main entry from GestureHandler (call very frequently)
     func enqueueCandidate(scale: CGFloat, rotationRadians: Double, offset: CGSize) {
-        // Preserve today's behavior: update the store immediately.
-        if passThrough, let mapTransform = mapTransform {
-            mapTransform.totalScale = scale
-            mapTransform.totalRotationRadians = rotationRadians
-            mapTransform.totalOffset = offset
-            lastScale = scale
-            lastRotation = rotationRadians
-            lastOffset = offset
+        // REPLACE the immediate write with a deferred commit:
+        if passThrough {
+            // Coalesce to next runloop tick (avoids "publish during view update")
+            pendingScale = scale
+            pendingRotation = rotationRadians
+            pendingOffset = offset
+            schedulePushIfNeeded()
             return
         }
         
