@@ -117,6 +117,12 @@ private struct MapCanvas: View {
         .rotationEffect(.radians(mapTransform.totalRotationRadians))
         .offset(mapTransform.totalOffset)
 
+        .overlay(
+            PinchRotateCentroidBridge { _ in
+                // NOP: do nothing for now
+            }
+            .ignoresSafeArea()
+        )
         // Gestures; disable while a square is interacting
         .gesture(gestures.combinedGesture)
         //.disabled(metricSquares.isInteracting)
@@ -134,7 +140,9 @@ private struct MapCanvas: View {
             print("Tapped MapContainer @ X:\(Int(location.x)) Y:\(Int(location.y))  " +
                   "(map size: \(Int(mapSize.width))x\(Int(mapSize.height)))")
         }
-        .drawingGroup()
+       // .drawingGroup()
+        // REMOVE this .drawingGroup() for now; it conflicts with the UIViewRepresentable overlay.
+
         .allowsHitTesting(true)
     }
 
