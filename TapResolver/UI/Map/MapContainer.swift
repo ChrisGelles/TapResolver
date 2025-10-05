@@ -96,11 +96,8 @@ private struct MapCanvas: View {
         .onAppear {
             // Eagerly initialize the transform store so drawers can convert immediately.
             transformProcessor.setMapSize(mapSize)
-            transformProcessor.enqueueCandidate(
-                scale: gestures.totalScale,
-                rotationRadians: Double(gestures.totalRotation.radians),
-                offset: gestures.totalOffset
-            )
+            // REPLACE the three direct assignments with a single push:
+            pushTransformTotals()
 
             // 🔧 Wire live updates from gestures -> transform processor every frame
             gestures.onTotalsChanged = { scale, rotationRadians, offset in
