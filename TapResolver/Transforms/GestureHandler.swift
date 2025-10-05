@@ -76,6 +76,10 @@ final class MapGestureHandler: ObservableObject {
             .simultaneously(with: rotateGesture())
     }
 
+    var panOnlyGesture: some Gesture {
+        panGesture()
+    }
+
     private func panGesture() -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { [weak self] value in

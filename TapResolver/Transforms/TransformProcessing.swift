@@ -12,6 +12,68 @@ import SwiftUI
 @MainActor
 final class TransformProcessor: ObservableObject {
 
+    enum PinchPhase { case began, changed, ended, cancelled }
+    @Published var useAnchorPreservingPivot: Bool = true
+
+    // Fixed at gesture start; do not change mid-gesture
+    private var fixedAnchorScreen: CGPoint?
+    private var fixedAnchorMap: CGPoint?
+    private var originScale: CGFloat = 1
+    private var originRotation: Double = 0
+    private var originOffset: CGSize = .zero
+
+    @MainActor
+    func handlePinchRotate(
+        phase: PinchPhase,
+        scaleFromStart ds: CGFloat,
+        rotationFromStart dθ: CGFloat,
+        centroidInScreen a_scr: CGPoint
+    ) {
+        guard let store = mapTransform else { return }
+        let Cscreen = store.screenCenter
+        let Cmap    = CGPoint(x: store.mapSize.width/2, y: store.mapSize.height/2)
+
+        switch phase {
+        case .began:
+            originScale    = store.totalScale
+            originRotation = store.totalRotationRadians
+            originOffset   = store.totalOffset
+            fixedAnchorScreen = a_scr
+
+            // Map anchor under the finger at start (invert transform once)
+            let dx = a_scr.x - Cscreen.x - originOffset.width
+            let dy = a_scr.y - Cscreen.y - originOffset.height
+            let c0 = cos(-originRotation), s0 = sin(-originRotation)
+            let rx = c0*dx - s0*dy
+            let ry = s0*dx + c0*dy
+            fixedAnchorMap = CGPoint(
+                x: Cmap.x + rx / max(originScale, 0.0001),
+                y: Cmap.y + ry / max(originScale, 0.0001)
+            )
+
+        case .changed:
+            guard let a_map0 = fixedAnchorMap, let a_scr0 = fixedAnchorScreen else { return }
+            // New cumulative totals
+            let s1  = originScale * max(ds, 0.0001)
+            let th1 = originRotation + Double(dθ)
+
+            // Keep the same map point under the same screen point captured at .began
+            let ax = a_map0.x - Cmap.x, ay = a_map0.y - Cmap.y
+            let c1 = cos(th1), s1r = sin(th1)
+            let rx = c1 * (s1 * ax) - s1r * (s1 * ay)
+            let ry = s1r * (s1 * ax) + c1  * (s1 * ay)
+            let t1 = CGSize(width: a_scr0.x - Cscreen.x - rx,
+                            height: a_scr0.y - Cscreen.y - ry)
+
+            // Defer publish (uses your existing coalescer)
+            enqueueCandidate(scale: s1, rotationRadians: th1, offset: t1)
+
+        case .ended, .cancelled:
+            fixedAnchorScreen = nil
+            fixedAnchorMap = nil
+        }
+    }
+
     // Pass-through mode to preserve current behavior (no throttling yet)
     var passThrough: Bool = true
 
