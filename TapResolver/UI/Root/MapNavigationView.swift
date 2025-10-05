@@ -13,6 +13,7 @@ struct MapNavigationView: View {
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var scanUtility: MapPointScanUtility
+    @EnvironmentObject private var transformProcessor: TransformProcessor
     
     @State private var mapUIImage: UIImage?
     @State private var overlaysReady = false
@@ -24,13 +25,13 @@ struct MapNavigationView: View {
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
                     .onAppear {
                         let bounds = UIScreen.main.bounds
-                        mapTransform.screenCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+                        transformProcessor.setScreenCenter(CGPoint(x: bounds.midX, y: bounds.midY))
                         switchToLocation(locationManager.currentLocationID)
                     }
-                    .onChange(of: geo.size) {
+                    .onChange(of: geo.size) { _ in
                         // Re-read full-screen bounds to keep center in visual middle (not safe-area middle)
                         let bounds = UIScreen.main.bounds
-                        mapTransform.screenCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+                        transformProcessor.setScreenCenter(CGPoint(x: bounds.midX, y: bounds.midY))
                     }
 
                 HUDContainer()

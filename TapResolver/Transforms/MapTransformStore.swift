@@ -10,13 +10,31 @@ import CoreGraphics
 
 // MARK: - Map transform publisher (for screen <-> map conversions)
 public final class MapTransformStore: ObservableObject {
-    @Published public var screenCenter: CGPoint = .zero
-    @Published public var totalScale: CGFloat = 1.0
-    @Published public var totalRotationRadians: CGFloat = 0.0
-    @Published public var totalOffset: CGSize = .zero
-    @Published public var mapSize: CGSize = .zero
+    @Published public private(set) var screenCenter: CGPoint = .zero
+    @Published public private(set) var totalScale: CGFloat = 1.0
+    @Published public private(set) var totalRotationRadians: CGFloat = 0.0
+    @Published public private(set) var totalOffset: CGSize = .zero
+    @Published public private(set) var mapSize: CGSize = .zero
 
     public init() {}
+
+    // MARK: - Internal setters (only TransformProcessor should use these)
+    @MainActor
+    internal func _setTotals(scale: CGFloat, rotationRadians: Double, offset: CGSize) {
+        totalScale = scale
+        totalRotationRadians = CGFloat(rotationRadians)
+        totalOffset = offset
+    }
+
+    @MainActor
+    internal func _setMapSize(_ size: CGSize) {
+        mapSize = size
+    }
+
+    @MainActor
+    internal func _setScreenCenter(_ point: CGPoint) {
+        screenCenter = point
+    }
 
     /// Convert GLOBAL (screen) point to MAP-LOCAL point
     public func screenToMap(_ G: CGPoint) -> CGPoint {

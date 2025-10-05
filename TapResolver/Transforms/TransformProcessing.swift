@@ -50,14 +50,19 @@ final class TransformProcessor: ObservableObject {
 
     // View metadata setters (route through processor so the view stays dumb)
     func setMapSize(_ size: CGSize) {
+        // REPLACE direct write with guard + deferred helper:
+        guard let store = mapTransform else { return }
+        if store.mapSize == size { return }
         DispatchQueue.main.async { [weak self] in
-            self?.mapTransform?.mapSize = size
+            self?.mapTransform?._setMapSize(size)
         }
     }
 
     func setScreenCenter(_ point: CGPoint) {
+        guard let store = mapTransform else { return }
+        if store.screenCenter == point { return }
         DispatchQueue.main.async { [weak self] in
-            self?.mapTransform?.screenCenter = point
+            self?.mapTransform?._setScreenCenter(point)
         }
     }
 
@@ -101,9 +106,10 @@ final class TransformProcessor: ObservableObject {
 
         guard scaleChanged || rotChanged || offChanged else { return }
 
-        store.totalScale = pendingScale
-        store.totalRotationRadians = pendingRotation
-        store.totalOffset = pendingOffset
+        // REPLACE the three direct assignments with this single call:
+        store._setTotals(scale: pendingScale,
+                         rotationRadians: pendingRotation,
+                         offset: pendingOffset)
 
         lastScale = pendingScale
         lastRotation = pendingRotation

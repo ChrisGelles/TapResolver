@@ -95,10 +95,12 @@ private struct MapCanvas: View {
 
         .onAppear {
             // Eagerly initialize the transform store so drawers can convert immediately.
-            mapTransform.mapSize = mapSize
-            mapTransform.totalScale = gestures.totalScale
-            mapTransform.totalRotationRadians = CGFloat(gestures.totalRotation.radians)
-            mapTransform.totalOffset = gestures.totalOffset
+            transformProcessor.setMapSize(mapSize)
+            transformProcessor.enqueueCandidate(
+                scale: gestures.totalScale,
+                rotationRadians: Double(gestures.totalRotation.radians),
+                offset: gestures.totalOffset
+            )
 
             // 🔧 Wire live updates from gestures -> transform processor every frame
             gestures.onTotalsChanged = { scale, rotationRadians, offset in
@@ -144,14 +146,14 @@ private struct MapCanvas: View {
     private func syncTransformStore(mapSize: CGSize) -> some View {
         Color.clear
             .onAppear {
-                mapTransform.mapSize = mapSize
+                transformProcessor.setMapSize(mapSize)
                 pushTransformTotals()
             }
             .onChange(of: gestures.totalScale)   {  pushTransformTotals() }
             .onChange(of: gestures.totalRotation){  pushTransformTotals() }
             .onChange(of: gestures.totalOffset)  {  pushTransformTotals() }
             .onChange(of: mapSize)               {
-                mapTransform.mapSize = mapSize
+                transformProcessor.setMapSize(mapSize)
                 pushTransformTotals()
             }
     }
