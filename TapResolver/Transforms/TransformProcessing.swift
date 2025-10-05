@@ -50,11 +50,15 @@ final class TransformProcessor: ObservableObject {
 
     // View metadata setters (route through processor so the view stays dumb)
     func setMapSize(_ size: CGSize) {
-        mapTransform?.mapSize = size
+        DispatchQueue.main.async { [weak self] in
+            self?.mapTransform?.mapSize = size
+        }
     }
 
     func setScreenCenter(_ point: CGPoint) {
-        mapTransform?.screenCenter = point
+        DispatchQueue.main.async { [weak self] in
+            self?.mapTransform?.screenCenter = point
+        }
     }
 
     // Main entry from GestureHandler (call very frequently)
