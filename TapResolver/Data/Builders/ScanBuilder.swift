@@ -21,12 +21,12 @@ enum ScanBuilder {
         let timing = ScanRecordV1.Timing(
             startISO: JSONKit.iso8601.string(from: start),
             endISO: JSONKit.iso8601.string(from: end),
-            duration_s: duration
+            duration_s: Rounding.d(duration, 3)  // 3 decimals
         )
         let user = ScanRecordV1.UserPose(deviceHeight_m: deviceHeight_m, facing_deg: facing_deg)
         let point = ScanRecordV1.Point(
-            xy_px: [Double(point_xy_px.x), Double(point_xy_px.y)],
-            xy_m: point_xy_m.map { [Double($0.x), Double($0.y)] }
+            xy_px: Rounding.arr2(point_xy_px, 2),                  // 2 decimals in px
+            xy_m: point_xy_m.map { Rounding.arr2(Double($0.x), Double($0.y), 2) } // 2 decimals in m
         )
         let transform = mapResolution_px.map { r in
             ScanRecordV1.TransformSnap(mapAssetResolution_px: [Int(r.width), Int(r.height)])
@@ -42,11 +42,18 @@ enum ScanBuilder {
             var dist: ScanRecordV1.BeaconObs.Distances? = nil
             if let geo = beaconGeo[b.beaconID],
                let ppm = pixelsPerMeter {
-                let planar_px = DistanceKit.planarPx(from: point_xy_px, to: geo.posPx)
-                let planar_m  = planar_px / ppm
+                let planar_px_raw = DistanceKit.planarPx(from: point_xy_px, to: geo.posPx)
+                let planar_m_raw  = planar_px_raw / ppm
                 let dz_m = (geo.elevation_m ?? 0) - (deviceHeight_m ?? 0) // user height as receiver Z
-                let xyz_px = DistanceKit.xyzPx(planar_px: planar_px, dz_m: dz_m, ppm: ppm)
-                let xyz_m  = DistanceKit.xyzM(planar_m: planar_m, dz_m: dz_m)
+                let xyz_px_raw = DistanceKit.xyzPx(planar_px: planar_px_raw, dz_m: dz_m, ppm: ppm)
+                let xyz_m_raw  = DistanceKit.xyzM(planar_m: planar_m_raw, dz_m: dz_m)
+                
+                // Round to 2 decimals
+                let planar_px = Rounding.d(planar_px_raw, 2)
+                let planar_m  = Rounding.d(planar_m_raw, 2)
+                let xyz_px = Rounding.d(xyz_px_raw, 2)
+                let xyz_m  = Rounding.d(xyz_m_raw, 2)
+                
                 dist = .init(xyMapD_px: planar_px,
                              xyMapD_m:  planar_m,
                              xyzMapD_px: xyz_px,
