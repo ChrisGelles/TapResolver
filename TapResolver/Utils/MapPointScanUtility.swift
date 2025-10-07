@@ -34,6 +34,9 @@ public final class MapPointScanUtility: ObservableObject {
     /// Resolve static meta for a known beacon ID (position/elevation/tx/name) from BeaconDotStore.
     /// Return nil for unknown beacons (will still be logged with minimal meta).
     public var resolveBeaconMeta: (_ beaconID: String) -> BeaconMeta?
+    
+    /// Get pixels per meter ratio from MetricSquareStore
+    public var getPixelsPerMeter: () -> Double?
 
     // MARK: - Published runtime state (observe from UI & Persistence)
 
@@ -263,10 +266,12 @@ public final class MapPointScanUtility: ObservableObject {
 
     public init(
         isExcluded: @escaping (_ beaconID: String, _ name: String?) -> Bool,
-        resolveBeaconMeta: @escaping (_ beaconID: String) -> BeaconMeta?
+        resolveBeaconMeta: @escaping (_ beaconID: String) -> BeaconMeta?,
+        getPixelsPerMeter: @escaping () -> Double?
     ) {
         self.isExcluded = isExcluded
         self.resolveBeaconMeta = resolveBeaconMeta
+        self.getPixelsPerMeter = getPixelsPerMeter
     }
 
     // MARK: - API
@@ -381,6 +386,9 @@ public final class MapPointScanUtility: ObservableObject {
         )
         lastScanRecord = record
 
+        // Save using new V1 persistence format
+        saveScanRecordV1(record: record, start: start, end: end)
+
         // DEBUG: Print scan results to console
         if verboseDebug {
             print("🔍 SCAN COMPLETE:")
@@ -441,6 +449,62 @@ public final class MapPointScanUtility: ObservableObject {
                 lastUpdateISO: nowISO
             )
             runningAggregates[key] = agg
+        }
+    }
+    
+    // MARK: - V1 Persistence Integration
+    
+    private func saveScanRecordV1(record: ScanRecord, start: Date, end: Date) {
+        do {
+            let locationID = PersistenceContext.shared.locationID
+            
+            // Get pixels per meter from MetricSquareStore
+            let pixelsPerMeter = getPixelsPerMeter()
+            
+            // Build beacon geometry lookup from existing beacon metadata
+            let beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?)] = 
+                Dictionary(uniqueKeysWithValues: record.beacons.compactMap { agg in
+                    // Use the beacon metadata that was resolved during scanning
+                    guard let posX = agg.beacon.posX_m, let posY = agg.beacon.posY_m else { return nil }
+                    return (agg.beacon.beaconID, (CGPoint(x: posX, y: posY), agg.beacon.posZ_m))
+                })
+            
+            // Convert existing ScanRecord to V1 format
+            let beaconStatsTuples: [(beaconID: String, median: Int, mad: Int, p10: Int, p90: Int, samples: Int, hist: (min:Int, max:Int, size:Int, counts:[Int])?)] = record.beacons.map { agg in
+                let median = agg.medianDbm ?? -999
+                let mad = Int(agg.madDb ?? 0)
+                let p10 = agg.p10Dbm ?? -999
+                let p90 = agg.p90Dbm ?? -999
+                let samples = agg.samples
+                let hist = (min: agg.obin.binMinDbm, max: agg.obin.binMaxDbm, size: agg.obin.binSizeDb, counts: agg.obin.counts)
+                
+                return (beaconID: agg.beacon.beaconID, median: median, mad: mad, p10: p10, p90: p90, samples: samples, hist: hist)
+            }
+            
+            // For now, use a dummy point position since we don't have the actual map point pixel coordinates
+            // TODO: Get actual map point pixel coordinates from MapTransformStore
+            let pointXY_px = CGPoint(x: 0, y: 0) // This should be the actual map point pixel position
+            
+            let scanDTO = ScanBuilder.makeScan(
+                scanID: record.scanID,
+                locationID: locationID,
+                pointID: record.point.pointID,
+                sessionID: record.point.sessionID,
+                start: start, end: end, duration: record.duration_s,
+                deviceHeight_m: record.point.userHeight_m,
+                facing_deg: nil, // Not available in current format
+                point_xy_px: pointXY_px,
+                point_xy_m: CGPoint(x: record.point.mapX_m, y: record.point.mapY_m),
+                mapResolution_px: nil, // Not available in current format
+                pixelsPerMeter: pixelsPerMeter,
+                beaconGeo: beaconGeo,
+                beacons: beaconStatsTuples
+            )
+            
+            let _ = try PersistenceService.writeScan(scanDTO, at: end)
+            print("💾 Saved scan record V1 to Application Support with distances: \(beaconGeo.count) beacons")
+        } catch {
+            print("❌ Failed to save scan record V1: \(error)")
         }
     }
 }

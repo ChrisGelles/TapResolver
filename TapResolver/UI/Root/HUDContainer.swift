@@ -28,6 +28,7 @@ extension Color {
 
 struct HUDContainer: View {
     @EnvironmentObject private var beaconDotStore: BeaconDotStore
+    @EnvironmentObject private var metricSquares: MetricSquareStore
     @EnvironmentObject private var squareMetrics: SquareMetrics
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var mapTransform: MapTransformStore
@@ -328,34 +329,42 @@ struct HUDContainer: View {
     
     @ViewBuilder
     private var exportButton: some View {
-        if let record = scanUtility.lastScanRecord {
-            Button("Export Last Scan JSON") {
-                if let url = MapPointScanPersistence.saveRecord(record) {
-                    lastExportURL = url
-                    showFilesPicker = true
-                } else {
-                    didExport = false
+        HStack(spacing: 8) {
+            if let record = scanUtility.lastScanRecord {
+                Button("Export Last Scan") {
+                    exportLastScanV1(record: record)
                 }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.green.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
             }
-            .font(.system(size: 12, weight: .medium))
-            .foregroundColor(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color.green.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
-            .sheet(isPresented: $showFilesPicker) {
-                Group {
-                    if let url = lastExportURL {
-                        DocumentExportPicker(fileURL: url) { success in
-                            didExport = success
-                        }
-                    } else {
-                        EmptyView()
+            
+            if let activePoint = mapPointStore.activePoint {
+                Button("Export All Scans") {
+                    exportAllScansForPoint(activePoint: activePoint)
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.blue.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
+        .sheet(isPresented: $showFilesPicker) {
+            Group {
+                if let url = lastExportURL {
+                    DocumentExportPicker(fileURL: url) { success in
+                        didExport = success
                     }
+                } else {
+                    EmptyView()
                 }
             }
-            .alert("Exported", isPresented: $didExport) {
-                Button("OK", role: .cancel) {}
-            }
+        }
+        .alert("Exported", isPresented: $didExport) {
+            Button("OK", role: .cancel) {}
         }
     }
     
@@ -401,6 +410,101 @@ struct HUDContainer: View {
             beaconDotStore: beaconDotStore,
             scanUtility: scanUtility
         )
+    }
+    
+    private func exportAllScansForPoint(activePoint: MapPointStore.MapPoint) {
+        do {
+            let locationID = PersistenceContext.shared.locationID
+            let pointID = activePoint.id.uuidString
+            
+            // Load all scans for this map point
+            let history = try MapPointHistoryBuilder.loadAll(locationID: locationID, pointID: pointID)
+            
+            // Create bundle
+            let bundle = MapPointScanBundleV1(
+                locationID: history.locationID,
+                pointID: history.pointID,
+                createdAtISO: JSONKit.iso8601.string(from: Date()),
+                scans: history.scans
+            )
+            
+            // Encode to JSON
+            let data = try JSONKit.encoder().encode(bundle)
+            
+            // Save to temporary file
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("mappoint_scans_\(pointID)_\(Date().timeIntervalSince1970).json")
+            try data.write(to: tempURL)
+            
+            // Show export picker
+            lastExportURL = tempURL
+            showFilesPicker = true
+            
+            print("📦 Exported \(history.scans.count) scans for point \(pointID)")
+        } catch {
+            print("❌ Failed to export all scans for point: \(error)")
+        }
+    }
+    
+    private func exportLastScanV1(record: MapPointScanUtility.ScanRecord) {
+        do {
+            // 1) Gather geometry data
+            let locationID = PersistenceContext.shared.locationID
+            
+            // Get pixels per meter from metric squares
+            let lockedSquares = metricSquares.squares.filter { $0.isLocked }
+            let squaresToUse = lockedSquares.isEmpty ? metricSquares.squares : lockedSquares
+            guard let square = squaresToUse.first else {
+                print("❌ No metric squares available for pixels per meter calculation")
+                return
+            }
+            let ppm = Double(square.side) / square.meters
+            
+            // Get map point pixel coordinates
+            guard let activePoint = mapPointStore.activePoint else {
+                print("❌ No active map point available")
+                return
+            }
+            let pointPx = CGPoint(x: activePoint.mapPoint.x, y: activePoint.mapPoint.y)
+            
+            // Build beacon geometry from beacon dots
+            let beaconsPx: [String: CGPoint] = Dictionary(uniqueKeysWithValues: 
+                beaconDotStore.dots.compactMap { dot in
+                    guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
+                    return (dot.beaconID, dot.mapPoint)
+                }
+            )
+            
+            let elevations: [String: Double?] = Dictionary(uniqueKeysWithValues:
+                beaconDotStore.dots.compactMap { dot in
+                    guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
+                    return (dot.beaconID, beaconDotStore.getElevation(for: dot.beaconID))
+                }
+            )
+            
+            // 2) Use the v1 exporter to build JSON with distances
+            let result = try ScanV1Exporter.buildJSON(
+                from: record,
+                locationID: locationID,
+                ppm: ppm,
+                pointPx: pointPx,
+                beaconsPx: beaconsPx,
+                elevations: elevations,
+                mapResolution: mapTransform.mapSize
+            )
+            
+            // 3) Save to temporary file and show export picker
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(result.filename)
+            try result.json.write(to: tempURL)
+            
+            lastExportURL = tempURL
+            showFilesPicker = true
+            
+            print("📦 Exported scan V1 with distances for \(beaconsPx.count) beacons")
+        } catch {
+            print("❌ Failed to export scan V1: \(error)")
+        }
     }
 }
 
@@ -687,4 +791,13 @@ private struct FacingToggleButton: View {
         .buttonStyle(.plain)
         .allowsHitTesting(true)
     }
+}
+
+// MARK: - Export Bundle Type
+struct MapPointScanBundleV1: Codable {
+    let schema = "tapresolver.mappointbundle.v1"
+    let locationID: String
+    let pointID: String
+    let createdAtISO: String
+    let scans: [ScanRecordV1]
 }

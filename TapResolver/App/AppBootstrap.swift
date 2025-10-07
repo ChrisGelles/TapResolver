@@ -49,7 +49,7 @@ struct AppBootstrap: ViewModifier {
         }
 
         // Provide meta for known beacons (x,y,z,label, tx power)
-        scanUtility.resolveBeaconMeta = { [weak beaconDots] beaconID in
+        scanUtility.resolveBeaconMeta = { [weak beaconDots, weak squares] beaconID in
             guard let store = beaconDots,
                   let dot = store.dots.first(where: { $0.beaconID == beaconID }) else {
                 return MapPointScanUtility.BeaconMeta(
@@ -59,14 +59,43 @@ struct AppBootstrap: ViewModifier {
                 )
             }
 
+            // Convert pixels to meters using the same ppm calculation
+            var x_m: Double?, y_m: Double?
+            if let squaresStore = squares {
+                let lockedSquares = squaresStore.squares.filter { $0.isLocked }
+                let squaresToUse = lockedSquares.isEmpty ? squaresStore.squares : lockedSquares
+                if let square = squaresToUse.first {
+                    let ppm = Double(square.side) / square.meters
+                    if ppm > 0 {
+                        x_m = Double(dot.mapPoint.x) / ppm
+                        y_m = Double(dot.mapPoint.y) / ppm
+                    }
+                }
+            }
+
             return MapPointScanUtility.BeaconMeta(
                 beaconID: beaconID,
                 name: beaconID,
-                posX_m: Double(dot.mapPoint.x),
-                posY_m: Double(dot.mapPoint.y),
+                posX_m: x_m,
+                posY_m: y_m,
                 posZ_m: store.getElevation(for: beaconID),
                 txPowerSettingDbm: store.getTxPower(for: beaconID)
             )
+        }
+        
+        // Provide pixels per meter from MetricSquareStore
+        scanUtility.getPixelsPerMeter = { [weak squares] in
+            guard let store = squares else { return nil }
+            
+            // Calculate pixels per meter from the first locked square, or any square if none are locked
+            let lockedSquares = store.squares.filter { $0.isLocked }
+            let squaresToUse = lockedSquares.isEmpty ? store.squares : lockedSquares
+            
+            guard let square = squaresToUse.first else { return nil }
+            
+            // pixels per meter = side_pixels / side_meters
+            let pixelsPerMeter = Double(square.side) / square.meters
+            return pixelsPerMeter > 0 ? pixelsPerMeter : nil
         }
     }
     

@@ -29,6 +29,10 @@ struct TapResolverApp: App {
         resolveBeaconMeta: { beaconID in
             // We'll implement this properly after the stores are created
             return nil
+        },
+        getPixelsPerMeter: {
+            // We'll implement this properly after the stores are created
+            return nil
         }
     )
 
