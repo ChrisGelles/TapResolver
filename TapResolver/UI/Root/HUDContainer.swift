@@ -263,7 +263,11 @@ struct HUDContainer: View {
                 return
             }
             let targetScreen = mapTransform.screenCenter
-            let mapPoint = mapTransform.screenToMap(targetScreen)
+            // Configurable X and Y pixel offsets
+            let offsetX: CGFloat = 0.0  // Adjust this value as needed
+            let offsetY: CGFloat = 48.0  // Adjust this value as needed
+            let adjustedScreen = CGPoint(x: targetScreen.x + offsetX, y: targetScreen.y + offsetY)
+            let mapPoint = mapTransform.screenToMap(adjustedScreen)
             let success = mapPointStore.addPoint(at: mapPoint)
             if !success {
                 print("⚠️ Cannot add map point: location already occupied")
