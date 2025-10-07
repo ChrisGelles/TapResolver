@@ -181,6 +181,5 @@ struct MapImage: View {
             .frame(width: uiImage.size.width, height: uiImage.size.height)
     }
 }
-struct MeasureLines: View { var body: some View { Color.clear } }
 struct BeaconOverlay: View { var body: some View { Color.clear } }
 struct UserNavigation: View { var body: some View { Color.clear } }
