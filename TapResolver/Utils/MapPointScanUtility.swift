@@ -37,6 +37,16 @@ public final class MapPointScanUtility: ObservableObject {
     
     /// Get pixels per meter ratio from MetricSquareStore
     public var getPixelsPerMeter: () -> Double?
+    
+    /// 0–360° CW from north (already fused/filtered). Return nil if unavailable.
+    public var getFusedHeadingDegrees: () -> Double? = { nil }
+    
+    /// Offsets (degrees) from location config (SquareMetrics)
+    public var getNorthOffsetDeg:    () -> Double = { 0 }
+    public var getFacingFineTuneDeg: () -> Double = { 0 }
+    
+    // Snapshot captured at scan start (0–360°), stored on the ScanRecord
+    private var capturedFacing_deg: Double?
 
     // MARK: - Published runtime state (observe from UI & Persistence)
 
@@ -202,13 +212,15 @@ public final class MapPointScanUtility: ObservableObject {
         public let timingEndISO: String
         public let duration_s: Double
         public let beacons: [BeaconScanAggregate]
-        public init(scanID: String, point: MapPointRef, timingStartISO: String, timingEndISO: String, duration_s: Double, beacons: [BeaconScanAggregate]) {
+        public let userFacing_deg: Double?   // 0–360°, CW from north, offsets applied at scan start
+        public init(scanID: String, point: MapPointRef, timingStartISO: String, timingEndISO: String, duration_s: Double, beacons: [BeaconScanAggregate], userFacing_deg: Double?) {
             self.scanID = scanID
             self.point = point
             self.timingStartISO = timingStartISO
             self.timingEndISO = timingEndISO
             self.duration_s = duration_s
             self.beacons = beacons
+            self.userFacing_deg = userFacing_deg
         }
     }
 
@@ -288,6 +300,13 @@ public final class MapPointScanUtility: ObservableObject {
 
         let sid = sessionID ?? config.defaultSessionID
         activePoint = MapPointRef(pointID: pointID, mapX_m: mapX_m, mapY_m: mapY_m, userHeight_m: userHeight_m, sessionID: sid)
+        
+        // Capture facing at scan start (0–360°, CW from north)
+        let fused = getFusedHeadingDegrees() ?? 0
+        let raw = fused + getNorthOffsetDeg() + getFacingFineTuneDeg()
+        var wrapped = raw.truncatingRemainder(dividingBy: 360)
+        if wrapped < 0 { wrapped += 360 }
+        capturedFacing_deg = wrapped
 
         // Countdown timer (UI: bind to `secondsRemaining`)
         scanTimer = Timer.publish(every: 0.05, on: .main, in: .default)
@@ -382,7 +401,8 @@ public final class MapPointScanUtility: ObservableObject {
             timingStartISO: ISO8601DateFormatter().string(from: start),
             timingEndISO: ISO8601DateFormatter().string(from: end),
             duration_s: duration,
-            beacons: aggregates.sorted { ($0.medianDbm ?? -200) > ($1.medianDbm ?? -200) }
+            beacons: aggregates.sorted { ($0.medianDbm ?? -200) > ($1.medianDbm ?? -200) },
+            userFacing_deg: capturedFacing_deg
         )
         lastScanRecord = record
 

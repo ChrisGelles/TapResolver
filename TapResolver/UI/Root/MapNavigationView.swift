@@ -14,6 +14,7 @@ struct MapNavigationView: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var scanUtility: MapPointScanUtility
     @EnvironmentObject private var transformProcessor: TransformProcessor
+    @EnvironmentObject private var orientationManager: CompassOrientationManager
     
     @State private var mapUIImage: UIImage?
     @State private var overlaysReady = false
@@ -44,7 +45,9 @@ struct MapNavigationView: View {
                 beaconDots: beaconDotStore,
                 squares: metricSquares,
                 lists: beaconLists,
-                scanUtility: scanUtility
+                scanUtility: scanUtility,
+                orientationManager: orientationManager,
+                squareMetrics: squareMetrics
             )
             .onChange(of: locationManager.currentLocationID) { newID in
                 switchToLocation(newID)

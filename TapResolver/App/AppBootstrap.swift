@@ -14,6 +14,8 @@ struct AppBootstrap: ViewModifier {
     let squares: MetricSquareStore
     let lists: BeaconListsStore
     let scanUtility: MapPointScanUtility
+    let orientationManager: CompassOrientationManager
+    let squareMetrics: SquareMetrics
 
     private let initialScanWindow: TimeInterval = 2.0
 
@@ -96,6 +98,19 @@ struct AppBootstrap: ViewModifier {
             let pixelsPerMeter = Double(square.side) / square.meters
             return pixelsPerMeter > 0 ? pixelsPerMeter : nil
         }
+        
+        // Heading source (0–360° CW from north)
+        scanUtility.getFusedHeadingDegrees = { [weak orientationManager] in
+            orientationManager?.fusedHeadingDegrees
+        }
+        
+        // Offsets from location config (SquareMetrics)
+        scanUtility.getNorthOffsetDeg = { [weak squareMetrics] in
+            squareMetrics?.northOffsetDeg ?? 0
+        }
+        scanUtility.getFacingFineTuneDeg = { [weak squareMetrics] in
+            squareMetrics?.facingFineTuneDeg ?? 0
+        }
     }
     
     /// Create a location.json stub for future use
@@ -128,14 +143,18 @@ extension View {
         beaconDots: BeaconDotStore,
         squares: MetricSquareStore,
         lists: BeaconListsStore,
-        scanUtility: MapPointScanUtility
+        scanUtility: MapPointScanUtility,
+        orientationManager: CompassOrientationManager,
+        squareMetrics: SquareMetrics
     ) -> some View {
         self.modifier(AppBootstrap(
             scanner: scanner,
             beaconDots: beaconDots,
             squares: squares,
             lists: lists,
-            scanUtility: scanUtility
+            scanUtility: scanUtility,
+            orientationManager: orientationManager,
+            squareMetrics: squareMetrics
         ))
     }
 }

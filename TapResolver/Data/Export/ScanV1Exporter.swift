@@ -43,7 +43,7 @@ enum ScanV1Exporter {
             end: ISO8601DateFormatter().date(from: utilRecord.timingEndISO) ?? Date(),
             duration: utilRecord.duration_s,
             deviceHeight_m: utilRecord.point.userHeight_m,
-            facing_deg: nil, // Not available in current ScanRecord
+            facing_deg: utilRecord.userFacing_deg,
             point_xy_px: pointPx, point_xy_m: pointM,
             mapResolution_px: mapResolution,
             pixelsPerMeter: ppm,

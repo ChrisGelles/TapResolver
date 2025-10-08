@@ -60,7 +60,9 @@ struct TapResolverApp: App {
                     beaconDots: beaconDotStore,
                     squares: metricSquares,
                     lists: beaconLists,
-                    scanUtility: scanUtility
+                    scanUtility: scanUtility,
+                    orientationManager: orientationManager,
+                    squareMetrics: squareMetrics
                 )
         }
     }
