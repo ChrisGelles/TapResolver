@@ -303,10 +303,20 @@ public final class MapPointScanUtility: ObservableObject {
         
         // Capture facing at scan start (0–360°, CW from north)
         let fused = getFusedHeadingDegrees() ?? 0
-        let raw = fused + getNorthOffsetDeg() + getFacingFineTuneDeg()
+        let northOffset = getNorthOffsetDeg()
+        let facingFineTune = getFacingFineTuneDeg()
+        let raw = fused + northOffset + facingFineTune
         var wrapped = raw.truncatingRemainder(dividingBy: 360)
         if wrapped < 0 { wrapped += 360 }
         capturedFacing_deg = wrapped
+        
+        // DEBUG: Print compass values
+        print("🧭 COMPASS DEBUG at scan start:")
+        print("   fusedHeadingDegrees: \(String(format: "%.2f", fused))°")
+        print("   northOffsetDeg: \(String(format: "%.2f", northOffset))°")
+        print("   facingFineTuneDeg: \(String(format: "%.2f", facingFineTune))°")
+        print("   raw calculation: \(String(format: "%.2f", raw))°")
+        print("   wrapped (exported): \(String(format: "%.2f", wrapped))°")
 
         // Countdown timer (UI: bind to `secondsRemaining`)
         scanTimer = Timer.publish(every: 0.05, on: .main, in: .default)

@@ -20,6 +20,8 @@ struct FacingOverlay: View {
     
     @EnvironmentObject private var mapTransform: MapTransformStore
     
+    @State private var lastDebugPrint: Date = Date.distantPast
+    
     var body: some View {
         GeometryReader { geometry in
             let deviceDeg = orientation.fusedHeadingDegrees.isNaN ? 
@@ -37,6 +39,14 @@ struct FacingOverlay: View {
 
             // Use CW directly for SwiftUI (no negation needed)
             let renderDeg = mapFacingCW
+            
+            let _ = logDebugInfo(
+                deviceDeg: deviceDeg,
+                northOffset: squareMetrics.northOffsetDeg,
+                fineTune: fineTuneDeg,
+                mapRotation: mapRotationDegCW,
+                renderDeg: renderDeg
+            )
             
             let facingGlyphImage = "facing-glyph"
             // Only render if heading is valid
@@ -73,6 +83,20 @@ struct FacingOverlay: View {
             normalized += 360.0
         }
         return normalized
+    }
+    
+    private func logDebugInfo(deviceDeg: Double, northOffset: Double, fineTune: Double, mapRotation: Double, renderDeg: Double) {
+        if Date().timeIntervalSince(lastDebugPrint) > 1.0 {
+            print("👁️ FACING GLYPH DEBUG:")
+            print("   deviceDeg: \(String(format: "%.2f", deviceDeg))°")
+            print("   northOffsetDeg: \(String(format: "%.2f", northOffset))°")
+            print("   facingFineTuneDeg: \(String(format: "%.2f", fineTune))°")
+            print("   mapRotationDegCW: \(String(format: "%.2f", mapRotation))°")
+            print("   renderDeg (glyph rotation): \(String(format: "%.2f", renderDeg))°")
+            DispatchQueue.main.async {
+                self.lastDebugPrint = Date()
+            }
+        }
     }
 }
 
