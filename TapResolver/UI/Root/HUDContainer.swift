@@ -45,6 +45,7 @@ struct HUDContainer: View {
     @State private var lastExportURL: URL? = nil
 
     @State private var selectedBeaconForTxPower: String? = nil
+    @State private var showScanQuality = true  // Temporary: always show for testing
 
     var body: some View {
         ZStack {
@@ -71,7 +72,18 @@ struct HUDContainer: View {
 
                 // Bottom buttons - only show when MapPoint drawer is open
                 if hud.isMapPointOpen {
-                    bottomButtons
+                    VStack(spacing: 8) {
+                        // NEW: Scan quality display
+                        if showScanQuality {
+                            ScanQualityDisplayView(viewModel: .dummyData)
+                                .transition(.opacity)
+                        }
+                        
+                        // Existing bottom buttons
+                        bottomButtons
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 40)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -228,26 +240,11 @@ struct HUDContainer: View {
 
     // MARK: - Bottom Buttons Cluster (MapPoint logging controls)
     private var bottomButtons: some View {
-        VStack(spacing: 12) {
-            sliderValueDisplay
-            bottomButtonRow
-        }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 40)
-    }
-    
-    private var sliderValueDisplay: some View {
-        Text("\(Int(sliderValue))s")
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundColor(.white.opacity(0.8))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-            .frame(maxWidth: .infinity, alignment: .trailing)
+        bottomButtonRow
     }
     
     private var bottomButtonRow: some View {
-        HStack {
+        HStack(spacing: 8) {
             addMapPointButton
             durationSlider
             countdownDisplay
@@ -319,12 +316,17 @@ struct HUDContainer: View {
         Button {
             handleLogDataButtonTap()
         } label: {
-            Text(beaconLogger.isLogging ? "Stop Logging" : "Log Data")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(beaconLogger.isLogging ? Color.red : Color.blue, in: RoundedRectangle(cornerRadius: 12))
+            VStack(spacing: 2) {
+                Text("\(Int(sliderValue))s")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white)
+                Text(beaconLogger.isLogging ? "Stop" : "Scan")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(beaconLogger.isLogging ? Color.red : Color.blue, in: RoundedRectangle(cornerRadius: 12))
         }
         .disabled(mapPointStore.activePoint == nil)
         .accessibilityLabel(beaconLogger.isLogging ? "Stop logging session" : "Log data for current map point")
