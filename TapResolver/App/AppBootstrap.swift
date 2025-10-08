@@ -39,13 +39,12 @@ struct AppBootstrap: ViewModifier {
     
     
     private func configureScanUtilityClosures() {
-        // Exclude anything NOT in Beacon Drawer or without a dot
-        scanUtility.isExcluded = { [weak lists, weak beaconDots] beaconID, name in
-            guard let lists = lists, let beaconDots = beaconDots else { return true }
+        // Whitelist-only filter: allow any device that's in Beacon Drawer.
+        // (Distances will be optional if a dot isn't placed yet.)
+        scanUtility.isExcluded = { [weak lists] beaconID, name in
+            guard let lists = lists else { return true }          // fail safe: exclude if lists missing
             guard let name = name, !name.isEmpty else { return true }
-            guard lists.beacons.contains(name) else { return true }
-            guard beaconDots.dots.contains(where: { $0.beaconID == name }) else { return true }
-            return false
+            return !lists.beacons.contains(name)                  // exclude if not on whitelist
         }
 
         // Provide meta for known beacons (x,y,z,label, tx power)
