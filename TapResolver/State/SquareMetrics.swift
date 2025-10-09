@@ -32,10 +32,18 @@ final class SquareMetrics: ObservableObject {
     @Published var facingFineTuneDeg: Double = 0 {
         didSet { saveFacingFineTune() }
     }
+    
+    @Published var mapBaseOrientation: Double = 270.0 {
+        didSet { saveMapBaseOrientation() }
+    }
 
     // MARK: - Facing Fine-Tune Persistence
     private func facingFineTuneKey(for locationID: String) -> String {
         return "locations.\(locationID).mapMetrics.facingFineTuneDeg.v1"
+    }
+    
+    private func mapBaseOrientationKey(for locationID: String) -> String {
+        return "locations.\(locationID).mapMetrics.mapBaseOrientation.v1"
     }
 
     private func reloadFacingFineTune() {
@@ -54,18 +62,36 @@ final class SquareMetrics: ObservableObject {
         UserDefaults.standard.set(facingFineTuneDeg, forKey: key)
     }
     
+    private func reloadMapBaseOrientation() {
+        let loc = PersistenceContext.shared.locationID
+        let key = mapBaseOrientationKey(for: loc)
+        if UserDefaults.standard.object(forKey: key) != nil {
+            mapBaseOrientation = UserDefaults.standard.double(forKey: key)
+        } else {
+            mapBaseOrientation = 270.0  // Default: north points left
+        }
+    }
+    
+    private func saveMapBaseOrientation() {
+        let loc = PersistenceContext.shared.locationID
+        let key = mapBaseOrientationKey(for: loc)
+        UserDefaults.standard.set(mapBaseOrientation, forKey: key)
+    }
+    
     private var bag = Set<AnyCancellable>()
     
     init() {
         // Load per-location values
         reloadNorthOffset()
         reloadFacingFineTune()
+        reloadMapBaseOrientation()
         
         // Observe location changes so we reload per-location value
         NotificationCenter.default.publisher(for: .locationDidChange)
             .sink { [weak self] _ in
                 self?.reloadNorthOffset()
                 self?.reloadFacingFineTune()
+                self?.reloadMapBaseOrientation()
             }
             .store(in: &bag)
     }

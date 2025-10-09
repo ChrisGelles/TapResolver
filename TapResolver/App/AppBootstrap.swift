@@ -111,6 +111,11 @@ struct AppBootstrap: ViewModifier {
         scanUtility.getFacingFineTuneDeg = { [weak squareMetrics] in
             squareMetrics?.facingFineTuneDeg ?? 0
         }
+        
+        // Map base orientation (where north points on the map image)
+        scanUtility.getMapBaseOrientation = { [weak squareMetrics] in
+            squareMetrics?.mapBaseOrientation ?? 270.0
+        }
     }
     
     /// Create a location.json stub for future use

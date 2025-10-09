@@ -87,12 +87,23 @@ struct FacingOverlay: View {
     
     private func logDebugInfo(deviceDeg: Double, northOffset: Double, fineTune: Double, mapRotation: Double, renderDeg: Double) {
         if Date().timeIntervalSince(lastDebugPrint) > 1.0 {
+            // Calculate what would be exported (same formula as MapPointScanUtility)
+            let mapBaseOrientation = squareMetrics.mapBaseOrientation
+            let exportRaw = deviceDeg + northOffset + fineTune - mapBaseOrientation
+            var exportWrapped = exportRaw.truncatingRemainder(dividingBy: 360)
+            if exportWrapped < 0 { exportWrapped += 360 }
+            
             print("👁️ FACING GLYPH DEBUG:")
             print("   deviceDeg: \(String(format: "%.2f", deviceDeg))°")
             print("   northOffsetDeg: \(String(format: "%.2f", northOffset))°")
             print("   facingFineTuneDeg: \(String(format: "%.2f", fineTune))°")
             print("   mapRotationDegCW: \(String(format: "%.2f", mapRotation))°")
             print("   renderDeg (glyph rotation): \(String(format: "%.2f", renderDeg))°")
+            print("   ──────────────────────────────────────")
+            print("   EXPORT CALCULATION:")
+            print("   mapBaseOrientation: \(String(format: "%.2f", mapBaseOrientation))°")
+            print("   \(String(format: "%.2f", deviceDeg)) + \(String(format: "%.2f", northOffset)) + \(String(format: "%.2f", fineTune)) - \(String(format: "%.2f", mapBaseOrientation)) = \(String(format: "%.2f", exportRaw))°")
+            print("   wrapped (what gets exported): \(String(format: "%.2f", exportWrapped))°")
             DispatchQueue.main.async {
                 self.lastDebugPrint = Date()
             }

@@ -45,6 +45,12 @@ public final class MapPointScanUtility: ObservableObject {
     public var getNorthOffsetDeg:    () -> Double = { 0 }
     public var getFacingFineTuneDeg: () -> Double = { 0 }
     
+    /// The angle (0-360°, CW from up) where north points on the map image
+    /// For maps where north points up: 0°
+    /// For maps where north points right: 90°
+    /// For maps where north points left: 270°
+    public var getMapBaseOrientation: () -> Double = { 0 }
+    
     // Snapshot captured at scan start (0–360°), stored on the ScanRecord
     private var capturedFacing_deg: Double?
 
@@ -301,11 +307,12 @@ public final class MapPointScanUtility: ObservableObject {
         let sid = sessionID ?? config.defaultSessionID
         activePoint = MapPointRef(pointID: pointID, mapX_m: mapX_m, mapY_m: mapY_m, userHeight_m: userHeight_m, sessionID: sid)
         
-        // Capture facing at scan start (0–360°, CW from north)
+        // Capture facing at scan start (0–360°, CW from map north)
         let fused = getFusedHeadingDegrees() ?? 0
         let northOffset = getNorthOffsetDeg()
         let facingFineTune = getFacingFineTuneDeg()
-        let raw = fused + northOffset + facingFineTune
+        let mapBaseOrientation = getMapBaseOrientation()
+        let raw = fused + northOffset + facingFineTune - mapBaseOrientation
         var wrapped = raw.truncatingRemainder(dividingBy: 360)
         if wrapped < 0 { wrapped += 360 }
         capturedFacing_deg = wrapped
@@ -315,7 +322,8 @@ public final class MapPointScanUtility: ObservableObject {
         print("   fusedHeadingDegrees: \(String(format: "%.2f", fused))°")
         print("   northOffsetDeg: \(String(format: "%.2f", northOffset))°")
         print("   facingFineTuneDeg: \(String(format: "%.2f", facingFineTune))°")
-        print("   raw calculation: \(String(format: "%.2f", raw))°")
+        print("   mapBaseOrientation: \(String(format: "%.2f", mapBaseOrientation))°")
+        print("   raw calculation: \(String(format: "%.2f", fused)) + \(String(format: "%.2f", northOffset)) + \(String(format: "%.2f", facingFineTune)) - \(String(format: "%.2f", mapBaseOrientation)) = \(String(format: "%.2f", raw))°")
         print("   wrapped (exported): \(String(format: "%.2f", wrapped))°")
 
         // Countdown timer (UI: bind to `secondsRemaining`)
