@@ -75,8 +75,14 @@ struct HUDContainer: View {
                     VStack(spacing: 8) {
                         // NEW: Scan quality display
                         if showScanQuality {
-                            ScanQualityDisplayView(viewModel: .dummyData)
-                                .transition(.opacity)
+                            ScanQualityDisplayView(
+                                viewModel: .countOnly(
+                                    btScanner: btScanner,
+                                    beaconLists: beaconLists,
+                                    beaconDotStore: beaconDotStore
+                                )
+                            )
+                            .transition(.opacity)
                         }
                         
                         // Existing bottom buttons
@@ -162,7 +168,7 @@ struct HUDContainer: View {
                         UserFacingCalibrationOverlay(
                             facingFineTuneDeg: Binding(
                                 get: { squareMetrics.facingFineTuneDeg },
-                                set: { squareMetrics.facingFineTuneDeg = $0 }
+                                set: { squareMetrics.setFacingFineTune($0) }
                             )
                         )
                         // Bottom-right degree readout
@@ -564,16 +570,15 @@ private struct BluetoothScanButton: View {
 
     var body: some View {
         Button {
-            // 1) Run a clean snapshot scan for N seconds (see BluetoothScanner.defaultSnapshotSeconds)
+            // 1) Run a clean snapshot scan for N seconds
             btScanner.snapshotScan { [weak btScanner, weak beaconLists, weak beaconDotStore] in
                 guard let scanner = btScanner, let lists = beaconLists, let dotStore = beaconDotStore else { return }
 
-                // 2) Clear unlocked beacons and morgue before ingesting new devices
+                // 2) Clear unlocked beacons only (keep locked beacons and morgue intact)
                 let lockedBeaconNames = dotStore.locked.keys.filter { dotStore.isLocked($0) }
                 lists.clearUnlockedBeacons(lockedBeaconNames: lockedBeaconNames)
-                lists.morgue.removeAll()
 
-                // 3) After snapshot completes, (re)build lists from what we saw
+                // 3) Ingest all discovered devices - the ingest() method will handle morgue filtering
                 for d in scanner.devices {
                     lists.ingest(deviceName: d.name, id: d.id)
                 }

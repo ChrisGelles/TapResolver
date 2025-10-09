@@ -6,89 +6,94 @@
 //
 
 import Foundation
+import Combine
 
 final class BeaconListsStore: ObservableObject {
     private let ctx = PersistenceContext.shared
+    private var bag = Set<AnyCancellable>()
+    
     @Published var beacons: [String] = []
-    @Published var morgue:  [String] = []
+    @Published var morgue: [String] = []
 
     // Persistence keys
     private let beaconsKey = "BeaconLists_beacons_v1"
-    // private let morgueKey  = "BeaconLists_morgue_v1"   // not persisted
-    private let lockedBeaconsKey = "LockedBeaconNames_v1"
     
-    /// Reload data for the active location
-    public func reloadForActiveLocation() {
-        clearAndReloadForActiveLocation()
-    }
-    
-    public func clearAndReloadForActiveLocation() {
-        beacons.removeAll()
-        morgue.removeAll()
-        load()
-        reconcileWithLockedDots()
-        objectWillChange.send()
-    }
-    
-    /// Clear in-memory without saving (used right before a location switch load)
-    func flush() {
-        beacons.removeAll()
-        morgue.removeAll()
-        objectWillChange.send()
-    }
-
-    /// Load persisted list for active namespace (no reconcile, no clears)
-    func loadOnly() {
-        beacons = ctx.read(beaconsKey, as: [String].self) ?? []
-        // morgue stays in-memory only
+    private func morgueKey(for locationID: String) -> String {
+        return "locations.\(locationID).beaconLists.morgue.v1"
     }
 
     init() {
         load()
+        reloadMorgue()
+        
+        // Reload when location changes
+        NotificationCenter.default.publisher(for: .locationDidChange)
+            .sink { [weak self] _ in
+                self?.load()
+                self?.reloadMorgue()
+            }
+            .store(in: &bag)
     }
 
     private func save() {
-        ctx.write(beaconsKey, value: beacons) // namespaced-only
+        ctx.write(beaconsKey, value: beacons)
+    }
+    
+    private func saveMorgue() {
+        let loc = PersistenceContext.shared.locationID
+        let key = morgueKey(for: loc)
+        UserDefaults.standard.set(morgue, forKey: key)
     }
 
     private func load() {
         beacons = ctx.read(beaconsKey, as: [String].self) ?? []
-        morgue.removeAll() // transient
     }
     
+    private func reloadMorgue() {
+        let loc = PersistenceContext.shared.locationID
+        let key = morgueKey(for: loc)
+        if let array = UserDefaults.standard.array(forKey: key) as? [String] {
+            morgue = array
+        } else {
+            morgue = []
+        }
+    }
+
     // Strict: "##-adjectiveAnimal" (e.g., "12-angryBeaver")
     private let beaconNameRegex = try! NSRegularExpression(
         pattern: #"^\d{2}-[a-z]+[A-Z][A-Za-z]*$"#,
         options: []
     )
 
-    /// Base ingest that sorts into Beacons vs Morgue by name pattern.
-    /// This method is location-aware and only ingests for the current active location.
     func ingest(deviceName: String) {
         let trimmed = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        // Remove from either list first (de-dupe)
+        // If this name is explicitly in the morgue, do NOT promote it automatically.
+        // The user must promote it from the UI (morgue -> beacons).
+        if morgue.contains(trimmed) {
+            // Keep it fresh (move to top) and persist
+            if let j = morgue.firstIndex(of: trimmed) { morgue.remove(at: j) }
+            morgue.insert(trimmed, at: 0)
+            saveMorgue()
+            objectWillChange.send()
+            return
+        }
+
+        // De-dupe across both lists
         if let i = beacons.firstIndex(of: trimmed) { beacons.remove(at: i) }
         if let j = morgue.firstIndex(of: trimmed)  { morgue.remove(at: j) }
 
         if isBeaconName(trimmed) {
-            beacons.append(trimmed)
+            beacons.insert(trimmed, at: 0)
+            save()
         } else {
-            // Newest-first in Morgue
             morgue.insert(trimmed, at: 0)
+            saveMorgue()
         }
-        save()  // <— add this
-    }
-    
-    /// Clear all beacon lists for location switching
-    func clearForLocationSwitch() {
-        beacons.removeAll()
-        morgue.removeAll()
-        // do NOT save here
+        objectWillChange.send()
     }
 
-    /// Overload that accepts (name, id). If name is empty/Unknown, suffix a short id.
     func ingest(deviceName: String, id: UUID) {
         let base = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
         let shortId = id.uuidString.prefix(4)
@@ -102,74 +107,104 @@ final class BeaconListsStore: ObservableObject {
         let range = NSRange(location: 0, length: (name as NSString).length)
         return beaconNameRegex.firstMatch(in: name, options: [], range: range) != nil
     }
-    
+
     func demoteToMorgue(_ name: String) {
-        guard let i = beacons.firstIndex(of: name) else { return }
-        beacons.remove(at: i)
-        morgue.insert(name, at: 0)     // newest at the top
-        save()  // <— add this
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        
+        print("📤 Demoting '\(trimmed)' to Morgue")
+        
+        // Remove from beacons list
+        if let i = beacons.firstIndex(of: trimmed) {
+            beacons.remove(at: i)
+            print("   ✓ Removed from beacons list")
+        }
+        
+        // Remove from morgue if already there (de-dupe)
+        if let j = morgue.firstIndex(of: trimmed) {
+            morgue.remove(at: j)
+            print("   ✓ Removed from morgue (de-dupe)")
+        }
+        
+        // Add to top of morgue (newest first)
+        morgue.insert(trimmed, at: 0)
+        print("   ✓ Added to top of morgue. Morgue now has \(morgue.count) items")
+        
+        save()
+        saveMorgue()
+        objectWillChange.send()
+        print("   ✓ Saved and notified UI")
     }
 
     func promoteToBeacons(_ name: String) {
-        guard let i = morgue.firstIndex(of: name) else { return }
-        morgue.remove(at: i)
-        beacons.append(name)
-        save()  // <— add this
-    }
-    
-    /// Clear unlocked beacons and morgue (called on scan refresh and app launch)
-    func refreshFromScan() {
-        // Clear morgue completely
-        morgue.removeAll()
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
         
-        // Clear unlocked beacons (keep only locked ones)
-        clearUnlockedBeacons()
+        // Remove from morgue
+        if let j = morgue.firstIndex(of: trimmed) {
+            morgue.remove(at: j)
+        }
+        
+        // Remove from beacons if already there (de-dupe)
+        if let i = beacons.firstIndex(of: trimmed) {
+            beacons.remove(at: i)
+        }
+        
+        // Add to top of beacons list (newest first)
+        beacons.insert(trimmed, at: 0)
         
         save()
+        saveMorgue()
+        objectWillChange.send()
     }
-    
-    /// Get only the locked beacon names
-    func getLockedBeacons() -> [String] {
-        return beacons.filter { beaconName in
-            // We need to check if this beacon has a locked dot
-            // This will be called from ContentView with access to beaconDotStore
-            return true // Placeholder - will be implemented in ContentView
-        }
-    }
-    
-    /// Clear unlocked beacons (helper method)
-    private func clearUnlockedBeacons() {
-        // This will be called from ContentView with access to beaconDotStore
-        // For now, keep all beacons - will be implemented when we update ContentView
-    }
-    
-    /// Clear unlocked beacons using beaconDotStore to check lock status
+
     func clearUnlockedBeacons(lockedBeaconNames: [String]) {
-        beacons = beacons.filter { beaconName in
-            lockedBeaconNames.contains(beaconName)
-        }
+        beacons = beacons.filter { lockedBeaconNames.contains($0) }
+        save()
+    }
+
+    // MARK: - Location switching support
+    
+    func reloadForActiveLocation() {
+        beacons.removeAll()
+        morgue.removeAll()
+        load()
+        reloadMorgue()
+        reconcileWithLockedDots()
+        objectWillChange.send()
     }
     
-    // MARK: - Reconciliation with locked dots
+    func flush() {
+        beacons.removeAll()
+        morgue.removeAll()
+        objectWillChange.send()
+    }
+    
+    func loadOnly() {
+        beacons = ctx.read(beaconsKey, as: [String].self) ?? []
+        // Also reload morgue when doing loadOnly (was missing!)
+        reloadMorgue()
+    }
+    
     func reconcileWithLockedDots(_ lockedBeaconNames: [String]? = nil) {
-        // If caller passed a list, use it; otherwise derive from BeaconDotStore via NotificationCenter or singleton
         let names: [String]
         if let locked = lockedBeaconNames {
             names = locked
         } else {
-            // Lightweight pull from BeaconDotStore if available in environment later;
-            // no-op if not available
             names = BeaconDotRegistry.sharedLockedIDs?() ?? []
         }
 
         guard !names.isEmpty else { return }
 
-        // Merge any locked names that aren't already present
         var changed = false
         for name in names where !beacons.contains(name) {
             beacons.append(name)
             changed = true
         }
         if changed { save() }
+    }
+    
+    func clearAndReloadForActiveLocation() {
+        reloadForActiveLocation()
     }
 }

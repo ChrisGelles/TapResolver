@@ -205,3 +205,29 @@ extension ScanQualityViewModel {
         )
     }
 }
+
+// MARK: - Simple Real Data (Step 1: Count Only)
+
+extension ScanQualityViewModel {
+    static func countOnly(
+        btScanner: BluetoothScanner, 
+        beaconLists: BeaconListsStore,
+        beaconDotStore: BeaconDotStore
+    ) -> ScanQualityViewModel {
+        // Only count beacons that have dots on the map
+        let beaconsWithDots = beaconDotStore.dots.map { $0.beaconID }
+        let totalBeacons = beaconsWithDots.count
+        
+        // Only count detected beacons that also have dots
+        let detectedCount = btScanner.devices.filter { device in
+            beaconsWithDots.contains(device.name)
+        }.count
+        
+        // Return dummy beacons, but with real counts
+        return ScanQualityViewModel(
+            detectedCount: detectedCount,
+            totalBeacons: totalBeacons,
+            beacons: dummyData.beacons // Keep dummy visual for now
+        )
+    }
+}

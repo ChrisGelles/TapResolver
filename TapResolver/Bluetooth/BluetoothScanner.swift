@@ -245,6 +245,17 @@ extension BluetoothScanner {
     }
 }
 
+extension BluetoothScanner {
+    /// Run a brief snapshot scan to populate Morgue on app launch (morning behavior)
+    func snapshotOnce() {
+        guard central.state == .poweredOn else { return }
+        snapshotScan(duration: 1.5) { [weak self] in
+            // Snapshot complete - devices are now in the devices array
+            // The onDeviceNameDiscovered callback has already populated the lists
+        }
+    }
+}
+
 private extension BluetoothScanner {
     func displayName(from advertisementData: [String: Any], peripheral: CBPeripheral) -> String {
         // Prefer advertised local name if present; fallback to peripheral.name; then a generic.

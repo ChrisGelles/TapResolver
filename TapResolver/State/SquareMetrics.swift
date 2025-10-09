@@ -24,18 +24,12 @@ final class SquareMetrics: ObservableObject {
     @Published var activeEdit: ActiveEdit? = nil
     
     // MARK: - Per-location North offset (degrees, +CW / -CCW)
-    @Published var northOffsetDeg: Double = 0 {
-        didSet { saveNorthOffset() }
-    }
+    @Published var northOffsetDeg: Double = 0
     
     /// Display + logging fine-tune offset for facing (degrees CW; negative = CCW)
-    @Published var facingFineTuneDeg: Double = 0 {
-        didSet { saveFacingFineTune() }
-    }
+    @Published var facingFineTuneDeg: Double = 0
     
-    @Published var mapBaseOrientation: Double = 270.0 {
-        didSet { saveMapBaseOrientation() }
-    }
+    @Published var mapBaseOrientation: Double = 270.0
 
     // MARK: - Facing Fine-Tune Persistence
     private func facingFineTuneKey(for locationID: String) -> String {
@@ -155,5 +149,16 @@ final class SquareMetrics: ObservableObject {
     // Public setter used by bindings (keeps @Published updates consistent)
     func setNorthOffset(_ deg: Double) {
         northOffsetDeg = deg
+        saveNorthOffset()
+    }
+    
+    func setFacingFineTune(_ deg: Double) {
+        facingFineTuneDeg = deg
+        saveFacingFineTune()
+    }
+    
+    func setMapBaseOrientation(_ deg: Double) {
+        mapBaseOrientation = deg
+        saveMapBaseOrientation()
     }
 }

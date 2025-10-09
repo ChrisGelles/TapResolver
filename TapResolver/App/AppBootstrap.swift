@@ -35,6 +35,12 @@ struct AppBootstrap: ViewModifier {
                     lists.ingest(deviceName: name, id: id)
                 }
                 configureScanUtilityClosures()
+                
+                // Run initial snapshot scan to populate Morgue on app launch
+                // This restores "morning behavior" where Morgue is auto-populated
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    scanner.snapshotOnce()
+                }
             }
     }
     
