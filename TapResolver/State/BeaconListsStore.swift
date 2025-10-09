@@ -14,6 +14,17 @@ final class BeaconListsStore: ObservableObject {
     
     @Published var beacons: [String] = []
     @Published var morgue: [String] = []
+    
+    // Computed property: smart-sorted morgue for display
+    var sortedMorgue: [String] {
+        // Separate into two groups
+        let beaconPattern = morgue.filter { isBeaconName($0) }
+        let otherDevices = morgue.filter { !isBeaconName($0) }
+        
+        // Beacon-pattern devices: alphabetical
+        // Other devices: preserve original order (newest first)
+        return beaconPattern.sorted() + otherDevices
+    }
 
     // Persistence keys
     private let beaconsKey = "BeaconLists_beacons_v1"
@@ -69,25 +80,20 @@ final class BeaconListsStore: ObservableObject {
         let trimmed = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        // If this name is explicitly in the morgue, do NOT promote it automatically.
-        // The user must promote it from the UI (morgue -> beacons).
-        if morgue.contains(trimmed) {
-            // Keep it fresh (move to top) and persist
-            if let j = morgue.firstIndex(of: trimmed) { morgue.remove(at: j) }
-            morgue.insert(trimmed, at: 0)
-            saveMorgue()
-            objectWillChange.send()
-            return
+        // CRITICAL: Don't re-add if already in morgue (respects user's demotion)
+        if morgue.contains(trimmed) { return }
+
+        // Remove from beacons if present (de-dupe)
+        if let i = beacons.firstIndex(of: trimmed) {
+            beacons.remove(at: i)
         }
 
-        // De-dupe across both lists
-        if let i = beacons.firstIndex(of: trimmed) { beacons.remove(at: i) }
-        if let j = morgue.firstIndex(of: trimmed)  { morgue.remove(at: j) }
-
+        // Only add to beacons if it matches pattern
         if isBeaconName(trimmed) {
-            beacons.insert(trimmed, at: 0)
+            beacons.append(trimmed)
             save()
         } else {
+            // Non-beacon devices go to morgue
             morgue.insert(trimmed, at: 0)
             saveMorgue()
         }

@@ -76,10 +76,10 @@ struct HUDContainer: View {
                         // NEW: Scan quality display
                         if showScanQuality {
                             ScanQualityDisplayView(
-                                viewModel: .countOnly(
+                                viewModel: .fromRealData(
                                     btScanner: btScanner,
-                                    beaconLists: beaconLists,
-                                    beaconDotStore: beaconDotStore
+                                    beaconDotStore: beaconDotStore,
+                                    scanUtility: scanUtility
                                 )
                             )
                             .transition(.opacity)

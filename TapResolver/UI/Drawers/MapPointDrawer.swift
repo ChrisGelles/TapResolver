@@ -17,6 +17,7 @@ struct MapPointDrawer: View {
     private let collapsedWidth: CGFloat = 56
     private let expandedWidth: CGFloat = 172
     private let topBarHeight: CGFloat = 48
+    private let drawerMaxHeight: CGFloat = 200
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -53,7 +54,7 @@ struct MapPointDrawer: View {
             // Top bar
             HStack(spacing: 2) {
                 if hud.isMapPointOpen {
-                    Text("Log Points")
+                    Text("Map Points")
                         .font(.headline)
                         .foregroundColor(.primary)
                     Spacer(minLength: 0)
@@ -82,7 +83,7 @@ struct MapPointDrawer: View {
         }
         .frame(
             width: hud.isMapPointOpen ? expandedWidth : collapsedWidth,
-            height: hud.isMapPointOpen ? min(320, idealOpenHeight) : topBarHeight
+            height: hud.isMapPointOpen ? min(drawerMaxHeight, idealOpenHeight) : topBarHeight
         )
         .clipped()
         .contentShape(Rectangle())
@@ -92,7 +93,7 @@ struct MapPointDrawer: View {
     private var idealOpenHeight: CGFloat {
         let rows = CGFloat(mapPointStore.points.count)
         let rowsHeight = rows * 44 + (rows - 1) * 6 + 6 + 8
-        let total = max(topBarHeight, min(320, topBarHeight + rowsHeight))
+        let total = max(topBarHeight, min(drawerMaxHeight, topBarHeight + rowsHeight))
         return total
     }
 }

@@ -20,10 +20,10 @@ struct MorgueDrawer: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.black.opacity(0.4))
 
-            // List (gray items) — render in array order (newest first)
+            // List (gray items) — smart sorted: beacon-pattern alphabetical, others newest first
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(beaconLists.morgue, id: \.self) { name in
+                    ForEach(beaconLists.sortedMorgue, id: \.self) { name in
                         MorgueListItem(name: name) {
                             beaconLists.promoteToBeacons(name)
                         }

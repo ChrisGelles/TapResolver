@@ -231,3 +231,129 @@ extension ScanQualityViewModel {
         )
     }
 }
+
+// MARK: - Real Data Builder
+
+extension ScanQualityViewModel {
+    static func fromRealData(
+        btScanner: BluetoothScanner,
+        beaconDotStore: BeaconDotStore,
+        scanUtility: MapPointScanUtility
+    ) -> ScanQualityViewModel {
+
+        // Get all beacons that have dots on the map
+        let beaconsWithDots: [BeaconDotStore.Dot] = beaconDotStore.dots
+        let totalBeacons: Int = beaconsWithDots.count
+
+        // Build detection state map: beaconID -> (rssi, timestamp)
+        var detectionState: [String: (rssi: Int, lastSeen: Date)] = [:]
+        for device in btScanner.devices {
+            detectionState[device.name] = (device.rssi, device.lastSeen)
+        }
+
+        // Track detection order (earlier = lower number)
+        var detectionOrder: [String: Int] = [:]
+        var orderCounter: Int = 0
+
+        // Build beacon status for each dot
+        var beaconStatuses: [BeaconStatus] = []
+
+        for dot in beaconsWithDots {
+            let beaconID: String = dot.beaconID
+
+            // Extract prefix (e.g., "05" from "05-bouncyLynx")
+            let prefix: String = beaconID.split(separator: "-").first.map(String.init) ?? "??"
+
+            // Check if currently detected (within last 3 seconds)
+            let now: Date = Date()
+            var currentRSSI: Int? = nil
+            var signalQuality: Quality = .none
+            var isCurrentlyDetected: Bool = false
+
+            if let detection = detectionState[beaconID],
+               now.timeIntervalSince(detection.lastSeen) < 3.0 {
+                currentRSSI = detection.rssi
+                isCurrentlyDetected = true
+
+                // Assign detection order if not yet tracked
+                if detectionOrder[beaconID] == nil {
+                    detectionOrder[beaconID] = orderCounter
+                    orderCounter += 1
+                }
+
+                // Calculate signal quality from RSSI
+                signalQuality = qualityFromRSSI(detection.rssi)
+            }
+
+            // Get stability from last scan record (MAD-based)
+            let stabilityPercent: Double = stabilityFromMAD(
+                beaconID: beaconID,
+                scanRecord: scanUtility.lastScanRecord
+            )
+
+            // Determine sort order
+            let sortOrder: Int
+            if isCurrentlyDetected {
+                // Currently detected: use detection order
+                sortOrder = detectionOrder[beaconID] ?? 9999
+            } else if let lastOrder = detectionOrder[beaconID] {
+                // Was detected, now silent: push after detected beacons
+                sortOrder = 1000 + lastOrder
+            } else {
+                // Never detected: sort alphanumerically at the end
+                sortOrder = 10000 + beaconID.hashValue
+            }
+
+            beaconStatuses.append(BeaconStatus(
+                beaconID: beaconID,
+                color: dot.color,
+                prefix: prefix,
+                rssiMedian: currentRSSI,
+                signalQuality: signalQuality,
+                stabilityPercent: stabilityPercent,
+                detectionOrder: sortOrder
+            ))
+        }
+
+        // Sort by detection order
+        beaconStatuses.sort { $0.detectionOrder < $1.detectionOrder }
+
+        // Count currently detected beacons
+        let detectedCount: Int = beaconStatuses.filter { $0.signalQuality != .none }.count
+
+        return ScanQualityViewModel(
+            detectedCount: detectedCount,
+            totalBeacons: totalBeacons,
+            beacons: beaconStatuses
+        )
+    }
+
+    // MARK: - Helper Functions
+
+    private static func qualityFromRSSI(_ rssi: Int) -> Quality {
+        if rssi > -80 {
+            return .good
+        } else if rssi >= -90 {
+            return .fair
+        } else {
+            return .poor
+        }
+    }
+
+    private static func stabilityFromMAD(
+        beaconID: String,
+        scanRecord: MapPointScanUtility.ScanRecord?
+    ) -> Double {
+        guard let record = scanRecord,
+              let aggregate = record.beacons.first(where: { $0.beacon.beaconID == beaconID }),
+              let madDb = aggregate.madDb else {
+            return 0.0
+        }
+
+        // Convert MAD to stability percentage
+        // Lower MAD = more stable = higher percentage
+        // MAD of 0 = 100% stability, MAD of 10+ = 0% stability
+        let stability: Double = max(0.0, min(1.0, 1.0 - (madDb / 10.0)))
+        return stability
+    }
+}
