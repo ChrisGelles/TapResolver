@@ -21,6 +21,10 @@ public struct ScanRecordV1: Codable {
 
     public struct BeaconObs: Codable {
         public let beaconID: String
+        public let meta: BeaconMeta
+        public let ibeacon: IBeaconData?
+        public let radio: BeaconRadio?
+        
         public struct Stats: Codable { public let median_dbm: Int; public let mad_db: Int; public let p10_dbm: Int; public let p90_dbm: Int; public let samples: Int }
         public let stats: Stats
         public struct Hist: Codable { public let binMin_dbm: Int; public let binMax_dbm: Int; public let binSize_db: Int; public let counts: [Int]; public let underflow: Int?; public let overflow: Int?; public let edgePolicy: String? }
@@ -34,20 +38,34 @@ public struct ScanRecordV1: Codable {
         }
         public let dist: Distances?
         
-        // Beacon physical properties and metadata
-        public struct BeaconGeo: Codable {
-            // Position
-            public let position_px: [Double]?    // [x, y] in pixels on map
-            public let position_m: [Double]?     // [x, y] in meters
-            public let elevation_m: Double?      // Z coordinate in meters (beacon height)
-            
-            // Radio properties
-            public let txPower_dbm: Int?         // Transmit power setting (dBm)
-            
-            // Metadata
-            public let name: String              // Beacon identifier/name
-            public let color: [Double]?          // RGB color [r, g, b] in 0.0-1.0 range
+        // Identity & display metadata
+        public struct BeaconMeta: Codable {
+            public let name: String              // Human-readable beacon name
+            public let color: [Double]?          // RGB color [r, g, b] (0.0-1.0)
+            public let model: String?            // Hardware model (e.g., "BC04P")
         }
+        
+        // Apple iBeacon protocol data (from advertisement)
+        public struct IBeaconData: Codable {
+            public let uuid: String              // 128-bit UUID
+            public let major: Int                // 16-bit major ID
+            public let minor: Int                // 16-bit minor ID
+            public let measuredPower_dbm: Int    // Calibrated RSSI at 1 meter
+        }
+        
+        // Radio/RF configuration (manual settings)
+        public struct BeaconRadio: Codable {
+            public let txPowerSetting_dbm: Int?  // Configured transmission power
+            public let advertisingInterval_ms: Int?  // Broadcast interval (optional)
+        }
+        
+        // Physical location on map (UPDATED - position only)
+        public struct BeaconGeo: Codable {
+            public let position_px: [Double]?    // [x, y] in pixels
+            public let position_m: [Double]?     // [x, y] in meters
+            public let elevation_m: Double?      // Z coordinate in meters
+        }
+        
         public let geo: BeaconGeo?
     }
     public let beacons: [BeaconObs]
