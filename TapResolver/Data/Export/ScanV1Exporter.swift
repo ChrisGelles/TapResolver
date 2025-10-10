@@ -9,16 +9,24 @@ enum ScanV1Exporter {
         pointPx: CGPoint,           // map-point in pixels
         beaconsPx: [String: CGPoint],// beaconID -> px
         elevations: [String: Double?],
+        txPowers: [String: Int?],
+        colors: [String: [Double]?],
         mapResolution: CGSize?
     ) throws -> (json: Data, filename: String) {
 
         // 1) Convert pointPx -> meters (optional)
         let pointM = CGPoint(x: pointPx.x / ppm, y: pointPx.y / ppm)
 
-        // 2) Build geometry dictionary for distances
-        var beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?)] = [:]
+        // 2) Build geometry dictionary with full beacon metadata
+        var beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?, txPower_dbm: Int?, name: String, color: [Double]?)] = [:]
         for (id, px) in beaconsPx {
-            beaconGeo[id] = (posPx: px, elevation_m: elevations[id] ?? nil)
+            beaconGeo[id] = (
+                posPx: px,
+                elevation_m: elevations[id] ?? nil,
+                txPower_dbm: txPowers[id] ?? nil,
+                name: id,  // beaconID is the name
+                color: colors[id] ?? nil
+            )
         }
 
         // 3) Flatten utilRecord beacons into the tuple list ScanBuilder expects:

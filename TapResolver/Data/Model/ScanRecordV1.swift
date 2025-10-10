@@ -33,6 +33,22 @@ public struct ScanRecordV1: Codable {
             public let xyzMapD_m: Double
         }
         public let dist: Distances?
+        
+        // Beacon physical properties and metadata
+        public struct BeaconGeo: Codable {
+            // Position
+            public let position_px: [Double]?    // [x, y] in pixels on map
+            public let position_m: [Double]?     // [x, y] in meters
+            public let elevation_m: Double?      // Z coordinate in meters (beacon height)
+            
+            // Radio properties
+            public let txPower_dbm: Int?         // Transmit power setting (dBm)
+            
+            // Metadata
+            public let name: String              // Beacon identifier/name
+            public let color: [Double]?          // RGB color [r, g, b] in 0.0-1.0 range
+        }
+        public let geo: BeaconGeo?
     }
     public let beacons: [BeaconObs]
 }

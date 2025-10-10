@@ -500,11 +500,29 @@ public final class MapPointScanUtility: ObservableObject {
             let pixelsPerMeter = getPixelsPerMeter()
             
             // Build beacon geometry lookup from existing beacon metadata
-            let beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?)] = 
+            // CRITICAL: Must convert meters to PIXELS before passing to ScanBuilder
+            // ScanBuilder expects posPx in pixels, then divides by ppm to get meters
+            let beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?, txPower_dbm: Int?, name: String, color: [Double]?)] = 
                 Dictionary(uniqueKeysWithValues: record.beacons.compactMap { agg in
-                    // Use the beacon metadata that was resolved during scanning
-                    guard let posX = agg.beacon.posX_m, let posY = agg.beacon.posY_m else { return nil }
-                    return (agg.beacon.beaconID, (CGPoint(x: posX, y: posY), agg.beacon.posZ_m))
+                    // Need both position AND ppm to convert meters → pixels
+                    guard let posX_m = agg.beacon.posX_m, 
+                          let posY_m = agg.beacon.posY_m,
+                          let ppm = pixelsPerMeter,
+                          ppm > 0 else { return nil }
+                    
+                    // Convert meters to pixels: meters × pixels_per_meter = pixels
+                    let posPx = CGPoint(x: posX_m * ppm, y: posY_m * ppm)
+                    
+                    return (
+                        agg.beacon.beaconID, 
+                        (
+                            posPx: posPx,                                           // Now in PIXELS
+                            elevation_m: agg.beacon.posZ_m,
+                            txPower_dbm: agg.beacon.txPowerSettingDbm,
+                            name: agg.beacon.name ?? agg.beacon.beaconID,
+                            color: nil  // Color not available in MapPointScanUtility context
+                        )
+                    )
                 })
             
             // Convert existing ScanRecord to V1 format

@@ -13,7 +13,7 @@ enum ScanBuilder {
         point_xy_px: CGPoint, point_xy_m: CGPoint?,
         mapResolution_px: CGSize?,
         pixelsPerMeter: Double?,                              // NEW
-        beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?)], // NEW (by beaconID)
+        beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?, txPower_dbm: Int?, name: String, color: [Double]?)], // NEW (by beaconID)
         beacons: [(beaconID: String, median: Int, mad: Int, p10: Int, p90: Int, samples: Int,
                    hist: (min:Int, max:Int, size:Int, counts:[Int])?)]
     ) -> ScanRecordV1 {
@@ -60,11 +60,30 @@ enum ScanBuilder {
                              xyzMapD_m:  xyz_m)
             }
             
+            // Build beacon geometry metadata
+            var geoData: ScanRecordV1.BeaconObs.BeaconGeo? = nil
+            if let geo = beaconGeo[b.beaconID] {
+                let pos_px = [Rounding.d(Double(geo.posPx.x), 2), Rounding.d(Double(geo.posPx.y), 2)]
+                let pos_m: [Double]? = pixelsPerMeter.map { ppm in
+                    [Rounding.d(Double(geo.posPx.x) / ppm, 2), Rounding.d(Double(geo.posPx.y) / ppm, 2)]
+                }
+                
+                geoData = ScanRecordV1.BeaconObs.BeaconGeo(
+                    position_px: pos_px,
+                    position_m: pos_m,
+                    elevation_m: geo.elevation_m,
+                    txPower_dbm: geo.txPower_dbm,
+                    name: geo.name,
+                    color: geo.color
+                )
+            }
+            
             return ScanRecordV1.BeaconObs(
                 beaconID: b.beaconID,
                 stats: stats,
                 hist: hist,
-                dist: dist
+                dist: dist,
+                geo: geoData
             )
         }
 

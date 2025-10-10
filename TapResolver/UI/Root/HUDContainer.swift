@@ -525,6 +525,27 @@ struct HUDContainer: View {
                 }
             )
             
+            // Collect Tx Power values for each beacon
+            let txPowers: [String: Int?] = Dictionary(uniqueKeysWithValues:
+                beaconDotStore.dots.compactMap { dot in
+                    guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
+                    return (dot.beaconID, beaconDotStore.getTxPower(for: dot.beaconID))
+                }
+            )
+            
+            // Collect color values for each beacon (convert SwiftUI Color to RGB array)
+            let colors: [String: [Double]?] = Dictionary(uniqueKeysWithValues:
+                beaconDotStore.dots.compactMap { dot in
+                    guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
+                    // Extract RGB from SwiftUI Color
+                    if let components = UIColor(dot.color).cgColor.components, components.count >= 3 {
+                        let rgb = [Double(components[0]), Double(components[1]), Double(components[2])]
+                        return (dot.beaconID, rgb)
+                    }
+                    return (dot.beaconID, nil)
+                }
+            )
+            
             // 2) Use the v1 exporter to build JSON with distances
             let result = try ScanV1Exporter.buildJSON(
                 from: record,
@@ -533,6 +554,8 @@ struct HUDContainer: View {
                 pointPx: pointPx,
                 beaconsPx: beaconsPx,
                 elevations: elevations,
+                txPowers: txPowers,
+                colors: colors,
                 mapResolution: mapTransform.mapSize
             )
             
