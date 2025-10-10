@@ -12,8 +12,11 @@ enum ScanBuilder {
         facing_deg: Double?,
         point_xy_px: CGPoint, point_xy_m: CGPoint?,
         mapResolution_px: CGSize?,
-        pixelsPerMeter: Double?,                              // NEW
-        beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?, txPower_dbm: Int?, name: String, color: [Double]?)], // NEW (by beaconID)
+        pixelsPerMeter: Double?,
+        beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?)],                              // Position only
+        beaconMeta: [String: (name: String, color: [Double]?, model: String?)],                   // Identity
+        beaconIBeacon: [String: (uuid: String, major: Int, minor: Int, measuredPower: Int)],      // iBeacon data
+        beaconRadio: [String: (txPowerSetting: Int?, advertisingInterval: Int?)],                 // Radio config
         beacons: [(beaconID: String, median: Int, mad: Int, p10: Int, p90: Int, samples: Int,
                    hist: (min:Int, max:Int, size:Int, counts:[Int])?)]
     ) -> ScanRecordV1 {
@@ -40,27 +43,22 @@ enum ScanBuilder {
             
             // Distances (optional if we have geometry)
             var dist: ScanRecordV1.BeaconObs.Distances? = nil
-            if let geo = beaconGeo[b.beaconID],
-               let ppm = pixelsPerMeter {
+            if let geo = beaconGeo[b.beaconID], let ppm = pixelsPerMeter {
                 let planar_px_raw = DistanceKit.planarPx(from: point_xy_px, to: geo.posPx)
                 let planar_m_raw  = planar_px_raw / ppm
-                let dz_m = (geo.elevation_m ?? 0) - (deviceHeight_m ?? 0) // user height as receiver Z
+                let dz_m = (geo.elevation_m ?? 0) - (deviceHeight_m ?? 0)
                 let xyz_px_raw = DistanceKit.xyzPx(planar_px: planar_px_raw, dz_m: dz_m, ppm: ppm)
                 let xyz_m_raw  = DistanceKit.xyzM(planar_m: planar_m_raw, dz_m: dz_m)
                 
-                // Round to 2 decimals
                 let planar_px = Rounding.d(planar_px_raw, 2)
                 let planar_m  = Rounding.d(planar_m_raw, 2)
                 let xyz_px = Rounding.d(xyz_px_raw, 2)
                 let xyz_m  = Rounding.d(xyz_m_raw, 2)
                 
-                dist = .init(xyMapD_px: planar_px,
-                             xyMapD_m:  planar_m,
-                             xyzMapD_px: xyz_px,
-                             xyzMapD_m:  xyz_m)
+                dist = .init(xyMapD_px: planar_px, xyMapD_m: planar_m, xyzMapD_px: xyz_px, xyzMapD_m: xyz_m)
             }
             
-            // Build beacon geometry metadata
+            // Build beacon geometry (position only)
             var geoData: ScanRecordV1.BeaconObs.BeaconGeo? = nil
             if let geo = beaconGeo[b.beaconID] {
                 let pos_px = [Rounding.d(Double(geo.posPx.x), 2), Rounding.d(Double(geo.posPx.y), 2)]
@@ -71,15 +69,43 @@ enum ScanBuilder {
                 geoData = ScanRecordV1.BeaconObs.BeaconGeo(
                     position_px: pos_px,
                     position_m: pos_m,
-                    elevation_m: geo.elevation_m,
-                    txPower_dbm: geo.txPower_dbm,
-                    name: geo.name,
-                    color: geo.color
+                    elevation_m: geo.elevation_m
+                )
+            }
+            
+            // Build beacon metadata (always present - at minimum has beaconID as name)
+            let metaInfo = beaconMeta[b.beaconID]
+            let metaData = ScanRecordV1.BeaconObs.BeaconMeta(
+                name: metaInfo?.name ?? b.beaconID,
+                color: metaInfo?.color,
+                model: metaInfo?.model
+            )
+            
+            // Build iBeacon data (optional)
+            var ibeaconData: ScanRecordV1.BeaconObs.IBeaconData? = nil
+            if let ibeacon = beaconIBeacon[b.beaconID] {
+                ibeaconData = ScanRecordV1.BeaconObs.IBeaconData(
+                    uuid: ibeacon.uuid,
+                    major: ibeacon.major,
+                    minor: ibeacon.minor,
+                    measuredPower_dbm: ibeacon.measuredPower
+                )
+            }
+            
+            // Build radio data (optional)
+            var radioData: ScanRecordV1.BeaconObs.BeaconRadio? = nil
+            if let radio = beaconRadio[b.beaconID] {
+                radioData = ScanRecordV1.BeaconObs.BeaconRadio(
+                    txPowerSetting_dbm: radio.txPowerSetting,
+                    advertisingInterval_ms: radio.advertisingInterval
                 )
             }
             
             return ScanRecordV1.BeaconObs(
                 beaconID: b.beaconID,
+                meta: metaData,
+                ibeacon: ibeaconData,
+                radio: radioData,
                 stats: stats,
                 hist: hist,
                 dist: dist,
