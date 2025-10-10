@@ -39,6 +39,9 @@ public final class BeaconDotStore: ObservableObject {
     @Published private(set) var elevations: [String: Double] = [:]
     // beaconID -> txPower dBm
     @Published var txPowerByID: [String: Int] = [:]
+    // beaconID -> advertising interval in milliseconds
+    @Published private(set) var advertisingIntervalByID: [String: Double] = [:]
+    private let defaultAdvertisingInterval: Double = 100.0  // BC04P default
     // Active elevation editing state
     @Published public var activeElevationEdit: ActiveElevationEdit? = nil
 
@@ -145,6 +148,31 @@ public final class BeaconDotStore: ObservableObject {
         return txPowerByID[beaconID]
     }
     
+    // MARK: - Advertising Interval API
+    
+    public func setAdvertisingInterval(for beaconID: String, ms: Double?) {
+        if let v = ms {
+            advertisingIntervalByID[beaconID] = v
+        } else {
+            advertisingIntervalByID.removeValue(forKey: beaconID)
+        }
+        saveAdvertisingIntervals()
+    }
+    
+    public func getAdvertisingInterval(for beaconID: String) -> Double {
+        return advertisingIntervalByID[beaconID] ?? defaultAdvertisingInterval
+    }
+    
+    public func displayAdvertisingInterval(for beaconID: String) -> String {
+        let interval = getAdvertisingInterval(for: beaconID)
+        // Format with up to 2 decimal places, removing trailing zeros
+        let formatted = String(format: "%.2f", interval)
+        if let lastNonZero = formatted.lastIndex(where: { $0 != "0" && $0 != "." }) {
+            return String(formatted[...lastNonZero]) + " ms"
+        }
+        return formatted + " ms"
+    }
+    
     /// Reload data for the active location
     public func reloadForActiveLocation() {
         clearAndReloadForActiveLocation()
@@ -157,11 +185,13 @@ public final class BeaconDotStore: ObservableObject {
         locked.removeAll()
         elevations.removeAll()
         txPowerByID.removeAll()
+        advertisingIntervalByID.removeAll()
 
         // Pure load for the active namespace and file
         loadLocks()
         loadElevations()
         loadTxPower()
+        loadAdvertisingIntervals()
         loadDotsFromDisk()
         objectWillChange.send()
     }
@@ -236,6 +266,14 @@ public final class BeaconDotStore: ObservableObject {
     
     private func saveTxPower() {
         ctx.write(txPowerKey, value: txPowerByID)
+    }
+    
+    private func saveAdvertisingIntervals() {
+        ctx.write("advertisingIntervals", value: advertisingIntervalByID)
+    }
+    
+    private func loadAdvertisingIntervals() {
+        advertisingIntervalByID = ctx.read("advertisingIntervals", as: [String: Double].self) ?? [:]
     }
     
     // MARK: - File persistence for dot coordinates

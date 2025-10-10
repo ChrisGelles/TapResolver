@@ -556,9 +556,10 @@ struct HUDContainer: View {
                 Dictionary(uniqueKeysWithValues:
                     beaconDotStore.dots.compactMap { dot in
                         guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
+                        let interval = beaconDotStore.getAdvertisingInterval(for: dot.beaconID)
                         return (dot.beaconID, (
                             txPowerSetting: beaconDotStore.getTxPower(for: dot.beaconID),
-                            advertisingInterval: nil
+                            advertisingInterval: Int(interval)  // Convert Double to Int for export
                         ))
                     }
                 )
@@ -772,9 +773,13 @@ struct CustomSlider: UIViewRepresentable {
 
 // MARK: - Tx Power Selection View
 struct TxPowerSelectionView: View {
+    @EnvironmentObject private var beaconDotStore: BeaconDotStore
+    
     let beaconID: String
     let onSelectTxPower: (Int?) -> Void
     let onDismiss: () -> Void
+    
+    @State private var showIntervalKeypad = false
     
     private let txPowerOptions: [(label: String, value: Int?)] = [
         ("8 dBm", 8),
@@ -795,7 +800,7 @@ struct TxPowerSelectionView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(.white)
             
-            // Selection buttons
+            // Tx Power selection buttons
             VStack(spacing: 4) {
                 ForEach(txPowerOptions, id: \.label) { option in
                     Button(action: {
@@ -810,25 +815,78 @@ struct TxPowerSelectionView: View {
                     }
                     .buttonStyle(.plain)
                 }
+            }
+            
+            // Divider
+            Divider()
+                .background(Color.white.opacity(0.3))
+                .padding(.vertical, 4)
+            
+            // Advertising Interval section
+            VStack(spacing: 4) {
+                Text("Broadcast Interval (ms)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.8))
                 
-                // Clear/Dismiss button
                 Button(action: {
-                    onDismiss()
+                    showIntervalKeypad = true
                 }) {
-                    Text("Cancel")
-                        .font(.system(size: 12, weight: .medium))
+                    Text(beaconDotStore.displayAdvertisingInterval(for: beaconID))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.gray.opacity(0.8), in: RoundedRectangle(cornerRadius: 6))
+                        .padding(.vertical, 8)
+                        .frame(minWidth: 100)
+                        .background(Color.gray.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
             }
+            
+            // Divider
+            Divider()
+                .background(Color.white.opacity(0.3))
+                .padding(.vertical, 4)
+            
+            // Cancel button
+            Button(action: {
+                onDismiss()
+            }) {
+                Text("Cancel")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.gray.opacity(0.8), in: RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
         }
         .padding(12)
+        .frame(maxWidth: 180)    // ← ADD THIS - adjust as needed
         .background(Color.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
         .padding(.trailing, 20)
         .padding(.bottom, 40)
+        .overlay(
+            Group {
+                if showIntervalKeypad {
+                    NumericInputKeypad(
+                        title: "Broadcast Interval (ms)",
+                        initialText: String(format: "%.2f", beaconDotStore.getAdvertisingInterval(for: beaconID)),
+                        onCommit: { text in
+                            if let value = Double(text) {
+                                beaconDotStore.setAdvertisingInterval(for: beaconID, ms: value)
+                            }
+                            showIntervalKeypad = false
+                        },
+                        onDismiss: {
+                            showIntervalKeypad = false
+                        }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.3))
+                    .zIndex(1000)
+                }
+            }
+        )
     }
 }
 
