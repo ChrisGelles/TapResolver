@@ -118,13 +118,24 @@ public final class MapPointScanUtility: ObservableObject {
         public let posY_m: Double?
         public let posZ_m: Double?
         public let txPowerSettingDbm: Int?
-        public init(beaconID: String, name: String?, posX_m: Double?, posY_m: Double?, posZ_m: Double?, txPowerSettingDbm: Int?) {
+        
+        // iBeacon protocol data (from BLE advertisement)
+        public let ibeaconUUID: String?
+        public let ibeaconMajor: Int?
+        public let ibeaconMinor: Int?
+        public let ibeaconMeasuredPower: Int?
+        
+        public init(beaconID: String, name: String?, posX_m: Double?, posY_m: Double?, posZ_m: Double?, txPowerSettingDbm: Int?, ibeaconUUID: String?, ibeaconMajor: Int?, ibeaconMinor: Int?, ibeaconMeasuredPower: Int?) {
             self.beaconID = beaconID
             self.name = name
             self.posX_m = posX_m
             self.posY_m = posY_m
             self.posZ_m = posZ_m
             self.txPowerSettingDbm = txPowerSettingDbm
+            self.ibeaconUUID = ibeaconUUID
+            self.ibeaconMajor = ibeaconMajor
+            self.ibeaconMinor = ibeaconMinor
+            self.ibeaconMeasuredPower = ibeaconMeasuredPower
         }
     }
 
@@ -393,7 +404,7 @@ public final class MapPointScanUtility: ObservableObject {
         aggregates.reserveCapacity(windowBins.count)
 
         for (beaconID, obin) in windowBins {
-            let meta = resolveBeaconMeta(beaconID) ?? BeaconMeta(beaconID: beaconID, name: nil, posX_m: nil, posY_m: nil, posZ_m: nil, txPowerSettingDbm: nil)
+            let meta = resolveBeaconMeta(beaconID) ?? BeaconMeta(beaconID: beaconID, name: nil, posX_m: nil, posY_m: nil, posZ_m: nil, txPowerSettingDbm: nil, ibeaconUUID: nil, ibeaconMajor: nil, ibeaconMinor: nil, ibeaconMeasuredPower: nil)
             let samples = obin.total
             let med = obin.medianDbm
             let agg = BeaconScanAggregate(
@@ -499,12 +510,9 @@ public final class MapPointScanUtility: ObservableObject {
             // Get pixels per meter from MetricSquareStore
             let pixelsPerMeter = getPixelsPerMeter()
             
-            // Build beacon geometry lookup from existing beacon metadata
-            // CRITICAL: Must convert meters to PIXELS before passing to ScanBuilder
-            // ScanBuilder expects posPx in pixels, then divides by ppm to get meters
-            let beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?, txPower_dbm: Int?, name: String, color: [Double]?)] = 
+            // Build geometry dictionary (position only)
+            let beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?)] = 
                 Dictionary(uniqueKeysWithValues: record.beacons.compactMap { agg in
-                    // Need both position AND ppm to convert meters → pixels
                     guard let posX_m = agg.beacon.posX_m, 
                           let posY_m = agg.beacon.posY_m,
                           let ppm = pixelsPerMeter,
@@ -512,17 +520,41 @@ public final class MapPointScanUtility: ObservableObject {
                     
                     // Convert meters to pixels: meters × pixels_per_meter = pixels
                     let posPx = CGPoint(x: posX_m * ppm, y: posY_m * ppm)
-                    
-                    return (
-                        agg.beacon.beaconID, 
-                        (
-                            posPx: posPx,                                           // Now in PIXELS
-                            elevation_m: agg.beacon.posZ_m,
-                            txPower_dbm: agg.beacon.txPowerSettingDbm,
-                            name: agg.beacon.name ?? agg.beacon.beaconID,
-                            color: nil  // Color not available in MapPointScanUtility context
-                        )
-                    )
+                    return (agg.beacon.beaconID, (posPx: posPx, elevation_m: agg.beacon.posZ_m))
+                })
+            
+            // Build metadata dictionary
+            let beaconMeta: [String: (name: String, color: [Double]?, model: String?)] = 
+                Dictionary(uniqueKeysWithValues: record.beacons.map { agg in
+                    (agg.beacon.beaconID, (
+                        name: agg.beacon.name ?? agg.beacon.beaconID,
+                        color: nil,  // Not available in MapPointScanUtility context
+                        model: "BC04P"
+                    ))
+                })
+            
+            // Build iBeacon dictionary from scan record
+            let beaconIBeacon: [String: (uuid: String, major: Int, minor: Int, measuredPower: Int)] = 
+                Dictionary(uniqueKeysWithValues: record.beacons.compactMap { agg in
+                    guard let uuid = agg.beacon.ibeaconUUID,
+                          let major = agg.beacon.ibeaconMajor,
+                          let minor = agg.beacon.ibeaconMinor,
+                          let measuredPower = agg.beacon.ibeaconMeasuredPower else {
+                        return nil
+                    }
+                    return (agg.beacon.beaconID, (uuid: uuid, major: major, minor: minor, measuredPower: measuredPower))
+                })
+            
+            // Build Eddystone dictionary (empty for now - will be populated when parsing added)
+            let beaconEddystone: [String: (namespace: String, instance: String, txPower: Int)] = [:]
+            
+            // Build radio dictionary
+            let beaconRadio: [String: (txPowerSetting: Int?, advertisingInterval: Int?)] = 
+                Dictionary(uniqueKeysWithValues: record.beacons.map { agg in
+                    (agg.beacon.beaconID, (
+                        txPowerSetting: agg.beacon.txPowerSettingDbm,
+                        advertisingInterval: nil  // Not currently tracked
+                    ))
                 })
             
             // Convert existing ScanRecord to V1 format
@@ -546,14 +578,20 @@ public final class MapPointScanUtility: ObservableObject {
                 locationID: locationID,
                 pointID: record.point.pointID,
                 sessionID: record.point.sessionID,
-                start: start, end: end, duration: record.duration_s,
+                start: start,
+                end: end,
+                duration: record.duration_s,
                 deviceHeight_m: record.point.userHeight_m,
-                facing_deg: nil, // Not available in current format
+                facing_deg: record.userFacing_deg,
                 point_xy_px: pointXY_px,
                 point_xy_m: CGPoint(x: record.point.mapX_m, y: record.point.mapY_m),
-                mapResolution_px: nil, // Not available in current format
+                mapResolution_px: nil,
                 pixelsPerMeter: pixelsPerMeter,
                 beaconGeo: beaconGeo,
+                beaconMeta: beaconMeta,
+                beaconIBeacon: beaconIBeacon,
+                beaconEddystone: beaconEddystone,
+                beaconRadio: beaconRadio,
                 beacons: beaconStatsTuples
             )
             

@@ -60,14 +60,21 @@ struct AppBootstrap: ViewModifier {
             return !lists.beacons.contains(name)                  // exclude if not on whitelist
         }
 
-        // Provide meta for known beacons (x,y,z,label, tx power)
-        scanUtility.resolveBeaconMeta = { [weak beaconDots, weak squares] beaconID in
+        // Provide meta for known beacons (x,y,z,label, tx power, iBeacon data)
+        scanUtility.resolveBeaconMeta = { [weak beaconDots, weak squares, weak scanner] beaconID in
             guard let store = beaconDots,
                   let dot = store.dots.first(where: { $0.beaconID == beaconID }) else {
                 return MapPointScanUtility.BeaconMeta(
-                    beaconID: beaconID, name: beaconID,
-                    posX_m: nil, posY_m: nil, posZ_m: nil,
-                    txPowerSettingDbm: nil
+                    beaconID: beaconID,
+                    name: beaconID,
+                    posX_m: nil,
+                    posY_m: nil,
+                    posZ_m: nil,
+                    txPowerSettingDbm: nil,
+                    ibeaconUUID: nil,
+                    ibeaconMajor: nil,
+                    ibeaconMinor: nil,
+                    ibeaconMeasuredPower: nil
                 )
             }
 
@@ -84,6 +91,9 @@ struct AppBootstrap: ViewModifier {
                     }
                 }
             }
+            
+            // Get iBeacon data from BluetoothScanner
+            let device = scanner?.devices.first(where: { $0.name == beaconID })
 
             return MapPointScanUtility.BeaconMeta(
                 beaconID: beaconID,
@@ -91,7 +101,11 @@ struct AppBootstrap: ViewModifier {
                 posX_m: x_m,
                 posY_m: y_m,
                 posZ_m: store.getElevation(for: beaconID),
-                txPowerSettingDbm: store.getTxPower(for: beaconID)
+                txPowerSettingDbm: store.getTxPower(for: beaconID),
+                ibeaconUUID: device?.ibeaconUUID,
+                ibeaconMajor: device?.ibeaconMajor,
+                ibeaconMinor: device?.ibeaconMinor,
+                ibeaconMeasuredPower: device?.ibeaconMeasuredPower
             )
         }
         

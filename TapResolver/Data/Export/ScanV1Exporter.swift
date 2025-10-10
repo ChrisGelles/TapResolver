@@ -6,30 +6,40 @@ enum ScanV1Exporter {
         from utilRecord: MapPointScanUtility.ScanRecord,
         locationID: String,
         ppm: Double,
-        pointPx: CGPoint,           // map-point in pixels
-        beaconsPx: [String: CGPoint],// beaconID -> px
+        pointPx: CGPoint,
+        beaconsPx: [String: CGPoint],
         elevations: [String: Double?],
-        txPowers: [String: Int?],
-        colors: [String: [Double]?],
+        beaconMeta: [String: (name: String, color: [Double]?, model: String?)],
+        beaconIBeacon: [String: (uuid: String, major: Int, minor: Int, measuredPower: Int)],
+        beaconEddystone: [String: (namespace: String, instance: String, txPower: Int)],
+        beaconRadio: [String: (txPowerSetting: Int?, advertisingInterval: Int?)],
         mapResolution: CGSize?
     ) throws -> (json: Data, filename: String) {
 
         // 1) Convert pointPx -> meters (optional)
         let pointM = CGPoint(x: pointPx.x / ppm, y: pointPx.y / ppm)
 
-        // 2) Build geometry dictionary with full beacon metadata
-        var beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?, txPower_dbm: Int?, name: String, color: [Double]?)] = [:]
+        // 2) Build geometry dictionary (position only)
+        var beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?)] = [:]
         for (id, px) in beaconsPx {
-            beaconGeo[id] = (
-                posPx: px,
-                elevation_m: elevations[id] ?? nil,
-                txPower_dbm: txPowers[id] ?? nil,
-                name: id,  // beaconID is the name
-                color: colors[id] ?? nil
-            )
+            beaconGeo[id] = (posPx: px, elevation_m: elevations[id] ?? nil)
         }
 
-        // 3) Flatten utilRecord beacons into the tuple list ScanBuilder expects:
+        // 3) Extract iBeacon data from scan record (if available)
+        var extractedIBeacon: [String: (uuid: String, major: Int, minor: Int, measuredPower: Int)] = [:]
+        for agg in utilRecord.beacons {
+            if let uuid = agg.beacon.ibeaconUUID,
+               let major = agg.beacon.ibeaconMajor,
+               let minor = agg.beacon.ibeaconMinor,
+               let measuredPower = agg.beacon.ibeaconMeasuredPower {
+                extractedIBeacon[agg.beacon.beaconID] = (uuid: uuid, major: major, minor: minor, measuredPower: measuredPower)
+            }
+        }
+        
+        // Merge with passed-in iBeacon data (passed data takes precedence)
+        let finalIBeacon = extractedIBeacon.merging(beaconIBeacon) { _, new in new }
+
+        // 4) Flatten utilRecord beacons into the tuple list ScanBuilder expects:
         //    (beaconID, median, mad, p10, p90, samples, hist)
         let tuples: [(String, Int, Int, Int, Int, Int, (min:Int,max:Int,size:Int,counts:[Int])?)] =
             utilRecord.beacons.map { b in
@@ -41,7 +51,7 @@ enum ScanV1Exporter {
                 return (b.beacon.beaconID, median, mad, p10, p90, b.samples, hist)
             }
 
-        // 4) Use your existing builder (this computes distances):
+        // 5) Use your existing builder (this computes distances):
         let v1 = ScanBuilder.makeScan(
             scanID: utilRecord.scanID,
             locationID: locationID,
@@ -52,14 +62,19 @@ enum ScanV1Exporter {
             duration: utilRecord.duration_s,
             deviceHeight_m: utilRecord.point.userHeight_m,
             facing_deg: utilRecord.userFacing_deg,
-            point_xy_px: pointPx, point_xy_m: pointM,
+            point_xy_px: pointPx,
+            point_xy_m: pointM,
             mapResolution_px: mapResolution,
             pixelsPerMeter: ppm,
             beaconGeo: beaconGeo,
+            beaconMeta: beaconMeta,
+            beaconIBeacon: finalIBeacon,
+            beaconEddystone: beaconEddystone,
+            beaconRadio: beaconRadio,
             beacons: tuples
         )
 
-        // 5) Encode with your JSONKit encoder (pretty/sorted)
+        // 6) Encode with your JSONKit encoder (pretty/sorted)
         let data = try JSONKit.encoder().encode(v1)
         let filename = "\(v1.scanID).json"
         return (data, filename)

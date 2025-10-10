@@ -23,6 +23,7 @@ public struct ScanRecordV1: Codable {
         public let beaconID: String
         public let meta: BeaconMeta
         public let ibeacon: IBeaconData?
+        public let eddystone: EddystoneData?
         public let radio: BeaconRadio?
         
         public struct Stats: Codable { public let median_dbm: Int; public let mad_db: Int; public let p10_dbm: Int; public let p90_dbm: Int; public let samples: Int }
@@ -51,6 +52,13 @@ public struct ScanRecordV1: Codable {
             public let major: Int                // 16-bit major ID
             public let minor: Int                // 16-bit minor ID
             public let measuredPower_dbm: Int    // Calibrated RSSI at 1 meter
+        }
+        
+        // Google Eddystone-UID protocol data (from advertisement)
+        public struct EddystoneData: Codable {
+            public let namespace: String         // 10-byte namespace ID (hex string)
+            public let instance: String          // 6-byte instance ID (hex string)
+            public let txPower_dbm: Int          // Calibrated Tx Power at 0 meters
         }
         
         // Radio/RF configuration (manual settings)

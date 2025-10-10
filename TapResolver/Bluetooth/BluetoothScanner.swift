@@ -100,6 +100,46 @@ final class BluetoothScanner: NSObject, ObservableObject {
         if verboseLogging { print("🛑 Stopped BLE scan. Total devices seen: \(devices.count)") }
     }
 
+    // MARK: - iBeacon Parsing
+    
+    /// Parse iBeacon data from manufacturer data
+    /// Apple's iBeacon format: Company ID 0x004C, followed by 0x02 0x15, then UUID, Major, Minor, Measured Power
+    private func parseIBeaconData(_ manufacturerData: Data) -> (uuid: String, major: Int, minor: Int, measuredPower: Int)? {
+        // iBeacon packet structure:
+        // Byte 0-1:   Company ID (0x4C 0x00 for Apple, little-endian)
+        // Byte 2:     iBeacon type (0x02)
+        // Byte 3:     Data length (0x15 = 21 bytes)
+        // Byte 4-19:  UUID (16 bytes)
+        // Byte 20-21: Major (2 bytes, big-endian)
+        // Byte 22-23: Minor (2 bytes, big-endian)
+        // Byte 24:    Measured Power (1 byte, signed int8)
+        
+        guard manufacturerData.count >= 25 else { return nil }
+        
+        // Check for Apple company ID (0x004C in little-endian = 0x4C 0x00)
+        guard manufacturerData[0] == 0x4C && manufacturerData[1] == 0x00 else { return nil }
+        
+        // Check for iBeacon type and length
+        guard manufacturerData[2] == 0x02 && manufacturerData[3] == 0x15 else { return nil }
+        
+        // Extract UUID (16 bytes starting at index 4)
+        let uuidData = manufacturerData.subdata(in: 4..<20)
+        let uuid = uuidData.map { String(format: "%02X", $0) }.joined()
+        // Format as standard UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+        let formattedUUID = "\(uuid.prefix(8))-\(uuid.dropFirst(8).prefix(4))-\(uuid.dropFirst(12).prefix(4))-\(uuid.dropFirst(16).prefix(4))-\(uuid.dropFirst(20))"
+        
+        // Extract Major (2 bytes, big-endian)
+        let major = Int(manufacturerData[20]) << 8 | Int(manufacturerData[21])
+        
+        // Extract Minor (2 bytes, big-endian)
+        let minor = Int(manufacturerData[22]) << 8 | Int(manufacturerData[23])
+        
+        // Extract Measured Power (1 byte, signed)
+        let measuredPower = Int(Int8(bitPattern: manufacturerData[24]))
+        
+        return (uuid: formattedUUID, major: major, minor: minor, measuredPower: measuredPower)
+    }
+    
     // MARK: - Model
     struct DiscoveredDevice: Identifiable {
         let id: UUID
@@ -108,6 +148,12 @@ final class BluetoothScanner: NSObject, ObservableObject {
         var txPower: Int?        // optional TX power from advertisement
         var lastSeen: Date
         var advSummary: String
+        
+        // iBeacon protocol data (parsed from manufacturer data)
+        var ibeaconUUID: String?           // 128-bit UUID
+        var ibeaconMajor: Int?             // 16-bit major ID
+        var ibeaconMinor: Int?             // 16-bit minor ID
+        var ibeaconMeasuredPower: Int?     // Calibrated RSSI at 1 meter
     }
 }
 
@@ -149,6 +195,29 @@ extension BluetoothScanner: @preconcurrency CBCentralManagerDelegate {
         let txPower = (advertisementData[CBAdvertisementDataTxPowerLevelKey] as? NSNumber)?.intValue
         let summary = summarize(advertisementData)
         onDeviceNameDiscovered?(name, id)
+        
+        // Parse iBeacon data if available
+        var ibeaconUUID: String? = nil
+        var ibeaconMajor: Int? = nil
+        var ibeaconMinor: Int? = nil
+        var ibeaconMeasuredPower: Int? = nil
+        
+        if let manufacturerData = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data {
+            if let ibeaconData = parseIBeaconData(manufacturerData) {
+                ibeaconUUID = ibeaconData.uuid
+                ibeaconMajor = ibeaconData.major
+                ibeaconMinor = ibeaconData.minor
+                ibeaconMeasuredPower = ibeaconData.measuredPower
+                
+                // Debug: Log iBeacon data on first detection
+                if deviceIndex[id] == nil {
+                    print("📱 iBeacon detected: \(name)")
+                    print("   UUID: \(ibeaconData.uuid)")
+                    print("   Major: \(ibeaconData.major), Minor: \(ibeaconData.minor)")
+                    print("   Measured Power: \(ibeaconData.measuredPower) dBm")
+                }
+            }
+        }
 
         if let idx = deviceIndex[id] {
             devices[idx].name = name
@@ -156,9 +225,22 @@ extension BluetoothScanner: @preconcurrency CBCentralManagerDelegate {
             devices[idx].txPower = txPower ?? devices[idx].txPower
             devices[idx].lastSeen = Date()
             devices[idx].advSummary = summary
+            devices[idx].ibeaconUUID = ibeaconUUID ?? devices[idx].ibeaconUUID
+            devices[idx].ibeaconMajor = ibeaconMajor ?? devices[idx].ibeaconMajor
+            devices[idx].ibeaconMinor = ibeaconMinor ?? devices[idx].ibeaconMinor
+            devices[idx].ibeaconMeasuredPower = ibeaconMeasuredPower ?? devices[idx].ibeaconMeasuredPower
         } else {
             let dev = DiscoveredDevice(
-                id: id, name: name, rssi: rssi, txPower: txPower, lastSeen: Date(), advSummary: summary
+                id: id,
+                name: name,
+                rssi: rssi,
+                txPower: txPower,
+                lastSeen: Date(),
+                advSummary: summary,
+                ibeaconUUID: ibeaconUUID,
+                ibeaconMajor: ibeaconMajor,
+                ibeaconMinor: ibeaconMinor,
+                ibeaconMeasuredPower: ibeaconMeasuredPower
             )
             deviceIndex[id] = devices.count
             devices.append(dev)

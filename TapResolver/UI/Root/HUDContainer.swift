@@ -525,26 +525,43 @@ struct HUDContainer: View {
                 }
             )
             
-            // Collect Tx Power values for each beacon
-            let txPowers: [String: Int?] = Dictionary(uniqueKeysWithValues:
-                beaconDotStore.dots.compactMap { dot in
-                    guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
-                    return (dot.beaconID, beaconDotStore.getTxPower(for: dot.beaconID))
-                }
-            )
-            
-            // Collect color values for each beacon (convert SwiftUI Color to RGB array)
-            let colors: [String: [Double]?] = Dictionary(uniqueKeysWithValues:
-                beaconDotStore.dots.compactMap { dot in
-                    guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
-                    // Extract RGB from SwiftUI Color
-                    if let components = UIColor(dot.color).cgColor.components, components.count >= 3 {
-                        let rgb = [Double(components[0]), Double(components[1]), Double(components[2])]
-                        return (dot.beaconID, rgb)
+            // Collect beacon metadata (identity & display)
+            let beaconMeta: [String: (name: String, color: [Double]?, model: String?)] = 
+                Dictionary(uniqueKeysWithValues:
+                    beaconDotStore.dots.compactMap { dot in
+                        guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
+                        
+                        // Extract RGB color
+                        var rgb: [Double]? = nil
+                        if let components = UIColor(dot.color).cgColor.components, components.count >= 3 {
+                            rgb = [Double(components[0]), Double(components[1]), Double(components[2])]
+                        }
+                        
+                        return (dot.beaconID, (
+                            name: dot.beaconID,
+                            color: rgb,
+                            model: "BC04P"
+                        ))
                     }
-                    return (dot.beaconID, nil)
-                }
-            )
+                )
+            
+            // Collect iBeacon protocol data (empty for now - will be populated when parsing added)
+            let beaconIBeacon: [String: (uuid: String, major: Int, minor: Int, measuredPower: Int)] = [:]
+            
+            // Collect Eddystone protocol data (empty for now - will be populated when parsing added)
+            let beaconEddystone: [String: (namespace: String, instance: String, txPower: Int)] = [:]
+            
+            // Collect radio configuration
+            let beaconRadio: [String: (txPowerSetting: Int?, advertisingInterval: Int?)] = 
+                Dictionary(uniqueKeysWithValues:
+                    beaconDotStore.dots.compactMap { dot in
+                        guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
+                        return (dot.beaconID, (
+                            txPowerSetting: beaconDotStore.getTxPower(for: dot.beaconID),
+                            advertisingInterval: nil
+                        ))
+                    }
+                )
             
             // 2) Use the v1 exporter to build JSON with distances
             let result = try ScanV1Exporter.buildJSON(
@@ -554,8 +571,10 @@ struct HUDContainer: View {
                 pointPx: pointPx,
                 beaconsPx: beaconsPx,
                 elevations: elevations,
-                txPowers: txPowers,
-                colors: colors,
+                beaconMeta: beaconMeta,
+                beaconIBeacon: beaconIBeacon,
+                beaconEddystone: beaconEddystone,
+                beaconRadio: beaconRadio,
                 mapResolution: mapTransform.mapSize
             )
             

@@ -16,6 +16,7 @@ enum ScanBuilder {
         beaconGeo: [String: (posPx: CGPoint, elevation_m: Double?)],                              // Position only
         beaconMeta: [String: (name: String, color: [Double]?, model: String?)],                   // Identity
         beaconIBeacon: [String: (uuid: String, major: Int, minor: Int, measuredPower: Int)],      // iBeacon data
+        beaconEddystone: [String: (namespace: String, instance: String, txPower: Int)],           // Eddystone data
         beaconRadio: [String: (txPowerSetting: Int?, advertisingInterval: Int?)],                 // Radio config
         beacons: [(beaconID: String, median: Int, mad: Int, p10: Int, p90: Int, samples: Int,
                    hist: (min:Int, max:Int, size:Int, counts:[Int])?)]
@@ -92,6 +93,16 @@ enum ScanBuilder {
                 )
             }
             
+            // Build Eddystone data (optional)
+            var eddystoneData: ScanRecordV1.BeaconObs.EddystoneData? = nil
+            if let eddystone = beaconEddystone[b.beaconID] {
+                eddystoneData = ScanRecordV1.BeaconObs.EddystoneData(
+                    namespace: eddystone.namespace,
+                    instance: eddystone.instance,
+                    txPower_dbm: eddystone.txPower
+                )
+            }
+            
             // Build radio data (optional)
             var radioData: ScanRecordV1.BeaconObs.BeaconRadio? = nil
             if let radio = beaconRadio[b.beaconID] {
@@ -105,6 +116,7 @@ enum ScanBuilder {
                 beaconID: b.beaconID,
                 meta: metaData,
                 ibeacon: ibeaconData,
+                eddystone: eddystoneData,
                 radio: radioData,
                 stats: stats,
                 hist: hist,
