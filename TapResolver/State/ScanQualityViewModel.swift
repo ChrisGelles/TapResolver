@@ -235,8 +235,12 @@ extension ScanQualityViewModel {
 // MARK: - Real Data Builder
 
 extension ScanQualityViewModel {
+    // ARCHITECTURAL UPDATE: Now uses BeaconStateManager instead of directly polling BluetoothScanner
+    // This ensures consistent beacon state across all UI components
+    // @MainActor required because BeaconStateManager is main-actor isolated
+    @MainActor
     static func fromRealData(
-        btScanner: BluetoothScanner,
+        beaconState: BeaconStateManager,    // Changed from btScanner
         beaconDotStore: BeaconDotStore,
         scanUtility: MapPointScanUtility
     ) -> ScanQualityViewModel {
@@ -245,13 +249,8 @@ extension ScanQualityViewModel {
         let beaconsWithDots: [BeaconDotStore.Dot] = beaconDotStore.dots
         let totalBeacons: Int = beaconsWithDots.count
 
-        // Build detection state map: beaconID -> (rssi, timestamp)
-        var detectionState: [String: (rssi: Int, lastSeen: Date)] = [:]
-        for device in btScanner.devices {
-            detectionState[device.name] = (device.rssi, device.lastSeen)
-        }
-
-        // Track detection order (earlier = lower number)
+        // ARCHITECTURAL UPDATE: Query BeaconStateManager instead of BluetoothScanner
+        // BeaconStateManager maintains consistent active/inactive state with 3-second staleness window
         var detectionOrder: [String: Int] = [:]
         var orderCounter: Int = 0
 
@@ -264,15 +263,15 @@ extension ScanQualityViewModel {
             // Extract prefix (e.g., "05" from "05-bouncyLynx")
             let prefix: String = beaconID.split(separator: "-").first.map(String.init) ?? "??"
 
-            // Check if currently detected (within last 3 seconds)
-            let now: Date = Date()
+            // ARCHITECTURAL UPDATE: Query BeaconStateManager for consistent active state
+            // Uses same 3-second staleness window as RSSILabelsOverlay and all other consumers
             var currentRSSI: Int? = nil
             var signalQuality: Quality = .none
             var isCurrentlyDetected: Bool = false
 
-            if let detection = detectionState[beaconID],
-               now.timeIntervalSince(detection.lastSeen) < 3.0 {
-                currentRSSI = detection.rssi
+            if let liveBeacon = beaconState.beacon(named: beaconID),
+               liveBeacon.isActive {
+                currentRSSI = liveBeacon.rssi
                 isCurrentlyDetected = true
 
                 // Assign detection order if not yet tracked
@@ -282,7 +281,7 @@ extension ScanQualityViewModel {
                 }
 
                 // Calculate signal quality from RSSI
-                signalQuality = qualityFromRSSI(detection.rssi)
+                signalQuality = qualityFromRSSI(liveBeacon.rssi)
             }
 
             // Get stability from last scan record (MAD-based)

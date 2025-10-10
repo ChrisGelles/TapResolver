@@ -16,6 +16,7 @@ struct AppBootstrap: ViewModifier {
     let scanUtility: MapPointScanUtility
     let orientationManager: CompassOrientationManager
     let squareMetrics: SquareMetrics
+    let beaconState: BeaconStateManager  // Added for beacon state consolidation
 
     private let initialScanWindow: TimeInterval = 2.0
 
@@ -35,6 +36,10 @@ struct AppBootstrap: ViewModifier {
                     lists.ingest(deviceName: name, id: id)
                 }
                 configureScanUtilityClosures()
+                
+                // ARCHITECTURAL INTEGRATION: Start beacon state monitoring
+                // This consolidates beacon state updates into a single source of truth
+                beaconState.startMonitoring(scanner: scanner)
                 
                 // Run initial snapshot scan to populate Morgue on app launch
                 // This restores "morning behavior" where Morgue is auto-populated
@@ -156,7 +161,8 @@ extension View {
         lists: BeaconListsStore,
         scanUtility: MapPointScanUtility,
         orientationManager: CompassOrientationManager,
-        squareMetrics: SquareMetrics
+        squareMetrics: SquareMetrics,
+        beaconState: BeaconStateManager  // Pass BeaconStateManager for initialization
     ) -> some View {
         self.modifier(AppBootstrap(
             scanner: scanner,
@@ -165,7 +171,8 @@ extension View {
             lists: lists,
             scanUtility: scanUtility,
             orientationManager: orientationManager,
-            squareMetrics: squareMetrics
+            squareMetrics: squareMetrics,
+            beaconState: beaconState
         ))
     }
 }

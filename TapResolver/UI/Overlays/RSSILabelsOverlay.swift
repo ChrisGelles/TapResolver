@@ -12,10 +12,11 @@ struct RSSILabelsOverlay: View {
     @EnvironmentObject private var beaconDotStore: BeaconDotStore
     @EnvironmentObject private var beaconLists: BeaconListsStore
     @EnvironmentObject private var mapTransform: MapTransformStore
+    @EnvironmentObject private var beaconState: BeaconStateManager  // Added for consolidated beacon state
     
     @State private var rssiLabels: [RSSILabel] = []
     @State private var isRSSIActive = false
-    @State private var timer: Timer?
+    // Timer removed - now observing BeaconStateManager's published updates
     
     var body: some View { 
         ZStack {
@@ -38,22 +39,29 @@ struct RSSILabelsOverlay: View {
                 }
             }
         }
-    }
-    
-    private func startRSSIUpdates() {
-        updateRSSILabels()
-        // Set up timer for continuous updates
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-            updateRSSILabels()
+        // ARCHITECTURAL UPDATE: Auto-refresh labels when BeaconStateManager updates
+        // This replaces the previous local timer pattern
+        .onChange(of: beaconState.liveBeacons) { _ in
+            if isRSSIActive {
+                updateRSSILabels()
+            }
         }
     }
     
+    // ARCHITECTURAL UPDATE: No longer needs local timer
+    // BeaconStateManager updates every 0.5s, we just observe changes
+    private func startRSSIUpdates() {
+        updateRSSILabels()
+        // Labels will auto-update via beaconState @Published property changes
+    }
+    
+    // ARCHITECTURAL UPDATE: No timer to invalidate
     private func stopRSSIUpdates() {
-        timer?.invalidate()
-        timer = nil
         rssiLabels.removeAll()
     }
     
+    // ARCHITECTURAL UPDATE: Now queries BeaconStateManager instead of BluetoothScanner
+    // Uses consistent 3-second staleness window and benefits from unified update timing
     private func updateRSSILabels() {
         var newLabels: [RSSILabel] = []
         
@@ -65,8 +73,9 @@ struct RSSILabelsOverlay: View {
         for beaconName in activeBeacons {
             // Find the beacon dot position
             if let dot = beaconDotStore.dots.first(where: { $0.beaconID == beaconName }) {
-                // Find RSSI value from scanner
-                if let device = btScanner.devices.first(where: { $0.name == beaconName }) {
+                // ARCHITECTURAL UPDATE: Query BeaconStateManager for active beacon data
+                if let liveBeacon = beaconState.beacon(named: beaconName),
+                   liveBeacon.isActive {
                     // Use exact beacon dot position
                     let beaconDotX = dot.mapPoint.x
                     let beaconDotY = dot.mapPoint.y
@@ -79,7 +88,7 @@ struct RSSILabelsOverlay: View {
 
                     let rssiLabel = RSSILabel(
                         beaconID: beaconName,
-                        rssiValue: device.rssi,
+                        rssiValue: liveBeacon.rssi,  // From BeaconStateManager
                         mapPosition: mapLocalPosition
                     )
 

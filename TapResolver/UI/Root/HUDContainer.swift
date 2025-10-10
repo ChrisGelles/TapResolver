@@ -37,6 +37,7 @@ struct HUDContainer: View {
     @EnvironmentObject private var beaconLists: BeaconListsStore
     @EnvironmentObject private var scanUtility: MapPointScanUtility
     @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var beaconState: BeaconStateManager  // Added for consolidated beacon state
     @StateObject private var beaconLogger = SimpleBeaconLogger()
 
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
@@ -75,9 +76,10 @@ struct HUDContainer: View {
                     VStack(spacing: 8) {
                         // NEW: Scan quality display
                         if showScanQuality {
+                            // ARCHITECTURAL UPDATE: Now uses BeaconStateManager for consistent beacon state
                             ScanQualityDisplayView(
                                 viewModel: .fromRealData(
-                                    btScanner: btScanner,
+                                    beaconState: beaconState,   // Changed from btScanner
                                     beaconDotStore: beaconDotStore,
                                     scanUtility: scanUtility
                                 )

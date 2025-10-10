@@ -35,6 +35,9 @@ struct TapResolverApp: App {
             return nil
         }
     )
+    // ARCHITECTURAL ADDITION: Single source of truth for live beacon state
+    // Consolidates polling logic previously duplicated in RSSILabelsOverlay and ScanQualityViewModel
+    @StateObject private var beaconState = BeaconStateManager()
 
     var body: some Scene {
         WindowGroup {
@@ -50,6 +53,7 @@ struct TapResolverApp: App {
                 .environmentObject(mapPointStore)
                 .environmentObject(orientationManager)
                 .environmentObject(scanUtility)
+                .environmentObject(beaconState)  // Inject BeaconStateManager into view hierarchy
                 .onAppear {
                     LocationMigration.runIfNeeded()
                     squareMetrics.setMetricSquareStore(metricSquares)
@@ -62,7 +66,8 @@ struct TapResolverApp: App {
                     lists: beaconLists,
                     scanUtility: scanUtility,
                     orientationManager: orientationManager,
-                    squareMetrics: squareMetrics
+                    squareMetrics: squareMetrics,
+                    beaconState: beaconState  // Pass BeaconStateManager for initialization
                 )
         }
     }
