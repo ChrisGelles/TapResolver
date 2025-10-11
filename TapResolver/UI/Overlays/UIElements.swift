@@ -100,6 +100,15 @@ struct NumericInputKeypad: View {
                 .cornerRadius(20)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 40)
+                .overlay(alignment: .topLeading) {
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundColor(.white.opacity(0.8))
+                            .padding(16)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

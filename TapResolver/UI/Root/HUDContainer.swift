@@ -37,7 +37,7 @@ struct HUDContainer: View {
     @EnvironmentObject private var beaconLists: BeaconListsStore
     @EnvironmentObject private var scanUtility: MapPointScanUtility
     @EnvironmentObject private var locationManager: LocationManager
-    @EnvironmentObject private var beaconState: BeaconStateManager  // Added for consolidated beacon state
+    @EnvironmentObject private var beaconState: BeaconStateManager
     @StateObject private var beaconLogger = SimpleBeaconLogger()
 
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
@@ -47,6 +47,7 @@ struct HUDContainer: View {
 
     @State private var selectedBeaconForTxPower: String? = nil
     @State private var showScanQuality = true  // Temporary: always show for testing
+    @State private var activeIntervalEdit: (beaconID: String, text: String)? = nil
 
     var body: some View {
         ZStack {
@@ -74,20 +75,16 @@ struct HUDContainer: View {
                 // Bottom buttons - only show when MapPoint drawer is open
                 if hud.isMapPointOpen {
                     VStack(spacing: 8) {
-                        // NEW: Scan quality display
                         if showScanQuality {
-                            // ARCHITECTURAL UPDATE: Now uses BeaconStateManager for consistent beacon state
                             ScanQualityDisplayView(
                                 viewModel: .fromRealData(
-                                    beaconState: beaconState,   // Changed from btScanner
+                                    beaconState: beaconState,
                                     beaconDotStore: beaconDotStore,
                                     scanUtility: scanUtility
                                 )
                             )
                             .transition(.opacity)
                         }
-                        
-                        // Existing bottom buttons
                         bottomButtons
                     }
                     .padding(.horizontal, 20)
@@ -98,60 +95,6 @@ struct HUDContainer: View {
             .allowsHitTesting(true)
         }
         .zIndex(100)
-
-        // Numeric keypad overlays - positioned in lower portion of screen
-        .overlay(
-            Group {
-                // Elevation keypad for beacons
-                if let edit = beaconDotStore.activeElevationEdit {
-                    NumericInputKeypad(
-                        title: "Elevation",
-                        initialText: edit.text,
-                        onCommit: { text in
-                            beaconDotStore.commitElevationText(text, for: edit.beaconID)
-                        },
-                        onDismiss: {
-                            beaconDotStore.activeElevationEdit = nil
-                        }
-                    )
-                }
-                // Meters keypad for squares
-                else if let edit = squareMetrics.activeEdit {
-                    NumericInputKeypad(
-                        title: "Meters",
-                        initialText: edit.text,
-                        onCommit: { text in
-                            squareMetrics.commitMetersText(text, for: edit.id)
-                        },
-                        onDismiss: {
-                            squareMetrics.activeEdit = nil
-                        }
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .zIndex(200)
-        )
-
-        // Tx Power selection interface - positioned in bottom right
-        .overlay(
-            Group {
-                if let selectedBeacon = selectedBeaconForTxPower {
-                    TxPowerSelectionView(
-                        beaconID: selectedBeacon,
-                        onSelectTxPower: { txPower in
-                            beaconDotStore.setTxPower(for: selectedBeacon, dbm: txPower)
-                            selectedBeaconForTxPower = nil
-                        },
-                        onDismiss: {
-                            selectedBeaconForTxPower = nil
-                        }
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-            .zIndex(300)
-        )
 
         // 🔵 Compass calibration overlay BEHIND the HUD so drawers stay tappable
         .background(
@@ -164,8 +107,7 @@ struct HUDContainer: View {
                         )
                     )
                     .allowsHitTesting(!hud.isCalibratingFacing)
-                    
-                    // When tools are enabled, show the user-facing calibration overlay on top.
+
                     if hud.isCalibratingFacing {
                         UserFacingCalibrationOverlay(
                             facingFineTuneDeg: Binding(
@@ -173,7 +115,6 @@ struct HUDContainer: View {
                                 set: { squareMetrics.setFacingFineTune($0) }
                             )
                         )
-                        // Bottom-right degree readout
                         .overlay(alignment: .bottomTrailing) {
                             Text("\(Int(squareMetrics.facingFineTuneDeg))°")
                                 .font(.system(size: 14, weight: .semibold))
@@ -191,7 +132,7 @@ struct HUDContainer: View {
                 }
             }
         )
-        
+
         // Tools button appears only during North calibration
         .overlay(alignment: .bottomLeading) {
             if hud.isCalibratingNorth {
@@ -210,18 +151,6 @@ struct HUDContainer: View {
                 .accessibilityLabel("Calibration Tools")
             }
         }
-        
-        // Bottom-left tools button shown only while calibrating north AND the Metric Square drawer is open
-        /*.overlay(alignment: .bottomLeading) {
-            if hud.isCalibratingNorth && hud.isSquareOpen {
-                CalibrationToolsButton {
-                    print("🛠️ Calibration Tools tapped")
-                }
-                .padding(.leading, 20)
-                .padding(.bottom, 40)
-                .zIndex(350)
-            }
-        }*/
 
         // Notifications for compass calibration mode
         .onReceive(NotificationCenter.default.publisher(for: .toggleNorthCalibration)) { _ in
@@ -244,42 +173,105 @@ struct HUDContainer: View {
                 .allowsHitTesting(true)
                 .zIndex(1000)
         }
-        
+
         // Auto-scan when MapPoint drawer opens to populate stability data for HUD
         .onChange(of: hud.isMapPointOpen) { isOpen in
-            // Only trigger scan when drawer opens (false → true transition)
             guard isOpen else { return }
-            
-            // Only scan if there's an active map point
             guard let activePoint = mapPointStore.activePoint else {
                 print("⏭️ Skipping auto-scan: no active map point")
                 return
             }
-            
-            // Don't interrupt an existing scan
             guard !scanUtility.isScanning else {
                 print("⏭️ Skipping auto-scan: scan already in progress")
                 return
             }
-            
-            // Trigger a short background scan (3 seconds) to populate stability data
             print("🔄 Auto-scanning for stability data (3s)...")
             scanUtility.startScan(
                 pointID: activePoint.id.uuidString,
                 mapX_m: activePoint.mapPoint.x,
                 mapY_m: activePoint.mapPoint.y,
-                userHeight_m: 1.05,  // Default user height
+                userHeight_m: 1.05,
                 sessionID: "auto-\(UUID().uuidString)",
-                durationSeconds: 3.0  // Short scan for quick feedback
+                durationSeconds: 3.0
             )
         }
+
+        // Tx Power picker overlay
+        .overlay(
+            Group {
+                if let selectedBeacon = selectedBeaconForTxPower {
+                    TxPowerSelectionView(
+                        beaconID: selectedBeacon,
+                        onSelectTxPower: { txPower in
+                            beaconDotStore.setTxPower(for: selectedBeacon, dbm: txPower)
+                            selectedBeaconForTxPower = nil
+                        },
+                        onDismiss: {
+                            selectedBeaconForTxPower = nil
+                        },
+                        onShowIntervalKeypad: {
+                            let currentInterval = beaconDotStore.getAdvertisingInterval(for: selectedBeacon)
+                            activeIntervalEdit = (
+                                beaconID: selectedBeacon,
+                                text: String(format: "%.2f", currentInterval)
+                            )
+                        }
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        )
+        
+        // Numeric keypad overlay - SEPARATE and LAST (renders on top)
+        .overlay(
+            Group {
+                if let edit = beaconDotStore.activeElevationEdit {
+                    NumericInputKeypad(
+                        title: "Elevation",
+                        initialText: edit.text,
+                        onCommit: { text in
+                            beaconDotStore.commitElevationText(text, for: edit.beaconID)
+                        },
+                        onDismiss: {
+                            beaconDotStore.activeElevationEdit = nil
+                        }
+                    )
+                } else if let edit = squareMetrics.activeEdit {
+                    NumericInputKeypad(
+                        title: "Meters",
+                        initialText: edit.text,
+                        onCommit: { text in
+                            squareMetrics.commitMetersText(text, for: edit.id)
+                        },
+                        onDismiss: {
+                            squareMetrics.activeEdit = nil
+                        }
+                    )
+                } else if let edit = activeIntervalEdit {
+                    NumericInputKeypad(
+                        title: "Broadcast Interval (ms)",
+                        initialText: edit.text,
+                        onCommit: { text in
+                            if let value = Double(text) {
+                                beaconDotStore.setAdvertisingInterval(for: edit.beaconID, ms: value)
+                            }
+                            activeIntervalEdit = nil
+                        },
+                        onDismiss: {
+                            activeIntervalEdit = nil
+                        }
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        )
     }
 
     // MARK: - Bottom Buttons Cluster (MapPoint logging controls)
     private var bottomButtons: some View {
         bottomButtonRow
     }
-    
+
     private var bottomButtonRow: some View {
         HStack(spacing: 8) {
             addMapPointButton
@@ -289,7 +281,7 @@ struct HUDContainer: View {
             exportButton
         }
     }
-    
+
     private var addMapPointButton: some View {
         Button {
             guard mapTransform.mapSize != .zero else {
@@ -297,9 +289,8 @@ struct HUDContainer: View {
                 return
             }
             let targetScreen = mapTransform.screenCenter
-            // Configurable X and Y pixel offsets
-            let offsetX: CGFloat = 0.0  // Adjust this value as needed
-            let offsetY: CGFloat = 48.0  // Adjust this value as needed
+            let offsetX: CGFloat = 0.0
+            let offsetY: CGFloat = 48.0
             let adjustedScreen = CGPoint(x: targetScreen.x + offsetX, y: targetScreen.y + offsetY)
             let mapPoint = mapTransform.screenToMap(adjustedScreen)
             let success = mapPointStore.addPoint(at: mapPoint)
@@ -316,7 +307,7 @@ struct HUDContainer: View {
         .accessibilityLabel("Add map point at crosshair location")
         .buttonStyle(.plain)
     }
-    
+
     private var durationSlider: some View {
         VStack(spacing: 4) {
             HStack {
@@ -336,7 +327,7 @@ struct HUDContainer: View {
         .padding(.vertical, 8)
         .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
     }
-    
+
     @ViewBuilder
     private var countdownDisplay: some View {
         if beaconLogger.isLogging {
@@ -348,7 +339,7 @@ struct HUDContainer: View {
                 .background(Color.orange.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
         }
     }
-    
+
     private var logDataButton: some View {
         Button {
             handleLogDataButtonTap()
@@ -369,7 +360,7 @@ struct HUDContainer: View {
         .accessibilityLabel(beaconLogger.isLogging ? "Stop logging session" : "Log data for current map point")
         .buttonStyle(.plain)
     }
-    
+
     @ViewBuilder
     private var exportButton: some View {
         HStack(spacing: 8) {
@@ -383,7 +374,7 @@ struct HUDContainer: View {
                 .padding(.vertical, 8)
                 .background(Color.green.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
             }
-            
+
             if let activePoint = mapPointStore.activePoint {
                 Button("Export All Scans") {
                     exportAllScansForPoint(activePoint: activePoint)
@@ -410,7 +401,7 @@ struct HUDContainer: View {
             Button("OK", role: .cancel) {}
         }
     }
-    
+
     private func handleLogDataButtonTap() {
         guard let activePoint = mapPointStore.activePoint else {
             print("⚠️ No active map point selected")
@@ -423,7 +414,7 @@ struct HUDContainer: View {
             handleStartLogging(activePoint: activePoint)
         }
     }
-    
+
     private func handleStopLogging() {
         if let session = beaconLogger.stopLogging() {
             print("📊 Session completed:")
@@ -439,7 +430,7 @@ struct HUDContainer: View {
             }
         }
     }
-    
+
     private func handleStartLogging(activePoint: MapPointStore.MapPoint) {
         print("🔍 Starting beacon logging for point \(activePoint.id)")
 
@@ -454,47 +445,40 @@ struct HUDContainer: View {
             scanUtility: scanUtility
         )
     }
-    
+
     private func exportAllScansForPoint(activePoint: MapPointStore.MapPoint) {
         do {
             let locationID = PersistenceContext.shared.locationID
             let pointID = activePoint.id.uuidString
-            
-            // Load all scans for this map point
+
             let history = try MapPointHistoryBuilder.loadAll(locationID: locationID, pointID: pointID)
-            
-            // Create bundle
+
             let bundle = MapPointScanBundleV1(
                 locationID: history.locationID,
                 pointID: history.pointID,
                 createdAtISO: JSONKit.iso8601.string(from: Date()),
                 scans: history.scans
             )
-            
-            // Encode to JSON
+
             let data = try JSONKit.encoder().encode(bundle)
-            
-            // Save to temporary file
+
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("mappoint_scans_\(pointID)_\(Date().timeIntervalSince1970).json")
             try data.write(to: tempURL)
-            
-            // Show export picker
+
             lastExportURL = tempURL
             showFilesPicker = true
-            
+
             print("📦 Exported \(history.scans.count) scans for point \(pointID)")
         } catch {
             print("❌ Failed to export all scans for point: \(error)")
         }
     }
-    
+
     private func exportLastScanV1(record: MapPointScanUtility.ScanRecord) {
         do {
-            // 1) Gather geometry data
             let locationID = PersistenceContext.shared.locationID
-            
-            // Get pixels per meter from metric squares
+
             let lockedSquares = metricSquares.squares.filter { $0.isLocked }
             let squaresToUse = lockedSquares.isEmpty ? metricSquares.squares : lockedSquares
             guard let square = squaresToUse.first else {
@@ -502,69 +486,54 @@ struct HUDContainer: View {
                 return
             }
             let ppm = Double(square.side) / square.meters
-            
-            // Get map point pixel coordinates
+
             guard let activePoint = mapPointStore.activePoint else {
                 print("❌ No active map point available")
                 return
             }
             let pointPx = CGPoint(x: activePoint.mapPoint.x, y: activePoint.mapPoint.y)
-            
-            // Build beacon geometry from beacon dots
-            let beaconsPx: [String: CGPoint] = Dictionary(uniqueKeysWithValues: 
+
+            let beaconsPx: [String: CGPoint] = Dictionary(uniqueKeysWithValues:
                 beaconDotStore.dots.compactMap { dot in
                     guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
                     return (dot.beaconID, dot.mapPoint)
                 }
             )
-            
+
             let elevations: [String: Double?] = Dictionary(uniqueKeysWithValues:
                 beaconDotStore.dots.compactMap { dot in
                     guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
                     return (dot.beaconID, beaconDotStore.getElevation(for: dot.beaconID))
                 }
             )
-            
-            // Collect beacon metadata (identity & display)
-            let beaconMeta: [String: (name: String, color: [Double]?, model: String?)] = 
+
+            let beaconMeta: [String: (name: String, color: [Double]?, model: String?)] =
                 Dictionary(uniqueKeysWithValues:
                     beaconDotStore.dots.compactMap { dot in
                         guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
-                        
-                        // Extract RGB color
                         var rgb: [Double]? = nil
-                        if let components = UIColor(dot.color).cgColor.components, components.count >= 3 {
-                            rgb = [Double(components[0]), Double(components[1]), Double(components[2])]
+                        if let comps = UIColor(dot.color).cgColor.components, comps.count >= 3 {
+                            rgb = [Double(comps[0]), Double(comps[1]), Double(comps[2])]
                         }
-                        
-                        return (dot.beaconID, (
-                            name: dot.beaconID,
-                            color: rgb,
-                            model: "BC04P"
-                        ))
+                        return (dot.beaconID, (name: dot.beaconID, color: rgb, model: "BC04P"))
                     }
                 )
-            
-            // Collect iBeacon protocol data (empty for now - will be populated when parsing added)
+
             let beaconIBeacon: [String: (uuid: String, major: Int, minor: Int, measuredPower: Int)] = [:]
-            
-            // Collect Eddystone protocol data (empty for now - will be populated when parsing added)
             let beaconEddystone: [String: (namespace: String, instance: String, txPower: Int)] = [:]
-            
-            // Collect radio configuration
-            let beaconRadio: [String: (txPowerSetting: Int?, advertisingInterval: Int?)] = 
+
+            let beaconRadio: [String: (txPowerSetting: Int?, advertisingInterval: Int?)] =
                 Dictionary(uniqueKeysWithValues:
                     beaconDotStore.dots.compactMap { dot in
                         guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
                         let interval = beaconDotStore.getAdvertisingInterval(for: dot.beaconID)
                         return (dot.beaconID, (
                             txPowerSetting: beaconDotStore.getTxPower(for: dot.beaconID),
-                            advertisingInterval: Int(interval)  // Convert Double to Int for export
+                            advertisingInterval: Int(interval)
                         ))
                     }
                 )
-            
-            // 2) Use the v1 exporter to build JSON with distances
+
             let result = try ScanV1Exporter.buildJSON(
                 from: record,
                 locationID: locationID,
@@ -578,21 +547,21 @@ struct HUDContainer: View {
                 beaconRadio: beaconRadio,
                 mapResolution: mapTransform.mapSize
             )
-            
-            // 3) Save to temporary file and show export picker
+
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent(result.filename)
             try result.json.write(to: tempURL)
-            
+
             lastExportURL = tempURL
             showFilesPicker = true
-            
+
             print("📦 Exported scan V1 with distances for \(beaconsPx.count) beacons")
         } catch {
             print("❌ Failed to export scan V1: \(error)")
         }
     }
 }
+
 
 private struct LocationMenuButton: View {
     @EnvironmentObject private var locationManager: LocationManager
@@ -778,8 +747,7 @@ struct TxPowerSelectionView: View {
     let beaconID: String
     let onSelectTxPower: (Int?) -> Void
     let onDismiss: () -> Void
-    
-    @State private var showIntervalKeypad = false
+    let onShowIntervalKeypad: () -> Void
     
     private let txPowerOptions: [(label: String, value: Int?)] = [
         ("8 dBm", 8),
@@ -829,13 +797,14 @@ struct TxPowerSelectionView: View {
                     .foregroundColor(.white.opacity(0.8))
                 
                 Button(action: {
-                    showIntervalKeypad = true
+                    onShowIntervalKeypad()
                 }) {
                     Text(beaconDotStore.displayAdvertisingInterval(for: beaconID))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
+                        .fixedSize(horizontal: true, vertical: false)  // ← ADD THIS LINE
                         .frame(minWidth: 100)
                         .background(Color.gray.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
                 }
@@ -861,32 +830,10 @@ struct TxPowerSelectionView: View {
             .buttonStyle(.plain)
         }
         .padding(12)
-        .frame(maxWidth: 180)    // ← ADD THIS - adjust as needed
         .background(Color.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
         .padding(.trailing, 20)
         .padding(.bottom, 40)
-        .overlay(
-            Group {
-                if showIntervalKeypad {
-                    NumericInputKeypad(
-                        title: "Broadcast Interval (ms)",
-                        initialText: String(format: "%.2f", beaconDotStore.getAdvertisingInterval(for: beaconID)),
-                        onCommit: { text in
-                            if let value = Double(text) {
-                                beaconDotStore.setAdvertisingInterval(for: beaconID, ms: value)
-                            }
-                            showIntervalKeypad = false
-                        },
-                        onDismiss: {
-                            showIntervalKeypad = false
-                        }
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.opacity(0.3))
-                    .zIndex(1000)
-                }
-            }
-        )
+        .frame(width: 220, alignment: .trailing)   // keep it compact and consistent
     }
 }
 

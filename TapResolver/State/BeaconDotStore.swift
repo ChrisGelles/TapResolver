@@ -165,12 +165,20 @@ public final class BeaconDotStore: ObservableObject {
     
     public func displayAdvertisingInterval(for beaconID: String) -> String {
         let interval = getAdvertisingInterval(for: beaconID)
-        // Format with up to 2 decimal places, removing trailing zeros
+        
+        // Format with up to 2 decimal places
         let formatted = String(format: "%.2f", interval)
-        if let lastNonZero = formatted.lastIndex(where: { $0 != "0" && $0 != "." }) {
-            return String(formatted[...lastNonZero]) + " ms"
+        
+        // Remove trailing zeros and unnecessary decimal point
+        var trimmed = formatted
+        while trimmed.hasSuffix("0") {
+            trimmed.removeLast()
         }
-        return formatted + " ms"
+        if trimmed.hasSuffix(".") {
+            trimmed.removeLast()
+        }
+        
+        return trimmed + " ms"
     }
     
     /// Reload data for the active location
@@ -188,11 +196,12 @@ public final class BeaconDotStore: ObservableObject {
         advertisingIntervalByID.removeAll()
 
         // Pure load for the active namespace and file
+        // Load dots first (positions only), then metadata from dedicated sources
+        loadDotsFromDisk()
         loadLocks()
         loadElevations()
         loadTxPower()
         loadAdvertisingIntervals()
-        loadDotsFromDisk()
         objectWillChange.send()
     }
     
@@ -309,9 +318,8 @@ public final class BeaconDotStore: ObservableObject {
                               color: beaconColor(for: $0.beaconID),
                               mapPoint: CGPoint(x: $0.x, y: $0.y))
                 dot.elevation = $0.elevation
-                // Rehydrate side tables too
-                elevations[$0.beaconID] = $0.elevation
-                if let p = $0.txPower { txPowerByID[$0.beaconID] = p }
+                // NOTE: Side table rehydration removed - elevations, txPower, and advertisingInterval
+                // are now loaded separately via their dedicated load methods
                 return dot
             }
         } catch {
