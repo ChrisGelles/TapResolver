@@ -42,10 +42,10 @@ struct AppBootstrap: ViewModifier {
                 // This consolidates beacon state updates into a single source of truth
                 beaconState.startMonitoring(scanner: scanner)
                 
-                // Run initial snapshot scan to populate Morgue on app launch
-                // This restores "morning behavior" where Morgue is auto-populated
+                // Auto-start continuous scanning on app launch
+                // Replaces old snapshot scan - provides continuous BLE data feed
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    scanner.snapshotOnce()
+                    scanner.startContinuous()
                 }
             }
     }
