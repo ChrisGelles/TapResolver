@@ -25,6 +25,7 @@ final class BluetoothScanner: NSObject, ObservableObject {
     private var central: CBCentralManager!
     private var deviceIndex: [UUID: Int] = [:] // quick lookup by peripheral.identifier
     private var pendingStopWork: DispatchWorkItem?
+    private var continuousMode: Bool = false
     
     // MARK: - Scan utility references (set by app)
     weak var scanUtility: MapPointScanUtility?
@@ -95,9 +96,25 @@ final class BluetoothScanner: NSObject, ObservableObject {
 
     func stop() {
         guard isScanning else { return }
+        if continuousMode { return }  // Don't stop if in continuous mode
         central.stopScan()
         isScanning = false
         if verboseLogging { print("🛑 Stopped BLE scan. Total devices seen: \(devices.count)") }
+    }
+    
+    /// Start continuous scanning (won't auto-stop)
+    func startContinuous() {
+        continuousMode = true
+        start()
+    }
+    
+    /// Stop continuous scanning
+    func stopContinuous() {
+        continuousMode = false
+        stop()
+        central.stopScan()
+        isScanning = false
+        if verboseLogging { print("🛑 Stopped continuous BLE scan. Total devices seen: \(devices.count)") }
     }
 
     // MARK: - iBeacon Parsing

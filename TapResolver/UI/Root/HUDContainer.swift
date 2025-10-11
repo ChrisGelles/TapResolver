@@ -608,35 +608,25 @@ private struct ResetMapButton: View {
 
 private struct BluetoothScanButton: View {
     @EnvironmentObject private var btScanner: BluetoothScanner
-    @EnvironmentObject private var beaconLists: BeaconListsStore
-    @EnvironmentObject private var beaconDotStore: BeaconDotStore
 
     var body: some View {
         Button {
-            // 1) Run a clean snapshot scan for N seconds
-            btScanner.snapshotScan { [weak btScanner, weak beaconLists, weak beaconDotStore] in
-                guard let scanner = btScanner, let lists = beaconLists, let dotStore = beaconDotStore else { return }
-
-                // 2) Clear unlocked beacons only (keep locked beacons and morgue intact)
-                let lockedBeaconNames = dotStore.locked.keys.filter { dotStore.isLocked($0) }
-                lists.clearUnlockedBeacons(lockedBeaconNames: lockedBeaconNames)
-
-                // 3) Ingest all discovered devices - the ingest() method will handle morgue filtering
-                for d in scanner.devices {
-                    lists.ingest(deviceName: d.name, id: d.id)
-                }
-
-                // 4) Optional: print a neat table once per snapshot
-                scanner.dumpSummaryTable()
+            if btScanner.isScanning {
+                btScanner.stopContinuous()
+            } else {
+                btScanner.startContinuous()
             }
         } label: {
             Image(systemName: "dot.radiowaves.left.and.right")
                 .font(.system(size: 22, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(.white)
                 .padding(10)
-                .background(.ultraThinMaterial, in: Circle())
+                .background(
+                    btScanner.isScanning ? Color.green : Color(white: 0.3),
+                    in: Circle()
+                )
         }
-        .accessibilityLabel("Scan Bluetooth (2-second snapshot) & update lists")
+        .accessibilityLabel(btScanner.isScanning ? "Stop continuous Bluetooth scanning" : "Start continuous Bluetooth scanning")
         .buttonStyle(.plain)
         .allowsHitTesting(true)
     }
@@ -651,21 +641,14 @@ struct RSSILabel: Identifiable {
 }
 
 private struct RSSIMeterButton: View {
-    @EnvironmentObject private var btScanner: BluetoothScanner
     @State private var isActive = false
 
     var body: some View {
         Button {
             isActive.toggle()
 
-            // Start/stop BLE scan to feed live RSSI while active
-            if isActive {
-                btScanner.start()
-            } else {
-                btScanner.stop()
-            }
-
             // Notify MeterLabels about state change (it manages the 0.5s timer)
+            // Labels will consume data from continuous scan (if active)
             NotificationCenter.default.post(
                 name: .rssiStateChanged,
                 object: isActive
@@ -681,7 +664,7 @@ private struct RSSIMeterButton: View {
                         .stroke(Color.white, lineWidth: isActive ? 2 : 0)
                 )
         }
-        .accessibilityLabel("Add live RSSI values from map beacons to map")
+        .accessibilityLabel("Toggle RSSI label display")
         .buttonStyle(.plain)
         .allowsHitTesting(true)
     }
