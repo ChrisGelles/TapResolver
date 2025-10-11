@@ -29,7 +29,8 @@ final class BluetoothScanner: NSObject, ObservableObject {
     
     // MARK: - Scan utility references (set by app)
     weak var scanUtility: MapPointScanUtility?
-    weak var simpleLogger: SimpleBeaconLogger?   // ← NEW
+    weak var simpleLogger: SimpleBeaconLogger?
+    weak var beaconLists: BeaconListsStore?
     var onDeviceNameDiscovered: ((_ name: String, _ id: UUID) -> Void)?
 
     // MARK: - Setup
@@ -276,6 +277,10 @@ extension BluetoothScanner: @preconcurrency CBCentralManagerDelegate {
             txPowerDbm: txPower,
             timestamp: CFAbsoluteTimeGetCurrent()
         )
+        
+        // Auto-update beacon lists during continuous scanning
+        // Pattern matching (##-adjectiveAnimal) and morgue filtering handled by BeaconListsStore.ingest()
+        beaconLists?.ingest(deviceName: name, id: id)
 
         if verboseLogging {
             // Comment this out entirely to eliminate update spam:
