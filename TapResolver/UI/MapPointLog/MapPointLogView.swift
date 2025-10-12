@@ -155,6 +155,11 @@ struct MapPointLogView: View {
             Text("Sessions for \(pointID)")
                 .foregroundColor(.white)
         }
+        .onAppear {
+            Task {
+                await mapPointLogManager.loadAll(context: PersistenceContext.shared)
+            }
+        }
     }
     
     // MARK: - Export Logic
