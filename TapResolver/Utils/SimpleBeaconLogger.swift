@@ -183,10 +183,8 @@ final class SimpleBeaconLogger: ObservableObject {
         print("   Map Point: \(mapPointID) at (\(Int(coordinates.x)), \(Int(coordinates.y)))")
         print("   Duration: \(Int(duration))s, Interval: \(Int(intervalMs))ms")
         
-        // Start continuous BLE scanning if not already running
-        if !btScanner.isScanning {
-            btScanner.start()
-        }
+        // Note: Relies on continuous scanning being active
+        // Data is consumed from BluetoothScanner.devices which is updated in real-time
         
         // Start countdown timer
         startCountdownTimer()

@@ -174,28 +174,6 @@ struct HUDContainer: View {
                 .zIndex(1000)
         }
 
-        // Auto-scan when MapPoint drawer opens to populate stability data for HUD
-        .onChange(of: hud.isMapPointOpen) { isOpen in
-            guard isOpen else { return }
-            guard let activePoint = mapPointStore.activePoint else {
-                print("⏭️ Skipping auto-scan: no active map point")
-                return
-            }
-            guard !scanUtility.isScanning else {
-                print("⏭️ Skipping auto-scan: scan already in progress")
-                return
-            }
-            print("🔄 Auto-scanning for stability data (3s)...")
-            scanUtility.startScan(
-                pointID: activePoint.id.uuidString,
-                mapX_m: activePoint.mapPoint.x,
-                mapY_m: activePoint.mapPoint.y,
-                userHeight_m: 1.05,
-                sessionID: "auto-\(UUID().uuidString)",
-                durationSeconds: 3.0
-            )
-        }
-
         // Tx Power picker overlay
         .overlay(
             Group {
