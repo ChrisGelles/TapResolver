@@ -37,9 +37,23 @@ final class MapPointLogManager: ObservableObject {
     /// Current persistence context
     private var currentContext: PersistenceContext?
     
+    /// Combine subscription bag
+    private var bag = Set<AnyCancellable>()
+    
     // MARK: - Initialization
     
-    init() {}
+    init() {
+        // Reload scan data when location changes (matches BeaconListsStore pattern)
+        NotificationCenter.default.publisher(for: .locationDidChange)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                Task { @MainActor in
+                    print("📍 MapPointLogManager: Location changed, reloading scan data...")
+                    await self.loadAll(context: PersistenceContext.shared)
+                }
+            }
+            .store(in: &bag)
+    }
     
     /// Wire up dependency to MapPointStore (call from AppBootstrap)
     func setMapPointStore(_ store: MapPointStore) {
@@ -76,14 +90,14 @@ final class MapPointLogManager: ObservableObject {
             throw MapPointLogError.noContext
         }
         
-        // Build file path
-        let pointDir = context.locationDir
-            .appendingPathComponent("scan_records_v1", isDirectory: true)
-            .appendingPathComponent(pointID, isDirectory: true)
-        let fileURL = pointDir.appendingPathComponent("\(sessionID).json")
+        // Find the actual file URL from the session metadata
+        guard let pointEntry = mapPoints.first(where: { $0.id == pointID }),
+              let session = pointEntry.sessions.first(where: { $0.id == sessionID }) else {
+            throw MapPointLogError.invalidSession
+        }
         
-        // Delete file
-        try FileManager.default.removeItem(at: fileURL)
+        // Delete using the actual file URL from metadata
+        try FileManager.default.removeItem(at: session.fileURL)
         print("🗑️ Deleted session: \(pointID)/\(sessionID)")
         
         // Update in-memory index
@@ -167,10 +181,22 @@ final class MapPointLogManager: ObservableObject {
             
             guard !sessionMetadata.isEmpty else { continue }
             
-            // Get coordinates and color from MapPointStore
-            let mapPoint = mapPointStore?.points.first { $0.id.uuidString == pointID }
-            let coordinates = mapPoint?.mapPoint ?? .zero
-            let color = mapPoint != nil ? colorForPointID(pointID) : .gray
+            // Get coordinates IN METERS from the first scan file (all scans at same point have same coordinates)
+            var coordinates: CGPoint = .zero
+            if let firstURL = urls.first {
+                do {
+                    let scan = try PersistenceService.readScan(firstURL)
+                    // Use meters from scan data, not pixels from MapPointStore
+                    // Note: xy_m is optional, so safely unwrap it
+                    if let xy_m = scan.point.xy_m, xy_m.count == 2 {
+                        coordinates = CGPoint(x: xy_m[0], y: xy_m[1])
+                    }
+                } catch {
+                    print("⚠️ Failed to read coordinates from scan: \(error)")
+                }
+            }
+            
+            let color = colorForPointID(pointID)
             
             entries.append(MapPointLogEntry(
                 id: pointID,
@@ -199,6 +225,7 @@ final class MapPointLogManager: ObservableObject {
             timestamp: timestamp,
             duration: duration,
             beaconCount: beaconCount,
+            facing: scan.user.facing_deg,
             fileURL: fileURL
         )
     }
@@ -222,6 +249,7 @@ final class MapPointLogManager: ObservableObject {
             timestamp: timestamp,
             duration: duration,
             beaconCount: beaconCount,
+            facing: record.userFacing_deg,
             fileURL: fileURL
         )
     }
@@ -294,6 +322,7 @@ extension MapPointLogManager {
         let timestamp: Date
         let duration: TimeInterval
         let beaconCount: Int
+        let facing: Double? // degrees, 0-360
         let fileURL: URL
     }
 }

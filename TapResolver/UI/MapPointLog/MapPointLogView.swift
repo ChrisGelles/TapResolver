@@ -15,12 +15,14 @@ import SwiftUI
 struct MapPointLogView: View {
     @EnvironmentObject private var mapPointLogManager: MapPointLogManager
     @EnvironmentObject private var hudPanels: HUDPanelsState
+    @EnvironmentObject private var mapPointStore: MapPointStore
     
     @State private var selectedPointID: String?
     @State private var showExportPicker = false
     @State private var exportData: Data?
     
     private let columns = [
+        GridItem(.flexible()),
         GridItem(.flexible()),
         GridItem(.flexible()),
         GridItem(.flexible())
@@ -67,16 +69,16 @@ struct MapPointLogView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black.opacity(0.85))
                 
-            } else if mapPointLogManager.mapPoints.isEmpty {
+            } else if mapPointStore.points.isEmpty {
                 // Empty state
                 VStack(spacing: 12) {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(.system(size: 48))
                         .foregroundColor(.white.opacity(0.4))
-                    Text("No Scan Data")
+                    Text("No Map Points")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(.white)
-                    Text("Record scans at map points to see them here")
+                    Text("Add map points to see them here")
                         .font(.system(size: 14))
                         .foregroundColor(.white.opacity(0.7))
                         .multilineTextAlignment(.center)
@@ -88,12 +90,13 @@ struct MapPointLogView: View {
             } else {
                 // Grid of map points
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: 20) {
-                        ForEach(mapPointLogManager.mapPoints) { entry in
+                    LazyVGrid(columns: columns, spacing: 16) {
+                        ForEach(mapPointStore.points) { point in
                             MapPointDotView(
-                                entry: entry,
+                                point: point,
+                                sessionCount: mapPointLogManager.mapPoints.first(where: { $0.id == point.id.uuidString })?.sessions.count ?? 0,
                                 onTap: {
-                                    selectedPointID = entry.id
+                                    selectedPointID = point.id.uuidString
                                 }
                             )
                         }
@@ -104,7 +107,7 @@ struct MapPointLogView: View {
             }
             
             // Bottom toolbar
-            if !mapPointLogManager.mapPoints.isEmpty {
+            if mapPointLogManager.mapPoints.reduce(0, { $0 + $1.sessions.count }) > 0 {
                 VStack(spacing: 0) {
                     Divider()
                         .background(Color.white.opacity(0.3))
@@ -151,9 +154,9 @@ struct MapPointLogView: View {
             }
         }
         .sheet(item: $selectedPointID) { pointID in
-            // Drill-down view will be added in next step
-            Text("Sessions for \(pointID)")
-                .foregroundColor(.white)
+            MapPointSessionListView(pointID: pointID)
+                .environmentObject(mapPointLogManager)
+                .environmentObject(mapPointStore)
         }
         .onAppear {
             Task {
@@ -186,41 +189,44 @@ struct MapPointLogView: View {
 // MARK: - Map Point Dot View
 
 private struct MapPointDotView: View {
-    let entry: MapPointLogManager.MapPointLogEntry
+    let point: MapPointStore.MapPoint
+    let sessionCount: Int
     let onTap: () -> Void
+    
+    private let mapPointBlue = Color(hex: 0x10fff1)
     
     var body: some View {
         Button(action: onTap) {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 ZStack(alignment: .topTrailing) {
                     // Main dot
                     Circle()
-                        .fill(entry.color)
-                        .frame(width: 60, height: 60)
+                        .fill(sessionCount > 0 ? mapPointBlue : Color.gray.opacity(0.4))
+                        .frame(width: 40, height: 40)
                         .overlay(
                             Circle()
-                                .strokeBorder(Color.white.opacity(0.3), lineWidth: 2)
+                                .strokeBorder(Color.white.opacity(0.3), lineWidth: 1.5)
                         )
                     
-                    // Session count badge
-                    if !entry.sessions.isEmpty {
-                        Text("\(entry.sessions.count)")
-                            .font(.system(size: 12, weight: .bold))
+                    // Session count badge (only if > 0)
+                    if sessionCount > 0 {
+                        Text("\(sessionCount)")
+                            .font(.system(size: 10, weight: .bold))
                             .foregroundColor(.white)
-                            .frame(width: 24, height: 24)
+                            .frame(width: 20, height: 20)
                             .background(Circle().fill(Color.red))
                             .overlay(
                                 Circle()
-                                    .strokeBorder(Color.white, lineWidth: 2)
+                                    .strokeBorder(Color.white, lineWidth: 1.5)
                             )
-                            .offset(x: 8, y: -8)
+                            .offset(x: 6, y: -6)
                     }
                 }
                 
                 // Point ID (shortened)
-                Text(shortenedPointID(entry.id))
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.8))
+                Text(shortenedPointID(point.id.uuidString))
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white.opacity(sessionCount > 0 ? 0.8 : 0.4))
                     .lineLimit(1)
             }
         }
