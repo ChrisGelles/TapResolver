@@ -20,6 +20,7 @@ struct TapResolverApp: App {
     @StateObject private var beaconLists = BeaconListsStore()   // beacon lists
     @StateObject private var btScanner = BluetoothScanner()     // Bluetooth scanner
     @StateObject private var mapPointStore = MapPointStore()    // map points (log points)
+    @StateObject private var mapPointLogManager = MapPointLogManager()
     @StateObject private var orientationManager = CompassOrientationManager()
     @StateObject private var scanUtility = MapPointScanUtility(
         isExcluded: { beaconID, name in
@@ -51,6 +52,7 @@ struct TapResolverApp: App {
                 .environmentObject(beaconLists)
                 .environmentObject(btScanner)
                 .environmentObject(mapPointStore)
+                .environmentObject(mapPointLogManager)
                 .environmentObject(orientationManager)
                 .environmentObject(scanUtility)
                 .environmentObject(beaconState)  // Inject BeaconStateManager into view hierarchy
@@ -67,7 +69,9 @@ struct TapResolverApp: App {
                     scanUtility: scanUtility,
                     orientationManager: orientationManager,
                     squareMetrics: squareMetrics,
-                    beaconState: beaconState  // Pass BeaconStateManager for initialization
+                    beaconState: beaconState,  // Pass BeaconStateManager for initialization
+                    mapPointStore: mapPointStore,
+                    mapPointLogManager: mapPointLogManager
                 )
         }
     }

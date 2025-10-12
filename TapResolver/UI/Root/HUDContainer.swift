@@ -64,6 +64,7 @@ struct HUDContainer: View {
                         BeaconDrawer()
                         MorgueDrawer()
                         MapPointDrawer()
+                        MapPointLogButton()
                         ResetMapButton()
                         BluetoothScanButton() // snapshot scan button
                         RSSIMeterButton()
@@ -93,8 +94,19 @@ struct HUDContainer: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .allowsHitTesting(true)
+            
+            // Map Point Log overlay
+            if hud.isMapPointLogOpen {
+                VStack {
+                    Spacer()
+                    MapPointLogView()
+                        .transition(.move(edge: .bottom))
+                }
+                .zIndex(200) // Ensure it appears above other UI
+            }
         }
         .zIndex(100)
+        .animation(.easeInOut(duration: 0.3), value: hud.isMapPointLogOpen)
 
         // 🔵 Compass calibration overlay BEHIND the HUD so drawers stay tappable
         .background(
@@ -564,6 +576,26 @@ private struct LocationMenuButton: View {
         .allowsHitTesting(true)
         .accessibilityLabel("Return to Location Menu")
         .accessibilityHint("Opens the Location Browser")
+    }
+}
+
+private struct MapPointLogButton: View {
+    @EnvironmentObject private var hudPanels: HUDPanelsState
+    
+    var body: some View {
+        Button {
+            hudPanels.toggleMapPointLog()
+        } label: {
+            Image(systemName: "list.bullet.rectangle")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Circle().fill(Color.blue.opacity(0.8)))
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("Open Map Point Log")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
     }
 }
 

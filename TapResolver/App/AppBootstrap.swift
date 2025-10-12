@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 
 struct AppBootstrap: ViewModifier {
@@ -17,11 +18,16 @@ struct AppBootstrap: ViewModifier {
     let orientationManager: CompassOrientationManager
     let squareMetrics: SquareMetrics
     let beaconState: BeaconStateManager  // Added for beacon state consolidation
+    let mapPointStore: MapPointStore
+    let mapPointLogManager: MapPointLogManager
 
     private let initialScanWindow: TimeInterval = 2.0
 
     // Run-once guard to prevent double wiring on scene changes
     private static var hasBootstrapped = false
+    
+    // Combine cancellables storage
+    private static var cancellables = Set<AnyCancellable>()
 
     func body(content: Content) -> some View {
         content
@@ -37,6 +43,23 @@ struct AppBootstrap: ViewModifier {
                     lists.ingest(deviceName: name, id: id)
                 }
                 configureScanUtilityClosures()
+                
+                // Wire MapPointLogManager dependency
+                mapPointLogManager.setMapPointStore(mapPointStore)
+                
+                // Load map point log data on app launch
+                Task {
+                    await mapPointLogManager.loadAll(context: PersistenceContext.shared)
+                }
+                
+                // Reload map point log data when location changes
+                NotificationCenter.default.publisher(for: .locationDidChange)
+                    .sink { _ in
+                        Task {
+                            await mapPointLogManager.loadAll(context: PersistenceContext.shared)
+                        }
+                    }
+                    .store(in: &Self.cancellables)
                 
                 // ARCHITECTURAL INTEGRATION: Start beacon state monitoring
                 // This consolidates beacon state updates into a single source of truth
@@ -177,7 +200,9 @@ extension View {
         scanUtility: MapPointScanUtility,
         orientationManager: CompassOrientationManager,
         squareMetrics: SquareMetrics,
-        beaconState: BeaconStateManager  // Pass BeaconStateManager for initialization
+        beaconState: BeaconStateManager,  // Pass BeaconStateManager for initialization
+        mapPointStore: MapPointStore,
+        mapPointLogManager: MapPointLogManager
     ) -> some View {
         self.modifier(AppBootstrap(
             scanner: scanner,
@@ -187,7 +212,9 @@ extension View {
             scanUtility: scanUtility,
             orientationManager: orientationManager,
             squareMetrics: squareMetrics,
-            beaconState: beaconState
+            beaconState: beaconState,
+            mapPointStore: mapPointStore,
+            mapPointLogManager: mapPointLogManager
         ))
     }
 }

@@ -13,6 +13,7 @@ final class HUDPanelsState: ObservableObject {
     @Published var isSquareOpen: Bool = false
     @Published var isMorgueOpen: Bool = false
     @Published var isMapPointOpen: Bool = false
+    @Published var isMapPointLogOpen = false
     @Published var isCalibratingNorth: Bool = false
     @Published var showFacingOverlay: Bool = true
     
@@ -24,4 +25,9 @@ final class HUDPanelsState: ObservableObject {
     func openMorgue() { isMorgueOpen = true; isBeaconOpen = false; isSquareOpen = false; isMapPointOpen = false }
     func openMapPoint() { isMapPointOpen = true; isBeaconOpen = false; isSquareOpen = false; isMorgueOpen = false }
     func closeAll() { isBeaconOpen = false; isSquareOpen = false; isMorgueOpen = false; isMapPointOpen = false }
+    
+    func toggleMapPointLog() {
+        isMapPointLogOpen.toggle()
+        print("🗂️ Map Point Log: \(isMapPointLogOpen ? "OPEN" : "CLOSED")")
+    }
 }
