@@ -70,6 +70,7 @@ struct MapPointDrawer: View {
                         hud.openMapPoint()
                         
                         // Run diagnostics after drawer opens to avoid view update conflicts
+                        
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                             // First: Check Application Support (current implementation)
                             mapPointLogManager.printFilesystemDiagnostic()

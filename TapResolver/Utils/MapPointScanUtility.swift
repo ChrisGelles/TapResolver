@@ -336,6 +336,10 @@ public final class MapPointScanUtility: ObservableObject {
         print("   mapBaseOrientation: \(String(format: "%.2f", mapBaseOrientation))°")
         print("   raw calculation: \(String(format: "%.2f", fused)) + \(String(format: "%.2f", northOffset)) + \(String(format: "%.2f", facingFineTune)) - \(String(format: "%.2f", mapBaseOrientation)) = \(String(format: "%.2f", raw))°")
         print("   wrapped (exported): \(String(format: "%.2f", wrapped))°")
+        
+        print("\n\(Int(durationSeconds)) Second Data Reporting Session Begun:")
+                print("Map Point ID: \(pointID)")
+                print("Session ID: \(sid)")
 
         // Countdown timer (UI: bind to `secondsRemaining`)
         scanTimer = Timer.publish(every: 0.05, on: .main, in: .default)
@@ -596,6 +600,10 @@ public final class MapPointScanUtility: ObservableObject {
             )
             
             let fileURL = try PersistenceService.writeScan(scanDTO, at: end)
+            
+            print("\nData Reporting Session \(record.point.sessionID) Complete.")
+                        print("Saving data to \(fileURL.deletingLastPathComponent().path)/\(fileURL.lastPathComponent)")
+            
             print("💾 Saved scan record V1 to Application Support with distances: \(beaconGeo.count) beacons")
             print("   File: \(fileURL.path)")
             

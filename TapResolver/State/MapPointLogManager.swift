@@ -110,23 +110,36 @@ final class MapPointLogManager: ObservableObject {
         let totalSessions = index.values.flatMap { $0 }.count
         print("✅ Built session index: \(index.count) points, \(totalSessions) sessions")
         
-        for (pointID, sessionIDs) in index.prefix(3) {
+        print("\nMap Log Opened Listing Map Points:")
+                for point in store.points.sorted(by: { $0.createdDate > $1.createdDate }) {
+                    let pointID = point.id.uuidString
+                    let sessionIDs = index[pointID] ?? []
+                    
+                    print("Map Point: \(pointID)")
+                    if sessionIDs.isEmpty {
+                        print("   Data Sessions: (none)")
+                    } else {
+                        print("   Data Sessions:")
+                        for sessionID in sessionIDs.sorted() {
+                            print("        \(sessionID)")
+                        }
+                    }
+                }
+        
+        /* for (pointID, sessionIDs) in index.prefix(3) {
             print("   \(pointID): \(sessionIDs.count) sessions")
-        }
+        } */
     }
     
-    /// Delete a specific scan session
+/// Delete a specific scan session
     func deleteSession(pointID: String, sessionID: String) async throws {
         guard let store = mapPointStore,
-              let pointUUID = UUID(uuidString: pointID),
-              let pointIndex = store.points.firstIndex(where: { $0.id == pointUUID }) else {
+              let pointUUID = UUID(uuidString: pointID) else {
             return
         }
         
-        var point = store.points[pointIndex]
-        
         // Find and delete the file
-        for (index, filePath) in point.sessionFilePaths.enumerated() {
+        for filePath in store.getSessionFilePaths(pointID: pointUUID) {
             let fileURL = URL(fileURLWithPath: filePath)
             
             if let data = try? Data(contentsOf: fileURL),
@@ -134,16 +147,12 @@ final class MapPointLogManager: ObservableObject {
                let fileSessionID = json["sessionID"] as? String,
                fileSessionID == sessionID {
                 
-                // Delete the file
+                // Delete the file from disk
                 try FileManager.default.removeItem(at: fileURL)
-                print("🗑️ Deleted session: \(sessionID)")
+                print("🗑️ Deleted session file: \(sessionID)")
                 
-                // Remove from map point's array
-                point.sessionFilePaths.remove(at: index)
-                store.points[pointIndex] = point
-                
-                // Trigger save through objectWillChange
-                store.objectWillChange.send()
+                // Remove from map point's array using the store method
+                store.removeSessionByID(pointID: pointUUID, sessionID: sessionID)
                 
                 // Rebuild index
                 await buildSessionIndex()
@@ -151,7 +160,6 @@ final class MapPointLogManager: ObservableObject {
             }
         }
     }
-    
     /// Load full scan data for a specific session
     func loadSessionData(sessionID: String) async -> [String: Any]? {
         guard let store = mapPointStore else { return nil }

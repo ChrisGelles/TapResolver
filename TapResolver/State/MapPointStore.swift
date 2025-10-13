@@ -95,6 +95,8 @@ public final class MapPointStore: ObservableObject {
         points.append(newPoint)
         // Set the new point as active (deactivating any previous active point)
         activePointID = newPoint.id
+        print("Map Point Created:")
+                print("ID: \(newPoint.id.uuidString)")
         save()
         print("Added map point @ map (\(Int(mapPoint.x)), \(Int(mapPoint.y)))")
         return true
@@ -215,4 +217,31 @@ public final class MapPointStore: ObservableObject {
     public func getSessionFilePaths(pointID: UUID) -> [String] {
         return points.first(where: { $0.id == pointID })?.sessionFilePaths ?? []
     }
+    /// Remove a session file path by sessionID
+    public func removeSessionByID(pointID: UUID, sessionID: String) {
+        if let idx = points.firstIndex(where: { $0.id == pointID }) {
+            // Find and remove the file path that contains this sessionID
+            var removedPath: String?
+            
+            for (fileIdx, filePath) in points[idx].sessionFilePaths.enumerated().reversed() {
+                let fileURL = URL(fileURLWithPath: filePath)
+                
+                if let data = try? Data(contentsOf: fileURL),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let fileSessionID = json["sessionID"] as? String,
+                   fileSessionID == sessionID {
+                    
+                    removedPath = filePath
+                    points[idx].sessionFilePaths.remove(at: fileIdx)
+                    break
+                }
+            }
+            
+            if removedPath != nil {
+                save()
+                print("🗑️ Removed session \(sessionID) from point \(pointID)")
+            }
+        }
+    }
+    
 }
