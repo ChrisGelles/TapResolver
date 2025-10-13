@@ -228,18 +228,20 @@ struct MetricSquareDrawer: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Reset square")
 
-            // Delete (red X)
-            Button {
-                squares.remove(id: sq.id)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.red)
-                    .frame(width: 24, height: 24)
-                    .background(.ultraThinMaterial, in: Circle())
+            // Delete (red X) - only show if unlocked
+            if !sq.isLocked {
+                Button {
+                    squares.remove(id: sq.id)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.red)
+                        .frame(width: 24, height: 24)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete square")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Delete square")
         }
         .padding(.horizontal, 2)
         .padding(.vertical, 4)

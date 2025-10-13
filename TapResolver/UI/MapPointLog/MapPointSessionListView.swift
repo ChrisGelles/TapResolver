@@ -5,10 +5,6 @@
 //  Created on 10/12/2025
 //
 //  Role: Displays all scan sessions for a specific map point
-//  - Styled like BeaconListItem
-//  - Sessions show: YYYYMMDD-HHMM-facing°
-//  - Lock/unlock to prevent deletion
-//  - Delete with confirmation
 //
 
 import SwiftUI
@@ -20,51 +16,38 @@ struct MapPointSessionListView: View {
     
     let pointID: String
     
+    @State private var sessions: [SessionInfo] = []
     @State private var lockedSessions: Set<String> = []
     @State private var sessionToDelete: String?
     @State private var showDeleteConfirmation = false
-    @State private var isLoadingSessions = true
+    @State private var isLoading = true
     
-    // Color palette for session items (cycles through)
+    struct SessionInfo: Identifiable {
+        let id: String // sessionID
+        let timestamp: Date
+        let duration: Double
+        let beaconCount: Int
+        let facing: Double?
+    }
+    
     private let sessionColors: [Color] = [
-        Color(hue: 0.55, saturation: 0.6, brightness: 0.7),  // Blue
-        Color(hue: 0.33, saturation: 0.6, brightness: 0.7),  // Green
-        Color(hue: 0.15, saturation: 0.6, brightness: 0.7),  // Orange
-        Color(hue: 0.75, saturation: 0.6, brightness: 0.7),  // Purple
-        Color(hue: 0.50, saturation: 0.6, brightness: 0.7),  // Cyan
-        Color(hue: 0.08, saturation: 0.6, brightness: 0.7),  // Yellow-Orange
+        Color(hue: 0.55, saturation: 0.6, brightness: 0.7),
+        Color(hue: 0.33, saturation: 0.6, brightness: 0.7),
+        Color(hue: 0.15, saturation: 0.6, brightness: 0.7),
+        Color(hue: 0.75, saturation: 0.6, brightness: 0.7),
+        Color(hue: 0.50, saturation: 0.6, brightness: 0.7),
+        Color(hue: 0.08, saturation: 0.6, brightness: 0.7),
     ]
     
-    private var mapPointEntry: MapPointLogManager.MapPointLogEntry? {
-        mapPointLogManager.mapPoints.first { $0.id == pointID }
-    }
-    
-    private var sessions: [MapPointLogManager.SessionMetadata] {
-        mapPointEntry?.sessions ?? []
-    }
-    
     private var pointName: String {
-        // Try to get from mapPointLogManager first (has coordinates)
-        if let entry = mapPointEntry {
-            return String(format: "%.2f, %.2f", entry.coordinates.x, entry.coordinates.y)
-        }
-        
-        // Fallback: get from mapPointStore
         if let point = mapPointStore.points.first(where: { $0.id.uuidString == pointID }) {
             return String(format: "%.2f, %.2f", point.mapPoint.x, point.mapPoint.y)
         }
-        
         return "Unknown"
     }
     
     var body: some View {
-        let _ = print("🔍 MapPointSessionListView DEBUG:")
-        let _ = print("   pointID: \(pointID)")
-        let _ = print("   mapPointLogManager.mapPoints.count: \(mapPointLogManager.mapPoints.count)")
-        let _ = print("   Found entry: \(mapPointEntry != nil)")
-        let _ = print("   Sessions count: \(sessions.count)")
-        
-        return VStack(spacing: 0) {
+        VStack(spacing: 0) {
             // Header
             HStack {
                 Button(action: { dismiss() }) {
@@ -73,7 +56,7 @@ struct MapPointSessionListView: View {
                         .foregroundColor(.white)
                 }
                 
-                Text("Point (\(pointName))m")
+                Text("Point (\(pointName))px")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.white)
                 
@@ -95,7 +78,7 @@ struct MapPointSessionListView: View {
                 .background(Color.white.opacity(0.3))
             
             // Sessions list
-            if isLoadingSessions {
+            if isLoading {
                 VStack(spacing: 12) {
                     ProgressView()
                         .scaleEffect(1.5)
@@ -160,29 +143,54 @@ struct MapPointSessionListView: View {
             Text("This action cannot be undone.")
         }
         .onAppear {
-            print("🔍 Session List Opened for pointID: \(pointID)")
-            print("   Current mapPointLogManager.mapPoints.count: \(mapPointLogManager.mapPoints.count)")
-            
             loadLockedSessions()
-            
-            // Force reload scan data to ensure we have latest
             Task {
-                print("   ⏳ Reloading all scan data...")
-                await mapPointLogManager.loadAll(context: PersistenceContext.shared)
-                
-                print("   ✅ Reload complete. mapPoints.count: \(mapPointLogManager.mapPoints.count)")
-                if let entry = mapPointEntry {
-                    print("   ✅ Found entry for pointID with \(entry.sessions.count) sessions")
-                } else {
-                    print("   ⚠️ No entry found for pointID: \(pointID)")
-                }
-                
-                isLoadingSessions = false
+                await loadSessions()
             }
         }
     }
     
     // MARK: - Actions
+    
+    private func loadSessions() async {
+        print("🔍 Loading sessions for point: \(pointID)")
+        
+        let sessionIDs = mapPointLogManager.sessions(for: pointID)
+        print("   Found \(sessionIDs.count) session IDs")
+        
+        var loadedSessions: [SessionInfo] = []
+        
+        for sessionID in sessionIDs {
+            if let json = await mapPointLogManager.loadSessionData(sessionID: sessionID) {
+                // Extract metadata
+                var timestamp = Date()
+                if let timing = json["timing"] as? [String: Any],
+                   let startISO = timing["startISO"] as? String,
+                   let date = ISO8601DateFormatter().date(from: startISO) {
+                    timestamp = date
+                }
+                
+                let duration = (json["timing"] as? [String: Any])?["duration_s"] as? Double ?? 0
+                let beaconCount = (json["beacons"] as? [[String: Any]])?.count ?? 0
+                let facing = (json["user"] as? [String: Any])?["facing_deg"] as? Double
+                
+                let info = SessionInfo(
+                    id: sessionID,
+                    timestamp: timestamp,
+                    duration: duration,
+                    beaconCount: beaconCount,
+                    facing: facing
+                )
+                
+                loadedSessions.append(info)
+            }
+        }
+        
+        sessions = loadedSessions.sorted { $0.timestamp > $1.timestamp }
+        isLoading = false
+        
+        print("   ✅ Loaded \(sessions.count) sessions")
+    }
     
     private func toggleLock(for sessionID: String) {
         if lockedSessions.contains(sessionID) {
@@ -197,8 +205,8 @@ struct MapPointSessionListView: View {
         Task {
             do {
                 try await mapPointLogManager.deleteSession(pointID: pointID, sessionID: sessionID)
+                await loadSessions()
                 
-                // If no sessions left, dismiss view
                 if sessions.isEmpty {
                     dismiss()
                 }
@@ -229,7 +237,7 @@ struct MapPointSessionListView: View {
 // MARK: - Session List Item
 
 private struct SessionListItem: View {
-    let session: MapPointLogManager.SessionMetadata
+    let session: MapPointSessionListView.SessionInfo
     let color: Color
     let isLocked: Bool
     let onToggleLock: () -> Void
@@ -237,7 +245,6 @@ private struct SessionListItem: View {
     
     var body: some View {
         HStack(spacing: 8) {
-            // Session name in colored rounded rectangle (styled like BeaconListItem)
             Text(formatSessionName())
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundColor(.white)
@@ -250,7 +257,6 @@ private struct SessionListItem: View {
             
             Spacer(minLength: 4)
             
-            // Session info (duration, beacon count)
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(Int(session.duration))s • \(session.beaconCount) beacons")
                     .font(.system(size: 10, weight: .medium))
@@ -259,7 +265,6 @@ private struct SessionListItem: View {
             
             Spacer()
             
-            // Lock toggle
             Button(action: onToggleLock) {
                 Image(systemName: isLocked ? "lock.fill" : "lock.open")
                     .font(.system(size: 12, weight: .bold))
@@ -269,7 +274,6 @@ private struct SessionListItem: View {
             }
             .buttonStyle(.plain)
             
-            // Delete button (only if unlocked)
             if !isLocked {
                 Button(action: onDelete) {
                     Image(systemName: "xmark")
@@ -294,7 +298,6 @@ private struct SessionListItem: View {
         formatter.dateFormat = "yyyyMMdd-HHmm"
         let dateTimeStr = formatter.string(from: session.timestamp)
         
-        // Format facing with degree symbol
         let facingStr: String
         if let facing = session.facing {
             facingStr = String(format: "%.0f°", facing)
@@ -305,4 +308,3 @@ private struct SessionListItem: View {
         return "\(dateTimeStr)-\(facingStr)"
     }
 }
-

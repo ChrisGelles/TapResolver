@@ -4,11 +4,10 @@
 //
 //  Created on 10/12/2025
 //
-//  Role: Manages discovery, indexing, and export of scan session data across all map points.
-//  - Scans {locationDir}/scan_records_v1/{pointID}/ for JSON files
-//  - Provides in-memory index of sessions per map point
-//  - Handles deletion of individual sessions
-//  - Generates master export JSON containing all sessions
+//  Role: Manages lightweight session index (pointID -> [sessionID])
+//  - Scans filesystem to build index
+//  - Reloads automatically when location changes
+//  - Provides session counts and lists for UI
 //
 
 import Foundation
@@ -20,36 +19,34 @@ final class MapPointLogManager: ObservableObject {
     
     // MARK: - Published State
     
-    /// All map points that have recorded scan data
-    @Published private(set) var mapPoints: [MapPointLogEntry] = []
-    
-    /// Loading state
-    @Published private(set) var isLoading = false
-    
-    /// Last error encountered
-    @Published private(set) var lastError: String?
+    /// Lightweight index: pointID -> [sessionID]
+    @Published private(set) var sessionIndex: [String: [String]] = [:]
     
     // MARK: - Dependencies
     
-    /// Reference to MapPointStore to get coordinates and colors
-    private weak var mapPointStore: MapPointStore?
-    
-    /// Current persistence context
-    private var currentContext: PersistenceContext?
-    
-    /// Combine subscription bag
+    private let ctx = PersistenceContext.shared
     private var bag = Set<AnyCancellable>()
+    private weak var mapPointStore: MapPointStore?
     
     // MARK: - Initialization
     
     init() {
-        // Reload scan data when location changes (matches BeaconListsStore pattern)
+        // Reload when location changes
         NotificationCenter.default.publisher(for: .locationDidChange)
             .sink { [weak self] _ in
-                guard let self = self else { return }
                 Task { @MainActor in
-                    print("📍 MapPointLogManager: Location changed, reloading scan data...")
-                    await self.loadAll(context: PersistenceContext.shared)
+                    print("📍 MapPointLogManager: Location changed, rebuilding session index...")
+                    await self?.buildSessionIndex()
+                }
+            }
+            .store(in: &bag)
+        
+        // Rebuild when map points reload
+        NotificationCenter.default.publisher(for: .mapPointsDidReload)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    print("🗺️ MapPointLogManager: Map points reloaded, rebuilding session index...")
+                    await self?.buildSessionIndex()
                 }
             }
             .store(in: &bag)
@@ -62,311 +59,387 @@ final class MapPointLogManager: ObservableObject {
     
     // MARK: - Public API
     
-    /// Scan filesystem and build index of all map points with scan data
-    /// - Parameter context: The current location's persistence context
-    func loadAll(context: PersistenceContext) async {
-        isLoading = true
-        lastError = nil
-        currentContext = context
-        
-        do {
-            let entries = try await discoverMapPoints(context: context)
-            self.mapPoints = entries.sorted { $0.id < $1.id }
-            print("📊 Loaded \(mapPoints.count) map points")
-        } catch {
-            lastError = "Failed to load scan data: \(error.localizedDescription)"
-            print("❌ MapPointLogManager.loadAll error: \(error)")
-        }
-        
-        isLoading = false
+    /// Get session count for a specific map point
+    func sessionCount(for pointID: String) -> Int {
+        return sessionIndex[pointID]?.count ?? 0
     }
     
-    /// Delete a specific scan session from disk and update index
-    /// - Parameters:
-    ///   - pointID: The map point identifier
-    ///   - sessionID: The session identifier (filename without .json)
-    func deleteSession(pointID: String, sessionID: String) async throws {
-        guard let context = currentContext else {
-            throw MapPointLogError.noContext
-        }
+    /// Get session IDs for a specific map point
+    func sessions(for pointID: String) -> [String] {
+        return sessionIndex[pointID] ?? []
+    }
+    
+    /// Build session index by scanning filesystem
+    /// Maps each Map Point ID to its session IDs
+    func buildSessionIndex() async {
+        print("🔍 Building session index from filesystem...")
         
-        // Find the actual file URL from the session metadata
-        guard let pointEntry = mapPoints.first(where: { $0.id == pointID }),
-              let session = pointEntry.sessions.first(where: { $0.id == sessionID }) else {
-            throw MapPointLogError.invalidSession
-        }
-        
-        // Delete using the actual file URL from metadata
-        try FileManager.default.removeItem(at: session.fileURL)
-        print("🗑️ Deleted session: \(pointID)/\(sessionID)")
-        
-        // Update in-memory index
-        if let pointIndex = mapPoints.firstIndex(where: { $0.id == pointID }) {
-            var updatedPoint = mapPoints[pointIndex]
-            updatedPoint.sessions.removeAll { $0.id == sessionID }
+        do {
+            // Get all scan file URLs
+            let urls = try PersistenceService.listScans(locationID: ctx.locationID)
+            print("📁 Found \(urls.count) scan files")
             
-            // If no sessions left, remove the entire map point entry
-            if updatedPoint.sessions.isEmpty {
-                mapPoints.remove(at: pointIndex)
-            } else {
-                mapPoints[pointIndex] = updatedPoint
+            // Build index: [pointID: [sessionID]]
+            var index: [String: [String]] = [:]
+            
+            for fileURL in urls {
+                // Read just pointID and sessionID from each file
+                guard let data = try? Data(contentsOf: fileURL),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let pointID = json["pointID"] as? String,
+                      let sessionID = json["sessionID"] as? String else {
+                    continue
+                }
+                
+                // Add to index
+                index[pointID, default: []].append(sessionID)
+            }
+            
+            // Store the index
+            sessionIndex = index
+            
+            let totalSessions = index.values.flatMap { $0 }.count
+            print("✅ Built session index: \(index.count) points, \(totalSessions) sessions")
+            
+            // Show sample
+            for (pointID, sessionIDs) in index.prefix(3) {
+                print("   \(pointID): \(sessionIDs.count) sessions")
+            }
+            
+        } catch {
+            print("❌ Failed to build session index: \(error)")
+            sessionIndex = [:]
+        }
+    }
+    
+    /// Delete a specific scan session
+    func deleteSession(pointID: String, sessionID: String) async throws {
+        // Find and delete the file
+        let urls = try PersistenceService.listScans(locationID: ctx.locationID)
+        
+        for url in urls {
+            if url.lastPathComponent.contains(sessionID) {
+                try FileManager.default.removeItem(at: url)
+                print("🗑️ Deleted session: \(sessionID)")
+                
+                // Rebuild index
+                await buildSessionIndex()
+                break
             }
         }
     }
     
-    /// Generate master export JSON containing all current scan data
-    /// - Returns: JSON data ready for export
+    /// Load full scan data for a specific session
+    func loadSessionData(sessionID: String) async -> [String: Any]? {
+        do {
+            let urls = try PersistenceService.listScans(locationID: ctx.locationID)
+            
+            guard let url = urls.first(where: { $0.lastPathComponent.contains(sessionID) }),
+                  let data = try? Data(contentsOf: url),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return nil
+            }
+            
+            return json
+        } catch {
+            print("❌ Failed to load session data: \(error)")
+            return nil
+        }
+    }
+    
+    /// Generate master export JSON
     func exportMasterJSON() async throws -> Data {
-        guard let context = currentContext else {
-            throw MapPointLogError.noContext
+        var mapPointsData: [[String: Any]] = []
+        
+        for (pointID, sessionIDs) in sessionIndex {
+            // Get coordinates from MapPointStore
+            var coords: [Double] = [0, 0]
+            if let point = mapPointStore?.points.first(where: { $0.id.uuidString == pointID }) {
+                coords = [Double(point.mapPoint.x), Double(point.mapPoint.y)]
+            }
+            
+            // Load full scan data for each session
+            var scans: [[String: Any]] = []
+            for sessionID in sessionIDs {
+                if let scanData = await loadSessionData(sessionID: sessionID) {
+                    scans.append(scanData)
+                }
+            }
+            
+            mapPointsData.append([
+                "pointID": pointID,
+                "coordinates": coords,
+                "sessions": scans
+            ])
         }
         
-        // Build master export structure
-        let masterExport = MasterExport(
-            exportDate: ISO8601DateFormatter().string(from: Date()),
-            locationID: context.locationID,
-            metadata: ExportMetadata(
-                appVersion: appVersion(),
-                totalMapPoints: mapPoints.count,
-                totalSessions: mapPoints.reduce(0) { $0 + $1.sessions.count }
-            ),
-            mapPoints: try await buildMapPointDataArray()
-        )
+        let masterExport: [String: Any] = [
+            "exportDate": ISO8601DateFormatter().string(from: Date()),
+            "locationID": ctx.locationID,
+            "metadata": [
+                "appVersion": appVersion(),
+                "totalMapPoints": sessionIndex.count,
+                "totalSessions": sessionIndex.values.flatMap { $0 }.count
+            ],
+            "mapPoints": mapPointsData
+        ]
         
-        // Encode to JSON
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
+        return try JSONSerialization.data(withJSONObject: masterExport, options: [.prettyPrinted, .sortedKeys])
+    }
+    
+    // MARK: - Diagnostic
+    
+    /// Diagnostic: Print all scan files found on disk
+    func printFilesystemDiagnostic() {
+        print("\n" + String(repeating: "=", count: 80))
+        print("📂 FILESYSTEM DIAGNOSTIC - SCAN FILES")
+        print(String(repeating: "=", count: 80))
         
-        return try encoder.encode(masterExport)
+        let locationID = ctx.locationID
+        print("Current locationID: \(locationID)")
+        
+        do {
+            let baseDir = try PathProvider.baseDir()
+            print("\n📁 Base directory: \(baseDir.path)")
+            
+            let locationsDir = baseDir.appendingPathComponent("Locations")
+            print("📁 Locations directory: \(locationsDir.path)")
+            print("   Exists: \(FileManager.default.fileExists(atPath: locationsDir.path))")
+            
+            let locationDir = locationsDir.appendingPathComponent(locationID)
+            print("📁 Location directory: \(locationDir.path)")
+            print("   Exists: \(FileManager.default.fileExists(atPath: locationDir.path))")
+            
+            let scansDir = locationDir.appendingPathComponent("Scans")
+            print("📁 Scans directory: \(scansDir.path)")
+            print("   Exists: \(FileManager.default.fileExists(atPath: scansDir.path))")
+            
+            if FileManager.default.fileExists(atPath: scansDir.path) {
+                let monthDirs = try FileManager.default.contentsOfDirectory(at: scansDir, includingPropertiesForKeys: nil)
+                print("\n📅 Month directories found: \(monthDirs.count)")
+                
+                for monthDir in monthDirs.sorted(by: { $0.path < $1.path }) {
+                    let jsonFiles = try FileManager.default.contentsOfDirectory(at: monthDir, includingPropertiesForKeys: nil)
+                        .filter { $0.pathExtension == "json" }
+                        .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+                    
+                    print("\n\(monthDir.path)/")
+                    print("Files: \(jsonFiles.count)\n")
+                    
+                    var isFirstFile = true
+                    
+                    for file in jsonFiles {
+                        print("\(file.lastPathComponent)")
+                        
+                        if let data = try? Data(contentsOf: file),
+                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            let pointID = json["pointID"] as? String ?? "missing"
+                            let sessionID = json["sessionID"] as? String ?? "missing"
+                            print("          pointID: \(pointID)")
+                            print("          sessionID: \(sessionID)")
+                            
+                            // Display full contents of first file
+                            if isFirstFile {
+                                print("\n" + String(repeating: "~", count: 80))
+                                print("📄 DISPLAYING FIRST FILE CONTENTS:")
+                                print(String(repeating: "~", count: 80))
+                                JSONFileViewer.displayFile(at: file, maxDepth: 10, truncateArrays: 10)
+                                isFirstFile = false
+                            }
+                        } else {
+                            print("          ⚠️ Could not read file")
+                        }
+                        print("")
+                    }
+                }
+            } else {
+                print("   ⚠️ Scans directory does not exist!")
+            }
+            
+            print("\n🔍 Testing PersistenceService.listScans():")
+            let urls = try PersistenceService.listScans(locationID: locationID)
+            print("   Found \(urls.count) files via PersistenceService")
+            
+            for (index, url) in urls.prefix(3).enumerated() {
+                print("   [\(index + 1)] \(url.lastPathComponent)")
+            }
+            
+        } catch {
+            print("❌ Error during diagnostic: \(error)")
+        }
+        
+        print(String(repeating: "=", count: 80) + "\n")
+    }
+    
+    /// Diagnostic: Print all files in Documents/locations directory
+    func printDocumentsDiagnostic() {
+        print("\n" + String(repeating: "=", count: 80))
+        print("📂 DOCUMENTS DIAGNOSTIC - SCAN SUMMARIES")
+        print(String(repeating: "=", count: 80))
+        
+        let locationID = ctx.locationID
+        print("Current locationID: \(locationID)")
+        
+        do {
+            // Get Documents directory
+            guard let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                print("❌ Could not access Documents directory")
+                return
+            }
+            
+            print("\n📁 Documents directory: \(documentsDir.path)")
+            print("   Exists: \(FileManager.default.fileExists(atPath: documentsDir.path))")
+            
+            let locationsDir = documentsDir.appendingPathComponent("locations")
+            print("📁 locations directory: \(locationsDir.path)")
+            print("   Exists: \(FileManager.default.fileExists(atPath: locationsDir.path))")
+            
+            let locationDir = locationsDir.appendingPathComponent(locationID)
+            print("📁 location directory: \(locationDir.path)")
+            print("   Exists: \(FileManager.default.fileExists(atPath: locationDir.path))")
+            
+            let scanSummariesDir = locationDir.appendingPathComponent("scan_summaries")
+            print("📁 scan_summaries directory: \(scanSummariesDir.path)")
+            print("   Exists: \(FileManager.default.fileExists(atPath: scanSummariesDir.path))")
+            
+            if FileManager.default.fileExists(atPath: scanSummariesDir.path) {
+                let jsonFiles = try FileManager.default.contentsOfDirectory(at: scanSummariesDir, includingPropertiesForKeys: nil)
+                    .filter { $0.pathExtension == "json" }
+                    .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+                
+                print("\n\(scanSummariesDir.path)/")
+                print("Files: \(jsonFiles.count)\n")
+                
+                var isFirstFile = true
+                
+                for file in jsonFiles {
+                    print("\(file.lastPathComponent)")
+                    
+                    if let data = try? Data(contentsOf: file),
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        let pointID = json["mapPointID"] as? String ?? "missing"
+                        let sessionID = json["sessionID"] as? String ?? "missing"
+                        print("          mapPointID: \(pointID)")
+                        print("          sessionID: \(sessionID)")
+                        
+                        // Show other fields present
+                        let keys = json.keys.sorted()
+                        print("          fields: \(keys.joined(separator: ", "))")
+                        
+                        // Display full contents of first file
+                        if isFirstFile {
+                            print("\n" + String(repeating: "~", count: 80))
+                            print("📄 DISPLAYING FIRST FILE CONTENTS:")
+                            print(String(repeating: "~", count: 80))
+                            JSONFileViewer.displayFile(at: file, maxDepth: 10, truncateArrays: 10)
+                            isFirstFile = false
+                        }
+                    } else {
+                        print("          ⚠️ Could not read file")
+                    }
+                    print("")
+                }
+            } else {
+                print("   ⚠️ scan_summaries directory does not exist!")
+            }
+            
+        } catch {
+            print("❌ Error during Documents diagnostic: \(error)")
+        }
+        
+        print(String(repeating: "=", count: 80) + "\n")
     }
     
     // MARK: - Private Helpers
     
-    /// Scan filesystem for all map points with scan data
-    private func discoverMapPoints(context: PersistenceContext) async throws -> [MapPointLogEntry] {
-        // Use PersistenceService to list all scans (matches how scans are actually saved)
-        let scanURLs = try PersistenceService.listScans(locationID: context.locationID)
-        
-        guard !scanURLs.isEmpty else {
-            print("ℹ️ No scans found via PersistenceService")
-            return []
-        }
-        
-        print("📁 Found \(scanURLs.count) scan files")
-        
-        // Group scans by pointID
-        var scansByPoint: [String: [URL]] = [:]
-        for url in scanURLs {
-            do {
-                let scan = try PersistenceService.readScan(url)
-                scansByPoint[scan.pointID, default: []].append(url)
-            } catch {
-                print("⚠️ Failed to read scan at \(url): \(error)")
-                continue
-            }
-        }
-        
-        var entries: [MapPointLogEntry] = []
-        
-        for (pointID, urls) in scansByPoint {
-            // Parse metadata from each session file
-            var sessionMetadata: [SessionMetadata] = []
-            
-            for fileURL in urls {
-                if let metadata = try? await extractSessionMetadataFromV1(from: fileURL) {
-                    sessionMetadata.append(metadata)
-                }
-            }
-            
-            guard !sessionMetadata.isEmpty else { continue }
-            
-            // Get coordinates IN METERS from the first scan file (all scans at same point have same coordinates)
-            var coordinates: CGPoint = .zero
-            if let firstURL = urls.first {
-                do {
-                    let scan = try PersistenceService.readScan(firstURL)
-                    // Use meters from scan data, not pixels from MapPointStore
-                    // Note: xy_m is optional, so safely unwrap it
-                    if let xy_m = scan.point.xy_m, xy_m.count == 2 {
-                        coordinates = CGPoint(x: xy_m[0], y: xy_m[1])
-                    }
-                } catch {
-                    print("⚠️ Failed to read coordinates from scan: \(error)")
-                }
-            }
-            
-            let color = colorForPointID(pointID)
-            
-            entries.append(MapPointLogEntry(
-                id: pointID,
-                coordinates: coordinates,
-                color: color,
-                sessions: sessionMetadata.sorted { $0.timestamp > $1.timestamp }
-            ))
-        }
-        
-        print("📊 Discovered \(entries.count) map points with scan data")
-        return entries
-    }
-    
-    /// Extract metadata from a V1 scan record JSON file
-    private func extractSessionMetadataFromV1(from fileURL: URL) async throws -> SessionMetadata {
-        let scan = try PersistenceService.readScan(fileURL)
-        
-        // Use scan ID from filename (more reliable than embedded scanID)
-        let sessionID = fileURL.deletingPathExtension().lastPathComponent
-        let timestamp = ISO8601DateFormatter().date(from: scan.timing.startISO) ?? Date()
-        let duration = scan.timing.duration_s
-        let beaconCount = scan.beacons.count
-        
-        return SessionMetadata(
-            id: sessionID,
-            timestamp: timestamp,
-            duration: duration,
-            beaconCount: beaconCount,
-            facing: scan.user.facing_deg,
-            fileURL: fileURL
-        )
-    }
-    
-    /// Extract metadata from a scan record JSON file without loading full data (LEGACY FORMAT)
-    private func extractSessionMetadataLegacy(from fileURL: URL) async throws -> SessionMetadata {
-        let data = try Data(contentsOf: fileURL)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        
-        // Parse just enough to get metadata
-        let record = try decoder.decode(MapPointScanUtility.ScanRecord.self, from: data)
-        
-        let sessionID = fileURL.deletingPathExtension().lastPathComponent
-        let timestamp = ISO8601DateFormatter().date(from: record.timingStartISO) ?? Date()
-        let duration = record.duration_s
-        let beaconCount = record.beacons.count
-        
-        return SessionMetadata(
-            id: sessionID,
-            timestamp: timestamp,
-            duration: duration,
-            beaconCount: beaconCount,
-            facing: record.userFacing_deg,
-            fileURL: fileURL
-        )
-    }
-    
-    /// Build array of MapPointData for export by loading full scan records
-    private func buildMapPointDataArray() async throws -> [MapPointData] {
-        var result: [MapPointData] = []
-        
-        for entry in mapPoints {
-            var scanRecords: [MapPointScanUtility.ScanRecord] = []
-            
-            for session in entry.sessions {
-                do {
-                    // Try V1 format first
-                    let scan = try PersistenceService.readScan(session.fileURL)
-                    // Convert V1 ScanRecordV1 to old ScanRecord format for export compatibility
-                    // For now, skip this - we'll update export format separately
-                    // Just load the scan to verify it exists
-                    print("✓ Loaded V1 scan: \(session.id)")
-                } catch {
-                    // Fall back to legacy format
-                    let data = try Data(contentsOf: session.fileURL)
-                    let decoder = JSONDecoder()
-                    decoder.dateDecodingStrategy = .iso8601
-                    let record = try decoder.decode(MapPointScanUtility.ScanRecord.self, from: data)
-                    scanRecords.append(record)
-                }
-            }
-            
-            result.append(MapPointData(
-                pointID: entry.id,
-                coordinates: entry.coordinates,
-                sessions: scanRecords
-            ))
-        }
-        
-        return result
-    }
-    
-    /// Get app version string
     private func appVersion() -> String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
         return "\(version) (\(build))"
     }
     
-    /// Generate a consistent color for a point ID
-    private func colorForPointID(_ pointID: String) -> Color {
-        let hash = abs(pointID.hashValue)
-        let hue = Double(hash % 360) / 360.0
-        return Color(hue: hue, saturation: 0.7, brightness: 0.8)
-    }
-}
-
-// MARK: - Data Models
-
-extension MapPointLogManager {
+    // MARK: - TEMPORARY DEBUG FUNCTION - REMOVE AFTER DEBUGGING
     
-    /// Represents a map point with its scan sessions
-    struct MapPointLogEntry: Identifiable {
-        let id: String // pointID
-        var coordinates: CGPoint
-        let color: Color
-        var sessions: [SessionMetadata]
-    }
-    
-    /// Lightweight metadata for a scan session
-    struct SessionMetadata: Identifiable {
-        let id: String // sessionID (filename without .json)
-        let timestamp: Date
-        let duration: TimeInterval
-        let beaconCount: Int
-        let facing: Double? // degrees, 0-360
-        let fileURL: URL
-    }
-}
-
-// MARK: - Export Models
-
-/// Master export structure containing all scan data
-struct MasterExport: Codable {
-    let exportDate: String // ISO8601
-    let locationID: String
-    let metadata: ExportMetadata
-    let mapPoints: [MapPointData]
-}
-
-/// Export metadata summary
-struct ExportMetadata: Codable {
-    let appVersion: String
-    let totalMapPoints: Int
-    let totalSessions: Int
-}
-
-/// Map point data for export
-struct MapPointData: Codable {
-    let pointID: String
-    let coordinates: CGPoint
-    let sessions: [MapPointScanUtility.ScanRecord]
-}
-
-// MARK: - Errors
-
-enum MapPointLogError: LocalizedError {
-    case noContext
-    case invalidSession
-    case exportFailed
-    
-    var errorDescription: String? {
-        switch self {
-        case .noContext:
-            return "No location context available"
-        case .invalidSession:
-            return "Invalid session data"
-        case .exportFailed:
-            return "Failed to generate export"
+    /// ⚠️ TEMPORARY: Delete all scan files from both locations
+    /// This will delete:
+    /// 1. All files in Documents/locations/{locationID}/scan_summaries/
+    /// 2. All files in Application Support/TapResolver/Locations/{locationID}/Scans/
+    func deleteAllScanFiles() {
+        print("\n" + String(repeating: "⚠️", count: 40))
+        print("🗑️ DELETING ALL SCAN FILES")
+        print(String(repeating: "⚠️", count: 40))
+        
+        let locationID = ctx.locationID
+        var totalDeleted = 0
+        
+        // 1. Delete from Documents/locations/home/scan_summaries/
+        do {
+            if let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                let scanSummariesDir = documentsDir
+                    .appendingPathComponent("locations")
+                    .appendingPathComponent(locationID)
+                    .appendingPathComponent("scan_summaries")
+                
+                if FileManager.default.fileExists(atPath: scanSummariesDir.path) {
+                    let files = try FileManager.default.contentsOfDirectory(at: scanSummariesDir, includingPropertiesForKeys: nil)
+                        .filter { $0.pathExtension == "json" }
+                    
+                    print("\n📂 Documents/scan_summaries/")
+                    print("   Found \(files.count) files")
+                    
+                    for file in files {
+                        try FileManager.default.removeItem(at: file)
+                        print("   ✓ Deleted: \(file.lastPathComponent)")
+                        totalDeleted += 1
+                    }
+                } else {
+                    print("\n📂 Documents/scan_summaries/ - does not exist")
+                }
+            }
+        } catch {
+            print("❌ Error deleting from Documents: \(error)")
         }
+        
+        // 2. Delete from Application Support/TapResolver/Locations/home/Scans/
+        do {
+            let baseDir = try PathProvider.baseDir()
+            let scansDir = baseDir
+                .appendingPathComponent("Locations")
+                .appendingPathComponent(locationID)
+                .appendingPathComponent("Scans")
+            
+            if FileManager.default.fileExists(atPath: scansDir.path) {
+                let monthDirs = try FileManager.default.contentsOfDirectory(at: scansDir, includingPropertiesForKeys: nil)
+                
+                print("\n📂 Application Support/Scans/")
+                print("   Found \(monthDirs.count) month directories")
+                
+                for monthDir in monthDirs {
+                    let files = try FileManager.default.contentsOfDirectory(at: monthDir, includingPropertiesForKeys: nil)
+                        .filter { $0.pathExtension == "json" }
+                    
+                    print("\n   📅 \(monthDir.lastPathComponent)/")
+                    print("      Found \(files.count) files")
+                    
+                    for file in files {
+                        try FileManager.default.removeItem(at: file)
+                        print("      ✓ Deleted: \(file.lastPathComponent)")
+                        totalDeleted += 1
+                    }
+                }
+            } else {
+                print("\n📂 Application Support/Scans/ - does not exist")
+            }
+        } catch {
+            print("❌ Error deleting from Application Support: \(error)")
+        }
+        
+        print("\n" + String(repeating: "-", count: 80))
+        print("✅ TOTAL DELETED: \(totalDeleted) files")
+        print(String(repeating: "⚠️", count: 40) + "\n")
+        
+        // Clear the session index
+        sessionIndex = [:]
+        print("🔄 Cleared session index")
     }
 }
-

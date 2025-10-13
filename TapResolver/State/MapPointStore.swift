@@ -8,6 +8,11 @@
 import SwiftUI
 import CoreGraphics
 
+// Notification for when map points reload
+extension Notification.Name {
+    static let mapPointsDidReload = Notification.Name("mapPointsDidReload")
+}
+
 // MARK: - Store of Map Points (log points) with map-local positions
 public final class MapPointStore: ObservableObject {
     private let ctx = PersistenceContext.shared
@@ -36,6 +41,9 @@ public final class MapPointStore: ObservableObject {
         activePointID = nil
         load()
         objectWillChange.send()
+        
+        // Notify that map points have reloaded - trigger session index rebuild
+        NotificationCenter.default.post(name: .mapPointsDidReload, object: nil)
     }
     
     func flush() {

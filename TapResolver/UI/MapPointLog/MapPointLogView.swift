@@ -57,19 +57,7 @@ struct MapPointLogView: View {
                 .background(Color.white.opacity(0.3))
             
             // Content area
-            if mapPointLogManager.isLoading {
-                // Loading state
-                VStack(spacing: 16) {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                        .tint(.white)
-                    Text("Loading scan data...")
-                        .foregroundColor(.white.opacity(0.7))
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.opacity(0.85))
-                
-            } else if mapPointStore.points.isEmpty {
+            if mapPointStore.points.isEmpty {
                 // Empty state
                 VStack(spacing: 12) {
                     Image(systemName: "doc.text.magnifyingglass")
@@ -94,7 +82,7 @@ struct MapPointLogView: View {
                         ForEach(mapPointStore.points) { point in
                             MapPointDotView(
                                 point: point,
-                                sessionCount: mapPointLogManager.mapPoints.first(where: { $0.id == point.id.uuidString })?.sessions.count ?? 0,
+                                sessionCount: mapPointLogManager.sessionCount(for: point.id.uuidString),
                                 onTap: {
                                     selectedPointID = point.id.uuidString
                                 }
@@ -107,7 +95,7 @@ struct MapPointLogView: View {
             }
             
             // Bottom toolbar
-            if mapPointLogManager.mapPoints.reduce(0, { $0 + $1.sessions.count }) > 0 {
+            if mapPointLogManager.sessionIndex.values.flatMap({ $0 }).count > 0 {
                 VStack(spacing: 0) {
                     Divider()
                         .background(Color.white.opacity(0.3))
@@ -159,8 +147,9 @@ struct MapPointLogView: View {
                 .environmentObject(mapPointStore)
         }
         .onAppear {
+            print("📊 Map Point Log opened")
             Task {
-                await mapPointLogManager.loadAll(context: PersistenceContext.shared)
+                await mapPointLogManager.buildSessionIndex()
             }
         }
     }

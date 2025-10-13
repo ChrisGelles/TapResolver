@@ -12,6 +12,7 @@ struct MapPointDrawer: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var hud: HUDPanelsState
+    @EnvironmentObject private var mapPointLogManager: MapPointLogManager
 
     private let crosshairScreenOffset = CGPoint(x: 0, y: 0)
     private let collapsedWidth: CGFloat = 56
@@ -33,6 +34,7 @@ struct MapPointDrawer: View {
                             coordinateText: mapPointStore.coordinateString(for: point),
                             isActive: mapPointStore.isActive(point.id),
                             onSelect: {
+                                print("📍 Map Point selected with ID: \(point.id.uuidString)")
                                 mapPointStore.toggleActive(id: point.id)
                             },
                             onDelete: {
@@ -64,7 +66,17 @@ struct MapPointDrawer: View {
                         mapPointStore.deactivateAll()
                         hud.closeAll() 
                     } else { 
-                        hud.openMapPoint() 
+                        print("🗺️ Map Point Drawer opening")
+                        hud.openMapPoint()
+                        
+                        // Run diagnostics after drawer opens to avoid view update conflicts
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            // First: Check Application Support (current implementation)
+                            mapPointLogManager.printFilesystemDiagnostic()
+                            
+                            // Second: Check Documents directory (where scans are actually saved)
+                            mapPointLogManager.printDocumentsDiagnostic()
+                        }
                     }
                 } label: {
                     Image(systemName: "chevron.right")
@@ -80,6 +92,27 @@ struct MapPointDrawer: View {
             .padding(.horizontal, 8)
             .frame(height: topBarHeight)
             .frame(maxWidth: .infinity, alignment: .trailing)
+            
+            // ⚠️ TEMPORARY DEBUG BUTTON - COMMENTED OUT
+            // Uncomment to show delete button for debugging
+            /*
+            if hud.isMapPointOpen {
+                Button(action: {
+                    print("⚠️ USER TRIGGERED: Delete all scan files")
+                    mapPointLogManager.deleteAllScanFiles()
+                }) {
+                    Text("🗑️ DELETE ALL SCANS")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.red)
+                        .cornerRadius(6)
+                }
+                .padding(.horizontal, 8)
+                .padding(.top, topBarHeight + 4)
+            }
+            */
         }
         .frame(
             width: hud.isMapPointOpen ? expandedWidth : collapsedWidth,

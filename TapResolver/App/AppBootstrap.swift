@@ -47,19 +47,10 @@ struct AppBootstrap: ViewModifier {
                 // Wire MapPointLogManager dependency
                 mapPointLogManager.setMapPointStore(mapPointStore)
                 
-                // Load map point log data on app launch
+                // Build session index on first launch
                 Task {
-                    await mapPointLogManager.loadAll(context: PersistenceContext.shared)
+                    await mapPointLogManager.buildSessionIndex()
                 }
-                
-                // Reload map point log data when location changes
-                NotificationCenter.default.publisher(for: .locationDidChange)
-                    .sink { _ in
-                        Task {
-                            await mapPointLogManager.loadAll(context: PersistenceContext.shared)
-                        }
-                    }
-                    .store(in: &Self.cancellables)
                 
                 // ARCHITECTURAL INTEGRATION: Start beacon state monitoring
                 // This consolidates beacon state updates into a single source of truth
