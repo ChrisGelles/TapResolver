@@ -21,10 +21,18 @@ public final class MapPointStore: ObservableObject {
     private var scanSessionCancellable: AnyCancellable?
     
     public struct MapPoint: Identifiable {
-        public let id = UUID()
+        public let id: UUID
         public var mapPoint: CGPoint    // map-local (untransformed) coords
-        public let createdDate: Date = Date()
+        public let createdDate: Date
         public var sessionFilePaths: [String] = []  // Array of file URLs for this point's scan sessions
+        
+        // Initializer that accepts existing ID or generates new one
+        init(id: UUID? = nil, mapPoint: CGPoint, createdDate: Date? = nil, sessionFilePaths: [String] = []) {
+            self.id = id ?? UUID()
+            self.mapPoint = mapPoint
+            self.createdDate = createdDate ?? Date()
+            self.sessionFilePaths = sessionFilePaths
+        }
     }
 
     @Published public private(set) var points: [MapPoint] = []
@@ -95,10 +103,10 @@ public final class MapPointStore: ObservableObject {
         points.append(newPoint)
         // Set the new point as active (deactivating any previous active point)
         activePointID = newPoint.id
-        print("Map Point Created:")
-                print("ID: \(newPoint.id.uuidString)")
+        print("✨ Map Point Created:")
+        print("   ID: \(newPoint.id.uuidString)")
+        print("   Position: (\(Int(mapPoint.x)), \(Int(mapPoint.y)))")
         save()
-        print("Added map point @ map (\(Int(mapPoint.x)), \(Int(mapPoint.y)))")
         return true
     }
 
@@ -185,14 +193,29 @@ public final class MapPointStore: ObservableObject {
         if let activeID = activePointID {
             ctx.write(activePointKey, value: activeID)
         }
+        
+        // DEBUG: Verify saved IDs
+        print("💾 Saved Map Points to persistence:")
+        for point in points {
+            print("   ID: \(point.id.uuidString) at (\(Int(point.mapPoint.x)), \(Int(point.mapPoint.y)))")
+        }
     }
 
     private func load() {
         if let dto: [MapPointDTO] = ctx.read(pointsKey, as: [MapPointDTO].self) {
             self.points = dto.map { dtoItem in
-                var point = MapPoint(mapPoint: CGPoint(x: dtoItem.x, y: dtoItem.y))
-                point.sessionFilePaths = dtoItem.sessionFilePaths
-                return point
+                MapPoint(
+                    id: dtoItem.id,
+                    mapPoint: CGPoint(x: dtoItem.x, y: dtoItem.y),
+                    createdDate: dtoItem.createdDate,
+                    sessionFilePaths: dtoItem.sessionFilePaths
+                )
+            }
+            
+            // DEBUG: Verify loaded IDs
+            print("📂 Loaded Map Points from persistence:")
+            for point in points {
+                print("   ID: \(point.id.uuidString) at (\(Int(point.mapPoint.x)), \(Int(point.mapPoint.y)))")
             }
         }
         if let activeID: UUID = ctx.read(activePointKey, as: UUID.self) {

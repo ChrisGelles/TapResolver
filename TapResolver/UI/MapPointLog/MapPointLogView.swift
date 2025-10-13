@@ -147,7 +147,7 @@ struct MapPointLogView: View {
                 .environmentObject(mapPointStore)
         }
         .onAppear {
-            print("📊 Map Point Log opened")
+            //print("📊 Map Point Log opened")
             Task {
                 await mapPointLogManager.buildSessionIndex()
             }
