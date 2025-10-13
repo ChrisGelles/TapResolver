@@ -595,8 +595,23 @@ public final class MapPointScanUtility: ObservableObject {
                 beacons: beaconStatsTuples
             )
             
-            let _ = try PersistenceService.writeScan(scanDTO, at: end)
+            let fileURL = try PersistenceService.writeScan(scanDTO, at: end)
             print("💾 Saved scan record V1 to Application Support with distances: \(beaconGeo.count) beacons")
+            print("   File: \(fileURL.path)")
+            
+            // Record this session file path on the map point
+            if let pointUUID = UUID(uuidString: record.point.pointID) {
+                // Post notification with the file path so MapPointStore can record it
+                NotificationCenter.default.post(
+                    name: .scanSessionSaved,
+                    object: nil,
+                    userInfo: [
+                        "pointID": pointUUID,
+                        "filePath": fileURL.path,
+                        "sessionID": record.point.sessionID
+                    ]
+                )
+            }
         } catch {
             print("❌ Failed to save scan record V1: \(error)")
         }

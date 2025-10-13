@@ -69,58 +69,81 @@ final class MapPointLogManager: ObservableObject {
         return sessionIndex[pointID] ?? []
     }
     
-    /// Build session index by scanning filesystem
+    /// Build session index from MapPoint's session file arrays
     /// Maps each Map Point ID to its session IDs
     func buildSessionIndex() async {
-        print("🔍 Building session index from filesystem...")
+        print("🔍 Building session index from MapPoint data...")
         
-        do {
-            // Get all scan file URLs
-            let urls = try PersistenceService.listScans(locationID: ctx.locationID)
-            print("📁 Found \(urls.count) scan files")
-            
-            // Build index: [pointID: [sessionID]]
-            var index: [String: [String]] = [:]
-            
-            for fileURL in urls {
-                // Read just pointID and sessionID from each file
-                guard let data = try? Data(contentsOf: fileURL),
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let pointID = json["pointID"] as? String,
-                      let sessionID = json["sessionID"] as? String else {
-                    continue
-                }
-                
-                // Add to index
-                index[pointID, default: []].append(sessionID)
-            }
-            
-            // Store the index
-            sessionIndex = index
-            
-            let totalSessions = index.values.flatMap { $0 }.count
-            print("✅ Built session index: \(index.count) points, \(totalSessions) sessions")
-            
-            // Show sample
-            for (pointID, sessionIDs) in index.prefix(3) {
-                print("   \(pointID): \(sessionIDs.count) sessions")
-            }
-            
-        } catch {
-            print("❌ Failed to build session index: \(error)")
+        guard let store = mapPointStore else {
+            print("⚠️ MapPointStore not available")
             sessionIndex = [:]
+            return
+        }
+        
+        var index: [String: [String]] = [:]
+        
+        for point in store.points {
+            let pointID = point.id.uuidString
+            let filePaths = point.sessionFilePaths
+            
+            // Extract session IDs from file paths
+            var sessionIDs: [String] = []
+            
+            for filePath in filePaths {
+                let fileURL = URL(fileURLWithPath: filePath)
+                
+                // Read the sessionID from the file
+                if let data = try? Data(contentsOf: fileURL),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let sessionID = json["sessionID"] as? String {
+                    sessionIDs.append(sessionID)
+                }
+            }
+            
+            if !sessionIDs.isEmpty {
+                index[pointID] = sessionIDs
+            }
+        }
+        
+        sessionIndex = index
+        
+        let totalSessions = index.values.flatMap { $0 }.count
+        print("✅ Built session index: \(index.count) points, \(totalSessions) sessions")
+        
+        for (pointID, sessionIDs) in index.prefix(3) {
+            print("   \(pointID): \(sessionIDs.count) sessions")
         }
     }
     
     /// Delete a specific scan session
     func deleteSession(pointID: String, sessionID: String) async throws {
-        // Find and delete the file
-        let urls = try PersistenceService.listScans(locationID: ctx.locationID)
+        guard let store = mapPointStore,
+              let pointUUID = UUID(uuidString: pointID),
+              let pointIndex = store.points.firstIndex(where: { $0.id == pointUUID }) else {
+            return
+        }
         
-        for url in urls {
-            if url.lastPathComponent.contains(sessionID) {
-                try FileManager.default.removeItem(at: url)
+        var point = store.points[pointIndex]
+        
+        // Find and delete the file
+        for (index, filePath) in point.sessionFilePaths.enumerated() {
+            let fileURL = URL(fileURLWithPath: filePath)
+            
+            if let data = try? Data(contentsOf: fileURL),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let fileSessionID = json["sessionID"] as? String,
+               fileSessionID == sessionID {
+                
+                // Delete the file
+                try FileManager.default.removeItem(at: fileURL)
                 print("🗑️ Deleted session: \(sessionID)")
+                
+                // Remove from map point's array
+                point.sessionFilePaths.remove(at: index)
+                store.points[pointIndex] = point
+                
+                // Trigger save through objectWillChange
+                store.objectWillChange.send()
                 
                 // Rebuild index
                 await buildSessionIndex()
@@ -131,20 +154,23 @@ final class MapPointLogManager: ObservableObject {
     
     /// Load full scan data for a specific session
     func loadSessionData(sessionID: String) async -> [String: Any]? {
-        do {
-            let urls = try PersistenceService.listScans(locationID: ctx.locationID)
-            
-            guard let url = urls.first(where: { $0.lastPathComponent.contains(sessionID) }),
-                  let data = try? Data(contentsOf: url),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return nil
+        guard let store = mapPointStore else { return nil }
+        
+        // Find the file path in any map point's session arrays
+        for point in store.points {
+            for filePath in point.sessionFilePaths {
+                let fileURL = URL(fileURLWithPath: filePath)
+                
+                if let data = try? Data(contentsOf: fileURL),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let fileSessionID = json["sessionID"] as? String,
+                   fileSessionID == sessionID {
+                    return json
+                }
             }
-            
-            return json
-        } catch {
-            print("❌ Failed to load session data: \(error)")
-            return nil
         }
+        
+        return nil
     }
     
     /// Generate master export JSON
