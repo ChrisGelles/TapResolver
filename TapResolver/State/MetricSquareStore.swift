@@ -113,7 +113,9 @@ final class MetricSquareStore: ObservableObject {
     }
 
     private func load() {
-        guard let dto: [SquareDTO] = ctx.read(squaresKey, as: [SquareDTO].self) else { return }
+        guard let dto: [SquareDTO] = ctx.read(squaresKey, as: [SquareDTO].self) else {
+            return
+        }
         self.squares = dto.map { d in
             let color = Color(hue: d.color.h, saturation: d.color.s, brightness: d.color.b, opacity: d.color.a)
             return Square(color: color,

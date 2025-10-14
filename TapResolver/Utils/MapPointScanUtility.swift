@@ -599,26 +599,57 @@ public final class MapPointScanUtility: ObservableObject {
                 beacons: beaconStatsTuples
             )
             
-            let fileURL = try PersistenceService.writeScan(scanDTO, at: end)
+            print("\n✅ Data Reporting Session \(record.point.sessionID) Complete.")
+            print("   \(record.beacons.count) beacons recorded")
             
-            print("\nData Reporting Session \(record.point.sessionID) Complete.")
-                        print("Saving data to \(fileURL.deletingLastPathComponent().path)/\(fileURL.lastPathComponent)")
-            
-            print("💾 Saved scan record V1 to Application Support with distances: \(beaconGeo.count) beacons")
-            print("   File: \(fileURL.path)")
-            
-            // Record this session file path on the map point
+            // Record this session data on the map point
             if let pointUUID = UUID(uuidString: record.point.pointID) {
-                // Post notification with the file path so MapPointStore can record it
+                // Build ScanSession object from the scan record
+                let sessionData = MapPointStore.ScanSession(
+                    scanID: record.scanID,
+                    sessionID: record.point.sessionID,
+                    pointID: record.point.pointID,
+                    locationID: locationID,
+                    timingStartISO: record.timingStartISO,
+                    timingEndISO: record.timingEndISO,
+                    duration_s: record.duration_s,
+                    deviceHeight_m: record.point.userHeight_m,
+                    facing_deg: record.userFacing_deg,
+                    beacons: record.beacons.map { agg in
+                        MapPointStore.ScanSession.BeaconData(
+                            beaconID: agg.beacon.beaconID,
+                            stats: MapPointStore.ScanSession.BeaconData.Stats(
+                                median_dbm: agg.medianDbm ?? -999,
+                                mad_db: Int(agg.madDb ?? 0),
+                                p10_dbm: agg.p10Dbm ?? -999,
+                                p90_dbm: agg.p90Dbm ?? -999,
+                                samples: agg.samples
+                            ),
+                            hist: MapPointStore.ScanSession.BeaconData.Histogram(
+                                binMin_dbm: agg.obin.binMinDbm,
+                                binMax_dbm: agg.obin.binMaxDbm,
+                                binSize_db: agg.obin.binSizeDb,
+                                counts: agg.obin.counts
+                            ),
+                            meta: MapPointStore.ScanSession.BeaconData.Metadata(
+                                name: agg.beacon.name ?? agg.beacon.beaconID,
+                                model: "BC04P"
+                            )
+                        )
+                    }
+                )
+                
+                // Post notification with full session data
                 NotificationCenter.default.post(
                     name: .scanSessionSaved,
                     object: nil,
                     userInfo: [
                         "pointID": pointUUID,
-                        "filePath": fileURL.path,
-                        "sessionID": record.point.sessionID
+                        "sessionData": sessionData
                     ]
                 )
+                
+                print("✅ Scan session saved to UserDefaults via MapPointStore")
             }
         } catch {
             print("❌ Failed to save scan record V1: \(error)")

@@ -82,20 +82,23 @@ struct MapPointLogView: View {
                         ForEach(mapPointStore.points) { point in
                             MapPointDotView(
                                 point: point,
-                                sessionCount: mapPointLogManager.sessionCount(for: point.id.uuidString),
+                                sessionCount: point.sessions.count,
                                 onTap: {
+                                    print("👆 Tapped: \(String(point.id.uuidString.prefix(8)))... (\(point.sessions.count) sessions)")
                                     selectedPointID = point.id.uuidString
                                 }
                             )
                         }
                     }
+                    
                     .padding(20)
                 }
                 .background(Color.black.opacity(0.85))
             }
             
             // Bottom toolbar
-            if mapPointLogManager.sessionIndex.values.flatMap({ $0 }).count > 0 {
+            let totalSessions = mapPointStore.points.reduce(0) { $0 + $1.sessions.count }
+            if totalSessions > 0 {
                 VStack(spacing: 0) {
                     Divider()
                         .background(Color.white.opacity(0.3))
@@ -145,12 +148,6 @@ struct MapPointLogView: View {
             MapPointSessionListView(pointID: pointID)
                 .environmentObject(mapPointLogManager)
                 .environmentObject(mapPointStore)
-        }
-        .onAppear {
-            //print("📊 Map Point Log opened")
-            Task {
-                await mapPointLogManager.buildSessionIndex()
-            }
         }
     }
     

@@ -45,12 +45,8 @@ struct AppBootstrap: ViewModifier {
                 configureScanUtilityClosures()
                 
                 // Wire MapPointLogManager dependency
+                // Note: setMapPointStore() now calls refreshSessionIndex() automatically
                 mapPointLogManager.setMapPointStore(mapPointStore)
-                
-                // Build session index on first launch
-                Task {
-                    await mapPointLogManager.buildSessionIndex()
-                }
                 
                 // ARCHITECTURAL INTEGRATION: Start beacon state monitoring
                 // This consolidates beacon state updates into a single source of truth

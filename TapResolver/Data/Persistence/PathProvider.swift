@@ -2,16 +2,19 @@ import Foundation
 
 enum PathProvider {
     static func baseDir() throws -> URL {
-        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("TapResolver", isDirectory: true)
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
+        guard let u = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            throw NSError(domain: "PathProvider", code: 1)
+        }
+        // Use Documents/locations/ structure (consistent with PersistenceContext)
+        let locationsDir = u.appendingPathComponent("locations")
+        try FileManager.default.createDirectory(at: locationsDir, withIntermediateDirectories: true)
+        return locationsDir
     }
     static func locationDir(_ id: String) throws -> URL {
-        let u = try baseDir().appendingPathComponent("Locations", isDirectory: true)
-            .appendingPathComponent(id, isDirectory: true)
-        try FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
-        return u
+        // baseDir is now Documents/locations/, so just append the locationID
+        let dir = try baseDir().appendingPathComponent(id, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
     }
     static func locationConfigURL(_ id: String) throws -> URL {
         try locationDir(id).appendingPathComponent("location.json", conformingTo: .json)
@@ -27,6 +30,13 @@ enum PathProvider {
         let comps = Calendar.current.dateComponents(in: .current, from: date)
         let y = comps.year!, mo = comps.month!
         let dir = try scansMonthDir(id, year: y, month: mo)
-        return dir.appendingPathComponent("\(scanID).json", conformingTo: .json)
+        let url = dir.appendingPathComponent("\(scanID).json", conformingTo: .json)
+        
+        // DEBUG: Log where we're saving
+        print("💾 PathProvider.scanURL() generated path:")
+        print("   Full path: \(url.path)")
+        print("   In Documents: \(url.path.contains("/Documents/"))")
+        
+        return url
     }
 }

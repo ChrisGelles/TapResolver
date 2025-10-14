@@ -81,8 +81,6 @@ final class BeaconStateManager: ObservableObject {
         ) { [weak self] _ in
             self?.updateLiveBeacons()
         }
-        
-        print("✅ BeaconStateManager started monitoring (update interval: \(updateInterval)s, staleness window: \(stalenessWindow)s)")
     }
     
     deinit {

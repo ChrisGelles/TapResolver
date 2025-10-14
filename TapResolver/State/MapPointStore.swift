@@ -20,18 +20,67 @@ public final class MapPointStore: ObservableObject {
     private let ctx = PersistenceContext.shared
     private var scanSessionCancellable: AnyCancellable?
     
+    // DIAGNOSTIC: Track which instance this is
+    private let instanceID = UUID().uuidString
+    
     public struct MapPoint: Identifiable {
         public let id: UUID
         public var mapPoint: CGPoint    // map-local (untransformed) coords
         public let createdDate: Date
-        public var sessionFilePaths: [String] = []  // Array of file URLs for this point's scan sessions
+        public var sessions: [ScanSession] = []  // Full scan session data stored in UserDefaults
         
         // Initializer that accepts existing ID or generates new one
-        init(id: UUID? = nil, mapPoint: CGPoint, createdDate: Date? = nil, sessionFilePaths: [String] = []) {
+        init(id: UUID? = nil, mapPoint: CGPoint, createdDate: Date? = nil, sessions: [ScanSession] = []) {
             self.id = id ?? UUID()
             self.mapPoint = mapPoint
             self.createdDate = createdDate ?? Date()
-            self.sessionFilePaths = sessionFilePaths
+            self.sessions = sessions
+        }
+    }
+    
+    // Scan session data structure - mirrors the v1 JSON schema
+    public struct ScanSession: Codable, Identifiable {
+        public let scanID: String
+        public let sessionID: String
+        public let pointID: String
+        public let locationID: String
+        
+        public let timingStartISO: String
+        public let timingEndISO: String
+        public let duration_s: Double
+        
+        public let deviceHeight_m: Double
+        public let facing_deg: Double?
+        
+        public let beacons: [BeaconData]
+        
+        public var id: String { sessionID }
+        
+        public struct BeaconData: Codable {
+            public let beaconID: String
+            public let stats: Stats
+            public let hist: Histogram
+            public let meta: Metadata
+            
+            public struct Stats: Codable {
+                public let median_dbm: Int
+                public let mad_db: Int
+                public let p10_dbm: Int
+                public let p90_dbm: Int
+                public let samples: Int
+            }
+            
+            public struct Histogram: Codable {
+                public let binMin_dbm: Int
+                public let binMax_dbm: Int
+                public let binSize_db: Int
+                public let counts: [Int]
+            }
+            
+            public struct Metadata: Codable {
+                public let name: String
+                public let model: String?
+            }
         }
     }
 
@@ -77,11 +126,12 @@ public final class MapPointStore: ObservableObject {
             .sink { [weak self] notification in
                 guard let userInfo = notification.userInfo,
                       let pointID = userInfo["pointID"] as? UUID,
-                      let filePath = userInfo["filePath"] as? String else {
+                      let sessionData = userInfo["sessionData"] as? ScanSession else {
+                    print("⚠️ scanSessionSaved notification missing required data")
                     return
                 }
                 
-                self?.addSessionFilePath(pointID: pointID, filePath: filePath)
+                self?.addSession(pointID: pointID, session: sessionData)
             }
     }
 
@@ -178,7 +228,7 @@ public final class MapPointStore: ObservableObject {
         let x: CGFloat
         let y: CGFloat
         let createdDate: Date
-        let sessionFilePaths: [String]
+        let sessions: [ScanSession]
     }
 
     private func save() {
@@ -187,17 +237,18 @@ public final class MapPointStore: ObservableObject {
             x: $0.mapPoint.x, 
             y: $0.mapPoint.y, 
             createdDate: $0.createdDate,
-            sessionFilePaths: $0.sessionFilePaths
+            sessions: $0.sessions
         )}
         ctx.write(pointsKey, value: dto)
         if let activeID = activePointID {
             ctx.write(activePointKey, value: activeID)
         }
         
-        // DEBUG: Verify saved IDs
-        print("💾 Saved Map Points to persistence:")
+        print("💾 Saved Map Points to UserDefaults:")
+        print("   Location: \(ctx.locationID)")
+        print("   Points: \(points.count)")
         for point in points {
-            print("   ID: \(point.id.uuidString) at (\(Int(point.mapPoint.x)), \(Int(point.mapPoint.y)))")
+            print("   • \(String(point.id.uuidString.prefix(8)))... @ (\(Int(point.mapPoint.x)),\(Int(point.mapPoint.y))) - \(point.sessions.count) sessions")
         }
     }
 
@@ -208,16 +259,17 @@ public final class MapPointStore: ObservableObject {
                     id: dtoItem.id,
                     mapPoint: CGPoint(x: dtoItem.x, y: dtoItem.y),
                     createdDate: dtoItem.createdDate,
-                    sessionFilePaths: dtoItem.sessionFilePaths
+                    sessions: dtoItem.sessions
                 )
             }
-            
-            // DEBUG: Verify loaded IDs
-            print("📂 Loaded Map Points from persistence:")
-            for point in points {
-                print("   ID: \(point.id.uuidString) at (\(Int(point.mapPoint.x)), \(Int(point.mapPoint.y)))")
+            // Only log if there are points loaded
+            if !points.isEmpty {
+                print("📂 Loaded \(points.count) Map Point(s) with \(points.reduce(0) { $0 + $1.sessions.count }) sessions")
             }
+        } else {
+            self.points = []
         }
+        
         if let activeID: UUID = ctx.read(activePointKey, as: UUID.self) {
             self.activePointID = points.contains(where: { $0.id == activeID }) ? activeID : nil
         }
@@ -225,46 +277,34 @@ public final class MapPointStore: ObservableObject {
     
     // MARK: - Session Management
     
-    /// Add a session file path to a map point
-    public func addSessionFilePath(pointID: UUID, filePath: String) {
+    /// Add a complete scan session to a map point
+    public func addSession(pointID: UUID, session: ScanSession) {
         if let idx = points.firstIndex(where: { $0.id == pointID }) {
-            if !points[idx].sessionFilePaths.contains(filePath) {
-                points[idx].sessionFilePaths.append(filePath)
-                save()
-                print("📎 Added session file to point \(pointID): \(URL(fileURLWithPath: filePath).lastPathComponent)")
-            }
+            points[idx].sessions.append(session)
+            save()
+            print("✅ Added session \(String(session.sessionID.prefix(8)))... to point \(String(pointID.uuidString.prefix(8)))...")
+        } else {
+            print("⚠️ Cannot add session: Map point \(pointID) not found")
         }
     }
     
-    /// Get all session file paths for a map point
-    public func getSessionFilePaths(pointID: UUID) -> [String] {
-        return points.first(where: { $0.id == pointID })?.sessionFilePaths ?? []
+    /// Get all sessions for a map point
+    public func getSessions(pointID: UUID) -> [ScanSession] {
+        return points.first(where: { $0.id == pointID })?.sessions ?? []
     }
-    /// Remove a session file path by sessionID
-    public func removeSessionByID(pointID: UUID, sessionID: String) {
+    
+    /// Remove a session by sessionID
+    public func removeSession(pointID: UUID, sessionID: String) {
         if let idx = points.firstIndex(where: { $0.id == pointID }) {
-            // Find and remove the file path that contains this sessionID
-            var removedPath: String?
-            
-            for (fileIdx, filePath) in points[idx].sessionFilePaths.enumerated().reversed() {
-                let fileURL = URL(fileURLWithPath: filePath)
-                
-                if let data = try? Data(contentsOf: fileURL),
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let fileSessionID = json["sessionID"] as? String,
-                   fileSessionID == sessionID {
-                    
-                    removedPath = filePath
-                    points[idx].sessionFilePaths.remove(at: fileIdx)
-                    break
-                }
-            }
-            
-            if removedPath != nil {
-                save()
-                print("🗑️ Removed session \(sessionID) from point \(pointID)")
-            }
+            points[idx].sessions.removeAll { $0.sessionID == sessionID }
+            save()
+            print("🗑️ Removed session \(sessionID) from point \(pointID)")
         }
+    }
+    
+    /// Get total session count across all points
+    public func totalSessionCount() -> Int {
+        return points.reduce(0) { $0 + $1.sessions.count }
     }
     
 }

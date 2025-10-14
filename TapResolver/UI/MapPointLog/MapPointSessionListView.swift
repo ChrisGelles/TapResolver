@@ -153,43 +153,31 @@ struct MapPointSessionListView: View {
     // MARK: - Actions
     
     private func loadSessions() async {
-        print("🔍 Loading sessions for point: \(pointID)")
-        
-        let sessionIDs = mapPointLogManager.sessions(for: pointID)
-        print("   Found \(sessionIDs.count) session IDs")
+        // Get sessions directly from MapPointStore
+        guard let point = mapPointStore.points.first(where: { $0.id.uuidString == pointID }) else {
+            sessions = []
+            isLoading = false
+            return
+        }
         
         var loadedSessions: [SessionInfo] = []
         
-        for sessionID in sessionIDs {
-            if let json = await mapPointLogManager.loadSessionData(sessionID: sessionID) {
-                // Extract metadata
-                var timestamp = Date()
-                if let timing = json["timing"] as? [String: Any],
-                   let startISO = timing["startISO"] as? String,
-                   let date = ISO8601DateFormatter().date(from: startISO) {
-                    timestamp = date
-                }
-                
-                let duration = (json["timing"] as? [String: Any])?["duration_s"] as? Double ?? 0
-                let beaconCount = (json["beacons"] as? [[String: Any]])?.count ?? 0
-                let facing = (json["user"] as? [String: Any])?["facing_deg"] as? Double
-                
-                let info = SessionInfo(
-                    id: sessionID,
-                    timestamp: timestamp,
-                    duration: duration,
-                    beaconCount: beaconCount,
-                    facing: facing
-                )
-                
-                loadedSessions.append(info)
-            }
+        for session in point.sessions {
+            let timestamp = ISO8601DateFormatter().date(from: session.timingStartISO) ?? Date()
+            
+            let info = SessionInfo(
+                id: session.sessionID,
+                timestamp: timestamp,
+                duration: session.duration_s,
+                beaconCount: session.beacons.count,
+                facing: session.facing_deg
+            )
+            
+            loadedSessions.append(info)
         }
         
         sessions = loadedSessions.sorted { $0.timestamp > $1.timestamp }
         isLoading = false
-        
-        print("   ✅ Loaded \(sessions.count) sessions")
     }
     
     private func toggleLock(for sessionID: String) {
@@ -202,16 +190,15 @@ struct MapPointSessionListView: View {
     }
     
     private func deleteSession(_ sessionID: String) {
+        guard let pointUUID = UUID(uuidString: pointID) else { return }
+        
+        mapPointStore.removeSession(pointID: pointUUID, sessionID: sessionID)
+        
         Task {
-            do {
-                try await mapPointLogManager.deleteSession(pointID: pointID, sessionID: sessionID)
-                await loadSessions()
-                
-                if sessions.isEmpty {
-                    dismiss()
-                }
-            } catch {
-                print("❌ Failed to delete session: \(error)")
+            await loadSessions()
+            
+            if sessions.isEmpty {
+                dismiss()
             }
         }
     }

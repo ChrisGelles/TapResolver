@@ -30,5 +30,10 @@ final class PersistenceContext {
     }
     var locationDir: URL { docs.appendingPathComponent("locations/\(locationID)", isDirectory: true) }
     var assetsDir: URL   { locationDir.appendingPathComponent("assets", isDirectory: true) }
-    var scansDir: URL    { locationDir.appendingPathComponent("scan_summaries", isDirectory: true) }
+    var scansDir: URL {
+        // Scans directory: Documents/locations/{id}/Scans/
+        // Individual scans organized into year-month subdirectories via PathProvider.scanURL()
+        // e.g., Documents/locations/museum/Scans/2025-10/scan_xxx.json
+        return locationDir.appendingPathComponent("Scans", isDirectory: true)
+    }
 }

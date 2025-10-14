@@ -66,18 +66,8 @@ struct MapPointDrawer: View {
                         mapPointStore.deactivateAll()
                         hud.closeAll() 
                     } else { 
-                        print("🗺️ Map Point Drawer opening")
                         hud.openMapPoint()
-                        
-                        // Run diagnostics after drawer opens to avoid view update conflicts
-                        
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                            // First: Check Application Support (current implementation)
-                            mapPointLogManager.printFilesystemDiagnostic()
-                            
-                            // Second: Check Documents directory (where scans are actually saved)
-                            mapPointLogManager.printDocumentsDiagnostic()
-                        }
+                        printMapPointDiagnostic()
                     }
                 } label: {
                     Image(systemName: "chevron.right")
@@ -129,6 +119,48 @@ struct MapPointDrawer: View {
         let rowsHeight = rows * 44 + (rows - 1) * 6 + 6 + 8
         let total = max(topBarHeight, min(drawerMaxHeight, topBarHeight + rowsHeight))
         return total
+    }
+    
+    // MARK: - Diagnostic
+    
+    private func printMapPointDiagnostic() {
+        print("\n" + String(repeating: "=", count: 80))
+        print("📍 MAP POINT DRAWER - PLIST DATA STRUCTURE")
+        print(String(repeating: "=", count: 80))
+        
+        print("\nLocation: \(PersistenceContext.shared.locationID)")
+        print("Total Map Points in Store: \(mapPointStore.points.count)")
+        
+        if mapPointStore.points.isEmpty {
+            print("\n⚠️ NO MAP POINTS FOUND")
+        } else {
+            for (index, point) in mapPointStore.points.enumerated() {
+                print("\n[\(index + 1)] Map Point:")
+                print("   ID: \(point.id.uuidString)")
+                print("   Position: (\(Int(point.mapPoint.x)), \(Int(point.mapPoint.y)))")
+                print("   Created: \(point.createdDate)")
+                print("   Sessions: \(point.sessions.count)")
+                
+                if point.sessions.isEmpty {
+                    print("      (No sessions)")
+                } else {
+                    for (sessionIndex, session) in point.sessions.enumerated() {
+                        print("      [\(sessionIndex + 1)] Session:")
+                        print("         Session ID: \(session.sessionID)")
+                        print("         Scan ID: \(session.scanID)")
+                        print("         Duration: \(String(format: "%.1f", session.duration_s))s")
+                        print("         Beacons: \(session.beacons.count)")
+                        print("         Timing: \(session.timingStartISO)")
+                    }
+                }
+            }
+        }
+        
+        print("\n" + String(repeating: "=", count: 80))
+        print("📊 SUMMARY:")
+        print("   Total Points: \(mapPointStore.points.count)")
+        print("   Total Sessions: \(mapPointStore.points.reduce(0) { $0 + $1.sessions.count })")
+        print(String(repeating: "=", count: 80) + "\n")
     }
 }
 
