@@ -12,7 +12,6 @@ struct MapNavigationView: View {
     @EnvironmentObject private var btScanner: BluetoothScanner
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var mapPointStore: MapPointStore
-    @EnvironmentObject private var mapPointLogManager: MapPointLogManager
     @EnvironmentObject private var scanUtility: MapPointScanUtility
     @EnvironmentObject private var transformProcessor: TransformProcessor
     @EnvironmentObject private var orientationManager: CompassOrientationManager
@@ -51,8 +50,7 @@ struct MapNavigationView: View {
                 orientationManager: orientationManager,
                 squareMetrics: squareMetrics,
                 beaconState: beaconState,  // Pass BeaconStateManager for initialization
-                mapPointStore: mapPointStore,
-                mapPointLogManager: mapPointLogManager
+                mapPointStore: mapPointStore
             )
             .onChange(of: locationManager.currentLocationID) { newID in
                 switchToLocation(newID)

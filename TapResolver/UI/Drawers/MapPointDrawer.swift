@@ -12,7 +12,6 @@ struct MapPointDrawer: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var hud: HUDPanelsState
-    @EnvironmentObject private var mapPointLogManager: MapPointLogManager
 
     private let crosshairScreenOffset = CGPoint(x: 0, y: 0)
     private let collapsedWidth: CGFloat = 56

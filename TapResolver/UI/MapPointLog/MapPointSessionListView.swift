@@ -10,7 +10,6 @@
 import SwiftUI
 
 struct MapPointSessionListView: View {
-    @EnvironmentObject private var mapPointLogManager: MapPointLogManager
     @EnvironmentObject private var mapPointStore: MapPointStore
     
     let pointID: String

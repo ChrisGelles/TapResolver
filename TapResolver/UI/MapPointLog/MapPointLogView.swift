@@ -15,7 +15,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct MapPointLogView: View {
-    @EnvironmentObject private var mapPointLogManager: MapPointLogManager
     @EnvironmentObject private var hudPanels: HUDPanelsState
     @EnvironmentObject private var mapPointStore: MapPointStore
     
@@ -74,7 +73,6 @@ struct MapPointLogView: View {
         }
         .onAppear {
             print("🖼️ MapPointLogView using MapPointStore ID: \(String(mapPointStore.instanceID.prefix(8)))...")
-            mapPointLogManager.refreshSessionIndex()
             
             // Animate drawer opening with bounce
             withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
@@ -235,7 +233,7 @@ struct MapPointLogView: View {
                             MapPointDotView(
                                 point: point,
                                 sessionCount: point.sessions.count,
-                                quality: mapPointLogManager.scanQuality(for: point.id.uuidString),
+                                quality: mapPointStore.scanQuality(for: point.id),
                                 onTap: {
                                     withAnimation(.easeInOut(duration: 0.35)) {
                                         selectedPointID = point.id.uuidString
@@ -268,7 +266,6 @@ struct MapPointLogView: View {
         .frame(height: panelHeight)
         .background(Color.black.opacity(0.9))
         .shadow(color: .black.opacity(0.15), radius: 8, x: 2, y: 0)
-        .environmentObject(mapPointLogManager)
         .environmentObject(mapPointStore)
     }
     
@@ -276,7 +273,7 @@ struct MapPointLogView: View {
     
     private func exportAllSessions() async {
         do {
-            let data = try await mapPointLogManager.exportMasterJSON()
+            let data = try await mapPointStore.exportMasterJSON()
             exportData = data
             showExportPicker = true
         } catch {
@@ -298,7 +295,7 @@ struct MapPointLogView: View {
 private struct MapPointDotView: View {
     let point: MapPointStore.MapPoint
     let sessionCount: Int
-    let quality: MapPointLogManager.ScanQuality
+    let quality: MapPointStore.ScanQuality
     let onTap: () -> Void
     
     // Reduced dot size by 40%: 40pt → 24pt

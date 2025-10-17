@@ -19,7 +19,6 @@ struct AppBootstrap: ViewModifier {
     let squareMetrics: SquareMetrics
     let beaconState: BeaconStateManager  // Added for beacon state consolidation
     let mapPointStore: MapPointStore
-    let mapPointLogManager: MapPointLogManager
 
     private let initialScanWindow: TimeInterval = 2.0
 
@@ -43,11 +42,6 @@ struct AppBootstrap: ViewModifier {
                     lists.ingest(deviceName: name, id: id)
                 }
                 configureScanUtilityClosures()
-                
-                // Wire MapPointLogManager dependency
-                // Note: setMapPointStore() now calls refreshSessionIndex() automatically
-                print("🪝 Wiring LogManager to MapPointStore ID: \(String(mapPointStore.instanceID.prefix(8)))...")
-                mapPointLogManager.setMapPointStore(mapPointStore)
                 
                 // ARCHITECTURAL INTEGRATION: Start beacon state monitoring
                 // This consolidates beacon state updates into a single source of truth
@@ -189,8 +183,7 @@ extension View {
         orientationManager: CompassOrientationManager,
         squareMetrics: SquareMetrics,
         beaconState: BeaconStateManager,  // Pass BeaconStateManager for initialization
-        mapPointStore: MapPointStore,
-        mapPointLogManager: MapPointLogManager
+        mapPointStore: MapPointStore
     ) -> some View {
         self.modifier(AppBootstrap(
             scanner: scanner,
@@ -201,8 +194,7 @@ extension View {
             orientationManager: orientationManager,
             squareMetrics: squareMetrics,
             beaconState: beaconState,
-            mapPointStore: mapPointStore,
-            mapPointLogManager: mapPointLogManager
+            mapPointStore: mapPointStore
         ))
     }
 }
