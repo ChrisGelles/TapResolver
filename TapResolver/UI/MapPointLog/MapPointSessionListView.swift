@@ -12,9 +12,9 @@ import SwiftUI
 struct MapPointSessionListView: View {
     @EnvironmentObject private var mapPointLogManager: MapPointLogManager
     @EnvironmentObject private var mapPointStore: MapPointStore
-    @Environment(\.dismiss) private var dismiss
     
     let pointID: String
+    let onDismiss: () -> Void
     
     @State private var sessions: [SessionInfo] = []
     @State private var lockedSessions: Set<String> = []
@@ -50,24 +50,21 @@ struct MapPointSessionListView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Button(action: { dismiss() }) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Point (\(pointName))px")
+                        .font(.system(size: 18, weight: .bold))
                         .foregroundColor(.white)
+                    Text("Sessions")
+                        .font(.system(size: 14))
+                        .foregroundColor(.white.opacity(0.7))
                 }
-                
-                Text("Point (\(pointName))px")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.white)
                 
                 Spacer()
                 
-                Button(action: { dismiss() }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(width: 32, height: 32)
-                        .background(Circle().fill(Color.white.opacity(0.2)))
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(.white.opacity(0.7))
                 }
             }
             .padding(.horizontal, 20)
@@ -125,10 +122,7 @@ struct MapPointSessionListView: View {
                 .background(Color.black.opacity(0.85))
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: UIScreen.main.bounds.height * 0.5)
-        .cornerRadius(20, corners: [.topLeft, .topRight])
-        .shadow(radius: 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .alert("Delete Session?", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) {
                 sessionToDelete = nil
@@ -198,7 +192,7 @@ struct MapPointSessionListView: View {
             await loadSessions()
             
             if sessions.isEmpty {
-                dismiss()
+                onDismiss()
             }
         }
     }
