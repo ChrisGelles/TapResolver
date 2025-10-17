@@ -59,6 +59,16 @@ struct MapPointDrawer: View {
                     Text("Map Points")
                         .font(.headline)
                         .foregroundColor(.primary)
+                    
+                    // Point count badge
+                    Text("\(mapPointStore.points.count)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(Color.blue)
+                        .cornerRadius(12)
+                    
                     Spacer(minLength: 0)
                 }
                 Button {

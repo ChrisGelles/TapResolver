@@ -20,7 +20,26 @@ final class PersistenceContext {
 
     func read<T: Decodable>(_ base: String, as type: T.Type) -> T? {
         let ud = UserDefaults.standard
-        guard let data = ud.data(forKey: key(base)) else { return nil }
+        let fullKey = key(base)
+        
+        // ADD LOGGING for MapPoints
+        if base.contains("MapPoints") {
+            print("🔍 PersistenceContext.read(\(base))")
+            print("   Full key: \(fullKey)")
+            print("   Current locationID: \(locationID)")
+        }
+        
+        guard let data = ud.data(forKey: fullKey) else {
+            if base.contains("MapPoints") {
+                print("   ❌ No data found for key: \(fullKey)")
+            }
+            return nil
+        }
+        
+        if base.contains("MapPoints") {
+            print("   ✅ Found data: \(data.count) bytes (\(String(format: "%.2f", Double(data.count) / 1024.0)) KB)")
+        }
+        
         return try? JSONDecoder().decode(T.self, from: data)
     }
 

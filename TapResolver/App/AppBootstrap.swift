@@ -46,6 +46,7 @@ struct AppBootstrap: ViewModifier {
                 
                 // Wire MapPointLogManager dependency
                 // Note: setMapPointStore() now calls refreshSessionIndex() automatically
+                print("🪝 Wiring LogManager to MapPointStore ID: \(String(mapPointStore.instanceID.prefix(8)))...")
                 mapPointLogManager.setMapPointStore(mapPointStore)
                 
                 // ARCHITECTURAL INTEGRATION: Start beacon state monitoring

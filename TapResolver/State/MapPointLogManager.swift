@@ -38,13 +38,29 @@ final class MapPointLogManager: ObservableObject {
     // MARK: - Initialization
     
     init() {
-        // MapPointLogManager initialized - will refresh index when needed
+        print("🧠 MapPointLogManager init — ID: \(String(instanceID.prefix(8)))...")
     }
     
     /// Wire up dependency to MapPointStore (call from AppBootstrap)
     func setMapPointStore(_ store: MapPointStore) {
+        print("📎 LogManager \(String(instanceID.prefix(8)))... wired to MapPointStore \(String(store.instanceID.prefix(8)))...")
         self.mapPointStore = store
-        // Refresh index immediately since data is already loaded
+        
+        // Subscribe to MapPointStore updates (point/session changes)
+        store.objectWillChange
+            .sink { [weak self] _ in
+                self?.refreshSessionIndex()
+            }
+            .store(in: &bag)
+        
+        // Subscribe to reload notifications (e.g., location change)
+        NotificationCenter.default.publisher(for: .mapPointsDidReload)
+            .sink { [weak self] _ in
+                self?.refreshSessionIndex()
+            }
+            .store(in: &bag)
+        
+        // Initial sync
         refreshSessionIndex()
     }
     
@@ -67,6 +83,8 @@ final class MapPointLogManager: ObservableObject {
             sessionIndex = [:]
             return
         }
+        
+        print("🪄 [LogManager] Refreshing session index — \(store.points.count) points in store")
         
         var index: [String: [String]] = [:]
         
@@ -106,13 +124,34 @@ final class MapPointLogManager: ObservableObject {
     
     /// Generate master export JSON
     func exportMasterJSON() async throws -> Data {
+        print("\n🔍 EXPORT DEBUG - MapPointLogManager")
+        print("   Manager instance: \(String(instanceID.prefix(8)))...")
+        print("   Store reference exists: \(mapPointStore != nil)")
+        
         guard let store = mapPointStore else {
             throw NSError(domain: "MapPointLogManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "MapPointStore not available"])
         }
         
+        print("   Store points array: \(store.points.count) points")
+        print("   First 3 point IDs:")
+        for (i, point) in store.points.prefix(3).enumerated() {
+            print("     \(i+1). \(String(point.id.uuidString.prefix(8)))... - \(point.sessions.count) sessions")
+        }
+        
+        // ADD LOGGING
+        print("\n" + String(repeating: "=", count: 80))
+        print("📤 EXPORT MASTER JSON - START")
+        print(String(repeating: "=", count: 80))
+        print("Location: \(ctx.locationID)")
+        print("Points in store: \(store.points.count)")
+        print("Total sessions: \(store.points.reduce(0) { $0 + $1.sessions.count })")
+        
         var mapPointsData: [[String: Any]] = []
         
-        for point in store.points {
+        for (index, point) in store.points.enumerated() {
+            // ADD LOGGING
+            let shortID = String(point.id.uuidString.prefix(8))
+            print("  Processing point \(index + 1)/\(store.points.count): \(shortID)... - \(point.sessions.count) sessions")
             // Convert sessions to JSON-compatible dictionaries
             let sessionsData = try point.sessions.map { session -> [String: Any] in
                 let jsonData = try JSONEncoder().encode(session)
@@ -136,6 +175,10 @@ final class MapPointLogManager: ObservableObject {
             ],
             "mapPoints": mapPointsData
         ]
+        
+        // ADD LOGGING
+        print("✅ Export complete: \(mapPointsData.count) points exported")
+        print(String(repeating: "=", count: 80) + "\n")
         
         return try JSONSerialization.data(withJSONObject: masterExport, options: [.prettyPrinted, .sortedKeys])
     }

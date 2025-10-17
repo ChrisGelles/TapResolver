@@ -73,6 +73,7 @@ struct MapPointLogView: View {
             }
         }
         .onAppear {
+            print("🖼️ MapPointLogView using MapPointStore ID: \(String(mapPointStore.instanceID.prefix(8)))...")
             mapPointLogManager.refreshSessionIndex()
             
             // Animate drawer opening with bounce
@@ -97,6 +98,25 @@ struct MapPointLogView: View {
                     .foregroundColor(.white)
                 
                 Spacer()
+                
+                // Storage scan button
+                Button(action: {
+                    StorageDiagnostics.printAllMapPointStorageLocations()
+                    StorageDiagnostics.scanAllUserDefaultsKeys()
+                }) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.orange)
+                }
+                
+                // Diagnostic button
+                Button(action: {
+                    mapPointStore.printUserDefaultsDiagnostic()
+                }) {
+                    Image(systemName: "stethoscope")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.yellow)
+                }
                 
                 // Export button
                 Button(action: {

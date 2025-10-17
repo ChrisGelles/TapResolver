@@ -21,7 +21,7 @@ public final class MapPointStore: ObservableObject {
     private var scanSessionCancellable: AnyCancellable?
     
     // DIAGNOSTIC: Track which instance this is
-    private let instanceID = UUID().uuidString
+    internal let instanceID = UUID().uuidString
     
     public struct MapPoint: Identifiable {
         public let id: UUID
@@ -119,6 +119,7 @@ public final class MapPointStore: ObservableObject {
     private let activePointKey = "MapPointsActive_v1"
 
     public init() {
+        print("🧠 MapPointStore init — ID: \(String(instanceID.prefix(8)))...")
         load()
         
         // Listen for scan session saves
@@ -253,6 +254,10 @@ public final class MapPointStore: ObservableObject {
     }
 
     private func load() {
+        print("\n🔄 MapPointStore.load() CALLED")
+        print("   Instance ID: \(String(instanceID.prefix(8)))...")
+        print("   Current locationID: \(ctx.locationID)")
+        
         if let dto: [MapPointDTO] = ctx.read(pointsKey, as: [MapPointDTO].self) {
             self.points = dto.map { dtoItem in
                 MapPoint(
@@ -273,6 +278,9 @@ public final class MapPointStore: ObservableObject {
         if let activeID: UUID = ctx.read(activePointKey, as: UUID.self) {
             self.activePointID = points.contains(where: { $0.id == activeID }) ? activeID : nil
         }
+        
+        print("   ✅ Load complete: \(points.count) points")
+        print("   Total sessions: \(points.reduce(0) { $0 + $1.sessions.count })")
     }
     
     // MARK: - Session Management
@@ -305,6 +313,121 @@ public final class MapPointStore: ObservableObject {
     /// Get total session count across all points
     public func totalSessionCount() -> Int {
         return points.reduce(0) { $0 + $1.sessions.count }
+    }
+    
+    // MARK: - Diagnostics
+
+    /// Diagnostic function to check what's actually stored in UserDefaults
+    public func printUserDefaultsDiagnostic() {
+        print("\n" + String(repeating: "=", count: 80))
+        print("📊 MAP POINT STORE - USERDEFAULTS DIAGNOSTIC")
+        print(String(repeating: "=", count: 80))
+        
+        let locID = ctx.locationID
+        print("Current locationID: \(locID)")
+        print("Points key: \(pointsKey)")
+        
+        // Check what's in memory
+        print("\n📱 IN-MEMORY STATE:")
+        print("   Points loaded: \(points.count)")
+        print("   Active point: \(activePointID?.uuidString ?? "none")")
+        
+        // Try to read raw data from UserDefaults
+        if let data = UserDefaults.standard.data(forKey: pointsKey) {
+            print("\n💾 USERDEFAULTS RAW DATA:")
+            print("   Data size: \(data.count) bytes (\(String(format: "%.2f", Double(data.count) / 1024.0)) KB)")
+            
+            // Try to decode it
+            do {
+                let decoder = JSONDecoder()
+                let dto = try decoder.decode([MapPointDTO].self, from: data)
+                print("   ✅ Successfully decoded \(dto.count) map points from UserDefaults")
+                
+                // Print summary
+                let totalSessions = dto.reduce(0) { $0 + $1.sessions.count }
+                print("   Total sessions across all points: \(totalSessions)")
+                
+                // Print first 10 points
+                print("\n📍 FIRST 10 POINTS IN USERDEFAULTS:")
+                for (index, point) in dto.prefix(10).enumerated() {
+                    let shortID = String(point.id.uuidString.prefix(8))
+                    print("   \(index + 1). \(shortID)... @ (\(Int(point.x)),\(Int(point.y))) - \(point.sessions.count) sessions")
+                }
+                
+                if dto.count > 10 {
+                    print("   ... and \(dto.count - 10) more points")
+                }
+                
+                // Check for discrepancy
+                if dto.count != points.count {
+                    print("\n⚠️  DISCREPANCY DETECTED!")
+                    print("   UserDefaults has: \(dto.count) points")
+                    print("   Memory has: \(points.count) points")
+                    print("   Missing: \(dto.count - points.count) points")
+                }
+                
+            } catch {
+                print("   ❌ Failed to decode UserDefaults data")
+                print("   Error: \(error)")
+                
+                // Try to get more details about the error
+                if let decodingError = error as? DecodingError {
+                    switch decodingError {
+                    case .dataCorrupted(let context):
+                        print("   Context: \(context)")
+                    case .keyNotFound(let key, let context):
+                        print("   Missing key: \(key), context: \(context)")
+                    case .typeMismatch(let type, let context):
+                        print("   Type mismatch: expected \(type), context: \(context)")
+                    case .valueNotFound(let type, let context):
+                        print("   Value not found: \(type), context: \(context)")
+                    @unknown default:
+                        print("   Unknown decoding error")
+                    }
+                }
+            }
+        } else {
+            print("\n❌ NO DATA in UserDefaults for key '\(pointsKey)'")
+        }
+        
+        // Check if there's a locationID-specific key being used
+        let locationSpecificKey = "locations.\(locID).mapPoints.v1"
+        if let locData = UserDefaults.standard.data(forKey: locationSpecificKey) {
+            print("\n🔍 FOUND LOCATION-SPECIFIC KEY: '\(locationSpecificKey)'")
+            print("   Size: \(locData.count) bytes")
+        }
+        
+        // List all UserDefaults keys that might be related
+        print("\n🔑 ALL USERDEFAULTS KEYS (filtered for 'map', 'point', 'location'):")
+        let allKeys = UserDefaults.standard.dictionaryRepresentation().keys
+        let relevantKeys = allKeys.filter { 
+            $0.lowercased().contains("map") || 
+            $0.lowercased().contains("point") || 
+            $0.lowercased().contains("location")
+        }.sorted()
+        
+        for key in relevantKeys {
+            if let data = UserDefaults.standard.data(forKey: key) {
+                print("   \(key): \(data.count) bytes")
+            } else if let value = UserDefaults.standard.object(forKey: key) {
+                print("   \(key): \(type(of: value))")
+            }
+        }
+        
+        print(String(repeating: "=", count: 80) + "\n")
+    }
+
+    /// Force reload from UserDefaults (for diagnostic purposes)
+    public func forceReload() {
+        print("🔄 Forcing reload from UserDefaults...")
+        points.removeAll()
+        activePointID = nil
+        load()
+        print("✅ Reload complete: \(points.count) points loaded")
+    }
+    
+    deinit {
+        print("💥 MapPointStore \(String(instanceID.prefix(8)))... deinitialized")
     }
     
 }
