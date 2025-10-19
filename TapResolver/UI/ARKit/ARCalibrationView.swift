@@ -30,12 +30,16 @@ struct ARCalibrationView: View {
             VStack {
                 HStack {
                     Button(action: {
-                        isPresented = false
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            isPresented = false
+                        }
                     }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 32, weight: .medium))
                             .foregroundColor(.white)
                             .padding(20)
+                            .padding(.top, 40)  // Additional top padding to clear safe area
+
                     }
                     .buttonStyle(.plain)
                     
