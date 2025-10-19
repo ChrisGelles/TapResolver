@@ -108,7 +108,7 @@ struct HUDContainer: View {
         .zIndex(100)
         .animation(.easeInOut(duration: 0.3), value: hud.isMapPointLogOpen)
 
-        // 🔵 Compass calibration overlay BEHIND the HUD so drawers stay tappable
+        // ðŸ”µ Compass calibration overlay BEHIND the HUD so drawers stay tappable
         .background(
             Group {
                 if hud.isCalibratingNorth {
@@ -128,7 +128,7 @@ struct HUDContainer: View {
                             )
                         )
                         .overlay(alignment: .bottomTrailing) {
-                            Text("\(Int(squareMetrics.facingFineTuneDeg))°")
+                            Text("\(Int(squareMetrics.facingFineTuneDeg))Â°")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 10)
@@ -179,11 +179,40 @@ struct HUDContainer: View {
             }
         }
 
-        // Escape-to-menu button (upper-left)
+        // Escape-to-menu button (upper-left) + AR button
         .overlay(alignment: .topLeading) {
-            LocationMenuButton()
-                .allowsHitTesting(true)
-                .zIndex(1000)
+            VStack(alignment: .leading, spacing: 12) {
+                // Existing location menu button
+                LocationMenuButton()
+                    .allowsHitTesting(true)
+                    .onAppear {
+                        print("ðŸ” DEBUG: activePointID on VStack appear = \(mapPointStore.activePointID?.uuidString ?? "nil")")
+                        print("ðŸ” DEBUG: Total points in store = \(mapPointStore.points.count)")
+                    }
+                
+                // AR Calibration button (only when MapPoint active)
+                if mapPointStore.activePointID != nil {
+                    let _ = print("ðŸ” DEBUG: AR button showing for activePointID = \(mapPointStore.activePointID!.uuidString)")
+                    
+                    Button(action: {
+                        print("Launching AR View Tools")
+                    }) {
+                        Image(systemName: "cube.fill")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 56, height: 56)
+                            .background(
+                                Circle()
+                                    .fill(Color.blue.opacity(0.9))
+                                    .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
+                }
+            }
+            .zIndex(1000)
         }
 
         // Tx Power picker overlay
@@ -275,7 +304,7 @@ struct HUDContainer: View {
     private var addMapPointButton: some View {
         Button {
             guard mapTransform.mapSize != .zero else {
-                print("⚠️ Map point add ignored: mapTransform not ready (mapSize == .zero)")
+                print("âš ï¸ Map point add ignored: mapTransform not ready (mapSize == .zero)")
                 return
             }
             let targetScreen = mapTransform.screenCenter
@@ -285,7 +314,7 @@ struct HUDContainer: View {
             let mapPoint = mapTransform.screenToMap(adjustedScreen)
             let success = mapPointStore.addPoint(at: mapPoint)
             if !success {
-                print("⚠️ Cannot add map point: location already occupied")
+                print("âš ï¸ Cannot add map point: location already occupied")
             }
         } label: {
             Image(systemName: "plus")
@@ -394,7 +423,7 @@ struct HUDContainer: View {
 
     private func handleLogDataButtonTap() {
         guard let activePoint = mapPointStore.activePoint else {
-            print("⚠️ No active map point selected")
+            print("âš ï¸ No active map point selected")
             return
         }
 
@@ -407,7 +436,7 @@ struct HUDContainer: View {
 
     private func handleStopLogging() {
         if let session = beaconLogger.stopLogging() {
-            print("📊 Session completed:")
+            print("ðŸ“Š Session completed:")
             print("   Session ID: \(session.sessionID)")
             print("   Map Point: \(session.mapPointID)")
             print("   Coordinates: (\(Int(session.coordinates.x)), \(Int(session.coordinates.y)))")
@@ -416,13 +445,13 @@ struct HUDContainer: View {
             print("   Beacons logged: \(session.obinsPerBeacon.count)")
             for (beaconName, stats) in session.statsPerBeacon {
                 let medianText = stats.medianDbm != nil ? "\(stats.medianDbm!) dBm" : "insufficient data"
-                print("   • \(beaconName): \(stats.samples) samples, median: \(medianText), \(String(format: "%.1f", stats.packetsPerSecond)) pkt/s")
+                print("   â€¢ \(beaconName): \(stats.samples) samples, median: \(medianText), \(String(format: "%.1f", stats.packetsPerSecond)) pkt/s")
             }
         }
     }
 
     private func handleStartLogging(activePoint: MapPointStore.MapPoint) {
-        print("🔍 Starting beacon logging for point \(activePoint.id)")
+        print("ðŸ” Starting beacon logging for point \(activePoint.id)")
 
         beaconLogger.startLogging(
             mapPointID: activePoint.id.uuidString,
@@ -459,9 +488,9 @@ struct HUDContainer: View {
             lastExportURL = tempURL
             showFilesPicker = true
 
-            print("📦 Exported \(history.scans.count) scans for point \(pointID)")
+            print("ðŸ“¦ Exported \(history.scans.count) scans for point \(pointID)")
         } catch {
-            print("❌ Failed to export all scans for point: \(error)")
+            print("âŒ Failed to export all scans for point: \(error)")
         }
     }
 
@@ -472,13 +501,13 @@ struct HUDContainer: View {
             let lockedSquares = metricSquares.squares.filter { $0.isLocked }
             let squaresToUse = lockedSquares.isEmpty ? metricSquares.squares : lockedSquares
             guard let square = squaresToUse.first else {
-                print("❌ No metric squares available for pixels per meter calculation")
+                print("âŒ No metric squares available for pixels per meter calculation")
                 return
             }
             let ppm = Double(square.side) / square.meters
 
             guard let activePoint = mapPointStore.activePoint else {
-                print("❌ No active map point available")
+                print("âŒ No active map point available")
                 return
             }
             let pointPx = CGPoint(x: activePoint.mapPoint.x, y: activePoint.mapPoint.y)
@@ -545,9 +574,9 @@ struct HUDContainer: View {
             lastExportURL = tempURL
             showFilesPicker = true
 
-            print("📦 Exported scan V1 with distances for \(beaconsPx.count) beacons")
+            print("ðŸ“¦ Exported scan V1 with distances for \(beaconsPx.count) beacons")
         } catch {
-            print("❌ Failed to export scan V1: \(error)")
+            print("âŒ Failed to export scan V1: \(error)")
         }
     }
 }
@@ -558,7 +587,7 @@ private struct LocationMenuButton: View {
 
     var body: some View {
         Button {
-            print("🎯 Location Menu button tapped!")
+            print("ðŸŽ¯ Location Menu button tapped!")
             locationManager.showLocationMenu = true
         } label: {
             Image(systemName: "square.grid.2x2")
@@ -797,7 +826,7 @@ struct TxPowerSelectionView: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .fixedSize(horizontal: true, vertical: false)  // ← ADD THIS LINE
+                        .fixedSize(horizontal: true, vertical: false)  // â† ADD THIS LINE
                         .frame(minWidth: 100)
                         .background(Color.gray.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
                 }

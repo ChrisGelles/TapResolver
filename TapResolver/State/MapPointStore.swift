@@ -119,7 +119,7 @@ public final class MapPointStore: ObservableObject {
     private let activePointKey = "MapPointsActive_v1"
 
     public init() {
-        print("🧠 MapPointStore init — ID: \(String(instanceID.prefix(8)))...")
+        print("ðŸ§  MapPointStore init â€” ID: \(String(instanceID.prefix(8)))...")
         load()
         
         // Listen for scan session saves
@@ -128,7 +128,7 @@ public final class MapPointStore: ObservableObject {
                 guard let userInfo = notification.userInfo,
                       let pointID = userInfo["pointID"] as? UUID,
                       let sessionData = userInfo["sessionData"] as? ScanSession else {
-                    print("⚠️ scanSessionSaved notification missing required data")
+                    print("âš ï¸ scanSessionSaved notification missing required data")
                     return
                 }
                 
@@ -154,7 +154,7 @@ public final class MapPointStore: ObservableObject {
         points.append(newPoint)
         // Set the new point as active (deactivating any previous active point)
         activePointID = newPoint.id
-        print("✨ Map Point Created:")
+        print("âœ¨ Map Point Created:")
         print("   ID: \(newPoint.id.uuidString)")
         print("   Position: (\(Int(mapPoint.x)), \(Int(mapPoint.y)))")
         save()
@@ -234,9 +234,9 @@ public final class MapPointStore: ObservableObject {
 
     private func save() {
         let dto = points.map { MapPointDTO(
-            id: $0.id, 
-            x: $0.mapPoint.x, 
-            y: $0.mapPoint.y, 
+            id: $0.id,
+            x: $0.mapPoint.x,
+            y: $0.mapPoint.y,
             createdDate: $0.createdDate,
             sessions: $0.sessions
         )}
@@ -245,16 +245,16 @@ public final class MapPointStore: ObservableObject {
             ctx.write(activePointKey, value: activeID)
         }
         
-        print("💾 Saved Map Points to UserDefaults:")
+        print("ðŸ’¾ Saved Map Points to UserDefaults:")
         print("   Location: \(ctx.locationID)")
         print("   Points: \(points.count)")
         for point in points {
-            print("   • \(String(point.id.uuidString.prefix(8)))... @ (\(Int(point.mapPoint.x)),\(Int(point.mapPoint.y))) - \(point.sessions.count) sessions")
+            print("   â€¢ \(String(point.id.uuidString.prefix(8)))... @ (\(Int(point.mapPoint.x)),\(Int(point.mapPoint.y))) - \(point.sessions.count) sessions")
         }
     }
 
     private func load() {
-        print("\n🔄 MapPointStore.load() CALLED")
+        print("\nðŸ”„ MapPointStore.load() CALLED")
         print("   Instance ID: \(String(instanceID.prefix(8)))...")
         print("   Current locationID: \(ctx.locationID)")
         
@@ -269,7 +269,7 @@ public final class MapPointStore: ObservableObject {
             }
             // Only log if there are points loaded
             if !points.isEmpty {
-                print("📂 Loaded \(points.count) Map Point(s) with \(points.reduce(0) { $0 + $1.sessions.count }) sessions")
+                print("ðŸ“‚ Loaded \(points.count) Map Point(s) with \(points.reduce(0) { $0 + $1.sessions.count }) sessions")
             }
         } else {
             self.points = []
@@ -278,7 +278,7 @@ public final class MapPointStore: ObservableObject {
         // REMOVED: No longer load activePointID from UserDefaults
         // User must explicitly select a MapPoint each session
         
-        print("   ✅ Load complete: \(points.count) points")
+        print("   âœ… Load complete: \(points.count) points")
         print("   Total sessions: \(points.reduce(0) { $0 + $1.sessions.count })")
     }
     
@@ -289,9 +289,9 @@ public final class MapPointStore: ObservableObject {
         if let idx = points.firstIndex(where: { $0.id == pointID }) {
             points[idx].sessions.append(session)
             save()
-            print("✅ Added session \(String(session.sessionID.prefix(8)))... to point \(String(pointID.uuidString.prefix(8)))...")
+            print("âœ… Added session \(String(session.sessionID.prefix(8)))... to point \(String(pointID.uuidString.prefix(8)))...")
         } else {
-            print("⚠️ Cannot add session: Map point \(pointID) not found")
+            print("âš ï¸ Cannot add session: Map point \(pointID) not found")
         }
     }
     
@@ -305,7 +305,7 @@ public final class MapPointStore: ObservableObject {
         if let idx = points.firstIndex(where: { $0.id == pointID }) {
             points[idx].sessions.removeAll { $0.sessionID == sessionID }
             save()
-            print("🗑️ Removed session \(sessionID) from point \(pointID)")
+            print("ðŸ—‘ï¸ Removed session \(sessionID) from point \(pointID)")
         }
     }
     
@@ -319,7 +319,7 @@ public final class MapPointStore: ObservableObject {
     /// Diagnostic function to check what's actually stored in UserDefaults
     public func printUserDefaultsDiagnostic() {
         print("\n" + String(repeating: "=", count: 80))
-        print("📊 MAP POINT STORE - USERDEFAULTS DIAGNOSTIC")
+        print("ðŸ“Š MAP POINT STORE - USERDEFAULTS DIAGNOSTIC")
         print(String(repeating: "=", count: 80))
         
         let locID = ctx.locationID
@@ -327,27 +327,27 @@ public final class MapPointStore: ObservableObject {
         print("Points key: \(pointsKey)")
         
         // Check what's in memory
-        print("\n📱 IN-MEMORY STATE:")
+        print("\nðŸ“± IN-MEMORY STATE:")
         print("   Points loaded: \(points.count)")
         print("   Active point: \(activePointID?.uuidString ?? "none")")
         
         // Try to read raw data from UserDefaults
         if let data = UserDefaults.standard.data(forKey: pointsKey) {
-            print("\n💾 USERDEFAULTS RAW DATA:")
+            print("\nðŸ’¾ USERDEFAULTS RAW DATA:")
             print("   Data size: \(data.count) bytes (\(String(format: "%.2f", Double(data.count) / 1024.0)) KB)")
             
             // Try to decode it
             do {
                 let decoder = JSONDecoder()
                 let dto = try decoder.decode([MapPointDTO].self, from: data)
-                print("   ✅ Successfully decoded \(dto.count) map points from UserDefaults")
+                print("   âœ… Successfully decoded \(dto.count) map points from UserDefaults")
                 
                 // Print summary
                 let totalSessions = dto.reduce(0) { $0 + $1.sessions.count }
                 print("   Total sessions across all points: \(totalSessions)")
                 
                 // Print first 10 points
-                print("\n📍 FIRST 10 POINTS IN USERDEFAULTS:")
+                print("\nðŸ“ FIRST 10 POINTS IN USERDEFAULTS:")
                 for (index, point) in dto.prefix(10).enumerated() {
                     let shortID = String(point.id.uuidString.prefix(8))
                     print("   \(index + 1). \(shortID)... @ (\(Int(point.x)),\(Int(point.y))) - \(point.sessions.count) sessions")
@@ -359,14 +359,14 @@ public final class MapPointStore: ObservableObject {
                 
                 // Check for discrepancy
                 if dto.count != points.count {
-                    print("\n⚠️  DISCREPANCY DETECTED!")
+                    print("\nâš ï¸  DISCREPANCY DETECTED!")
                     print("   UserDefaults has: \(dto.count) points")
                     print("   Memory has: \(points.count) points")
                     print("   Missing: \(dto.count - points.count) points")
                 }
                 
             } catch {
-                print("   ❌ Failed to decode UserDefaults data")
+                print("   âŒ Failed to decode UserDefaults data")
                 print("   Error: \(error)")
                 
                 // Try to get more details about the error
@@ -386,22 +386,22 @@ public final class MapPointStore: ObservableObject {
                 }
             }
         } else {
-            print("\n❌ NO DATA in UserDefaults for key '\(pointsKey)'")
+            print("\nâŒ NO DATA in UserDefaults for key '\(pointsKey)'")
         }
         
         // Check if there's a locationID-specific key being used
         let locationSpecificKey = "locations.\(locID).mapPoints.v1"
         if let locData = UserDefaults.standard.data(forKey: locationSpecificKey) {
-            print("\n🔍 FOUND LOCATION-SPECIFIC KEY: '\(locationSpecificKey)'")
+            print("\nðŸ” FOUND LOCATION-SPECIFIC KEY: '\(locationSpecificKey)'")
             print("   Size: \(locData.count) bytes")
         }
         
         // List all UserDefaults keys that might be related
-        print("\n🔑 ALL USERDEFAULTS KEYS (filtered for 'map', 'point', 'location'):")
+        print("\nðŸ”‘ ALL USERDEFAULTS KEYS (filtered for 'map', 'point', 'location'):")
         let allKeys = UserDefaults.standard.dictionaryRepresentation().keys
-        let relevantKeys = allKeys.filter { 
-            $0.lowercased().contains("map") || 
-            $0.lowercased().contains("point") || 
+        let relevantKeys = allKeys.filter {
+            $0.lowercased().contains("map") ||
+            $0.lowercased().contains("point") ||
             $0.lowercased().contains("location")
         }.sorted()
         
@@ -418,15 +418,15 @@ public final class MapPointStore: ObservableObject {
 
     /// Force reload from UserDefaults (for diagnostic purposes)
     public func forceReload() {
-        print("🔄 Forcing reload from UserDefaults...")
+        print("ðŸ”„ Forcing reload from UserDefaults...")
         points.removeAll()
         activePointID = nil
         load()
-        print("✅ Reload complete: \(points.count) points loaded")
+        print("âœ… Reload complete: \(points.count) points loaded")
     }
     
     deinit {
-        print("💥 MapPointStore \(String(instanceID.prefix(8)))... deinitialized")
+        print("ðŸ’¥ MapPointStore \(String(instanceID.prefix(8)))... deinitialized")
     }
     
 }
