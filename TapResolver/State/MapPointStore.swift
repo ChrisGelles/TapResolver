@@ -275,9 +275,8 @@ public final class MapPointStore: ObservableObject {
             self.points = []
         }
         
-        if let activeID: UUID = ctx.read(activePointKey, as: UUID.self) {
-            self.activePointID = points.contains(where: { $0.id == activeID }) ? activeID : nil
-        }
+        // REMOVED: No longer load activePointID from UserDefaults
+        // User must explicitly select a MapPoint each session
         
         print("   ✅ Load complete: \(points.count) points")
         print("   Total sessions: \(points.reduce(0) { $0 + $1.sessions.count })")
