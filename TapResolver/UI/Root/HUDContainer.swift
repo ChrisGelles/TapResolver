@@ -51,10 +51,33 @@ struct HUDContainer: View {
     @State private var activeIntervalEdit: (beaconID: String, text: String)? = nil
 
     var body: some View {
+        baseContent
+            .background { backgroundOverlays }
+            .overlay(alignment: .bottomLeading) { calibrationTools }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleNorthCalibration)) { _ in
+                hud.isCalibratingNorth.toggle()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .stopNorthCalibration)) { _ in
+                hud.isCalibratingNorth = false
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .beaconSelectedForTxPower)) { notification in
+                if let beaconID = notification.object as? String {
+                    selectedBeaconForTxPower = beaconID
+                }
+            }
+            .overlay(alignment: .topLeading) { topLeftButtons }
+            .overlay { txPowerOverlay }
+            .overlay { keypadOverlay }
+            .overlay { arViewOverlay }
+        }
+    
+    // MARK: - View Composition Helpers
+        
+    private var baseContent: some View {
         ZStack {
             Color.clear.ignoresSafeArea().allowsHitTesting(false)
-            CrosshairHUDOverlay() // shows crosshairs at screen center when beacons drawer is open
-
+            CrosshairHUDOverlay()
+            
             VStack(spacing: 8) {
                 HStack {
                     Spacer()
@@ -67,14 +90,13 @@ struct HUDContainer: View {
                         MapPointDrawer()
                         MapPointLogButton()
                         ResetMapButton()
-                        BluetoothScanButton() // snapshot scan button
+                        BluetoothScanButton()
                         RSSIMeterButton()
                         FacingToggleButton()
                     }
                 }
                 Spacer()
-
-                // Bottom buttons - only show when MapPoint drawer is open
+                
                 if hud.isMapPointOpen {
                     VStack(spacing: 8) {
                         if showScanQuality {
@@ -96,211 +118,188 @@ struct HUDContainer: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .allowsHitTesting(true)
             
-            // Map Point Log overlay
             if hud.isMapPointLogOpen {
                 VStack {
                     Spacer()
                     MapPointLogView()
                         .transition(.move(edge: .bottom))
                 }
-                .zIndex(200) // Ensure it appears above other UI
+                .zIndex(200)
             }
         }
         .zIndex(100)
         .animation(.easeInOut(duration: 0.3), value: hud.isMapPointLogOpen)
+    }
 
-        // ðŸ”µ Compass calibration overlay BEHIND the HUD so drawers stay tappable
-        .background(
-            Group {
-                if hud.isCalibratingNorth {
-                    CompassCalibrationOverlay(
-                        angleDeg: Binding(
-                            get: { squareMetrics.northOffsetDeg },
-                            set: { squareMetrics.setNorthOffset($0) }
-                        )
-                    )
-                    .allowsHitTesting(!hud.isCalibratingFacing)
-
-                    if hud.isCalibratingFacing {
-                        UserFacingCalibrationOverlay(
-                            facingFineTuneDeg: Binding(
-                                get: { squareMetrics.facingFineTuneDeg },
-                                set: { squareMetrics.setFacingFineTune($0) }
-                            )
-                        )
-                        .overlay(alignment: .bottomTrailing) {
-                            Text("\(Int(squareMetrics.facingFineTuneDeg))Â°")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-                                .padding(.trailing, 20)
-                                .padding(.bottom, 24)
-                        }
-                    }
-                }
-                if hud.showFacingOverlay {
-                    FacingOverlay()
-                }
-            }
-        )
-
-        // Tools button appears only during North calibration
-        .overlay(alignment: .bottomLeading) {
-            if hud.isCalibratingNorth {
-                Button {
-                    hud.isCalibratingFacing.toggle()
-                } label: {
-                    Image(systemName: "wrench.and.screwdriver.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(10)
-                        .background(Color.black.opacity(0.6), in: Circle())
-                }
-                .padding(.leading, 20)
-                .padding(.bottom, 24)
-                .buttonStyle(.plain)
-                .accessibilityLabel("Calibration Tools")
-            }
-        }
-
-        // Notifications for compass calibration mode
-        .onReceive(NotificationCenter.default.publisher(for: .toggleNorthCalibration)) { _ in
-            hud.isCalibratingNorth.toggle()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .stopNorthCalibration)) { _ in
-            hud.isCalibratingNorth = false
-        }
-
-        // Tx Power picker notification
-        .onReceive(NotificationCenter.default.publisher(for: .beaconSelectedForTxPower)) { notification in
-            if let beaconID = notification.object as? String {
-                selectedBeaconForTxPower = beaconID
-            }
-        }
-
-        // Escape-to-menu button (upper-left) + AR button
-        .overlay(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 12) {
-                // Existing location menu button
-                LocationMenuButton()
-                    .allowsHitTesting(true)
-                    .onAppear {
-                        print("ðŸ” DEBUG: activePointID on VStack appear = \(mapPointStore.activePointID?.uuidString ?? "nil")")
-                        print("ðŸ” DEBUG: Total points in store = \(mapPointStore.points.count)")
-                    }
-                
-                // AR Calibration button (only when MapPoint active)
-                if mapPointStore.activePointID != nil {
-                    let _ = print()
-                    //"ðŸ” DEBUG: AR button showing for activePointID = \(mapPointStore.activePointID!.uuidString)")
-                    
-                    Button(action: {
-                        print("Launching AR View Tools")
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            showARCalibration = true
-                        }
-                    }) {
-                        Image(systemName: "cube.fill")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 56, height: 56)
-                            .background(
-                                Circle()
-                                    .fill(Color.blue.opacity(0.9))
-                                    .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
-                }
-            }
-            .zIndex(1000)
-        }
-
-        // Tx Power picker overlay
-        .overlay(
-            Group {
-                if let selectedBeacon = selectedBeaconForTxPower {
-                    TxPowerSelectionView(
-                        beaconID: selectedBeacon,
-                        onSelectTxPower: { txPower in
-                            beaconDotStore.setTxPower(for: selectedBeacon, dbm: txPower)
-                            selectedBeaconForTxPower = nil
-                        },
-                        onDismiss: {
-                            selectedBeaconForTxPower = nil
-                        },
-                        onShowIntervalKeypad: {
-                            let currentInterval = beaconDotStore.getAdvertisingInterval(for: selectedBeacon)
-                            activeIntervalEdit = (
-                                beaconID: selectedBeacon,
-                                text: String(format: "%.2f", currentInterval)
-                            )
-                        }
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        )
-        
-        // Numeric keypad overlay - SEPARATE and LAST (renders on top)
-        .overlay(
-            Group {
-                if let edit = beaconDotStore.activeElevationEdit {
-                    NumericInputKeypad(
-                        title: "Elevation",
-                        initialText: edit.text,
-                        onCommit: { text in
-                            beaconDotStore.commitElevationText(text, for: edit.beaconID)
-                        },
-                        onDismiss: {
-                            beaconDotStore.activeElevationEdit = nil
-                        }
-                    )
-                } else if let edit = squareMetrics.activeEdit {
-                    NumericInputKeypad(
-                        title: "Meters",
-                        initialText: edit.text,
-                        onCommit: { text in
-                            squareMetrics.commitMetersText(text, for: edit.id)
-                        },
-                        onDismiss: {
-                            squareMetrics.activeEdit = nil
-                        }
-                    )
-                } else if let edit = activeIntervalEdit {
-                    NumericInputKeypad(
-                        title: "Broadcast Interval (ms)",
-                        initialText: edit.text,
-                        onCommit: { text in
-                            if let value = Double(text) {
-                                beaconDotStore.setAdvertisingInterval(for: edit.beaconID, ms: value)
-                            }
-                            activeIntervalEdit = nil
-                        },
-                        onDismiss: {
-                            activeIntervalEdit = nil
-                        }
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        )
-        // AR Calibration View (full-screen, above everything)
-        .overlay {
-            if showARCalibration, let activeID = mapPointStore.activePointID {
-                ARCalibrationView(
-                    isPresented: $showARCalibration,
-                    mapPointID: activeID
+    @ViewBuilder
+    private var backgroundOverlays: some View {
+        if hud.isCalibratingNorth {
+            CompassCalibrationOverlay(
+                angleDeg: Binding(
+                    get: { squareMetrics.northOffsetDeg },
+                    set: { squareMetrics.setNorthOffset($0) }
                 )
-                .allowsHitTesting(true)
+            )
+            .allowsHitTesting(!hud.isCalibratingFacing)
+            
+            if hud.isCalibratingFacing {
+                UserFacingCalibrationOverlay(
+                    facingFineTuneDeg: Binding(
+                        get: { squareMetrics.facingFineTuneDeg },
+                        set: { squareMetrics.setFacingFineTune($0) }
+                    )
+                )
+                .overlay(alignment: .bottomTrailing) {
+                    Text("\(Int(squareMetrics.facingFineTuneDeg))°")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                        .padding(.trailing, 20)
+                        .padding(.bottom, 24)
+                }
             }
+        }
+        if hud.showFacingOverlay {
+            FacingOverlay()
         }
     }
 
+    @ViewBuilder
+    private var calibrationTools: some View {
+        if hud.isCalibratingNorth {
+            Button {
+                hud.isCalibratingFacing.toggle()
+            } label: {
+                Image(systemName: "wrench.and.screwdriver.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(10)
+                    .background(Color.black.opacity(0.6), in: Circle())
+            }
+            .padding(.leading, 20)
+            .padding(.bottom, 24)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Calibration Tools")
+        }
+    }
+
+    private var topLeftButtons: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            LocationMenuButton()
+                .allowsHitTesting(true)
+                .onAppear {
+                    print("🔍 DEBUG: activePointID on VStack appear = \(mapPointStore.activePointID?.uuidString ?? "nil")")
+                    print("🔍 DEBUG: Total points in store = \(mapPointStore.points.count)")
+                }
+            
+            if mapPointStore.activePointID != nil {
+                let _ = print()
+                
+                Button(action: {
+                    print("Launching AR View Tools")
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        showARCalibration = true
+                    }
+                }) {
+                    Image(systemName: "cube.fill")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 56, height: 56)
+                        .background(
+                            Circle()
+                                .fill(Color.blue.opacity(0.9))
+                                .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                        )
+                }
+                .buttonStyle(.plain)
+                .transition(.move(edge: .leading).combined(with: .opacity))
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
+            }
+        }
+        .zIndex(1000)
+    }
+
+    @ViewBuilder
+    private var txPowerOverlay: some View {
+        if let selectedBeacon = selectedBeaconForTxPower {
+            TxPowerSelectionView(
+                beaconID: selectedBeacon,
+                onSelectTxPower: { txPower in
+                    beaconDotStore.setTxPower(for: selectedBeacon, dbm: txPower)
+                    selectedBeaconForTxPower = nil
+                },
+                onDismiss: {
+                    selectedBeaconForTxPower = nil
+                },
+                onShowIntervalKeypad: {
+                    let currentInterval = beaconDotStore.getAdvertisingInterval(for: selectedBeacon)
+                    activeIntervalEdit = (
+                        beaconID: selectedBeacon,
+                        text: String(format: "%.2f", currentInterval)
+                    )
+                }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        }
+    }
+
+    @ViewBuilder
+    private var keypadOverlay: some View {
+        if let edit = beaconDotStore.activeElevationEdit {
+            NumericInputKeypad(
+                title: "Elevation",
+                initialText: edit.text,
+                onCommit: { text in
+                    beaconDotStore.commitElevationText(text, for: edit.beaconID)
+                },
+                onDismiss: {
+                    beaconDotStore.activeElevationEdit = nil
+                }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        } else if let edit = squareMetrics.activeEdit {
+            NumericInputKeypad(
+                title: "Meters",
+                initialText: edit.text,
+                onCommit: { text in
+                    squareMetrics.commitMetersText(text, for: edit.id)
+                },
+                onDismiss: {
+                    squareMetrics.activeEdit = nil
+                }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        } else if let edit = activeIntervalEdit {
+            NumericInputKeypad(
+                title: "Broadcast Interval (ms)",
+                initialText: edit.text,
+                onCommit: { text in
+                    if let value = Double(text) {
+                        beaconDotStore.setAdvertisingInterval(for: edit.beaconID, ms: value)
+                    }
+                    activeIntervalEdit = nil
+                },
+                onDismiss: {
+                    activeIntervalEdit = nil
+                }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        }
+    }
+
+    @ViewBuilder
+    private var arViewOverlay: some View {
+        if showARCalibration, let activeID = mapPointStore.activePointID {
+            ARCalibrationView(
+                isPresented: $showARCalibration,
+                mapPointID: activeID
+            )
+            .allowsHitTesting(true)
+        }
+    }
+    
     // MARK: - Bottom Buttons Cluster (MapPoint logging controls)
     private var bottomButtons: some View {
         bottomButtonRow
