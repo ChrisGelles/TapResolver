@@ -44,6 +44,7 @@ struct HUDContainer: View {
     @State private var didExport = false
     @State private var showFilesPicker = false
     @State private var lastExportURL: URL? = nil
+    @State private var showARCalibration = false
 
     @State private var selectedBeaconForTxPower: String? = nil
     @State private var showScanQuality = true  // Temporary: always show for testing
@@ -192,10 +193,14 @@ struct HUDContainer: View {
                 
                 // AR Calibration button (only when MapPoint active)
                 if mapPointStore.activePointID != nil {
-                    let _ = print("ðŸ” DEBUG: AR button showing for activePointID = \(mapPointStore.activePointID!.uuidString)")
+                    let _ = print()
+                    //"ðŸ” DEBUG: AR button showing for activePointID = \(mapPointStore.activePointID!.uuidString)")
                     
                     Button(action: {
                         print("Launching AR View Tools")
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            showARCalibration = true
+                        }
                     }) {
                         Image(systemName: "cube.fill")
                             .font(.system(size: 24, weight: .semibold))
@@ -284,6 +289,16 @@ struct HUDContainer: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         )
+        // AR Calibration View (full-screen, above everything)
+        .overlay {
+            if showARCalibration, let activeID = mapPointStore.activePointID {
+                ARCalibrationView(
+                    isPresented: $showARCalibration,
+                    mapPointID: activeID
+                )
+                .allowsHitTesting(true)
+            }
+        }
     }
 
     // MARK: - Bottom Buttons Cluster (MapPoint logging controls)
