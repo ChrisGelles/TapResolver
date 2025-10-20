@@ -20,11 +20,18 @@ struct ARCalibrationView: View {
     @Binding var isPresented: Bool
     let mapPointID: UUID
     
+    @EnvironmentObject private var mapPointStore: MapPointStore
+    @State private var markerPlaced = false
+    
     var body: some View {
         ZStack {
             // AR Camera feed
-            ARViewContainer()
-                .ignoresSafeArea()
+            ARViewContainer(
+                mapPointID: mapPointID,
+                userHeight: Float(getUserHeight()),
+                markerPlaced: $markerPlaced
+            )
+            .ignoresSafeArea()
             
             // Close button (upper-left)
             VStack {
@@ -50,5 +57,13 @@ struct ARCalibrationView: View {
         }
         .zIndex(10000)
         .transition(.move(edge: .leading))
+    }
+    
+    private func getUserHeight() -> Double {
+        guard let activePoint = mapPointStore.points.first(where: { $0.id == mapPointID }),
+              let lastSession = activePoint.sessions.last else {
+            return 1.05 // Default fallback
+        }
+        return lastSession.deviceHeight_m
     }
 }
