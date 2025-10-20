@@ -24,11 +24,25 @@ struct ARMarkerData {
     let userHeight: Float
 }
 
+// MARK: - Square Placement State
+
+enum SquarePlacementState {
+    case idle
+    case corner1Placed(position: simd_float3)
+    case corner2Placed(corner1: simd_float3, corner2: simd_float3)
+    case completed
+}
+
 struct ARViewContainer: UIViewRepresentable {
     
     let mapPointID: UUID
     let userHeight: Float  // From MapPoint's latest session
     @Binding var markerPlaced: Bool
+    
+    // Metric Square mode (optional)
+    let metricSquareID: UUID?
+    let squareColor: UIColor?
+    let squareSideMeters: Double?
     
     func makeUIView(context: Context) -> ARSCNView {
         let arView = ARSCNView()
@@ -57,6 +71,9 @@ struct ARViewContainer: UIViewRepresentable {
         context.coordinator.arView = arView
         context.coordinator.userHeight = userHeight
         context.coordinator.markerPlaced = markerPlaced
+        context.coordinator.metricSquareID = metricSquareID
+        context.coordinator.squareColor = squareColor
+        context.coordinator.squareSideMeters = squareSideMeters
         
         print("📷 AR Camera session started")
         
@@ -80,6 +97,13 @@ struct ARViewContainer: UIViewRepresentable {
         var markerNode: SCNNode?
         
         private var detectedPlanes: [UUID: SCNNode] = [:]
+        
+        // Metric Square placement
+        var metricSquareID: UUID?
+        var squareColor: UIColor?
+        var squareSideMeters: Double?
+        var squarePlacementState: SquarePlacementState = .idle
+        var squareNodes: [SCNNode] = []
         
         // MARK: - Crosshair Creation
         
@@ -211,12 +235,20 @@ struct ARViewContainer: UIViewRepresentable {
         // MARK: - Marker Placement
         
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            guard !markerPlaced,
-                  let crosshair = crosshairNode,
+            guard let crosshair = crosshairNode,
                   !crosshair.isHidden else { return }
             
-            let markerPosition = crosshair.simdPosition
-            placeMarker(at: markerPosition)
+            let position = crosshair.simdPosition
+            
+            // Metric Square mode
+            if metricSquareID != nil {
+                handleSquarePlacement(at: position)
+                return
+            }
+            
+            // MapPoint marker mode
+            guard !markerPlaced else { return }
+            placeMarker(at: position)
             markerPlaced = true
         }
         
@@ -281,6 +313,153 @@ struct ARViewContainer: UIViewRepresentable {
             crosshairNode?.isHidden = true
             
             print("✅ Marker placed at height: \(userHeight)m")
+        }
+        
+        // MARK: - Metric Square Placement
+        
+        private func handleSquarePlacement(at position: simd_float3) {
+            switch squarePlacementState {
+            case .idle:
+                placeCorner1(at: position)
+            case .corner1Placed(let corner1):
+                placeCorner2(at: position, corner1: corner1)
+            case .corner2Placed(let corner1, let corner2):
+                completeSquare(corner1: corner1, corner2: corner2, directionPoint: position)
+            case .completed:
+                break // Already completed
+            }
+        }
+        
+        private func placeCorner1(at position: simd_float3) {
+            let cornerNode = createCornerMarker(at: position)
+            squareNodes.append(cornerNode)
+            arView?.scene.rootNode.addChildNode(cornerNode)
+            
+            squarePlacementState = .corner1Placed(position: position)
+            print("📍 Corner 1 placed at: \(position)")
+        }
+        
+        private func placeCorner2(at position: simd_float3, corner1: simd_float3) {
+            let cornerNode = createCornerMarker(at: position)
+            squareNodes.append(cornerNode)
+            arView?.scene.rootNode.addChildNode(cornerNode)
+            
+            // Create line between corners
+            let lineNode = createLine(from: corner1, to: position)
+            squareNodes.append(lineNode)
+            arView?.scene.rootNode.addChildNode(lineNode)
+            
+            squarePlacementState = .corner2Placed(corner1: corner1, corner2: position)
+            
+            let distance = simd_distance(corner1, position)
+            print("📍 Corner 2 placed at: \(position)")
+            print("📏 Edge length: \(String(format: "%.3f", distance))m")
+        }
+        
+        private func completeSquare(corner1: simd_float3, corner2: simd_float3, directionPoint: simd_float3) {
+            // Calculate edge vector
+            let edge = corner2 - corner1
+            let edgeLength = simd_length(edge)
+            let edgeDir = simd_normalize(edge)
+            
+            // Calculate perpendicular direction
+            let up = simd_float3(0, 1, 0)
+            let perpDir = simd_normalize(simd_cross(edgeDir, up))
+            
+            // Determine which side of the edge the direction point is on
+            let toPoint = directionPoint - corner1
+            let side = simd_dot(toPoint, perpDir)
+            let squareDir = side > 0 ? perpDir : -perpDir
+            
+            // Calculate other two corners
+            let corner3 = corner2 + squareDir * edgeLength
+            let corner4 = corner1 + squareDir * edgeLength
+            
+            // Create square outline
+            createSquareOutline(corner1: corner1, corner2: corner2, corner3: corner3, corner4: corner4)
+            
+            squarePlacementState = .completed
+            crosshairNode?.isHidden = true
+            
+            print("✅ Metric Square completed")
+            print("   Edge length (AR): \(String(format: "%.3f", edgeLength))m")
+            if let configured = squareSideMeters {
+                let diff = abs(Double(edgeLength) - configured)
+                let percentDiff = (diff / configured) * 100
+                print("   Configured: \(String(format: "%.3f", configured))m")
+                print("   Difference: \(String(format: "%.3f", diff))m (\(String(format: "%.1f", percentDiff))%)")
+            }
+        }
+        
+        private func createCornerMarker(at position: simd_float3) -> SCNNode {
+            let sphere = SCNSphere(radius: 0.01) // 1cm diameter
+            let material = SCNMaterial()
+            material.diffuse.contents = squareColor ?? UIColor.red
+            sphere.materials = [material]
+            
+            let node = SCNNode(geometry: sphere)
+            node.simdPosition = position
+            return node
+        }
+        
+        private func createLine(from start: simd_float3, to end: simd_float3) -> SCNNode {
+            let vector = end - start
+            let length = simd_length(vector)
+            let direction = simd_normalize(vector)
+            
+            let cylinder = SCNCylinder(radius: 0.002, height: CGFloat(length)) // 2mm thick
+            let material = SCNMaterial()
+            material.diffuse.contents = (squareColor ?? UIColor.red).withAlphaComponent(0.6)
+            cylinder.materials = [material]
+            
+            let node = SCNNode(geometry: cylinder)
+            
+            // Position at midpoint
+            let midpoint = (start + end) / 2
+            node.simdPosition = midpoint
+            
+            // Orient along the vector
+            let up = simd_float3(0, 1, 0)
+            let rotationAxis = simd_normalize(simd_cross(up, direction))
+            let angle = acos(simd_dot(up, direction))
+            node.simdRotation = simd_float4(rotationAxis.x, rotationAxis.y, rotationAxis.z, angle)
+            
+            return node
+        }
+        
+        private func createSquareOutline(corner1: simd_float3, corner2: simd_float3, corner3: simd_float3, corner4: simd_float3) {
+            // Create four edges
+            let edge1 = createLine(from: corner1, to: corner2)
+            let edge2 = createLine(from: corner2, to: corner3)
+            let edge3 = createLine(from: corner3, to: corner4)
+            let edge4 = createLine(from: corner4, to: corner1)
+            
+            squareNodes.append(contentsOf: [edge1, edge2, edge3, edge4])
+            
+            arView?.scene.rootNode.addChildNode(edge1)
+            arView?.scene.rootNode.addChildNode(edge2)
+            arView?.scene.rootNode.addChildNode(edge3)
+            arView?.scene.rootNode.addChildNode(edge4)
+            
+            // Create fill plane
+            let edgeLength = simd_distance(corner1, corner2)
+            let plane = SCNPlane(width: CGFloat(edgeLength), height: CGFloat(edgeLength))
+            let material = SCNMaterial()
+            material.diffuse.contents = (squareColor ?? UIColor.red).withAlphaComponent(0.15)
+            material.isDoubleSided = false
+            plane.materials = [material]
+            
+            let fillNode = SCNNode(geometry: plane)
+            
+            // Position at center of square
+            let center = (corner1 + corner2 + corner3 + corner4) / 4
+            fillNode.simdPosition = center
+            
+            // Orient parallel to ground (horizontal plane)
+            fillNode.eulerAngles.x = .pi / 2
+            
+            squareNodes.append(fillNode)
+            arView?.scene.rootNode.addChildNode(fillNode)
         }
         
         // MARK: - Plane Detection

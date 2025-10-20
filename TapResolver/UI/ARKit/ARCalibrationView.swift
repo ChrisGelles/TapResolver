@@ -29,7 +29,10 @@ struct ARCalibrationView: View {
             ARViewContainer(
                 mapPointID: mapPointID,
                 userHeight: Float(getUserHeight()),
-                markerPlaced: $markerPlaced
+                markerPlaced: $markerPlaced,
+                metricSquareID: nil,
+                squareColor: nil,
+                squareSideMeters: nil
             )
             .ignoresSafeArea()
             
