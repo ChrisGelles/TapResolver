@@ -30,7 +30,7 @@ struct ARViewContainer: UIViewRepresentable {
         
         // Configure AR session
         let configuration = ARWorldTrackingConfiguration()
-        configuration.planeDetection = [] // Start with no plane detection
+        configuration.planeDetection = [.horizontal, .vertical] // Detect both plane types
         
         // Run the session
         arView.session.run(configuration)
@@ -49,6 +49,54 @@ struct ARViewContainer: UIViewRepresentable {
     }
     
     class Coordinator: NSObject, ARSCNViewDelegate {
+        
+        // MARK: - Plane Detection
+        
+        func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
+            guard let planeAnchor = anchor as? ARPlaneAnchor else { return }
+            
+            let planeNode = createPlaneNode(for: planeAnchor)
+            node.addChildNode(planeNode)
+            
+            print("✅ Detected \(planeAnchor.alignment == .horizontal ? "horizontal" : "vertical") plane")
+        }
+        
+        func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
+            guard let planeAnchor = anchor as? ARPlaneAnchor,
+                  let planeNode = node.childNodes.first,
+                  let plane = planeNode.geometry as? SCNPlane else { return }
+            
+            // Update plane size as ARKit refines the detection
+            plane.width = CGFloat(planeAnchor.planeExtent.width)
+            plane.height = CGFloat(planeAnchor.planeExtent.height)
+            
+            // Update position
+            planeNode.simdPosition = planeAnchor.center
+        }
+        
+        private func createPlaneNode(for planeAnchor: ARPlaneAnchor) -> SCNNode {
+            let plane = SCNPlane(
+                width: CGFloat(planeAnchor.planeExtent.width),
+                height: CGFloat(planeAnchor.planeExtent.height)
+            )
+            
+            // Different colors for horizontal vs vertical planes
+            let material = SCNMaterial()
+            if planeAnchor.alignment == .horizontal {
+                material.diffuse.contents = UIColor.blue.withAlphaComponent(0.3)
+            } else {
+                material.diffuse.contents = UIColor.green.withAlphaComponent(0.3)
+            }
+            plane.materials = [material]
+            
+            let planeNode = SCNNode(geometry: plane)
+            planeNode.simdPosition = planeAnchor.center
+            
+            // Rotate plane to match surface orientation
+            planeNode.eulerAngles.x = -.pi / 2
+            
+            return planeNode
+        }
         
         func session(_ session: ARSession, didFailWithError error: Error) {
             print("❌ AR Session failed: \(error.localizedDescription)")
