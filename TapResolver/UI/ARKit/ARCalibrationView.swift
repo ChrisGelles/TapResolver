@@ -22,8 +22,8 @@ struct ARCalibrationView: View {
     
     var body: some View {
         ZStack {
-            // Black semi-transparent background
-            Color.black.opacity(0.7)
+            // AR Camera feed
+            ARViewContainer()
                 .ignoresSafeArea()
             
             // Close button (upper-left)
@@ -37,11 +37,10 @@ struct ARCalibrationView: View {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 32, weight: .medium))
                             .foregroundColor(.white)
-                            .padding(20)
-                            .padding(.top, 40)  // Additional top padding to clear safe area
-
                     }
                     .buttonStyle(.plain)
+                    .padding(.top, 60)
+                    .padding(.leading, 20)
                     
                     Spacer()
                 }

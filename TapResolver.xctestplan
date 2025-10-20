@@ -1,0 +1,37 @@
+{
+  "configurations" : [
+    {
+      "id" : "5B5CDB3D-5086-4891-BF4A-5160CAAADFE2",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:TapResolver.xcodeproj",
+      "identifier" : "6BDF50CA2E779EF700CBB5E5",
+      "name" : "TapResolver"
+    }
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:TapResolver.xcodeproj",
+        "identifier" : "6BDF50D72E779EF900CBB5E5",
+        "name" : "TapResolverTests"
+      }
+    },
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:TapResolver.xcodeproj",
+        "identifier" : "6BDF50E12E779EF900CBB5E5",
+        "name" : "TapResolverUITests"
+      }
+    }
+  ],
+  "version" : 1
+}
