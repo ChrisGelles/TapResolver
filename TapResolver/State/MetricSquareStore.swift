@@ -24,6 +24,7 @@ final class MetricSquareStore: ObservableObject {
     }
 
     @Published private(set) var squares: [Square] = []
+    @Published var activeSquareID: UUID? = nil
     let maxSquares = 4
 
     // persistence
@@ -141,5 +142,23 @@ final class MetricSquareStore: ObservableObject {
         // clear in-memory without saving
         squares.removeAll()
         objectWillChange.send()
+    }
+    
+    // MARK: - Selection
+    
+    func toggleSelection(id: UUID) {
+        if activeSquareID == id {
+            activeSquareID = nil
+        } else {
+            activeSquareID = id
+        }
+    }
+    
+    func isActive(_ id: UUID) -> Bool {
+        return activeSquareID == id
+    }
+    
+    func deactivateAll() {
+        activeSquareID = nil
     }
 }

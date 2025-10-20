@@ -247,9 +247,16 @@ struct MetricSquareDrawer: View {
         .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(0.08))
+                .fill(squares.isActive(sq.id) 
+                    ? Color.white.opacity(0.2) 
+                    : Color.white.opacity(0.08))
         )
         .contentShape(Rectangle())
+        .onTapGesture {
+            if sq.isLocked {
+                squares.toggleSelection(id: sq.id)
+            }
+        }
     }
 
     private var idealOpenHeight: CGFloat {
