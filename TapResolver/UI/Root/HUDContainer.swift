@@ -45,6 +45,7 @@ struct HUDContainer: View {
     @State private var showFilesPicker = false
     @State private var lastExportURL: URL? = nil
     @State private var showARCalibration = false
+    @State private var showMetricSquareAR = false
 
     @State private var selectedBeaconForTxPower: String? = nil
     @State private var showScanQuality = true  // Temporary: always show for testing
@@ -217,6 +218,29 @@ struct HUDContainer: View {
                 .transition(.move(edge: .leading).combined(with: .opacity))
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
             }
+            
+            // AR Calibration button for Metric Square (only when square active)
+            if metricSquares.activeSquareID != nil {
+                Button(action: {
+                    print("Launching Metric Square AR Calibration")
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        showMetricSquareAR = true
+                    }
+                }) {
+                    Image(systemName: "square.dashed")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 56, height: 56)
+                        .background(
+                            Circle()
+                                .fill(Color.orange.opacity(0.9))
+                                .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                        )
+                }
+                .buttonStyle(.plain)
+                .transition(.move(edge: .leading).combined(with: .opacity))
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: metricSquares.activeSquareID)
+            }
         }
         .zIndex(1000)
     }
@@ -295,6 +319,14 @@ struct HUDContainer: View {
             ARCalibrationView(
                 isPresented: $showARCalibration,
                 mapPointID: activeID
+            )
+            .allowsHitTesting(true)
+        }
+        
+        if showMetricSquareAR, let activeID = metricSquares.activeSquareID {
+            MetricSquareARView(
+                isPresented: $showMetricSquareAR,
+                squareID: activeID
             )
             .allowsHitTesting(true)
         }
