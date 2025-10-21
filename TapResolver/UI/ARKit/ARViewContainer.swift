@@ -118,9 +118,19 @@ struct ARViewContainer: UIViewRepresentable {
             
             let circleNode = SCNNode(geometry: circle)
             //circleNode.eulerAngles.x = .pi / 2
-            //circleNode.eulerAngles = SCNVector3Zero
-            //circleNode.eulerAngles.x = .pi //.pi / 2
             crosshairNode.addChildNode(circleNode)
+            
+            // Outer confidence ring (hidden by default, shown when surface is stable)
+            let outerCircle = SCNTorus(ringRadius: 0.18, pipeRadius: 0.002) // 15cm radius (30cm diameter)
+            let outerMaterial = SCNMaterial()
+            outerMaterial.diffuse.contents = UIColor.white.withAlphaComponent(0.5)
+            outerCircle.materials = [outerMaterial]
+            
+            let outerCircleNode = SCNNode(geometry: outerCircle)
+            //outerCircleNode.eulerAngles.x = .pi / 2
+            outerCircleNode.isHidden = true
+            outerCircleNode.name = "outerConfidenceRing"
+            crosshairNode.addChildNode(outerCircleNode)
             
             // Create crosshair lines
             let lineLength: CGFloat = 0.1
@@ -168,6 +178,9 @@ struct ARViewContainer: UIViewRepresentable {
                 //crosshair.simdWorldOrientation = simd_quatf(angle: 0, axis: simd_float3(0, 1, 0))
                 crosshair.isHidden = false
                 
+                // Check surface confidence
+                updateSurfaceConfidence(for: result, crosshair: crosshair)
+                
                 // Check for corner snapping
                 if let snappedPosition = findNearbyCorner(from: result.worldTransform.columns.3) {
                     crosshair.simdPosition = snappedPosition
@@ -183,6 +196,34 @@ struct ARViewContainer: UIViewRepresentable {
                 }
             } else {
                 crosshair.isHidden = true
+            }
+        }
+        
+        private func updateSurfaceConfidence(for result: ARRaycastResult, crosshair: SCNNode) {
+            guard let arView = arView,
+                  let outerRing = crosshair.childNode(withName: "outerConfidenceRing", recursively: false) else { return }
+            
+            // Get the plane anchor if available
+            if let planeAnchor = result.anchor as? ARPlaneAnchor,
+               planeAnchor.alignment == .horizontal {
+                let planeExtent = planeAnchor.planeExtent
+                let planeArea = planeExtent.width * planeExtent.height
+                
+                // Consider plane "confident" if it's larger than 0.5 square meters
+                let isConfident = planeArea > 0.5
+                
+                outerRing.isHidden = !isConfident
+                
+                // Optionally pulse the outer ring when confident
+                if isConfident && outerRing.opacity == 1.0 {
+                    let pulse = SCNAction.sequence([
+                        SCNAction.fadeOpacity(to: 0.3, duration: 0.8),
+                        SCNAction.fadeOpacity(to: 1.0, duration: 0.8)
+                    ])
+                    outerRing.runAction(SCNAction.repeatForever(pulse))
+                }
+            } else {
+                outerRing.isHidden = true
             }
         }
         
@@ -511,7 +552,7 @@ struct ARViewContainer: UIViewRepresentable {
             
             let planeNode = SCNNode(geometry: plane)
             planeNode.simdPosition = planeAnchor.center
-            planeNode.eulerAngles.x = .pi
+            planeNode.eulerAngles.x = -.pi/2
             
             return planeNode
         }
