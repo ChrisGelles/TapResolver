@@ -41,9 +41,6 @@ struct HUDContainer: View {
     @StateObject private var beaconLogger = SimpleBeaconLogger()
 
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
-    @State private var didExport = false
-    @State private var showFilesPicker = false
-    @State private var lastExportURL: URL? = nil
     @State private var showARCalibration = false
     @State private var showMetricSquareAR = false
 
@@ -343,7 +340,6 @@ struct HUDContainer: View {
             durationSlider
             countdownDisplay
             logDataButton
-            exportButton
         }
     }
 
@@ -427,45 +423,6 @@ struct HUDContainer: View {
     }
 
     @ViewBuilder
-    private var exportButton: some View {
-        HStack(spacing: 8) {
-            if let record = scanUtility.lastScanRecord {
-                Button("Export Last Scan") {
-                    exportLastScanV1(record: record)
-                }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.green.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
-            }
-
-            if let activePoint = mapPointStore.activePoint {
-                Button("Export All Scans") {
-                    exportAllScansForPoint(activePoint: activePoint)
-                }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.blue.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
-            }
-        }
-        .sheet(isPresented: $showFilesPicker) {
-            Group {
-                if let url = lastExportURL {
-                    DocumentExportPicker(fileURL: url) { success in
-                        didExport = success
-                    }
-                } else {
-                    EmptyView()
-                }
-            }
-        }
-        .alert("Exported", isPresented: $didExport) {
-            Button("OK", role: .cancel) {}
-        }
-    }
 
     private func handleLogDataButtonTap() {
         guard let activePoint = mapPointStore.activePoint else {
@@ -511,120 +468,6 @@ struct HUDContainer: View {
         )
     }
 
-    private func exportAllScansForPoint(activePoint: MapPointStore.MapPoint) {
-        do {
-            let locationID = PersistenceContext.shared.locationID
-            let pointID = activePoint.id.uuidString
-
-            let history = try MapPointHistoryBuilder.loadAll(locationID: locationID, pointID: pointID)
-
-            let bundle = MapPointScanBundleV1(
-                locationID: history.locationID,
-                pointID: history.pointID,
-                createdAtISO: JSONKit.iso8601.string(from: Date()),
-                scans: history.scans
-            )
-
-            let data = try JSONKit.encoder().encode(bundle)
-
-            let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("mappoint_scans_\(pointID)_\(Date().timeIntervalSince1970).json")
-            try data.write(to: tempURL)
-
-            lastExportURL = tempURL
-            showFilesPicker = true
-
-            print("ðŸ“¦ Exported \(history.scans.count) scans for point \(pointID)")
-        } catch {
-            print("âŒ Failed to export all scans for point: \(error)")
-        }
-    }
-
-    private func exportLastScanV1(record: MapPointScanUtility.ScanRecord) {
-        do {
-            let locationID = PersistenceContext.shared.locationID
-
-            let lockedSquares = metricSquares.squares.filter { $0.isLocked }
-            let squaresToUse = lockedSquares.isEmpty ? metricSquares.squares : lockedSquares
-            guard let square = squaresToUse.first else {
-                print("âŒ No metric squares available for pixels per meter calculation")
-                return
-            }
-            let ppm = Double(square.side) / square.meters
-
-            guard let activePoint = mapPointStore.activePoint else {
-                print("âŒ No active map point available")
-                return
-            }
-            let pointPx = CGPoint(x: activePoint.mapPoint.x, y: activePoint.mapPoint.y)
-
-            let beaconsPx: [String: CGPoint] = Dictionary(uniqueKeysWithValues:
-                beaconDotStore.dots.compactMap { dot in
-                    guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
-                    return (dot.beaconID, dot.mapPoint)
-                }
-            )
-
-            let elevations: [String: Double?] = Dictionary(uniqueKeysWithValues:
-                beaconDotStore.dots.compactMap { dot in
-                    guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
-                    return (dot.beaconID, beaconDotStore.getElevation(for: dot.beaconID))
-                }
-            )
-
-            let beaconMeta: [String: (name: String, color: [Double]?, model: String?)] =
-                Dictionary(uniqueKeysWithValues:
-                    beaconDotStore.dots.compactMap { dot in
-                        guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
-                        var rgb: [Double]? = nil
-                        if let comps = UIColor(dot.color).cgColor.components, comps.count >= 3 {
-                            rgb = [Double(comps[0]), Double(comps[1]), Double(comps[2])]
-                        }
-                        return (dot.beaconID, (name: dot.beaconID, color: rgb, model: "BC04P"))
-                    }
-                )
-
-            let beaconIBeacon: [String: (uuid: String, major: Int, minor: Int, measuredPower: Int)] = [:]
-            let beaconEddystone: [String: (namespace: String, instance: String, txPower: Int)] = [:]
-
-            let beaconRadio: [String: (txPowerSetting: Int?, advertisingInterval: Int?)] =
-                Dictionary(uniqueKeysWithValues:
-                    beaconDotStore.dots.compactMap { dot in
-                        guard beaconLists.beacons.contains(dot.beaconID) else { return nil }
-                        let interval = beaconDotStore.getAdvertisingInterval(for: dot.beaconID)
-                        return (dot.beaconID, (
-                            txPowerSetting: beaconDotStore.getTxPower(for: dot.beaconID),
-                            advertisingInterval: Int(interval)
-                        ))
-                    }
-                )
-
-            let result = try ScanV1Exporter.buildJSON(
-                from: record,
-                locationID: locationID,
-                ppm: ppm,
-                pointPx: pointPx,
-                beaconsPx: beaconsPx,
-                elevations: elevations,
-                beaconMeta: beaconMeta,
-                beaconIBeacon: beaconIBeacon,
-                beaconEddystone: beaconEddystone,
-                beaconRadio: beaconRadio,
-                mapResolution: mapTransform.mapSize
-            )
-
-            let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent(result.filename)
-            try result.json.write(to: tempURL)
-
-            lastExportURL = tempURL
-            showFilesPicker = true
-
-            print("ðŸ“¦ Exported scan V1 with distances for \(beaconsPx.count) beacons")
-        } catch {
-            print("âŒ Failed to export scan V1: \(error)")
-        }
-    }
 }
 
 

@@ -116,24 +116,6 @@ struct MapPointLogView: View {
                         .foregroundColor(.yellow)
                 }
                 
-                // RECOVERY BUTTON (temporary - delete after successful recovery)
-                Button(action: {
-                    mapPointStore.recoverFromSessionFiles()
-                }) {
-                    Image(systemName: "bandage.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.green)
-                }
-                
-                // SESSION RECONNECTION BUTTON (temporary - delete after successful recovery)
-                Button(action: {
-                    mapPointStore.reconnectSessionFiles()
-                }) {
-                    Image(systemName: "link.circle.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.blue)
-                }
-                
                 // Export button
                 Button(action: {
                     Task { await exportAllSessions() }
