@@ -86,6 +86,8 @@ public final class MapPointStore: ObservableObject {
             public struct Metadata: Codable {
                 public let name: String
                 public let model: String?
+                public let txPower: Int?
+                public let msInt: Int?
             }
         }
     }

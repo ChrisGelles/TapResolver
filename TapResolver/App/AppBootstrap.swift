@@ -80,7 +80,9 @@ struct AppBootstrap: ViewModifier {
                     ibeaconUUID: nil,
                     ibeaconMajor: nil,
                     ibeaconMinor: nil,
-                    ibeaconMeasuredPower: nil
+                    ibeaconMeasuredPower: nil,
+                    txPower: nil,
+                    msInt: nil
                 )
             }
 
@@ -111,7 +113,15 @@ struct AppBootstrap: ViewModifier {
                 ibeaconUUID: device?.ibeaconUUID,
                 ibeaconMajor: device?.ibeaconMajor,
                 ibeaconMinor: device?.ibeaconMinor,
-                ibeaconMeasuredPower: device?.ibeaconMeasuredPower
+                ibeaconMeasuredPower: device?.ibeaconMeasuredPower,
+                txPower: store.getTxPower(for: beaconID),
+                msInt: {
+                    print("🎯 Creating BeaconMeta for beaconID: '\(beaconID)'")
+                    let interval = store.getAdvertisingInterval(for: beaconID)
+                    let rounded = Int(interval.rounded())
+                    print("   Raw interval: \(interval), Rounded: \(rounded)")
+                    return rounded
+                }()
             )
         }
         

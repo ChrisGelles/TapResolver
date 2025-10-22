@@ -126,7 +126,10 @@ public final class MapPointScanUtility: ObservableObject {
         public let ibeaconMinor: Int?
         public let ibeaconMeasuredPower: Int?
         
-        public init(beaconID: String, name: String?, posX_m: Double?, posY_m: Double?, posZ_m: Double?, txPowerSettingDbm: Int?, ibeaconUUID: String?, ibeaconMajor: Int?, ibeaconMinor: Int?, ibeaconMeasuredPower: Int?) {
+        public let txPower: Int?
+        public let msInt: Int?
+        
+        public init(beaconID: String, name: String?, posX_m: Double?, posY_m: Double?, posZ_m: Double?, txPowerSettingDbm: Int?, ibeaconUUID: String?, ibeaconMajor: Int?, ibeaconMinor: Int?, ibeaconMeasuredPower: Int?, txPower: Int?, msInt: Int?) {
             self.beaconID = beaconID
             self.name = name
             self.posX_m = posX_m
@@ -137,6 +140,8 @@ public final class MapPointScanUtility: ObservableObject {
             self.ibeaconMajor = ibeaconMajor
             self.ibeaconMinor = ibeaconMinor
             self.ibeaconMeasuredPower = ibeaconMeasuredPower
+            self.txPower = txPower
+            self.msInt = msInt
         }
     }
 
@@ -437,7 +442,7 @@ public final class MapPointScanUtility: ObservableObject {
             print("   Samples in obin: \(obin.total)")
             print("   Samples in windowSamples: \(windowSamples[beaconID]?.count ?? 0)")
             
-            let meta = resolveBeaconMeta(beaconID) ?? BeaconMeta(beaconID: beaconID, name: nil, posX_m: nil, posY_m: nil, posZ_m: nil, txPowerSettingDbm: nil, ibeaconUUID: nil, ibeaconMajor: nil, ibeaconMinor: nil, ibeaconMeasuredPower: nil)
+            let meta = resolveBeaconMeta(beaconID) ?? BeaconMeta(beaconID: beaconID, name: nil, posX_m: nil, posY_m: nil, posZ_m: nil, txPowerSettingDbm: nil, ibeaconUUID: nil, ibeaconMajor: nil, ibeaconMinor: nil, ibeaconMeasuredPower: nil, txPower: nil, msInt: nil)
             let samples = obin.total
             let med = obin.medianDbm
             
@@ -674,10 +679,18 @@ public final class MapPointScanUtility: ObservableObject {
                             samples: agg.rawSamples.map { 
                                 MapPointStore.ScanSession.RssiSample(rssi: $0.rssi, ms: $0.ms)
                             },
-                            meta: MapPointStore.ScanSession.BeaconData.Metadata(
-                                name: agg.beacon.name ?? agg.beacon.beaconID,
-                                model: "BC04P"
-                            )
+                            meta: {
+                                print("📝 Creating Metadata for beacon: '\(agg.beacon.beaconID)'")
+                                print("   agg.beacon.txPower: \(agg.beacon.txPower?.description ?? "nil")")
+                                print("   agg.beacon.msInt: \(agg.beacon.msInt?.description ?? "nil")")
+                                
+                                return MapPointStore.ScanSession.BeaconData.Metadata(
+                                    name: agg.beacon.name ?? agg.beacon.beaconID,
+                                    model: "BC04P",
+                                    txPower: agg.beacon.txPower,
+                                    msInt: agg.beacon.msInt
+                                )
+                            }()
                         )
                     }
                 )

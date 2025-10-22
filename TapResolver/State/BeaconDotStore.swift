@@ -57,6 +57,7 @@ public final class BeaconDotStore: ObservableObject {
         loadLocks()
         loadElevations()
         loadTxPower()
+        loadAdvertisingIntervals()
         loadDotsFromDisk()
     }
 
@@ -160,7 +161,16 @@ public final class BeaconDotStore: ObservableObject {
     }
     
     public func getAdvertisingInterval(for beaconID: String) -> Double {
-        return advertisingIntervalByID[beaconID] ?? defaultAdvertisingInterval
+        let result = advertisingIntervalByID[beaconID] ?? defaultAdvertisingInterval
+        
+        // ADD DIAGNOSTIC OUTPUT:
+        print("🔍 getAdvertisingInterval called:")
+        print("   beaconID: '\(beaconID)'")
+        print("   advertisingIntervalByID['\(beaconID)']: \(advertisingIntervalByID[beaconID]?.description ?? "nil")")
+        print("   Returning: \(result)")
+        print("   All keys in advertisingIntervalByID: \(Array(advertisingIntervalByID.keys).sorted())")
+        
+        return result
     }
     
     public func displayAdvertisingInterval(for beaconID: String) -> String {
