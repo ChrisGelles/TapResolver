@@ -56,10 +56,16 @@ public final class MapPointStore: ObservableObject {
         
         public var id: String { sessionID }
         
+        public struct RssiSample: Codable {
+            public let rssi: Int  // RSSI value in dBm
+            public let ms: Int64  // Milliseconds since session start
+        }
+        
         public struct BeaconData: Codable {
             public let beaconID: String
             public let stats: Stats
             public let hist: Histogram
+            public let samples: [RssiSample]?  // Optional for backward compatibility
             public let meta: Metadata
             
             public struct Stats: Codable {

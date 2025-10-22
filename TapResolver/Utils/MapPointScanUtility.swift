@@ -70,6 +70,7 @@ public final class MapPointScanUtility: ObservableObject {
     private var wallClockStart: Date?
     private var wallClockEnd: Date?
     private var windowBins: [String: Obin] = [:] // beaconID -> Obin
+    private var windowSamples: [String: [(rssi: Int, timestamp: Date)]] = [:]
     private var excludedBeacons: Set<String> = [] // Track excluded beacons for debug output
     private var cancellables = Set<AnyCancellable>()
 
@@ -203,6 +204,11 @@ public final class MapPointScanUtility: ObservableObject {
         }
     }
 
+    public struct RawRssiSample: Codable {
+        public let rssi: Int
+        public let ms: Int64
+    }
+
     public struct BeaconScanAggregate: Codable {
         public let beacon: BeaconMeta
         public let samples: Int
@@ -211,7 +217,8 @@ public final class MapPointScanUtility: ObservableObject {
         public let p90Dbm: Int?
         public let madDb: Double?
         public let obin: Obin
-        public init(beacon: BeaconMeta, samples: Int, medianDbm: Int?, p10Dbm: Int?, p90Dbm: Int?, madDb: Double?, obin: Obin) {
+        public let rawSamples: [RawRssiSample]
+        public init(beacon: BeaconMeta, samples: Int, medianDbm: Int?, p10Dbm: Int?, p90Dbm: Int?, madDb: Double?, obin: Obin, rawSamples: [RawRssiSample]) {
             self.beacon = beacon
             self.samples = samples
             self.medianDbm = medianDbm
@@ -219,6 +226,7 @@ public final class MapPointScanUtility: ObservableObject {
             self.p90Dbm = p90Dbm
             self.madDb = madDb
             self.obin = obin
+            self.rawSamples = rawSamples
         }
     }
 
@@ -313,6 +321,7 @@ public final class MapPointScanUtility: ObservableObject {
         wallClockEnd = nil
         secondsRemaining = durationSeconds
         windowBins.removeAll(keepingCapacity: true)
+        windowSamples.removeAll()
         excludedBeacons.removeAll()
 
         let sid = sessionID ?? config.defaultSessionID
@@ -361,6 +370,7 @@ public final class MapPointScanUtility: ObservableObject {
         isScanning = false
         activePoint = nil
         windowBins.removeAll()
+        windowSamples.removeAll()
     }
 
     /// Ingest a single BLE advertisement. Call this from BluetoothScanner's discovery callback.
@@ -385,6 +395,9 @@ public final class MapPointScanUtility: ObservableObject {
         var obin = windowBins[beaconID] ?? Obin(binMinDbm: config.binMinDbm, binMaxDbm: config.binMaxDbm, binSizeDb: config.binSizeDb)
         obin.add(rssiDbm)
         windowBins[beaconID] = obin
+        
+        // Capture raw sample with timestamp
+        windowSamples[beaconID, default: []].append((rssi: rssiDbm, timestamp: Date()))
     }
 
     // MARK: - Internals
@@ -398,19 +411,44 @@ public final class MapPointScanUtility: ObservableObject {
         let duration = end.timeIntervalSince(start)
 
         guard let point = activePoint else {
+            print("⚠️ finishScan called but activePoint is nil")
+            print("   windowBins count: \(windowBins.count)")
+            print("   windowSamples count: \(windowSamples.count)")
+            
             isScanning = false
             windowBins.removeAll()
+            windowSamples.removeAll()
             return
         }
+
+        print("\n🏁 FINISH SCAN:")
+        print("   Point ID: \(point.pointID)")
+        print("   Duration: \(duration)s")
+        print("   windowBins count: \(windowBins.count)")
+        print("   windowSamples count: \(windowSamples.count)")
 
         // Build per-beacon aggregates
         var aggregates: [BeaconScanAggregate] = []
         aggregates.reserveCapacity(windowBins.count)
 
         for (beaconID, obin) in windowBins {
+            print("🔍 Processing beacon in finishScan:")
+            print("   BeaconID: \(beaconID)")
+            print("   Samples in obin: \(obin.total)")
+            print("   Samples in windowSamples: \(windowSamples[beaconID]?.count ?? 0)")
+            
             let meta = resolveBeaconMeta(beaconID) ?? BeaconMeta(beaconID: beaconID, name: nil, posX_m: nil, posY_m: nil, posZ_m: nil, txPowerSettingDbm: nil, ibeaconUUID: nil, ibeaconMajor: nil, ibeaconMinor: nil, ibeaconMeasuredPower: nil)
             let samples = obin.total
             let med = obin.medianDbm
+            
+            // Convert raw samples to millisecond offsets relative to scan start
+            let rawSamples = windowSamples[beaconID] ?? []
+            let relativeSamples = rawSamples.map { sample -> RawRssiSample in
+                let offsetSeconds = sample.timestamp.timeIntervalSince(start)
+                let offsetMs = Int64(offsetSeconds * 1000.0)
+                return RawRssiSample(rssi: sample.rssi, ms: offsetMs)
+            }
+            
             let agg = BeaconScanAggregate(
                 beacon: meta,
                 samples: samples,
@@ -418,7 +456,8 @@ public final class MapPointScanUtility: ObservableObject {
                 p10Dbm: obin.p10Dbm,
                 p90Dbm: obin.p90Dbm,
                 madDb: obin.madDb(relativeTo: med),
-                obin: obin
+                obin: obin,
+                rawSamples: relativeSamples
             )
             aggregates.append(agg)
 
@@ -476,6 +515,7 @@ public final class MapPointScanUtility: ObservableObject {
         isScanning = false
         activePoint = nil
         windowBins.removeAll()
+        windowSamples.removeAll()
     }
 
     private func updateRunningAggregate(pointID: String, beaconID: String, obin newObin: Obin, duration: TimeInterval) {
@@ -631,6 +671,9 @@ public final class MapPointScanUtility: ObservableObject {
                                 binSize_db: agg.obin.binSizeDb,
                                 counts: agg.obin.counts
                             ),
+                            samples: agg.rawSamples.map { 
+                                MapPointStore.ScanSession.RssiSample(rssi: $0.rssi, ms: $0.ms)
+                            },
                             meta: MapPointStore.ScanSession.BeaconData.Metadata(
                                 name: agg.beacon.name ?? agg.beacon.beaconID,
                                 model: "BC04P"
