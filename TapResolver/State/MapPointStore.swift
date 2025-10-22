@@ -17,11 +17,11 @@ extension Notification.Name {
 
 // MARK: - Store of Map Points (log points) with map-local positions
 public final class MapPointStore: ObservableObject {
-    private let ctx = PersistenceContext.shared
+    internal let ctx = PersistenceContext.shared
     private var scanSessionCancellable: AnyCancellable?
     
     // CRITICAL: Prevent data loss during reload operations
-    private var isReloading: Bool = false
+    internal var isReloading: Bool = false
     
     // DIAGNOSTIC: Track which instance this is
     internal let instanceID = UUID().uuidString
@@ -95,7 +95,7 @@ public final class MapPointStore: ObservableObject {
         }
     }
 
-    @Published public private(set) var points: [MapPoint] = []
+    @Published public internal(set) var points: [MapPoint] = []
     @Published public private(set) var activePointID: UUID? = nil
     
     /// Get the currently active map point
@@ -285,7 +285,7 @@ public final class MapPointStore: ObservableObject {
         let sessions: [ScanSession]
     }
 
-    private func save() {
+    internal func save() {
         // CRITICAL: Never save during reload operations (prevents data loss)
         guard !isReloading else {
             print("⚠️ MapPointStore.save() blocked during reload operation")
