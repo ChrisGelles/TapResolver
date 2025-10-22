@@ -370,42 +370,19 @@ public final class MapPointStore: ObservableObject {
                                 }
                             }
                             
-                            // DIAGNOSTIC: Read the raw content of the first file
+                            // DIAGNOSTIC: Dump COMPLETE first session file
                             if let firstFile = jsonFiles.first {
                                 let firstFileURL = scansDir.appendingPathComponent(firstFile)
-                                print("\n🔍 RAW CONTENT OF FIRST FILE: \(firstFile)")
+                                print("\n" + String(repeating: "=", count: 80))
+                                print("📄 COMPLETE SESSION FILE DUMP: \(firstFile)")
+                                print(String(repeating: "=", count: 80))
                                 
-                                if let data = try? Data(contentsOf: firstFileURL) {
-                                    print("   File size: \(data.count) bytes")
-                                    
-                                    // Try to read as string
-                                    if let jsonString = String(data: data, encoding: .utf8) {
-                                        let preview = String(jsonString.prefix(500))
-                                        print("   Content preview (first 500 chars):")
-                                        print("   ---")
-                                        print(preview)
-                                        print("   ---")
-                                        
-                                        // Try to parse as JSON
-                                        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                                            print("\n   ✅ Valid JSON structure")
-                                            print("   Top-level keys: \(json.keys.sorted())")
-                                            
-                                            // Check for scan data structure
-                                            if let beacons = json["beacons"] as? [[String: Any]] {
-                                                print("   Beacons array: \(beacons.count) items")
-                                                if let first = beacons.first {
-                                                    print("   First beacon keys: \(first.keys.sorted())")
-                                                }
-                                            }
-                                        } else {
-                                            print("   ❌ Failed to parse as JSON")
-                                        }
-                                    } else {
-                                        print("   ❌ Failed to decode as UTF-8 string")
-                                    }
+                                if let data = try? Data(contentsOf: firstFileURL),
+                                   let jsonString = String(data: data, encoding: .utf8) {
+                                    print(jsonString)  // Print ENTIRE file, no truncation
+                                    print(String(repeating: "=", count: 80))
                                 } else {
-                                    print("   ❌ Failed to read file data")
+                                    print("❌ Failed to read file")
                                 }
                             }
                             
@@ -609,8 +586,76 @@ public final class MapPointStore: ObservableObject {
         print("âœ… Reload complete: \(points.count) points loaded")
     }
     
+    /// ONE-TIME CLEANUP: Delete legacy Scans directory
+    /// Removes old V1 session JSON files that are now redundant (data in UserDefaults)
+    public func deleteScansDirectory() {
+        print("\n" + String(repeating: "=", count: 80))
+        print("🗑️ CLEANUP: Deleting legacy Scans directory")
+        print(String(repeating: "=", count: 80))
+        
+        let scansDir = ctx.locationDir.appendingPathComponent("Scans", isDirectory: true)
+        let fileManager = FileManager.default
+        
+        guard fileManager.fileExists(atPath: scansDir.path) else {
+            print("ℹ️ No Scans directory found - nothing to delete")
+            print(String(repeating: "=", count: 80) + "\n")
+            return
+        }
+        
+        do {
+            // Count files before deletion
+            let files = try fileManager.contentsOfDirectory(atPath: scansDir.path)
+            let jsonFiles = files.filter { $0.hasSuffix(".json") }
+            
+            print("📁 Found Scans directory at: \(scansDir.path)")
+            print("   Contains \(jsonFiles.count) JSON files")
+            print("   Total items: \(files.count)")
+            
+            // Delete the entire directory
+            try fileManager.removeItem(at: scansDir)
+            
+            print("\n✅ CLEANUP COMPLETE")
+            print("   Deleted: \(scansDir.path)")
+            print("   Files removed: \(jsonFiles.count)")
+            print("   All session data is safely stored in UserDefaults")
+            print(String(repeating: "=", count: 80) + "\n")
+            
+        } catch {
+            print("❌ Cleanup failed: \(error)")
+            print(String(repeating: "=", count: 80) + "\n")
+        }
+    }
+    
+    /// Purge all session data from all map points (keeps map points, removes sessions only)
+    public func purgeAllSessions() {
+        print("\n" + String(repeating: "=", count: 80))
+        print("🗑️ PURGE: Removing all session data from map points")
+        print(String(repeating: "=", count: 80))
+        
+        let totalSessionsBefore = totalSessionCount()
+        let pointsCount = points.count
+        
+        print("   Map Points: \(pointsCount)")
+        print("   Total Sessions Before: \(totalSessionsBefore)")
+        
+        // Remove all sessions from all points
+        for i in 0..<points.count {
+            points[i].sessions.removeAll()
+        }
+        
+        // Save to UserDefaults
+        save()
+        
+        print("\n✅ PURGE COMPLETE")
+        print("   Map Points Kept: \(pointsCount)")
+        print("   Sessions Removed: \(totalSessionsBefore)")
+        print("   Map points still exist at their coordinates")
+        print("   Ready for fresh scanning sessions")
+        print(String(repeating: "=", count: 80) + "\n")
+    }
+    
     deinit {
-        print("ðŸ’¥ MapPointStore \(String(instanceID.prefix(8)))... deinitialized")
+        print("ðŸ'¥ MapPointStore \(String(instanceID.prefix(8)))... deinitialized")
     }
     
 }

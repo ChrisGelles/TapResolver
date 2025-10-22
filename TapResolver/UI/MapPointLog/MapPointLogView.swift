@@ -26,6 +26,7 @@ struct MapPointLogView: View {
     @State private var selectedPointID: String? = nil
     @State private var showExportPicker = false
     @State private var exportData: Data?
+    @State private var showPurgeConfirmation = false
     
     private let minHeight: CGFloat = 0
     private let maxHeight: CGFloat = 0.5
@@ -71,6 +72,16 @@ struct MapPointLogView: View {
                 print("✅ Export saved to: \(url)")
             }
         }
+        .alert("Purge All Sessions?", isPresented: $showPurgeConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                mapPointStore.purgeAllSessions()
+            }
+        } message: {
+            let sessionCount = mapPointStore.totalSessionCount()
+            let pointCount = mapPointStore.points.count
+            Text("This will delete \(sessionCount) session\(sessionCount == 1 ? "" : "s") from \(pointCount) map point\(pointCount == 1 ? "" : "s").\n\nMap point locations will be preserved, but all beacon scan data will be permanently removed.")
+        }
         .onAppear {
             print("🖼️ MapPointLogView using MapPointStore ID: \(String(mapPointStore.instanceID.prefix(8)))...")
             
@@ -114,6 +125,15 @@ struct MapPointLogView: View {
                     Image(systemName: "stethoscope")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.yellow)
+                }
+                
+                // Purge sessions button
+                Button(action: {
+                    showPurgeConfirmation = true
+                }) {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.red)
                 }
                 
                 // Export button
