@@ -20,6 +20,9 @@ public final class MapPointStore: ObservableObject {
     private let ctx = PersistenceContext.shared
     private var scanSessionCancellable: AnyCancellable?
     
+    // CRITICAL: Prevent data loss during reload operations
+    private var isReloading: Bool = false
+    
     // DIAGNOSTIC: Track which instance this is
     internal let instanceID = UUID().uuidString
     
@@ -107,13 +110,45 @@ public final class MapPointStore: ObservableObject {
     }
     
     public func clearAndReloadForActiveLocation() {
+        print("🔄 MapPointStore: Starting reload for location '\(ctx.locationID)'")
+        
+        // Set flag to prevent saves during reload
+        isReloading = true
+        
+        // Clear in-memory data
         points.removeAll()
         activePointID = nil
+        
+        // Load fresh data for current location
         load()
+        
+        // Re-enable saves
+        isReloading = false
+        
         objectWillChange.send()
         
         // Notify that map points have reloaded - trigger session index rebuild
         NotificationCenter.default.post(name: .mapPointsDidReload, object: nil)
+        
+        print("✅ MapPointStore: Reload complete - \(points.count) points loaded")
+    }
+    
+    /// Explicitly clear all map points for the current location
+    /// This bypasses the empty-save protection and WILL delete data
+    public func clearAllPoints() {
+        print("🗑️ MapPointStore: Explicitly clearing all points for location '\(ctx.locationID)'")
+        print("   Previous count: \(points.count)")
+        
+        points.removeAll()
+        activePointID = nil
+        
+        // Temporarily allow empty save for explicit clear
+        let wasReloading = isReloading
+        isReloading = false
+        save()
+        isReloading = wasReloading
+        
+        print("   ✅ All points cleared and saved")
     }
     
     func flush() {
@@ -142,6 +177,16 @@ public final class MapPointStore: ObservableObject {
                 
                 self?.addSession(pointID: pointID, session: sessionData)
             }
+        
+        // Listen for location changes and reload points
+        NotificationCenter.default.addObserver(
+            forName: .locationDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            print("📍 MapPointStore: Location changed, reloading...")
+            self?.reloadForActiveLocation()
+        }
     }
 
     /// Add a new map point at the specified coordinates
@@ -241,6 +286,23 @@ public final class MapPointStore: ObservableObject {
     }
 
     private func save() {
+        // CRITICAL: Never save during reload operations (prevents data loss)
+        guard !isReloading else {
+            print("⚠️ MapPointStore.save() blocked during reload operation")
+            return
+        }
+        
+        // CRITICAL: Never save empty data if we previously had data
+        if points.isEmpty {
+            // Check if UserDefaults has existing data
+            if let existingDTO: [MapPointDTO] = ctx.read(pointsKey, as: [MapPointDTO].self),
+               !existingDTO.isEmpty {
+                print("🛑 CRITICAL: Blocked save of empty array - UserDefaults has \(existingDTO.count) points")
+                print("   This prevents accidental data loss. If you want to delete all points, use clearAllPoints() explicitly.")
+                return
+            }
+        }
+        
         let dto = points.map { MapPointDTO(
             id: $0.id,
             x: $0.mapPoint.x,
@@ -267,6 +329,36 @@ public final class MapPointStore: ObservableObject {
         print("   Current locationID: \(ctx.locationID)")
         
         if let dto: [MapPointDTO] = ctx.read(pointsKey, as: [MapPointDTO].self) {
+            
+            // DIAGNOSTIC: Print raw museum data if this is museum location
+            if ctx.locationID == "museum" {
+                print("\n" + String(repeating: "=", count: 80))
+                print("🔍 MUSEUM LOCATION DATA DIAGNOSTIC")
+                print(String(repeating: "=", count: 80))
+                print("Full key: locations.museum.MapPoints_v1")
+                print("Raw DTO count: \(dto.count)")
+                
+                if dto.isEmpty {
+                    print("⚠️ Museum location has EMPTY array stored in UserDefaults")
+                } else {
+                    print("📍 Museum Map Points:")
+                    for (index, point) in dto.enumerated() {
+                        print("   [\(index + 1)] Point ID: \(point.id.uuidString)")
+                        print("       Position: (\(Int(point.x)), \(Int(point.y)))")
+                        print("       Created: \(point.createdDate)")
+                        print("       Sessions: \(point.sessions.count)")
+                        if !point.sessions.isEmpty {
+                            for (sIndex, session) in point.sessions.enumerated() {
+                                print("          Session \(sIndex + 1): \(session.sessionID)")
+                                print("             Beacons: \(session.beacons.count)")
+                                print("             Duration: \(session.duration_s)s")
+                            }
+                        }
+                    }
+                }
+                print(String(repeating: "=", count: 80) + "\n")
+            }
+            
             self.points = dto.map { dtoItem in
                 MapPoint(
                     id: dtoItem.id,
