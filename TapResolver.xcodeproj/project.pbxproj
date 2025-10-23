@@ -112,10 +112,11 @@
 			fileSystemSynchronizedGroups = (
 				6BDF50CD2E779EF700CBB5E5 /* TapResolver */,
 			);
-			name = TapResolver;
-			packageProductDependencies = (
-			);
-			productName = TapResolver;
+		name = TapResolver;
+		packageProductDependencies = (
+			6BAF103E2EAA685C00DCE1FD /* ZIPFoundation */,
+		);
+		productName = TapResolver;
 			productReference = 6BDF50CB2E779EF700CBB5E5 /* TapResolver.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -197,6 +198,9 @@
 			);
 			mainGroup = 6BDF50C22E779EF700CBB5E5;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				6BAF103D2EAA685C00DCE1FC /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6BDF50CC2E779EF700CBB5E5 /* Products */;
 			projectDirPath = "";
@@ -576,6 +580,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		6BAF103E2EAA685C00DCE1FD /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6BAF103D2EAA685C00DCE1FC /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		6BAF103D2EAA685C00DCE1FC /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.20;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
 	};
 	rootObject = 6BDF50C32E779EF700CBB5E5 /* Project object */;
 }
