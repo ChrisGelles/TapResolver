@@ -82,7 +82,18 @@ enum UserDataBackup {
             throw BackupError.archiveReadFailed
         }
         
-        try archive.extract(to: tempDir)
+        // Extract all entries
+        for entry in archive {
+            let destinationURL = tempDir.appendingPathComponent(entry.path)
+            // Create intermediate directories if needed
+            if entry.type == .directory {
+                try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+            } else {
+                let parentDir = destinationURL.deletingLastPathComponent()
+                try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
+                _ = try archive.extract(entry, to: destinationURL)
+            }
+        }
         
         // Restore each location
         for locationID in targetLocationIDs {
@@ -124,14 +135,20 @@ enum UserDataBackup {
         // 2. Backup dots.json
         let dotsFile = locationDir.appendingPathComponent("dots.json")
         if FileManager.default.fileExists(atPath: dotsFile.path) {
-            try archive.addEntry(with: "\(locationID)/dots.json", relativeTo: locationDir)
+            let dotsData = try Data(contentsOf: dotsFile)
+            try archive.addEntry(with: "\(locationID)/dots.json", type: .file, uncompressedSize: UInt32(dotsData.count), provider: { position, size in
+                return dotsData.subdata(in: position..<position+size)
+            })
             print("   ✓ dots.json")
         }
         
         // 3. Backup location.json
         let locationFile = locationDir.appendingPathComponent("location.json")
         if FileManager.default.fileExists(atPath: locationFile.path) {
-            try archive.addEntry(with: "\(locationID)/location.json", relativeTo: locationDir)
+            let locationData = try Data(contentsOf: locationFile)
+            try archive.addEntry(with: "\(locationID)/location.json", type: .file, uncompressedSize: UInt32(locationData.count), provider: { position, size in
+                return locationData.subdata(in: position..<position+size)
+            })
             print("   ✓ location.json")
         }
         
@@ -140,11 +157,25 @@ enum UserDataBackup {
             let assetsDir = locationDir.appendingPathComponent("assets", isDirectory: true)
             if FileManager.default.fileExists(atPath: assetsDir.path) {
                 let assetFiles = try FileManager.default.contentsOfDirectory(at: assetsDir, includingPropertiesForKeys: nil)
+                print("   📁 Found \(assetFiles.count) file(s) in assets directory:")
                 for assetFile in assetFiles {
-                    try archive.addEntry(with: "\(locationID)/assets/\(assetFile.lastPathComponent)", relativeTo: locationDir)
-                    print("   ✓ assets/\(assetFile.lastPathComponent)")
+                    let fileName = assetFile.lastPathComponent
+                    let fileSize = (try? FileManager.default.attributesOfItem(atPath: assetFile.path)[.size] as? Int64) ?? 0
+                    let fileSizeMB = Double(fileSize) / 1_048_576.0
+                    
+                    print("      • \(fileName) (\(String(format: "%.2f", fileSizeMB)) MB)")
+                    
+                    let assetData = try Data(contentsOf: assetFile)
+                    try archive.addEntry(with: "\(locationID)/assets/\(fileName)", type: .file, uncompressedSize: UInt32(assetData.count), provider: { position, size in
+                        return assetData.subdata(in: position..<position+size)
+                    })
+                    print("      ✓ Backed up \(fileName)")
                 }
+            } else {
+                print("   ⚠️ No assets directory found at: \(assetsDir.path)")
             }
+        } else {
+            print("   ⏭️ Skipping assets (user chose not to include)")
         }
     }
     
@@ -169,7 +200,12 @@ enum UserDataBackup {
         for key in keys {
             let fullKey = prefix + key
             if let value = ud.object(forKey: fullKey) {
-                data[key] = value
+                // Convert Data objects to Base64 strings for JSON compatibility
+                if let dataValue = value as? Data {
+                    data[key] = ["__data_base64": dataValue.base64EncodedString()]
+                } else {
+                    data[key] = value
+                }
             }
         }
         
@@ -192,7 +228,14 @@ enum UserDataBackup {
             let prefix = "locations.\(locationID)."
             
             for (key, value) in dict {
-                ud.set(value, forKey: prefix + key)
+                // Convert Base64 strings back to Data objects
+                if let dataDict = value as? [String: String],
+                   let base64String = dataDict["__data_base64"],
+                   let restoredData = Data(base64Encoded: base64String) {
+                    ud.set(restoredData, forKey: prefix + key)
+                } else {
+                    ud.set(value, forKey: prefix + key)
+                }
             }
             
             print("   ✓ UserDefaults: \(dict.count) keys restored")
@@ -202,14 +245,18 @@ enum UserDataBackup {
         let dotsFile = extractedDir.appendingPathComponent("dots.json")
         if FileManager.default.fileExists(atPath: dotsFile.path) {
             try FileManager.default.createDirectory(at: targetLocationDir, withIntermediateDirectories: true)
-            try FileManager.default.copyItem(at: dotsFile, to: targetLocationDir.appendingPathComponent("dots.json"))
+            let targetDotsFile = targetLocationDir.appendingPathComponent("dots.json")
+            try? FileManager.default.removeItem(at: targetDotsFile) // Remove existing
+            try FileManager.default.copyItem(at: dotsFile, to: targetDotsFile)
             print("   ✓ dots.json")
         }
         
         // 3. Restore location.json
         let locationFile = extractedDir.appendingPathComponent("location.json")
         if FileManager.default.fileExists(atPath: locationFile.path) {
-            try FileManager.default.copyItem(at: locationFile, to: targetLocationDir.appendingPathComponent("location.json"))
+            let targetLocationFile = targetLocationDir.appendingPathComponent("location.json")
+            try? FileManager.default.removeItem(at: targetLocationFile) // Remove existing
+            try FileManager.default.copyItem(at: locationFile, to: targetLocationFile)
             print("   ✓ location.json")
         }
         

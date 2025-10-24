@@ -8,6 +8,19 @@ struct LocationMenuView: View {
     @State private var showingPhotosPicker = false
     @State private var showingDocumentPicker = false
 
+    // Backup/Restore state
+    @State private var backupMode: BackupMode = .none
+    @State private var selectedLocationIDs: Set<String> = []
+    @State private var includeAssets: Bool = true
+    @State private var showBackupPicker: Bool = false
+    @State private var showRestorePicker: Bool = false
+    @State private var showRestoreConfirmation: Bool = false
+    @State private var backupURL: URL?
+
+    enum BackupMode {
+        case none, selectForBackup, selectForRestore
+    }
+
     // Hard-coded IDs & asset names
     private let homeID = "home"
     private let homeTitle = "Chris's House"
@@ -30,59 +43,89 @@ struct LocationMenuView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                ScrollView {
-                    LazyVGrid(columns: columns, alignment: .center, spacing: 12) {
+                VStack(spacing: 0) {
+                    // Main content ScrollView
+                    ScrollView {
+                        LazyVGrid(columns: columns, alignment: .center, spacing: 12) {
 
-                        // --- Hard-coded chiclet: Home/Chris's House ---
-                        AssetLocationTile(
-                            title: homeTitle,
-                            imageName: defaultThumbAsset
-                        ) {
-                            seedIfNeeded(id: homeID,
-                                         title: homeTitle,
-                                         mapAsset: defaultMapAsset,
-                                         thumbAsset: defaultThumbAsset)
-                            locationManager.setCurrentLocation(homeID)
-                            locationManager.showLocationMenu = false
-                        }
-
-                        // --- Hard-coded chiclet: Museum (8192×8192 asset) ---
-                        AssetLocationTile(
-                            title: museumTitle,
-                            imageName: museumThumbAsset
-                        ) {
-                            seedIfNeeded(id: museumID,
-                                         title: museumTitle,
-                                         mapAsset: museumMapAsset,
-                                         thumbAsset: museumThumbAsset)
-                            locationManager.setCurrentLocation(museumID)
-                            locationManager.showLocationMenu = false
-                        }
-
-                        // --- Dynamic locations from sandbox, excluding the two hard-coded IDs ---
-                        ForEach(locationSummaries.filter { $0.id != homeID && $0.id != museumID }) { summary in
-                            LocationTileView(summary: summary) {
-                                locationManager.setCurrentLocation(summary.id)
-                                locationManager.showLocationMenu = false
+                            // --- Hard-coded chiclet: Home/Chris's House ---
+                            SelectableAssetLocationTile(
+                                title: homeTitle,
+                                imageName: defaultThumbAsset,
+                                locationID: homeID,
+                                isInSelectionMode: backupMode != .none,
+                                isSelected: selectedLocationIDs.contains(homeID)
+                            ) {
+                                if backupMode != .none {
+                                    toggleSelection(homeID)
+                                } else {
+                                    seedIfNeeded(id: homeID,
+                                                 title: homeTitle,
+                                                 mapAsset: defaultMapAsset,
+                                                 thumbAsset: defaultThumbAsset)
+                                    locationManager.setCurrentLocation(homeID)
+                                    locationManager.showLocationMenu = false
+                                }
                             }
-                            .aspectRatio(1, contentMode: .fit)
-                        }
 
-                        // --- Square "New Map" tile at the end of the grid ---
-                        NewMapTileView()
-                            .aspectRatio(1, contentMode: .fit)
-                            .onTapGesture { showingImportSheet = true }
+                            // --- Hard-coded chiclet: Museum (8192×8192 asset) ---
+                            SelectableAssetLocationTile(
+                                title: museumTitle,
+                                imageName: museumThumbAsset,
+                                locationID: museumID,
+                                isInSelectionMode: backupMode != .none,
+                                isSelected: selectedLocationIDs.contains(museumID)
+                            ) {
+                                if backupMode != .none {
+                                    toggleSelection(museumID)
+                                } else {
+                                    seedIfNeeded(id: museumID,
+                                                 title: museumTitle,
+                                                 mapAsset: museumMapAsset,
+                                                 thumbAsset: museumThumbAsset)
+                                    locationManager.setCurrentLocation(museumID)
+                                    locationManager.showLocationMenu = false
+                                }
+                            }
+
+                            // --- Dynamic locations from sandbox, excluding the two hard-coded IDs ---
+                            ForEach(locationSummaries.filter { $0.id != homeID && $0.id != museumID }) { summary in
+                                SelectableLocationTileView(
+                                    summary: summary,
+                                    isInSelectionMode: backupMode != .none,
+                                    isSelected: selectedLocationIDs.contains(summary.id)
+                                ) {
+                                    if backupMode != .none {
+                                        toggleSelection(summary.id)
+                                    } else {
+                                        locationManager.setCurrentLocation(summary.id)
+                                        locationManager.showLocationMenu = false
+                                    }
+                                }
+                                .aspectRatio(1, contentMode: .fit)
+                            }
+
+                            // --- Square "New Map" tile at the end of the grid ---
+                            if backupMode == .none {
+                                NewMapTileView()
+                                    .aspectRatio(1, contentMode: .fit)
+                                    .onTapGesture { showingImportSheet = true }
+                            }
+                        }
+                        .padding(.top, 12)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 24)
                     }
-                    .padding(.top, 12)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 24)
-                }
-                .refreshable {
-                    _ = LocationImportUtils.reconcileLocationsOnMenuOpen(
-                        seedDefaultIfEmpty: false,
-                        defaultAssetName: nil
-                    )
-                    locationSummaries = LocationImportUtils.listLocationSummaries()
+                    .refreshable {
+                        _ = LocationImportUtils.reconcileLocationsOnMenuOpen(
+                            seedDefaultIfEmpty: false,
+                            defaultAssetName: nil
+                        )
+                        locationSummaries = LocationImportUtils.listLocationSummaries()
+                    }
+                    
+                    // Backup/Restore controls at bottom
+                    backupRestoreControls
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -133,7 +176,127 @@ struct LocationMenuView: View {
                     importFromFile(url)
                 }
             }
+            .fileExporter(
+                isPresented: $showBackupPicker,
+                document: backupURL.map { ZIPDocument(url: $0) },
+                contentType: .zip,
+                defaultFilename: backupURL?.lastPathComponent ?? "TapResolver_Backup.zip"
+            ) { result in
+                if case .success(let url) = result {
+                    print("✅ Backup saved to: \(url)")
+                }
+            }
+            .fileImporter(
+                isPresented: $showRestorePicker,
+                allowedContentTypes: [.zip],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first {
+                        showRestoreConfirmation = true
+                        backupURL = url
+                    }
+                case .failure(let error):
+                    print("❌ File selection failed: \(error)")
+                }
+            }
+            .alert("Restore Data?", isPresented: $showRestoreConfirmation) {
+                Button("Cancel", role: .cancel) {
+                    backupMode = .none
+                    selectedLocationIDs.removeAll()
+                }
+                Button("Restore", role: .destructive) {
+                    if let url = backupURL {
+                        performRestore(from: url)
+                    }
+                }
+            } message: {
+                Text("This will overwrite \(selectedLocationIDs.count) location(s) with data from the backup file.\n\nAll existing data for these locations will be permanently replaced.")
+            }
         }
+    }
+
+    private var backupRestoreControls: some View {
+        VStack(spacing: 0) {
+            Divider()
+                .background(Color.white.opacity(0.3))
+            
+            if backupMode == .none {
+                // Default state: Show Backup and Restore buttons
+                HStack(spacing: 16) {
+                    Button(action: {
+                        backupMode = .selectForBackup
+                        selectedLocationIDs.removeAll()
+                    }) {
+                        HStack {
+                            Image(systemName: "square.and.arrow.down.fill")
+                            Text("Backup")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                    }
+                    
+                    Button(action: {
+                        backupMode = .selectForRestore
+                        selectedLocationIDs.removeAll()
+                    }) {
+                        HStack {
+                            Image(systemName: "square.and.arrow.up.fill")
+                            Text("Restore")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.green)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                    }
+                }
+                .padding()
+                
+            } else {
+                // Selection mode: Show options and action buttons
+                VStack(spacing: 12) {
+                    if backupMode == .selectForBackup {
+                        Toggle("Include map images", isOn: $includeAssets)
+                            .foregroundColor(.white)
+                            .padding(.horizontal)
+                    }
+                    
+                    HStack(spacing: 16) {
+                        Button("Cancel") {
+                            backupMode = .none
+                            selectedLocationIDs.removeAll()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.gray.opacity(0.3))
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                        
+                        Button(backupMode == .selectForBackup ? "Backup Selected" : "Restore Selected") {
+                            if backupMode == .selectForBackup {
+                                performBackup()
+                            } else {
+                                showRestorePicker = true
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(selectedLocationIDs.isEmpty ? Color.gray.opacity(0.3) : Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                        .disabled(selectedLocationIDs.isEmpty)
+                    }
+                    .padding(.horizontal)
+                }
+                .padding(.vertical, 12)
+            }
+        }
+        .background(Color.black.opacity(0.9))
     }
 
     // MARK: - Seeding (idempotent)
@@ -179,6 +342,45 @@ struct LocationMenuView: View {
             loadLocationSummaries()
         } catch {
             print("❌ Failed to import from file: \(error)")
+        }
+    }
+
+    // MARK: - Backup/Restore Helpers
+
+    private func toggleSelection(_ locationID: String) {
+        if selectedLocationIDs.contains(locationID) {
+            selectedLocationIDs.remove(locationID)
+        } else {
+            selectedLocationIDs.insert(locationID)
+        }
+    }
+
+    private func performBackup() {
+        do {
+            let zipURL = try UserDataBackup.backupLocations(
+                locationIDs: Array(selectedLocationIDs),
+                includeAssets: includeAssets
+            )
+            backupURL = zipURL
+            showBackupPicker = true
+            backupMode = .none
+            selectedLocationIDs.removeAll()
+        } catch {
+            print("❌ Backup failed: \(error)")
+        }
+    }
+
+    private func performRestore(from url: URL) {
+        do {
+            try UserDataBackup.restoreLocations(
+                from: url,
+                targetLocationIDs: Array(selectedLocationIDs)
+            )
+            backupMode = .none
+            selectedLocationIDs.removeAll()
+            loadLocationSummaries()
+        } catch {
+            print("❌ Restore failed: \(error)")
         }
     }
 }
@@ -259,6 +461,160 @@ struct ImportSourceSheet: View {
             Spacer(minLength: 0)
         }
         .background(Color.black.ignoresSafeArea())
+    }
+}
+
+// MARK: - Selectable Asset Tile
+
+private struct SelectableAssetLocationTile: View {
+    let title: String
+    let imageName: String
+    let locationID: String
+    let isInSelectionMode: Bool
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 6) {
+                ZStack(alignment: .topTrailing) {
+                    Image(imageName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipped()
+                    
+                    if isInSelectionMode {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.title)
+                            .foregroundColor(isSelected ? .blue : .white)
+                            .background(Circle().fill(Color.black.opacity(0.5)).padding(-4))
+                            .padding(8)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(isSelected ? Color.blue : Color.white, lineWidth: isSelected ? 3 : 2)
+                )
+                .shadow(radius: 4, y: 2)
+
+                Text(title)
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Selectable Location Tile
+
+private struct SelectableLocationTileView: View {
+    let summary: LocationSummary
+    let isInSelectionMode: Bool
+    let isSelected: Bool
+    let onTap: () -> Void
+    
+    @State private var thumbnailImage: UIImage?
+    
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 8) {
+                ZStack(alignment: .topTrailing) {
+                    if let image = thumbnailImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.3))
+                            .overlay(
+                                Image(systemName: "photo")
+                                    .font(.title2)
+                                    .foregroundColor(.white.opacity(0.6))
+                            )
+                    }
+                    
+                    if isInSelectionMode {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.title)
+                            .foregroundColor(isSelected ? .blue : .white)
+                            .background(Circle().fill(Color.black.opacity(0.5)).padding(-4))
+                            .padding(8)
+                    }
+                }
+                .frame(height: 120)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3)
+                )
+                .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                
+                Text(summary.name)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                
+                Text(formatDate(summary.updatedISO))
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.7))
+            }
+        }
+        .buttonStyle(.plain)
+        .onAppear {
+            loadThumbnail()
+        }
+    }
+    
+    private func loadThumbnail() {
+        guard let image = UIImage(contentsOfFile: summary.thumbnailURL.path) else {
+            return
+        }
+        thumbnailImage = image
+    }
+    
+    private func formatDate(_ isoString: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: isoString) else {
+            return "Unknown"
+        }
+        
+        let displayFormatter = DateFormatter()
+        displayFormatter.dateStyle = .medium
+        displayFormatter.timeStyle = .none
+        return displayFormatter.string(from: date)
+    }
+}
+
+// MARK: - ZIP Document Wrapper
+
+struct ZIPDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.zip] }
+    
+    let url: URL
+    
+    init(url: URL) {
+        self.url = url
+    }
+    
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".zip")
+        try data.write(to: tempURL)
+        self.url = tempURL
+    }
+    
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        return try FileWrapper(url: url)
     }
 }
 
