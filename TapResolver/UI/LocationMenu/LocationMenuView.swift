@@ -308,8 +308,43 @@ struct LocationMenuView: View {
             thumbnailAssetName: thumbAsset,
             locationID: id,
             displayName: title,
-            longEdge: 4096 // downscale 8192x8192 to a display-friendly PNG
+            longEdge: 8192 // PRESERVE FULL RESOLUTION - do not downscale
         )
+        
+        // BACKUP SUPPORT: Copy embedded assets to Documents so they can be backed up
+        copyEmbeddedAssetsToDocuments(locationID: id, mapAsset: mapAsset, thumbAsset: thumbAsset)
+    }
+    
+    // MARK: - Asset Migration for Backup Support
+
+    private func copyEmbeddedAssetsToDocuments(locationID: String, mapAsset: String, thumbAsset: String) {
+        let ctx = PersistenceContext.shared
+        let assetsDir = ctx.docs.appendingPathComponent("locations/\(locationID)/assets", isDirectory: true)
+        
+        // Create assets directory if it doesn't exist
+        try? FileManager.default.createDirectory(at: assetsDir, withIntermediateDirectories: true)
+        
+        // Copy map image at FULL RESOLUTION (if not already there)
+        let mapDestination = assetsDir.appendingPathComponent("map_display.png")
+        if !FileManager.default.fileExists(atPath: mapDestination.path),
+           let mapImage = UIImage(named: mapAsset) {
+            // Preserve EXACT resolution - no downscaling
+            if let pngData = mapImage.pngData() {
+                try? pngData.write(to: mapDestination)
+                let sizeMB = Double(pngData.count) / 1_048_576.0
+                print("📋 Copied embedded map image for '\(locationID)' to Documents (\(String(format: "%.1f", sizeMB)) MB, \(Int(mapImage.size.width))×\(Int(mapImage.size.height)))")
+            }
+        }
+        
+        // Copy thumbnail (if not already there)
+        let thumbDestination = assetsDir.appendingPathComponent("thumbnail.jpg")
+        if !FileManager.default.fileExists(atPath: thumbDestination.path),
+           let thumbImage = UIImage(named: thumbAsset) {
+            if let jpegData = thumbImage.jpegData(compressionQuality: 0.85) {
+                try? jpegData.write(to: thumbDestination)
+                print("📋 Copied embedded thumbnail for '\(locationID)' to Documents")
+            }
+        }
     }
 
     // MARK: - Data
@@ -389,19 +424,32 @@ struct LocationMenuView: View {
 
 private struct AssetLocationTile: View {
     let title: String
+    let locationID: String
     let imageName: String
     let onTap: () -> Void
+    
+    @State private var thumbnailImage: UIImage?
 
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 6) {
                 ZStack {
-                    Image(imageName)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity)
-                        .aspectRatio(1, contentMode: .fit)
-                        .clipped()
+                    if let image = thumbnailImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity)
+                            .aspectRatio(1, contentMode: .fit)
+                            .clipped()
+                    } else {
+                        // Fallback to bundle asset while loading
+                        Image(imageName)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity)
+                            .aspectRatio(1, contentMode: .fit)
+                            .clipped()
+                    }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
@@ -418,6 +466,20 @@ private struct AssetLocationTile: View {
             }
         }
         .buttonStyle(.plain)
+        .onAppear {
+            loadThumbnail()
+        }
+    }
+    
+    private func loadThumbnail() {
+        // Try loading from Documents first (migrated assets)
+        let ctx = PersistenceContext.shared
+        let thumbURL = ctx.docs.appendingPathComponent("locations/\(locationID)/assets/thumbnail.jpg")
+        
+        if let image = UIImage(contentsOfFile: thumbURL.path) {
+            thumbnailImage = image
+        }
+        // Otherwise, fall back to bundle asset (already in Image(imageName))
     }
 }
 
@@ -473,17 +535,28 @@ private struct SelectableAssetLocationTile: View {
     let isInSelectionMode: Bool
     let isSelected: Bool
     let onTap: () -> Void
+    
+    @State private var thumbnailImage: UIImage?
 
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 6) {
                 ZStack(alignment: .topTrailing) {
-                    Image(imageName)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity)
-                        .aspectRatio(1, contentMode: .fit)
-                        .clipped()
+                    if let image = thumbnailImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity)
+                            .aspectRatio(1, contentMode: .fit)
+                            .clipped()
+                    } else {
+                        Image(imageName)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity)
+                            .aspectRatio(1, contentMode: .fit)
+                            .clipped()
+                    }
                     
                     if isInSelectionMode {
                         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
@@ -508,6 +581,20 @@ private struct SelectableAssetLocationTile: View {
             }
         }
         .buttonStyle(.plain)
+        .onAppear {
+            loadThumbnail()
+        }
+    }
+    
+    private func loadThumbnail() {
+        // Try loading from Documents first (migrated assets)
+        let ctx = PersistenceContext.shared
+        let thumbURL = ctx.docs.appendingPathComponent("locations/\(locationID)/assets/thumbnail.jpg")
+        
+        if let image = UIImage(contentsOfFile: thumbURL.path) {
+            thumbnailImage = image
+        }
+        // Otherwise, fall back to bundle asset (already in Image(imageName))
     }
 }
 
