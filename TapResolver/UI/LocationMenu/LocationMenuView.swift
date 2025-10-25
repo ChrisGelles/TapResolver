@@ -60,6 +60,23 @@ struct ImportResult {
     let backupPath: String?
 }
 
+struct WizardContext {
+    let archive: Archive
+    let metadata: BackupMetadata
+    let conflicts: [ImportConflict]
+    var currentIndex: Int
+    var decisions: [ImportDecision]
+
+    var currentConflict: ImportConflict? {
+        guard currentIndex < conflicts.count else { return nil }
+        return conflicts[currentIndex]
+    }
+
+    var progressText: String {
+        return "Location \(currentIndex + 1) of \(conflicts.count)"
+    }
+}
+
 struct LocationMenuView: View {
     @EnvironmentObject private var locationManager: LocationManager
     @State private var locationSummaries: [LocationSummary] = []
@@ -80,6 +97,7 @@ struct LocationMenuView: View {
     @State private var showingImportPicker = false
     @State private var importWizardState: ImportWizardState?
     @State private var importError: String?
+    @State private var wizardContext: WizardContext?
 
     enum BackupMode {
         case none, selectForBackup, selectForRestore
@@ -278,6 +296,33 @@ struct LocationMenuView: View {
                 case .failure(let error):
                     importError = error.localizedDescription
                     print("❌ Import file selection failed: \(error)")
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { importWizardState != nil },
+                set: { if !$0 {
+                    importWizardState = nil
+                    wizardContext = nil
+                }}
+            )) {
+                if let state = importWizardState, let context = wizardContext {
+                    ImportWizardSheet(
+                        state: state,
+                        context: context,
+                        onActionChoice: { action in
+                            handleActionChoice(action)
+                        },
+                        onDecision: { decision in
+                            recordDecisionAndAdvance(decision)
+                        },
+                        onExecute: { decisions, archive in
+                            executeImport(decisions: decisions, archive: archive)
+                        },
+                        onCancel: {
+                            importWizardState = nil
+                            wizardContext = nil
+                        }
+                    )
                 }
             }
             .alert("Restore Data?", isPresented: $showRestoreConfirmation) {
@@ -544,7 +589,7 @@ struct LocationMenuView: View {
             // 5. Detect conflicts
             let conflicts = detectConflicts(metadata: metadata)
             
-            // 6. Print analysis
+            // 6. Print analysis (keep for debugging)
             for conflict in conflicts {
                 let icon = conflict.conflictType == .none ? "🆕" :
                           conflict.conflictType == .exactMatch ? "🔄" : "❓"
@@ -558,6 +603,20 @@ struct LocationMenuView: View {
                                              existingStub: existing)
                     print("   Recommendation: \(rec.0) - \(rec.1)")
                 }
+            }
+            
+            // 7. Start wizard
+            wizardContext = WizardContext(
+                archive: archive,
+                metadata: metadata,
+                conflicts: conflicts,
+                currentIndex: 0,
+                decisions: []
+            )
+            
+            // Show first conflict
+            if let firstConflict = conflicts.first {
+                importWizardState = .reviewingConflict(firstConflict, archive, metadata)
             }
             
         } catch {
@@ -645,6 +704,324 @@ struct LocationMenuView: View {
                 return (.skip, "✅ Your version is newer with MORE data (\(existing.sessionCount) vs \(importMetadata.sessionCount) sessions) [Recommended]")
             } else {
                 return (.importAsNew, "Your version is newer but import has more data. Import both to compare?")
+            }
+        }
+    }
+    
+    private func handleActionChoice(_ action: ImportAction) {
+        guard let context = wizardContext,
+              let conflict = context.currentConflict else { return }
+
+        switch action {
+        case .skip:
+            let decision = ImportDecision(
+                conflict: conflict,
+                action: .skip,
+                newName: nil,
+                createBackup: false
+            )
+            recordDecisionAndAdvance(decision)
+
+        case .importAsNew:
+            importWizardState = .namingNewLocation(conflict, context.archive, context.metadata)
+
+        case .replace:
+            importWizardState = .confirmReplace(conflict, context.archive, context.metadata)
+        }
+    }
+
+    private func recordDecisionAndAdvance(_ decision: ImportDecision) {
+        guard var context = wizardContext else { return }
+
+        print("📝 Decision: \(decision.action) for \(decision.conflict.locationName)")
+
+        context.decisions.append(decision)
+        context.currentIndex += 1
+        wizardContext = context
+
+        if let nextConflict = context.currentConflict {
+            importWizardState = .reviewingConflict(nextConflict, context.archive, context.metadata)
+        } else {
+            importWizardState = .importing(context.decisions, context.archive)
+        }
+    }
+    
+    // MARK: - Import Execution
+    
+    private func executeImport(decisions: [ImportDecision], archive: Archive) {
+        print("\n" + String(repeating: "=", count: 80))
+        print("🚀 EXECUTING IMPORT")
+        print(String(repeating: "=", count: 80))
+        
+        var results: [ImportResult] = []
+        
+        for decision in decisions {
+            let result: ImportResult
+            
+            switch decision.action {
+            case .skip:
+                result = ImportResult(
+                    locationName: decision.conflict.locationName,
+                    action: .skip,
+                    success: true,
+                    error: nil,
+                    backupPath: nil
+                )
+                print("⏭️  Skipped: \(decision.conflict.locationName)")
+                
+            case .importAsNew:
+                result = executeImportAsNew(decision: decision, archive: archive)
+                
+            case .replace:
+                result = executeReplace(decision: decision, archive: archive)
+            }
+            
+            results.append(result)
+        }
+        
+        print("\n✅ IMPORT COMPLETE")
+        print("   Success: \(results.filter { $0.success }.count)/\(results.count)")
+        print(String(repeating: "=", count: 80) + "\n")
+        
+        // Show completion screen
+        importWizardState = .complete(results)
+        
+        // Reload location list
+        loadLocationSummaries()
+    }
+
+    private func executeImportAsNew(decision: ImportDecision, archive: Archive) -> ImportResult {
+        do {
+            let newLocationID = UUID().uuidString
+            let newName = decision.newName ?? (decision.conflict.locationName + " (Imported)")
+            
+            print("📦 Importing as new: \(newName) (ID: \(newLocationID))")
+            
+            // Extract location from archive
+            try extractLocationFromArchive(
+                archive: archive,
+                sourceLocationID: decision.conflict.locationID,
+                targetLocationID: newLocationID
+            )
+            
+            // Update location stub with new name and ID
+            try updateLocationStub(
+                locationID: newLocationID,
+                newName: newName,
+                originalID: decision.conflict.originalID
+            )
+            
+            print("✅ Import successful: \(newName)")
+            
+            return ImportResult(
+                locationName: newName,
+                action: .importAsNew,
+                success: true,
+                error: nil,
+                backupPath: nil
+            )
+        } catch {
+            print("❌ Import failed: \(decision.conflict.locationName) - \(error)")
+            return ImportResult(
+                locationName: decision.conflict.locationName,
+                action: .importAsNew,
+                success: false,
+                error: error.localizedDescription,
+                backupPath: nil
+            )
+        }
+    }
+
+    private func executeReplace(decision: ImportDecision, archive: Archive) -> ImportResult {
+        guard let existingLocation = decision.conflict.existingLocation else {
+            return ImportResult(
+                locationName: decision.conflict.locationName,
+                action: .replace,
+                success: false,
+                error: "No existing location found",
+                backupPath: nil
+            )
+        }
+        
+        do {
+            var backupPath: String? = nil
+            
+            // Create backup if requested
+            if decision.createBackup {
+                print("💾 Creating backup before replace...")
+                let backupID = "\(existingLocation.id)_backup_\(Int(Date().timeIntervalSince1970))"
+                try createLocationBackup(
+                    sourceLocationID: existingLocation.id,
+                    backupLocationID: backupID
+                )
+                backupPath = backupID
+                print("✅ Backup created: \(backupID)")
+            }
+            
+            print("🔄 Replacing: \(existingLocation.name)")
+            
+            // Delete existing location data
+            try deleteLocationData(locationID: existingLocation.id)
+            
+            // Extract from archive to existing ID
+            try extractLocationFromArchive(
+                archive: archive,
+                sourceLocationID: decision.conflict.locationID,
+                targetLocationID: existingLocation.id
+            )
+            
+            // Preserve the name (don't rename on replace)
+            try updateLocationStub(
+                locationID: existingLocation.id,
+                newName: existingLocation.name,
+                originalID: decision.conflict.originalID
+            )
+            
+            print("✅ Replace successful: \(existingLocation.name)")
+            
+            return ImportResult(
+                locationName: existingLocation.name,
+                action: .replace,
+                success: true,
+                error: nil,
+                backupPath: backupPath
+            )
+        } catch {
+            print("❌ Replace failed: \(decision.conflict.locationName) - \(error)")
+            return ImportResult(
+                locationName: decision.conflict.locationName,
+                action: .replace,
+                success: false,
+                error: error.localizedDescription,
+                backupPath: nil
+            )
+        }
+    }
+    
+    private func extractLocationFromArchive(archive: Archive, sourceLocationID: String, targetLocationID: String) throws {
+        let ctx = PersistenceContext.shared
+        let targetDir = ctx.docs.appendingPathComponent("locations/\(targetLocationID)", isDirectory: true)
+        
+        // Create target directory
+        try FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true)
+        
+        print("   📂 Extracting to: \(targetLocationID)")
+        
+        // Extract all files for this location
+        for entry in archive {
+            let entryPath = entry.path
+            
+            // Check if this entry belongs to the source location
+            if entryPath.hasPrefix("\(sourceLocationID)/") {
+                // Calculate relative path and target path
+                let relativePath = String(entryPath.dropFirst("\(sourceLocationID)/".count))
+                let targetPath = targetDir.appendingPathComponent(relativePath)
+                
+                // Create parent directory if needed
+                let parentDir = targetPath.deletingLastPathComponent()
+                try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
+                
+                // Extract file
+                if entry.type == .file {
+                    _ = try archive.extract(entry, to: targetPath)
+                    print("      ✓ \(relativePath)")
+                }
+            }
+        }
+        
+        // Restore UserDefaults data
+        let userDefaultsFile = targetDir.appendingPathComponent("userdefaults.json")
+        if FileManager.default.fileExists(atPath: userDefaultsFile.path) {
+            let data = try Data(contentsOf: userDefaultsFile)
+            let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            
+            let ud = UserDefaults.standard
+            let prefix = "locations.\(targetLocationID)."
+            
+            for (key, value) in dict {
+                // Convert Base64 strings back to Data objects
+                if let dataDict = value as? [String: String],
+                   let base64String = dataDict["__data_base64"],
+                   let restoredData = Data(base64Encoded: base64String) {
+                    ud.set(restoredData, forKey: prefix + key)
+                } else {
+                    ud.set(value, forKey: prefix + key)
+                }
+            }
+            
+            print("      ✓ Restored UserDefaults (\(dict.count) keys)")
+        }
+    }
+
+    private func updateLocationStub(locationID: String, newName: String, originalID: String) throws {
+        let ctx = PersistenceContext.shared
+        let stubURL = ctx.docs.appendingPathComponent("locations/\(locationID)/location.json")
+        
+        // Read existing stub
+        let data = try Data(contentsOf: stubURL)
+        var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        
+        // Update ID and name
+        dict["id"] = locationID
+        dict["name"] = newName
+        // Keep originalID from import (this preserves the lineage)
+        
+        // Write back
+        let updatedData = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
+        try updatedData.write(to: stubURL)
+        
+        print("      ✓ Updated stub: \(newName)")
+    }
+
+    private func deleteLocationData(locationID: String) throws {
+        let ctx = PersistenceContext.shared
+        let locationDir = ctx.docs.appendingPathComponent("locations/\(locationID)")
+        
+        // Delete directory
+        try FileManager.default.removeItem(at: locationDir)
+        
+        // Clear UserDefaults keys
+        let defaults = UserDefaults.standard
+        let allKeys = defaults.dictionaryRepresentation().keys
+        let locationKeys = allKeys.filter { $0.contains("locations.\(locationID).") }
+        
+        for key in locationKeys {
+            defaults.removeObject(forKey: key)
+        }
+        
+        print("      ✓ Deleted existing data")
+    }
+
+    private func createLocationBackup(sourceLocationID: String, backupLocationID: String) throws {
+        let ctx = PersistenceContext.shared
+        let sourceDir = ctx.docs.appendingPathComponent("locations/\(sourceLocationID)")
+        let backupDir = ctx.docs.appendingPathComponent("locations/\(backupLocationID)")
+        
+        // Copy entire directory
+        try FileManager.default.copyItem(at: sourceDir, to: backupDir)
+        
+        // Update stub with backup ID and name
+        let stubURL = backupDir.appendingPathComponent("location.json")
+        let data = try Data(contentsOf: stubURL)
+        var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        
+        dict["id"] = backupLocationID
+        if let currentName = dict["name"] as? String {
+            dict["name"] = currentName + " (Backup)"
+        }
+        
+        let updatedData = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
+        try updatedData.write(to: stubURL)
+        
+        // Copy UserDefaults keys
+        let defaults = UserDefaults.standard
+        let allKeys = defaults.dictionaryRepresentation().keys
+        let locationKeys = allKeys.filter { $0.contains("locations.\(sourceLocationID).") }
+        
+        for key in locationKeys {
+            if let value = defaults.object(forKey: key) {
+                let backupKey = key.replacingOccurrences(of: "locations.\(sourceLocationID).", with: "locations.\(backupLocationID).")
+                defaults.set(value, forKey: backupKey)
             }
         }
     }
@@ -932,6 +1309,549 @@ struct ZIPDocument: FileDocument {
     
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         return try FileWrapper(url: url)
+    }
+}
+
+// MARK: - Import Wizard Views
+
+struct ImportWizardSheet: View {
+    let state: ImportWizardState
+    let context: WizardContext
+    let onActionChoice: (ImportAction) -> Void
+    let onDecision: (ImportDecision) -> Void
+    let onExecute: ([ImportDecision], Archive) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.95).ignoresSafeArea()
+
+            switch state {
+            case .reviewingConflict(let conflict, _, let metadata):
+                ReviewConflictView(
+                    conflict: conflict,
+                    metadata: metadata,
+                    context: context,
+                    onActionChoice: onActionChoice,
+                    onCancel: onCancel
+                )
+
+            case .namingNewLocation(let conflict, _, let metadata):
+                NameNewLocationView(
+                    conflict: conflict,
+                    metadata: metadata,
+                    onDecision: onDecision,
+                    onCancel: onCancel
+                )
+
+            case .confirmReplace(let conflict, _, let metadata):
+                ConfirmReplaceView(
+                    conflict: conflict,
+                    metadata: metadata,
+                    onDecision: onDecision,
+                    onCancel: onCancel
+                )
+
+            case .importing(let decisions, let archive):
+                ImportSummaryView(
+                    decisions: decisions,
+                    archive: archive,
+                    onExecute: {
+                        onExecute(decisions, archive)
+                    },
+                    onCancel: onCancel
+                )
+
+            case .complete(let results):
+                ImportCompleteView(
+                    results: results,
+                    onDismiss: onCancel
+                )
+
+            case .analyzing:
+                ProgressView("Analyzing backup...")
+                    .foregroundColor(.white)
+            }
+        }
+    }
+}
+
+struct ReviewConflictView: View {
+    let conflict: ImportConflict
+    let metadata: BackupMetadata
+    let context: WizardContext
+    let onActionChoice: (ImportAction) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Text(context.progressText)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.6))
+
+            Text(conflict.locationName)
+                .font(.title)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+
+            conflictIndicator
+
+            if let existing = conflict.existingLocation,
+               let importMeta = metadata.locations.first(where: { $0.id == conflict.locationID }) {
+                recommendationText(conflict: conflict, importMeta: importMeta, existing: existing, metadata: metadata)
+            }
+
+            VStack(spacing: 12) {
+                actionButton(title: "Skip", color: .gray, action: .skip)
+                actionButton(title: "Import as New", color: .blue, action: .importAsNew)
+
+                if conflict.existingLocation != nil {
+                    actionButton(title: "Replace Existing", color: .red, action: .replace)
+                }
+            }
+            .padding(.top, 8)
+
+            Button("Cancel Import") {
+                onCancel()
+            }
+            .foregroundColor(.white.opacity(0.5))
+            .padding(.top)
+        }
+        .padding(32)
+    }
+
+    private var conflictIndicator: some View {
+        HStack {
+            Image(systemName: conflictIcon)
+                .font(.largeTitle)
+            Text(conflictText)
+                .font(.headline)
+        }
+        .foregroundColor(conflictColor)
+        .padding()
+        .background(conflictColor.opacity(0.2))
+        .cornerRadius(12)
+    }
+
+    private var conflictIcon: String {
+        switch conflict.conflictType {
+        case .none: return "plus.circle"
+        case .exactMatch: return "arrow.triangle.2.circlepath"
+        case .probableMatch: return "questionmark.circle"
+        }
+    }
+
+    private var conflictText: String {
+        switch conflict.conflictType {
+        case .none: return "New Location"
+        case .exactMatch: return "Exact Match Found"
+        case .probableMatch: return "Possible Match Found"
+        }
+    }
+
+    private var conflictColor: Color {
+        switch conflict.conflictType {
+        case .none: return .green
+        case .exactMatch: return .orange
+        case .probableMatch: return .yellow
+        }
+    }
+
+    private func recommendationText(conflict: ImportConflict, importMeta: BackupMetadata.LocationSummary, existing: LocationStub, metadata: BackupMetadata) -> some View {
+        let formatter = ISO8601DateFormatter()
+        let importDate = formatter.date(from: metadata.exportDate) ?? Date.distantPast
+        let localDate = formatter.date(from: existing.updatedISO) ?? Date.distantPast
+        
+        // Format dates for display
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy/MM/dd 'at' h:mma"
+        
+        let importDateStr = dateFormatter.string(from: importDate)
+        let localDateStr = dateFormatter.string(from: localDate)
+        
+        // Build comparison text
+        let comparisonText = """
+        📦 Import version:
+        Last updated: \(importDateStr)
+        Data: \(importMeta.beaconCount) beacons, \(importMeta.sessionCount) sessions
+        
+        📱 Current version:
+        Last updated: \(localDateStr)
+        Data: \(existing.beaconCount) beacons, \(existing.sessionCount) sessions
+        """
+        
+        // Add recommendation
+        let recommendation: String
+        if importDate > localDate && importMeta.sessionCount > existing.sessionCount {
+            recommendation = "\n\n💡 Recommendation: Import version is newer with more data. Consider replacing."
+        } else if localDate > importDate && existing.sessionCount > importMeta.sessionCount {
+            recommendation = "\n\n💡 Recommendation: Current version is newer with more data. Consider skipping."
+        } else if importMeta.sessionCount > existing.sessionCount {
+            recommendation = "\n\n💡 Recommendation: Import has more data. Consider importing as new to compare."
+        } else {
+            recommendation = "\n\n💡 Recommendation: Current version has equal or more data. Consider skipping."
+        }
+        
+        return Text(comparisonText + recommendation)
+            .font(.body)
+            .foregroundColor(.white.opacity(0.8))
+            .multilineTextAlignment(.leading)
+            .padding()
+            .background(Color.white.opacity(0.1))
+            .cornerRadius(8)
+    }
+
+    private func actionButton(title: String, color: Color, action: ImportAction) -> some View {
+        Button(action: {
+            onActionChoice(action)
+        }) {
+            Text(title)
+                .font(.headline)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(color)
+                .cornerRadius(12)
+        }
+    }
+}
+
+struct NameNewLocationView: View {
+    let conflict: ImportConflict
+    let metadata: BackupMetadata
+    let onDecision: (ImportDecision) -> Void
+    let onCancel: () -> Void
+
+    @State private var newName: String = ""
+    @FocusState private var isTextFieldFocused: Bool
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Text("Import as New Location")
+                .font(.title)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+
+            Text("Enter a name for the imported location:")
+                .font(.body)
+                .foregroundColor(.white.opacity(0.8))
+
+            TextField("Location Name", text: $newName)
+                .textFieldStyle(.roundedBorder)
+                .focused($isTextFieldFocused)
+                .onAppear {
+                    newName = conflict.locationName + " (Imported)"
+                    isTextFieldFocused = true
+                }
+
+            HStack(spacing: 12) {
+                Button("Back") {
+                    onCancel()
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.gray)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+
+                Button("Continue") {
+                    let decision = ImportDecision(
+                        conflict: conflict,
+                        action: .importAsNew,
+                        newName: newName,
+                        createBackup: false
+                    )
+                    onDecision(decision)
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.gray.opacity(0.5) : Color.blue)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+                .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(32)
+    }
+}
+
+struct ConfirmReplaceView: View {
+    let conflict: ImportConflict
+    let metadata: BackupMetadata
+    let onDecision: (ImportDecision) -> Void
+    let onCancel: () -> Void
+
+    @State private var createBackup: Bool = true
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 60))
+                .foregroundColor(.red)
+
+            Text("Replace Existing Location?")
+                .font(.title)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+
+            Text("This will overwrite '\(conflict.locationName)' with imported data.")
+                .font(.body)
+                .foregroundColor(.white.opacity(0.8))
+                .multilineTextAlignment(.center)
+
+            if let existing = conflict.existingLocation {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Current location has:")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.6))
+                    Text("• \(existing.beaconCount) beacons")
+                        .foregroundColor(.white)
+                    Text("• \(existing.sessionCount) scan sessions")
+                        .foregroundColor(.white)
+                }
+                .padding()
+                .background(Color.red.opacity(0.2))
+                .cornerRadius(8)
+            }
+
+            Toggle("Create backup before replacing", isOn: $createBackup)
+                .foregroundColor(.white)
+                .padding()
+                .background(Color.white.opacity(0.1))
+                .cornerRadius(8)
+
+            HStack(spacing: 12) {
+                Button("Cancel") {
+                    onCancel()
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.gray)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+
+                Button("Replace") {
+                    let decision = ImportDecision(
+                        conflict: conflict,
+                        action: .replace,
+                        newName: nil,
+                        createBackup: createBackup
+                    )
+                    onDecision(decision)
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.red)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+            }
+        }
+        .padding(32)
+    }
+}
+
+struct ImportSummaryView: View {
+    let decisions: [ImportDecision]
+    let archive: Archive
+    let onExecute: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Text("Review Import Plan")
+                .font(.title)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+
+            Text("\(decisions.count) location(s) to process")
+                .font(.subheadline)
+                .foregroundColor(.white.opacity(0.6))
+
+            ScrollView {
+                VStack(spacing: 12) {
+                    ForEach(Array(decisions.enumerated()), id: \.offset) { index, decision in
+                        DecisionRowView(decision: decision)
+                    }
+                }
+            }
+            .frame(maxHeight: 400)
+
+            HStack(spacing: 12) {
+                Button("Cancel") {
+                    onCancel()
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.gray)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+
+                Button("Confirm") {
+                    onExecute()
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.blue)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+            }
+        }
+        .padding(32)
+    }
+}
+
+struct DecisionRowView: View {
+    let decision: ImportDecision
+
+    var body: some View {
+        HStack {
+            Image(systemName: actionIcon)
+                .foregroundColor(actionColor)
+                .frame(width: 30)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(decision.conflict.locationName)
+                    .font(.headline)
+                    .foregroundColor(.white)
+
+                Text(actionText)
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.6))
+
+                if let newName = decision.newName {
+                    Text("New name: \(newName)")
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                }
+
+                if decision.createBackup {
+                    Text("✓ Will create backup first")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                }
+            }
+
+            Spacer()
+        }
+        .padding()
+        .background(Color.white.opacity(0.1))
+        .cornerRadius(8)
+    }
+
+    private var actionIcon: String {
+        switch decision.action {
+        case .skip: return "xmark.circle"
+        case .importAsNew: return "plus.circle"
+        case .replace: return "arrow.triangle.2.circlepath"
+        }
+    }
+
+    private var actionColor: Color {
+        switch decision.action {
+        case .skip: return .gray
+        case .importAsNew: return .green
+        case .replace: return .orange
+        }
+    }
+
+    private var actionText: String {
+        switch decision.action {
+        case .skip: return "Skip (will not import)"
+        case .importAsNew: return "Import as new location"
+        case .replace: return "Replace existing location"
+        }
+    }
+}
+
+struct ImportCompleteView: View {
+    let results: [ImportResult]
+    let onDismiss: () -> Void
+
+    var successCount: Int {
+        results.filter { $0.success }.count
+    }
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Image(systemName: successCount == results.count ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .font(.system(size: 60))
+                .foregroundColor(successCount == results.count ? .green : .orange)
+
+            Text("Import Complete")
+                .font(.title)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+
+            Text("\(successCount) of \(results.count) location(s) imported successfully")
+                .font(.body)
+                .foregroundColor(.white.opacity(0.8))
+
+            ScrollView {
+                VStack(spacing: 12) {
+                    ForEach(Array(results.enumerated()), id: \.offset) { index, result in
+                        ResultRowView(result: result)
+                    }
+                }
+            }
+            .frame(maxHeight: 400)
+
+            Button("Done") {
+                onDismiss()
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Color.blue)
+            .foregroundColor(.white)
+            .cornerRadius(12)
+        }
+        .padding(32)
+    }
+}
+
+struct ResultRowView: View {
+    let result: ImportResult
+
+    var body: some View {
+        HStack {
+            Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundColor(result.success ? .green : .red)
+                .frame(width: 30)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(result.locationName)
+                    .font(.headline)
+                    .foregroundColor(.white)
+
+                if result.success {
+                    Text(successText)
+                        .font(.caption)
+                        .foregroundColor(.green)
+                } else if let error = result.error {
+                    Text("Failed: \(error)")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
+
+                if let backupPath = result.backupPath {
+                    Text("Backup: \(backupPath)")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            }
+
+            Spacer()
+        }
+        .padding()
+        .background(Color.white.opacity(0.1))
+        .cornerRadius(8)
+    }
+
+    private var successText: String {
+        switch result.action {
+        case .skip: return "Skipped"
+        case .importAsNew: return "Imported as new"
+        case .replace: return "Replaced existing"
+        }
     }
 }
 
