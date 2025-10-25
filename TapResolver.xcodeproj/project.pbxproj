@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		6BEDF80E2EAD0BB600357282 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 6BAF103E2EAA685C00DCE1FD /* ZIPFoundation */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		6BDF50D92E779EF900CBB5E5 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -30,9 +34,22 @@
 		6BDF50E22E779EF900CBB5E5 /* TapResolverUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TapResolverUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		6BEDF8C62EAD0F2F00357282 /* Exceptions for "TapResolver" folder in "TapResolver" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 6BDF50CA2E779EF700CBB5E5 /* TapResolver */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		6BDF50CD2E779EF700CBB5E5 /* TapResolver */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				6BEDF8C62EAD0F2F00357282 /* Exceptions for "TapResolver" folder in "TapResolver" target */,
+			);
 			path = TapResolver;
 			sourceTree = "<group>";
 		};
@@ -53,6 +70,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6BEDF80E2EAD0BB600357282 /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,11 +130,11 @@
 			fileSystemSynchronizedGroups = (
 				6BDF50CD2E779EF700CBB5E5 /* TapResolver */,
 			);
-		name = TapResolver;
-		packageProductDependencies = (
-			6BAF103E2EAA685C00DCE1FD /* ZIPFoundation */,
-		);
-		productName = TapResolver;
+			name = TapResolver;
+			packageProductDependencies = (
+				6BAF103E2EAA685C00DCE1FD /* ZIPFoundation */,
+			);
+			productName = TapResolver;
 			productReference = 6BDF50CB2E779EF700CBB5E5 /* TapResolver.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -412,6 +430,7 @@
 				DEVELOPMENT_TEAM = XSA4USUHDC;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TapResolver/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "This app needs Bluetooth to detect nearby beacons";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "This app needs Bluetooth to detect nearby beacons";
@@ -445,6 +464,7 @@
 				DEVELOPMENT_TEAM = XSA4USUHDC;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TapResolver/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "This app needs Bluetooth to detect nearby beacons";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "This app needs Bluetooth to detect nearby beacons";
@@ -581,14 +601,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCSwiftPackageProductDependency section */
-		6BAF103E2EAA685C00DCE1FD /* ZIPFoundation */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 6BAF103D2EAA685C00DCE1FC /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
-			productName = ZIPFoundation;
-		};
-/* End XCSwiftPackageProductDependency section */
-
 /* Begin XCRemoteSwiftPackageReference section */
 		6BAF103D2EAA685C00DCE1FC /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -599,6 +611,14 @@
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		6BAF103E2EAA685C00DCE1FD /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6BAF103D2EAA685C00DCE1FC /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 6BDF50C32E779EF700CBB5E5 /* Project object */;
 }

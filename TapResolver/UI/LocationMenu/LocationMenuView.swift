@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct LocationMenuView: View {
     @EnvironmentObject private var locationManager: LocationManager
@@ -179,7 +180,7 @@ struct LocationMenuView: View {
             .fileExporter(
                 isPresented: $showBackupPicker,
                 document: backupURL.map { ZIPDocument(url: $0) },
-                contentType: .zip,
+                contentType: UTType(filenameExtension: "tapmap") ?? .zip,
                 defaultFilename: backupURL?.lastPathComponent ?? "TapResolver_Backup.tapmap"
             ) { result in
                 if case .success(let url) = result {

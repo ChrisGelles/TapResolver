@@ -1,0 +1,8 @@
+CRITICAL GIT RULES:
+- NEVER run git restore, git reset, or git checkout without explicit user confirmation
+- When user says "push", run: git add . && git commit -m "..." && git push
+- When user says "commit", run: git add . && git commit -m "..."
+- ALWAYS show the exact git command you're about to run and wait for confirmation
+- If uncertain about a git command, ASK the user first
+
+DO NOT make assumptions about git operations. Always be explicit.
