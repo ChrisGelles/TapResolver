@@ -331,94 +331,7 @@ public final class MapPointStore: ObservableObject {
         if let dto: [MapPointDTO] = ctx.read(pointsKey, as: [MapPointDTO].self) {
             
             // DIAGNOSTIC: Print raw museum data if this is museum location
-            if ctx.locationID == "museum" {
-                print("\n" + String(repeating: "=", count: 80))
-                print("🔍 MUSEUM LOCATION DATA DIAGNOSTIC")
-                print(String(repeating: "=", count: 80))
-                print("Full key: locations.museum.MapPoints_v1")
-                print("Raw DTO count: \(dto.count)")
-                
-                // Check for orphaned session files on disk
-                let scansDir = ctx.locationDir.appendingPathComponent("Scans", isDirectory: true)
-                let fileManager = FileManager.default
-                
-                if fileManager.fileExists(atPath: scansDir.path) {
-                    do {
-                        let files = try fileManager.contentsOfDirectory(atPath: scansDir.path)
-                        let jsonFiles = files.filter { $0.hasSuffix(".json") }
-                        
-                        print("\n📁 Session Files in Scans Directory:")
-                        print("   Path: \(scansDir.path)")
-                        print("   Total JSON files: \(jsonFiles.count)")
-                        
-                        if !jsonFiles.isEmpty {
-                            print("\n   Session Files Found:")
-                            for (index, file) in jsonFiles.enumerated() {
-                                let fileURL = scansDir.appendingPathComponent(file)
-                                if let data = try? Data(contentsOf: fileURL),
-                                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                                    let sessionID = json["sessionID"] as? String ?? "unknown"
-                                    let pointID = json["pointID"] as? String ?? "unknown"
-                                    let beaconCount = (json["beacons"] as? [[String: Any]])?.count ?? 0
-                                    let duration = json["duration_s"] as? Double ?? 0
-                                    
-                                    print("      [\(index + 1)] \(file)")
-                                    print("          Session ID: \(sessionID)")
-                                    print("          Point ID: \(String(pointID.prefix(8)))...")
-                                    print("          Beacons: \(beaconCount)")
-                                    print("          Duration: \(duration)s")
-                                }
-                            }
-                            
-                            // DIAGNOSTIC: Dump COMPLETE first session file
-                            if let firstFile = jsonFiles.first {
-                                let firstFileURL = scansDir.appendingPathComponent(firstFile)
-                                print("\n" + String(repeating: "=", count: 80))
-                                print("📄 COMPLETE SESSION FILE DUMP: \(firstFile)")
-                                print(String(repeating: "=", count: 80))
-                                
-                                if let data = try? Data(contentsOf: firstFileURL),
-                                   let jsonString = String(data: data, encoding: .utf8) {
-                                    print(jsonString)  // Print ENTIRE file, no truncation
-                                    print(String(repeating: "=", count: 80))
-                                } else {
-                                    print("❌ Failed to read file")
-                                }
-                            }
-                            
-                            if dto.isEmpty {
-                                print("\n   ⚠️ ORPHANED DATA DETECTED!")
-                                print("   UserDefaults shows 0 map points, but \(jsonFiles.count) session files exist on disk")
-                                print("   This data may be recoverable!")
-                            }
-                        }
-                    } catch {
-                        print("   ❌ Error reading Scans directory: \(error)")
-                    }
-                } else {
-                    print("\n📁 No Scans directory found at: \(scansDir.path)")
-                }
-                
-                if dto.isEmpty {
-                    print("\n⚠️ Museum location has EMPTY array stored in UserDefaults")
-                } else {
-                    print("\n📍 Museum Map Points in UserDefaults:")
-                    for (index, point) in dto.enumerated() {
-                        print("   [\(index + 1)] Point ID: \(point.id.uuidString)")
-                        print("       Position: (\(Int(point.x)), \(Int(point.y)))")
-                        print("       Created: \(point.createdDate)")
-                        print("       Sessions: \(point.sessions.count)")
-                        if !point.sessions.isEmpty {
-                            for (sIndex, session) in point.sessions.enumerated() {
-                                print("          Session \(sIndex + 1): \(session.sessionID)")
-                                print("             Beacons: \(session.beacons.count)")
-                                print("             Duration: \(session.duration_s)s")
-                            }
-                        }
-                    }
-                }
-                print(String(repeating: "=", count: 80) + "\n")
-            }
+            // Museum diagnostic removed - use external tools for detailed inspection
             
             self.points = dto.map { dtoItem in
                 MapPoint(
@@ -439,8 +352,7 @@ public final class MapPointStore: ObservableObject {
         // REMOVED: No longer load activePointID from UserDefaults
         // User must explicitly select a MapPoint each session
         
-        print("   âœ… Load complete: \(points.count) points")
-        print("   Total sessions: \(points.reduce(0) { $0 + $1.sessions.count })")
+        // Removed verbose logging - data loaded successfully
     }
     
     // MARK: - Session Management

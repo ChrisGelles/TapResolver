@@ -180,7 +180,7 @@ struct LocationMenuView: View {
                 isPresented: $showBackupPicker,
                 document: backupURL.map { ZIPDocument(url: $0) },
                 contentType: .zip,
-                defaultFilename: backupURL?.lastPathComponent ?? "TapResolver_Backup.zip"
+                defaultFilename: backupURL?.lastPathComponent ?? "TapResolver_Backup.tapmap"
             ) { result in
                 if case .success(let url) = result {
                     print("✅ Backup saved to: \(url)")
@@ -327,23 +327,17 @@ struct LocationMenuView: View {
         // Copy map image at FULL RESOLUTION (if not already there)
         let mapDestination = assetsDir.appendingPathComponent("map_display.png")
         if !FileManager.default.fileExists(atPath: mapDestination.path),
-           let mapImage = UIImage(named: mapAsset) {
-            // Preserve EXACT resolution - no downscaling
-            if let pngData = mapImage.pngData() {
-                try? pngData.write(to: mapDestination)
-                let sizeMB = Double(pngData.count) / 1_048_576.0
-                print("📋 Copied embedded map image for '\(locationID)' to Documents (\(String(format: "%.1f", sizeMB)) MB, \(Int(mapImage.size.width))×\(Int(mapImage.size.height)))")
-            }
+           let mapImage = UIImage(named: mapAsset),
+           let pngData = mapImage.pngData() {
+            try? pngData.write(to: mapDestination)
         }
         
         // Copy thumbnail (if not already there)
         let thumbDestination = assetsDir.appendingPathComponent("thumbnail.jpg")
         if !FileManager.default.fileExists(atPath: thumbDestination.path),
-           let thumbImage = UIImage(named: thumbAsset) {
-            if let jpegData = thumbImage.jpegData(compressionQuality: 0.85) {
-                try? jpegData.write(to: thumbDestination)
-                print("📋 Copied embedded thumbnail for '\(locationID)' to Documents")
-            }
+           let thumbImage = UIImage(named: thumbAsset),
+           let jpegData = thumbImage.jpegData(compressionQuality: 0.85) {
+            try? jpegData.write(to: thumbDestination)
         }
     }
 
@@ -355,7 +349,6 @@ struct LocationMenuView: View {
             defaultAssetName: nil
         )
         locationSummaries = LocationImportUtils.listLocationSummaries()
-        print("📋 Loaded \(locationSummaries.count) location summaries for menu")
     }
 
     private func importFromImage(_ image: UIImage) {

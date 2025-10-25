@@ -18,18 +18,18 @@ import ZIPFoundation
 
 enum UserDataBackup {
     
-    /// Backup selected locations to a ZIP file
+    /// Backup selected locations to a .tapmap file
     /// - Parameters:
     ///   - locationIDs: Array of location IDs to backup
     ///   - includeAssets: Whether to include map images (large files)
-    /// - Returns: URL to the created ZIP file in temp directory
+    /// - Returns: URL to the created .tapmap file in temp directory
     static func backupLocations(locationIDs: [String], includeAssets: Bool) throws -> URL {
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
             .replacingOccurrences(of: "T", with: "_")
             .prefix(19) // YYYY-MM-DD_HHmmss
         
-        let zipFileName = "TapResolver_Backup_\(timestamp).zip"
+        let zipFileName = "TapResolver_Backup_\(timestamp).tapmap"
         let tempDir = FileManager.default.temporaryDirectory
         let zipURL = tempDir.appendingPathComponent(zipFileName)
         
@@ -50,6 +50,9 @@ enum UserDataBackup {
         for locationID in locationIDs {
             try backupLocation(locationID: locationID, includeAssets: includeAssets, to: archive)
         }
+        
+        // Add metadata.json at root of archive
+        try addBackupMetadata(locationIDs: locationIDs, includeAssets: includeAssets, to: archive)
         
         print("\n✅ BACKUP COMPLETE")
         print("   File: \(zipFileName)")
@@ -279,6 +282,59 @@ enum UserDataBackup {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         return formatter.string(fromByteCount: size)
+    }
+    
+    private static func addBackupMetadata(locationIDs: [String], includeAssets: Bool, to archive: Archive) throws {
+        // Gather location summaries
+        let locationSummaries: [BackupMetadata.LocationSummary] = locationIDs.compactMap { locationID in
+            let ctx = PersistenceContext.shared
+            let locationDir = ctx.docs.appendingPathComponent("locations/\(locationID)", isDirectory: true)
+            let stubURL = locationDir.appendingPathComponent("location.json")
+            
+            guard let data = try? Data(contentsOf: stubURL),
+                  let stub = try? JSONDecoder().decode(LocationStub.self, from: data) else {
+                return nil
+            }
+            
+            // Read actual beacon count from dots.json (real-time, not cached)
+            let dotsURL = locationDir.appendingPathComponent("dots.json")
+            let actualBeaconCount: Int
+            if let dotsData = try? Data(contentsOf: dotsURL),
+               let dotsArray = try? JSONSerialization.jsonObject(with: dotsData) as? [[String: Any]] {
+                actualBeaconCount = dotsArray.count
+            } else {
+                actualBeaconCount = 0
+            }
+            
+            return BackupMetadata.LocationSummary(
+                id: stub.id,
+                name: stub.name,
+                originalID: stub.originalID,
+                sessionCount: stub.sessionCount,
+                beaconCount: actualBeaconCount,  // Use real-time count
+                mapDimensions: [stub.displayWidth, stub.displayHeight]
+            )
+        }
+        
+        let metadata = BackupMetadata(
+            format: "tapresolver.backup.v1",
+            exportedBy: "TapResolver iOS v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")",
+            exportDate: ISO8601DateFormatter().string(from: Date()),
+            authorName: AppSettings.authorName,
+            locations: locationSummaries,
+            totalLocations: locationIDs.count,
+            includesAssets: includeAssets
+        )
+        
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let metadataData = try encoder.encode(metadata)
+        
+        try archive.addEntry(with: "metadata.json", type: .file, uncompressedSize: UInt32(metadataData.count), provider: { position, size in
+            return metadataData.subdata(in: position..<position+size)
+        })
+        
+        print("   ✓ metadata.json")
     }
     
     enum BackupError: Error {

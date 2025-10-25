@@ -43,8 +43,11 @@ enum SandboxPaths {
 struct LocationStub: Codable {
     var id: String
     var name: String
+    let originalID: String  // NEW: Unique identifier that persists across renames
     var createdISO: String
+    let createdBy: String  // NEW: Author who created this location
     var updatedISO: String
+    var lastModifiedBy: String  // NEW: Author who last modified this location
     // Relative (to the location folder) asset paths
     let mapOriginalRel: String
     let mapDisplayRel: String
@@ -52,6 +55,8 @@ struct LocationStub: Codable {
     // Pixel dimensions of the display image (what the app should render)
     let displayWidth: Int
     let displayHeight: Int
+    var beaconCount: Int  // NEW: Number of beacons (from dots.json)
+    var sessionCount: Int  // NEW: Number of scan sessions (from UserDefaults)
 }
 
 /// Returned to the caller after a successful import.
@@ -256,7 +261,6 @@ func refreshLocationMenuData(bundleDefaultAssetName: String) -> [String] {
     
     // Return final IDs for the menu to render
     let finalIds = listSandboxLocationIDs()
-    print("✅ Final location IDs for menu: \(finalIds)")
     return finalIds
 }
 
@@ -330,13 +334,18 @@ extension LocationImportUtils {
         let stub = LocationStub(
             id: locationID,
             name: displayName,
+            originalID: UUID().uuidString,  // NEW
             createdISO: now,
+            createdBy: AppSettings.authorName,  // NEW
             updatedISO: now,
+            lastModifiedBy: AppSettings.authorName,  // NEW
             mapOriginalRel: "assets/\(display.lastPathComponent)", // fine if original unknown
             mapDisplayRel: "assets/\(display.lastPathComponent)",
             thumbnailRel: "assets/\(thumb.lastPathComponent)",
             displayWidth: Int(displayImg.size.width.rounded()),
-            displayHeight: Int(displayImg.size.height.rounded())
+            displayHeight: Int(displayImg.size.height.rounded()),
+            beaconCount: 0,  // NEW - will be updated when beacons are added
+            sessionCount: 0  // NEW - will be updated when sessions are recorded
         )
         if let data = try? JSONEncoder().encode(stub) {
             try? data.write(to: stubURL, options: .atomic)
@@ -511,58 +520,25 @@ enum LocationImportUtils {
     @discardableResult
     static func reconcileLocationsOnMenuOpen(seedDefaultIfEmpty: Bool,
                                              defaultAssetName: String?) -> [LocationSummary] {
-        print("🔧 Starting location reconciliation...")
         let fm = FileManager.default
         
-        // COMPREHENSIVE FILE SYSTEM EXPLORATION
-        print("🔍 === COMPREHENSIVE FILE SYSTEM EXPLORATION ===")
-        print("📱 Documents directory: \(docs.path)")
-        
-        // List ALL files in Documents directory
-        print("📋 === ALL DOCUMENTS FILES ===")
-        let docsContents = (try? fm.contentsOfDirectory(at: docs, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
-        print("📊 Found \(docsContents.count) items in Documents:")
-        for item in docsContents {
-            let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-            let prefix = isDir ? "📁" : "📄"
-            print("\(prefix) \(item.lastPathComponent)")
-        }
-        
-        // Explore Documents subdirectories
-        for item in docsContents {
-            if (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-                print("📁 === CONTENTS OF \(item.lastPathComponent) ===")
-                let subContents = (try? fm.contentsOfDirectory(at: item, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
-                for subItem in subContents {
-                    let isSubDir = (try? subItem.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-                    let prefix = isSubDir ? "📁" : "📄"
-                    print("   \(prefix) \(subItem.lastPathComponent)")
-                }
-            }
-        }
-        
         let root = docs.appendingPathComponent("locations", isDirectory: true)
-        print("📁 Checking locations directory: \(root.path)")
         try? fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         // 1) If empty and seeding is requested, seed default from bundled asset.
         let existingFolders = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
-        print("📂 Found \(existingFolders.count) existing location folders")
         
         if seedDefaultIfEmpty,
            existingFolders.isEmpty,
            let asset = defaultAssetName {
-            print("🌱 No locations found, seeding default from bundled asset: \(asset)")
             ensureDefaultLocationPresenceIfNeeded(assetName: asset, preferredName: "Default Location", maxDisplayDimension: 4096)
         }
 
         // 2) For each subfolder, ensure stub + thumbnail + name.
         let folders = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
-        print("🔍 Processing \(folders.count) location folders...")
         
         for dir in folders where dir.hasDirectoryPath {
             let id = dir.lastPathComponent
-            print("📋 Processing location: \(id) at \(dir.path)")
             guard var stub = ensureStubForLocation(at: dir, id: id) else { 
                 print("❌ Failed to ensure stub for location: \(id)")
                 continue 
@@ -570,26 +546,21 @@ enum LocationImportUtils {
             
             // Name fallback
             if stub.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                print("📝 Setting fallback name for location: \(id)")
                 stub.name = "Unnamed Location"
             }
             
             // Thumbnail ensure
-            print("🖼️ Ensuring thumbnail for location: \(id)")
             ensureThumbnail(for: dir, stub: &stub)
             
             // Persist stub (if changed)
             let stubURL = dir.appendingPathComponent("location.json")
-            print("💾 Writing updated stub to: \(stubURL.path)")
             if let data = try? JSONEncoder().encode(stub) {
                 try? data.write(to: stubURL, options: .atomic)
-                print("✅ Successfully wrote stub for location: \(id)")
             } else {
                 print("❌ Failed to encode/write stub for location: \(id)")
             }
         }
 
-        print("🎯 Reconciliation complete, listing summaries...")
         return listLocationSummaries()
     }
 
@@ -800,13 +771,18 @@ enum LocationImportUtils {
         let stub = LocationStub(
             id: id,
             name: "Unnamed Location",
+            originalID: UUID().uuidString,  // NEW
             createdISO: now,
+            createdBy: AppSettings.authorName,  // NEW
             updatedISO: now,
+            lastModifiedBy: AppSettings.authorName,  // NEW
             mapOriginalRel: "assets/\(displayURL.lastPathComponent)", // we may not know original; ok
             mapDisplayRel: "assets/\(displayURL.lastPathComponent)",
             thumbnailRel: "assets/thumbnail.jpg",
             displayWidth: Int(img.size.width.rounded()),
-            displayHeight: Int(img.size.height.rounded())
+            displayHeight: Int(img.size.height.rounded()),
+            beaconCount: 0,  // NEW - will be updated when beacons are added
+            sessionCount: 0  // NEW - will be updated when sessions are recorded
         )
         
         print("📋 Created stub with:")
@@ -952,13 +928,18 @@ enum LocationImportUtils {
         let stub = LocationStub(
             id: id,
             name: preferredName,
+            originalID: UUID().uuidString,  // NEW
             createdISO: now,
+            createdBy: AppSettings.authorName,  // NEW
             updatedISO: now,
+            lastModifiedBy: AppSettings.authorName,  // NEW
             mapOriginalRel: "assets/\(originalName)",
             mapDisplayRel: "assets/\(displayName)",
             thumbnailRel: "assets/\(thumbName)",
             displayWidth: Int(displayImage.size.width.rounded()),
-            displayHeight: Int(displayImage.size.height.rounded())
+            displayHeight: Int(displayImage.size.height.rounded()),
+            beaconCount: 0,  // NEW - will be updated when beacons are added
+            sessionCount: 0  // NEW - will be updated when sessions are recorded
         )
         let locJSON = locDir.appendingPathComponent("location.json")
         let stubData = try JSONEncoder().encode(stub)
@@ -983,6 +964,122 @@ enum LocationImportUtils {
         } catch {
             throw LocationImportError.writeFailed(error.localizedDescription)
         }
+    }
+    
+    // MARK: - Migration
+    
+    /// Migrate existing location.json files to include new metadata fields
+    /// - Parameter locationID: The location to migrate
+    /// - Returns: True if migration was needed and successful, false if already up-to-date
+    @discardableResult
+    static func migrateLocationMetadata(locationID: String) -> Bool {
+        let ctx = PersistenceContext.shared
+        let locationDir = ctx.docs.appendingPathComponent("locations/\(locationID)", isDirectory: true)
+        let stubURL = locationDir.appendingPathComponent("location.json")
+        
+        guard FileManager.default.fileExists(atPath: stubURL.path) else {
+            print("⚠️ No location.json found for '\(locationID)', skipping migration")
+            return false
+        }
+        
+        // Read existing stub
+        guard let data = try? Data(contentsOf: stubURL),
+              var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            print("❌ Failed to read location.json for '\(locationID)'")
+            return false
+        }
+        
+        var needsMigration = false
+        
+        // Add originalID if missing
+        if dict["originalID"] == nil {
+            dict["originalID"] = UUID().uuidString
+            needsMigration = true
+            print("   📝 Adding originalID for '\(locationID)'")
+        }
+        
+        // Add createdBy if missing
+        if dict["createdBy"] == nil {
+            dict["createdBy"] = AppSettings.authorName
+            needsMigration = true
+            print("   📝 Adding createdBy for '\(locationID)'")
+        }
+        
+        // Add lastModifiedBy if missing
+        if dict["lastModifiedBy"] == nil {
+            dict["lastModifiedBy"] = AppSettings.authorName
+            needsMigration = true
+            print("   📝 Adding lastModifiedBy for '\(locationID)'")
+        }
+        
+        // Update beaconCount from dots.json (beacons placed on map)
+        let dotsURL = locationDir.appendingPathComponent("dots.json")
+        print("   🔍 Checking dots.json at: \(dotsURL.path)")
+
+        if FileManager.default.fileExists(atPath: dotsURL.path) {
+            print("   ✓ dots.json exists")
+            
+            if let dotsData = try? Data(contentsOf: dotsURL) {
+                print("   ✓ Read \(dotsData.count) bytes from dots.json")
+                
+                // dots.json is an ARRAY of dot objects, not a dictionary
+                if let dotsArray = try? JSONSerialization.jsonObject(with: dotsData) as? [[String: Any]] {
+                    let currentCount = dict["beaconCount"] as? Int ?? -1
+                    if currentCount != dotsArray.count {
+                        dict["beaconCount"] = dotsArray.count
+                        needsMigration = true
+                        print("   📝 Updating beaconCount (\(currentCount) → \(dotsArray.count)) for '\(locationID)'")
+                    }
+                } else {
+                    print("   ❌ Failed to parse dots.json as array")
+                }
+            } else {
+                print("   ❌ Failed to read file data")
+            }
+        } else {
+            print("   ❌ dots.json does NOT exist")
+            
+            if dict["beaconCount"] == nil {
+                dict["beaconCount"] = 0
+                needsMigration = true
+                print("   📝 Setting beaconCount to 0 (no dots.json) for '\(locationID)'")
+            }
+        }
+        
+        // Add sessionCount if missing
+        if dict["sessionCount"] == nil {
+            let key = "locations.\(locationID).MapPoints_v1"
+            if let mapPointsData = UserDefaults.standard.data(forKey: key),
+               let jsonArray = try? JSONSerialization.jsonObject(with: mapPointsData) as? [[String: Any]] {
+                // Count total sessions across all map points
+                let totalSessions = jsonArray.reduce(0) { count, point in
+                    if let sessions = point["sessions"] as? [[String: Any]] {
+                        return count + sessions.count
+                    }
+                    return count
+                }
+                dict["sessionCount"] = totalSessions
+                needsMigration = true
+                print("   📝 Adding sessionCount (\(totalSessions)) for '\(locationID)'")
+            } else {
+                dict["sessionCount"] = 0
+                needsMigration = true
+            }
+        }
+        
+        // Write back if changes were made
+        if needsMigration {
+            if let updatedData = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]) {
+                try? updatedData.write(to: stubURL, options: .atomic)
+                print("✅ Migrated metadata for '\(locationID)'")
+                return true
+            }
+        } else {
+            print("✅ Location '\(locationID)' already has all metadata fields")
+            return false
+        }
+        
+        return false
     }
 }
 
