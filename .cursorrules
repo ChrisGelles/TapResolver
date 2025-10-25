@@ -6,3 +6,10 @@ CRITICAL GIT RULES:
 - If uncertain about a git command, ASK the user first
 
 DO NOT make assumptions about git operations. Always be explicit.
+
+**CRITICAL CONSTRAINTS:**
+1. Make ONLY the changes specified.
+2. Do NOT refactor, optimize, or modify any code beyond this scope.
+3. If you encounter errors, STOP and report the error message—do not attempt fixes.
+4. If the creation of new files is necessary, inform the user of those files so they may update XCode.
+5. **Do NOT automatically push to git. Wait for explicit instructions to do so.**

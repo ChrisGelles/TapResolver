@@ -100,21 +100,6 @@ enum LocationImportError: Error, LocalizedError {
 }
 
 // MARK: - Sandbox Operations (Read/Write from Documents only)
-
-/// Enumerate sandbox locations (not the bundle)
-func listSandboxLocationIDs() -> [String] {
-    let fm = FileManager.default
-    try? fm.createDirectory(at: SandboxPaths.locationsRoot, withIntermediateDirectories: true)
-
-    let dirs = (try? fm.contentsOfDirectory(
-        at: SandboxPaths.locationsRoot,
-        includingPropertiesForKeys: [.isDirectoryKey],
-        options: [.skipsHiddenFiles]
-    )) ?? []
-
-    return dirs.filter(\.hasDirectoryPath).map(\.lastPathComponent).sorted()
-}
-
 /// Load the map image from the sandbox
 func loadDisplayImageFromSandbox(locationID: String) -> UIImage? {
     let path = SandboxPaths.displayURL(locationID).path
@@ -246,7 +231,7 @@ func refreshLocationMenuData(bundleDefaultAssetName: String) -> [String] {
     print("📂 Locations root: \(SandboxPaths.locationsRoot.path)")
     
     // Seed default if the sandbox is empty (first run)
-    let ids = listSandboxLocationIDs()
+    let ids = LocationImportUtils.listSandboxLocationIDs()
     print("🔍 Found locations: \(ids)")
     
     if ids.isEmpty {
@@ -255,12 +240,12 @@ func refreshLocationMenuData(bundleDefaultAssetName: String) -> [String] {
     }
     
     // Reconcile each folder (stub + thumbnail guarantees chiclet)
-    for id in listSandboxLocationIDs() {
+    for id in LocationImportUtils.listSandboxLocationIDs() {
         reconcileFolder(locationID: id)
     }
     
     // Return final IDs for the menu to render
-    let finalIds = listSandboxLocationIDs()
+    let finalIds = LocationImportUtils.listSandboxLocationIDs()
     return finalIds
 }
 
@@ -365,6 +350,20 @@ extension LocationImportUtils {
 enum LocationImportUtils {
 
     // MARK: - Public API
+    
+    /// Enumerate sandbox locations (not the bundle)
+    static func listSandboxLocationIDs() -> [String] {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: SandboxPaths.locationsRoot, withIntermediateDirectories: true)
+
+        let dirs = (try? fm.contentsOfDirectory(
+            at: SandboxPaths.locationsRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        return dirs.filter(\.hasDirectoryPath).map(\.lastPathComponent).sorted()
+    }
 
     /// Create a new location from an on-disk image file.
     /// - Parameters:

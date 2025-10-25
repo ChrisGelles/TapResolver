@@ -1,6 +1,64 @@
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
+import ZIPFoundation
+
+// MARK: - Import Types
+
+enum ConflictType {
+    case none           // New location, no conflict
+    case exactMatch     // originalID matches existing location
+    case probableMatch  // Same name + dimensions, but no originalID match
+}
+
+struct ImportConflict {
+    let locationID: String          // From import file
+    let locationName: String
+    let originalID: String
+    let conflictType: ConflictType
+    let existingLocation: LocationStub?
+}
+
+enum ImportAction {
+    case skip
+    case importAsNew
+    case replace
+}
+
+struct ImportDecision {
+    let conflict: ImportConflict
+    var action: ImportAction
+    var newName: String?
+    var createBackup: Bool
+    
+    var finalLocationID: String {
+        switch action {
+        case .skip:
+            return conflict.locationID
+        case .importAsNew:
+            return UUID().uuidString
+        case .replace:
+            return conflict.existingLocation?.id ?? conflict.locationID
+        }
+    }
+}
+
+enum ImportWizardState {
+    case analyzing(URL)
+    case reviewingConflict(ImportConflict, Archive, BackupMetadata)
+    case namingNewLocation(ImportConflict, Archive, BackupMetadata)
+    case confirmReplace(ImportConflict, Archive, BackupMetadata)
+    case importing([ImportDecision], Archive)
+    case complete([ImportResult])
+}
+
+struct ImportResult {
+    let locationName: String
+    let action: ImportAction
+    let success: Bool
+    let error: String?
+    let backupPath: String?
+}
 
 struct LocationMenuView: View {
     @EnvironmentObject private var locationManager: LocationManager
@@ -17,6 +75,11 @@ struct LocationMenuView: View {
     @State private var showRestorePicker: Bool = false
     @State private var showRestoreConfirmation: Bool = false
     @State private var backupURL: URL?
+    
+    // Import state
+    @State private var showingImportPicker = false
+    @State private var importWizardState: ImportWizardState?
+    @State private var importError: String?
 
     enum BackupMode {
         case none, selectForBackup, selectForRestore
@@ -202,6 +265,21 @@ struct LocationMenuView: View {
                     print("❌ File selection failed: \(error)")
                 }
             }
+            .fileImporter(
+                isPresented: $showingImportPicker,
+                allowedContentTypes: [UTType(filenameExtension: "tapmap") ?? .zip],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first {
+                        handleImportFile(url)
+                    }
+                case .failure(let error):
+                    importError = error.localizedDescription
+                    print("❌ Import file selection failed: \(error)")
+                }
+            }
             .alert("Restore Data?", isPresented: $showRestoreConfirmation) {
                 Button("Cancel", role: .cancel) {
                     backupMode = .none
@@ -242,12 +320,11 @@ struct LocationMenuView: View {
                     }
                     
                     Button(action: {
-                        backupMode = .selectForRestore
-                        selectedLocationIDs.removeAll()
+                        showingImportPicker = true
                     }) {
                         HStack {
-                            Image(systemName: "square.and.arrow.up.fill")
-                            Text("Restore")
+                            Image(systemName: "square.and.arrow.down")
+                            Text("Import")
                         }
                         .frame(maxWidth: .infinity)
                         .padding()
@@ -410,6 +487,165 @@ struct LocationMenuView: View {
             loadLocationSummaries()
         } catch {
             print("❌ Restore failed: \(error)")
+        }
+    }
+    
+    // MARK: - Import Functions
+    
+    private func handleImportFile(_ url: URL) {
+        // Request access to security-scoped resource
+        guard url.startAccessingSecurityScopedResource() else {
+            importError = "Permission denied to access file"
+            print("❌ Could not access security-scoped resource: \(url)")
+            return
+        }
+        
+        // Ensure we stop accessing when done
+        defer {
+            url.stopAccessingSecurityScopedResource()
+        }
+        
+        do {
+            // 1. Copy to temporary location
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(url.lastPathComponent)
+            try? FileManager.default.removeItem(at: tempURL)
+            try FileManager.default.copyItem(at: url, to: tempURL)
+            
+            print("📦 Importing from: \(tempURL.lastPathComponent)")
+            
+            // 2. Open as ZIP archive
+            guard let archive = Archive(url: tempURL, accessMode: .read) else {
+                throw NSError(domain: "ImportError", code: 1,
+                             userInfo: [NSLocalizedDescriptionKey: "Invalid archive"])
+            }
+            
+            // 3. Extract metadata.json
+            guard let metadataEntry = archive["metadata.json"] else {
+                throw NSError(domain: "ImportError", code: 2,
+                             userInfo: [NSLocalizedDescriptionKey: "Missing metadata.json"])
+            }
+            
+            var metadataData = Data()
+            _ = try archive.extract(metadataEntry) { data in
+                metadataData.append(data)
+            }
+            
+            let metadata = try JSONDecoder().decode(BackupMetadata.self, from: metadataData)
+            
+            // 4. Validate format
+            guard metadata.format == "tapresolver.backup.v1" else {
+                throw NSError(domain: "ImportError", code: 3,
+                             userInfo: [NSLocalizedDescriptionKey: "Unsupported format: \(metadata.format)"])
+            }
+            
+            print("✅ Archive valid: \(metadata.locations.count) locations")
+            
+            // 5. Detect conflicts
+            let conflicts = detectConflicts(metadata: metadata)
+            
+            // 6. Print analysis
+            for conflict in conflicts {
+                let icon = conflict.conflictType == .none ? "🆕" :
+                          conflict.conflictType == .exactMatch ? "🔄" : "❓"
+                print("\(icon) \(conflict.locationName) - \(conflict.conflictType)")
+                
+                if let existing = conflict.existingLocation,
+                   let importMeta = metadata.locations.first(where: { $0.id == conflict.locationID }) {
+                    let rec = recommendAction(for: conflict,
+                                             importMetadata: importMeta,
+                                             backupMetadata: metadata,
+                                             existingStub: existing)
+                    print("   Recommendation: \(rec.0) - \(rec.1)")
+                }
+            }
+            
+        } catch {
+            importError = error.localizedDescription
+            print("❌ Import failed: \(error)")
+        }
+    }
+    
+    private func detectConflicts(metadata: BackupMetadata) -> [ImportConflict] {
+        var conflicts: [ImportConflict] = []
+        
+        // Get all existing locations
+        let existingLocationIDs = LocationImportUtils.listSandboxLocationIDs()
+        let existingStubs = existingLocationIDs.compactMap { locationID -> LocationStub? in
+            let ctx = PersistenceContext.shared
+            let stubURL = ctx.docs.appendingPathComponent("locations/\(locationID)/location.json")
+            guard let data = try? Data(contentsOf: stubURL),
+                  let stub = try? JSONDecoder().decode(LocationStub.self, from: data) else {
+                return nil
+            }
+            return stub
+        }
+        
+        // Check each location in import for conflicts
+        for importedLocation in metadata.locations {
+            // Strategy 1: Check originalID (definitive)
+            if let existing = existingStubs.first(where: { $0.originalID == importedLocation.originalID }) {
+                conflicts.append(ImportConflict(
+                    locationID: importedLocation.id,
+                    locationName: importedLocation.name,
+                    originalID: importedLocation.originalID,
+                    conflictType: .exactMatch,
+                    existingLocation: existing
+                ))
+            }
+            // Strategy 2: Check name + dimensions (heuristic)
+            else if let existing = existingStubs.first(where: {
+                $0.name == importedLocation.name &&
+                $0.displayWidth == importedLocation.mapDimensions[0] &&
+                $0.displayHeight == importedLocation.mapDimensions[1]
+            }) {
+                conflicts.append(ImportConflict(
+                    locationID: importedLocation.id,
+                    locationName: importedLocation.name,
+                    originalID: importedLocation.originalID,
+                    conflictType: .probableMatch,
+                    existingLocation: existing
+                ))
+            }
+            // No conflict
+            else {
+                conflicts.append(ImportConflict(
+                    locationID: importedLocation.id,
+                    locationName: importedLocation.name,
+                    originalID: importedLocation.originalID,
+                    conflictType: .none,
+                    existingLocation: nil
+                ))
+            }
+        }
+        
+        return conflicts
+    }
+    
+    private func recommendAction(for conflict: ImportConflict,
+                                importMetadata: BackupMetadata.LocationSummary,
+                                backupMetadata: BackupMetadata,
+                                existingStub: LocationStub?) -> (ImportAction, String) {
+        guard let existing = existingStub else {
+            return (.importAsNew, "New location - safe to import")
+        }
+        
+        let formatter = ISO8601DateFormatter()
+        let importDate = formatter.date(from: backupMetadata.exportDate) ?? Date.distantPast
+        let localDate = formatter.date(from: existing.updatedISO) ?? Date.distantPast
+        
+        if importDate > localDate {
+            if importMetadata.sessionCount > existing.sessionCount {
+                return (.replace, "⚠️ Import is newer with MORE data (\(importMetadata.sessionCount) vs \(existing.sessionCount) sessions)")
+            } else {
+                return (.skip, "Import is newer but has LESS data. Keep your version?")
+            }
+        } else {
+            if existing.sessionCount > importMetadata.sessionCount {
+                return (.skip, "✅ Your version is newer with MORE data (\(existing.sessionCount) vs \(importMetadata.sessionCount) sessions) [Recommended]")
+            } else {
+                return (.importAsNew, "Your version is newer but import has more data. Import both to compare?")
+            }
         }
     }
 }
