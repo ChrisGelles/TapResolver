@@ -258,8 +258,18 @@ struct LocationMenuView: View {
             }
             .sheet(isPresented: $showingImportSheet) {
                 ImportSourceSheet(
-                    onPhotosSelected: { showingPhotosPicker = true },
-                    onFilesSelected: { showingDocumentPicker = true }
+                    onPhotosSelected: {
+                        showingImportSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            showingPhotosPicker = true
+                        }
+                    },
+                    onFilesSelected: {
+                        showingImportSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            showingDocumentPicker = true
+                        }
+                    }
                 )
             }
             .sheet(isPresented: $showingPhotosPicker) {

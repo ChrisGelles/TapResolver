@@ -58,21 +58,32 @@ struct MapNavigationView: View {
         }
     }
     
-    /// Hard-wired asset routing (no sandbox, no importer)
     private func loadAssetMapImage(for locationID: String) {
+        // Try loading from Documents (for user-created locations)
+        if let image = LocationImportUtils.loadDisplayImage(locationID: locationID) {
+            mapUIImage = image
+            print("✅ Loaded map image for '\(locationID)' from Documents")
+            return
+        }
+        
+        // Fallback to bundled assets for hardcoded locations
         let assetName: String
         switch locationID {
-        case "home":    // Chris's House
+        case "home":
             assetName = "myFirstFloor_v03-metric"
-        case "museum":  // Museum Map
+        case "museum":
             assetName = "MuseumMap-8k"
         default:
-            // Fallback to Chris's House if unknown id
-            assetName = "myFirstFloor_v03-metric"
+            print("⚠️ No map image found for locationID: '\(locationID)'")
+            mapUIImage = nil
+            return
         }
+        
         mapUIImage = UIImage(named: assetName)
         if mapUIImage == nil {
-            print("⚠️ Map asset '\(assetName)' not found. Check Assets.xcassets.")
+            print("⚠️ Map asset '\(assetName)' not found in bundle")
+        } else {
+            print("✅ Loaded bundled asset '\(assetName)'")
         }
     }
     
