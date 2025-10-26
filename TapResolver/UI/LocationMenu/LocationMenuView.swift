@@ -102,6 +102,11 @@ struct LocationMenuView: View {
     // Delete confirmation state
     @State private var locationToDelete: String?
     @State private var showDeleteConfirmation = false
+    
+    // Rename state
+    @State private var locationToRename: String?
+    @State private var showRenameDialog = false
+    @State private var renameText = ""
 
     enum BackupMode {
         case none, selectForBackup, selectForRestore
@@ -191,6 +196,16 @@ struct LocationMenuView: View {
                                 .aspectRatio(1, contentMode: .fit)
                                 .contextMenu {
                                     if backupMode == .none {
+                                        Button {
+                                            if let location = locationSummaries.first(where: { $0.id == summary.id }) {
+                                                locationToRename = summary.id
+                                                renameText = location.name
+                                                showRenameDialog = true
+                                            }
+                                        } label: {
+                                            Label("Rename", systemImage: "pencil")
+                                        }
+                                        
                                         Button(role: .destructive) {
                                             locationToDelete = summary.id
                                             showDeleteConfirmation = true
@@ -376,6 +391,27 @@ struct LocationMenuView: View {
                 if let locationID = locationToDelete,
                    let location = locationSummaries.first(where: { $0.id == locationID }) {
                     Text("Are you sure you want to delete '\(location.name)'? This action cannot be undone.")
+                }
+            }
+            .alert("Rename Location", isPresented: $showRenameDialog) {
+                TextField("Location Name", text: $renameText)
+                
+                Button("Cancel", role: .cancel) {
+                    locationToRename = nil
+                    renameText = ""
+                }
+                
+                Button("Save") {
+                    if let locationID = locationToRename, !renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        renameLocation(locationID, newName: renameText.trimmingCharacters(in: .whitespacesAndNewlines))
+                    }
+                    locationToRename = nil
+                    renameText = ""
+                }
+            } message: {
+                if let locationID = locationToRename,
+                   let location = locationSummaries.first(where: { $0.id == locationID }) {
+                    Text("Enter a new name for '\(location.name)'")
                 }
             }
         }
@@ -1096,6 +1132,21 @@ struct LocationMenuView: View {
             
         } catch {
             print("❌ Delete failed: \(error)\n")
+        }
+    }
+    
+    private func renameLocation(_ locationID: String, newName: String) {
+        print("\n✏️ Renaming location: \(locationID) to '\(newName)'")
+        
+        do {
+            try LocationImportUtils.renameLocation(id: locationID, newName: newName)
+            print("✅ Location renamed successfully\n")
+            
+            // Reload location list
+            loadLocationSummaries()
+            
+        } catch {
+            print("❌ Rename failed: \(error)\n")
         }
     }
 }
