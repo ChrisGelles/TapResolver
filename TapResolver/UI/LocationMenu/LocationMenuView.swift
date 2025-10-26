@@ -79,6 +79,7 @@ struct WizardContext {
 
 struct LocationMenuView: View {
     @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
     @State private var locationSummaries: [LocationSummary] = []
     @State private var showingImportSheet = false
     @State private var showingPhotosPicker = false
@@ -107,6 +108,9 @@ struct LocationMenuView: View {
     @State private var locationToRename: String?
     @State private var showRenameDialog = false
     @State private var renameText = ""
+    
+    // AR Settings navigation
+    @State private var selectedLocationForAR: String?
 
     enum BackupMode {
         case none, selectForBackup, selectForRestore
@@ -130,70 +134,91 @@ struct LocationMenuView: View {
     ]
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     // Main content ScrollView
-                    ScrollView {
-                        LazyVGrid(columns: columns, alignment: .center, spacing: 12) {
+                ScrollView {
+                    LazyVGrid(columns: columns, alignment: .center, spacing: 12) {
 
-                            // --- Hard-coded chiclet: Home/Chris's House ---
+                        // --- Hard-coded chiclet: Home/Chris's House ---
                             SelectableAssetLocationTile(
-                                title: homeTitle,
+                            title: homeTitle,
                                 imageName: defaultThumbAsset,
                                 locationID: homeID,
                                 isInSelectionMode: backupMode != .none,
-                                isSelected: selectedLocationIDs.contains(homeID)
-                            ) {
+                                isSelected: selectedLocationIDs.contains(homeID),
+                                onTap: {
                                 if backupMode != .none {
                                     toggleSelection(homeID)
                                 } else {
-                                    seedIfNeeded(id: homeID,
-                                                 title: homeTitle,
-                                                 mapAsset: defaultMapAsset,
-                                                 thumbAsset: defaultThumbAsset)
-                                    locationManager.setCurrentLocation(homeID)
-                                    locationManager.showLocationMenu = false
+                            seedIfNeeded(id: homeID,
+                                         title: homeTitle,
+                                         mapAsset: defaultMapAsset,
+                                         thumbAsset: defaultThumbAsset)
+                            locationManager.setCurrentLocation(homeID)
+                            locationManager.showLocationMenu = false
                                 }
-                            }
+                                },
+                                onGearTap: {
+                                    // Set location context and show AR settings
+                                    PersistenceContext.shared.locationID = homeID
+                                    arWorldMapStore.loadMetadata()
+                                    selectedLocationForAR = homeID
+                                }
+                        )
 
-                            // --- Hard-coded chiclet: Museum (8192×8192 asset) ---
+                        // --- Hard-coded chiclet: Museum (8192×8192 asset) ---
                             SelectableAssetLocationTile(
-                                title: museumTitle,
+                            title: museumTitle,
                                 imageName: museumThumbAsset,
                                 locationID: museumID,
                                 isInSelectionMode: backupMode != .none,
-                                isSelected: selectedLocationIDs.contains(museumID)
-                            ) {
+                                isSelected: selectedLocationIDs.contains(museumID),
+                                onTap: {
                                 if backupMode != .none {
                                     toggleSelection(museumID)
                                 } else {
-                                    seedIfNeeded(id: museumID,
-                                                 title: museumTitle,
-                                                 mapAsset: museumMapAsset,
-                                                 thumbAsset: museumThumbAsset)
-                                    locationManager.setCurrentLocation(museumID)
-                                    locationManager.showLocationMenu = false
+                            seedIfNeeded(id: museumID,
+                                         title: museumTitle,
+                                         mapAsset: museumMapAsset,
+                                         thumbAsset: museumThumbAsset)
+                            locationManager.setCurrentLocation(museumID)
+                            locationManager.showLocationMenu = false
                                 }
-                            }
+                                },
+                                onGearTap: {
+                                    // Set location context and show AR settings
+                                    PersistenceContext.shared.locationID = museumID
+                                    arWorldMapStore.loadMetadata()
+                                    selectedLocationForAR = museumID
+                                }
+                        )
 
-                            // --- Dynamic locations from sandbox, excluding the two hard-coded IDs ---
-                            ForEach(locationSummaries.filter { $0.id != homeID && $0.id != museumID }) { summary in
+                        // --- Dynamic locations from sandbox, excluding the two hard-coded IDs ---
+                        ForEach(locationSummaries.filter { $0.id != homeID && $0.id != museumID }) { summary in
                                 SelectableLocationTileView(
                                     summary: summary,
                                     isInSelectionMode: backupMode != .none,
-                                    isSelected: selectedLocationIDs.contains(summary.id)
-                                ) {
+                                    isSelected: selectedLocationIDs.contains(summary.id),
+                                    onTap: {
                                     if backupMode != .none {
                                         toggleSelection(summary.id)
                                     } else {
                                         locationManager.setCurrentLocation(summary.id)
                                         locationManager.showLocationMenu = false
                                     }
-                                }
-                                .aspectRatio(1, contentMode: .fit)
+                                    },
+                                    onGearTap: {
+                                        // Set location context and show AR settings
+                                        PersistenceContext.shared.locationID = summary.id
+                                        arWorldMapStore.loadMetadata()
+                                        selectedLocationForAR = summary.id
+                                    }
+                                )
+                                //.aspectRatio(1, contentMode: .fit)
                                 .contextMenu {
                                     if backupMode == .none {
                                         Button {
@@ -214,25 +239,34 @@ struct LocationMenuView: View {
                                         }
                                     }
                                 }
-                            }
-
-                            // --- Square "New Map" tile at the end of the grid ---
-                            if backupMode == .none {
-                                NewMapTileView()
-                                    .aspectRatio(1, contentMode: .fit)
-                                    .onTapGesture { showingImportSheet = true }
-                            }
                         }
-                        .padding(.top, 12)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 24)
+
+                        // --- Square "New Map" tile at the end of the grid ---
+                            if backupMode == .none {
+                        NewMapTileView()
+                                    //.aspectRatio(1, contentMode: .fit)
+                            .onTapGesture { showingImportSheet = true }
+                            }
                     }
-                    .refreshable {
-                        _ = LocationImportUtils.reconcileLocationsOnMenuOpen(
-                            seedDefaultIfEmpty: false,
-                            defaultAssetName: nil
-                        )
-                        locationSummaries = LocationImportUtils.listLocationSummaries()
+                    .padding(.top, 12)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 24)
+                }
+                .refreshable {
+                    _ = LocationImportUtils.reconcileLocationsOnMenuOpen(
+                        seedDefaultIfEmpty: false,
+                        defaultAssetName: nil
+                    )
+                    locationSummaries = LocationImportUtils.listLocationSummaries()
+                    }
+                    .navigationDestination(isPresented: Binding(
+                        get: { selectedLocationForAR != nil },
+                        set: { if !$0 { selectedLocationForAR = nil } }
+                    )) {
+                        if let _ = selectedLocationForAR {
+                            ARWorldMapManagementView()
+                                .environmentObject(arWorldMapStore)
+                        }
                     }
                     
                     // Backup/Restore controls at bottom
@@ -246,12 +280,6 @@ struct LocationMenuView: View {
                         locationManager.showLocationMenu = false
                     }
                     .foregroundColor(.white)
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Options") {
-                        // Placeholder for future sort/filter options
-                    }
-                    .foregroundColor(.white.opacity(0.7))
                 }
             }
             .onAppear {
@@ -1174,12 +1202,12 @@ private struct AssetLocationTile: View {
                             .clipped()
                     } else {
                         // Fallback to bundle asset while loading
-                        Image(imageName)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(maxWidth: .infinity)
-                            .aspectRatio(1, contentMode: .fit)
-                            .clipped()
+                    Image(imageName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipped()
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -1266,6 +1294,7 @@ private struct SelectableAssetLocationTile: View {
     let isInSelectionMode: Bool
     let isSelected: Bool
     let onTap: () -> Void
+    let onGearTap: () -> Void
     
     @State private var thumbnailImage: UIImage?
 
@@ -1289,7 +1318,28 @@ private struct SelectableAssetLocationTile: View {
                             .clipped()
                     }
                     
-                    if isInSelectionMode {
+                    // Gear icon overlay (top-right corner)
+                    if !isInSelectionMode {
+                        VStack {
+                            HStack {
+                                Spacer()
+                                Button(action: {
+                                    onGearTap()
+                                }) {
+                                    Image(systemName: "gearshape.fill")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .padding(8)
+                                        .background(Color.black.opacity(0.6))
+                                        .clipShape(Circle())
+                                        .shadow(color: .black.opacity(0.3), radius: 2)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(8)
+                            }
+                            Spacer()
+                        }
+                    } else if isInSelectionMode {
                         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                             .font(.title)
                             .foregroundColor(isSelected ? .blue : .white)
@@ -1336,17 +1386,21 @@ private struct SelectableLocationTileView: View {
     let isInSelectionMode: Bool
     let isSelected: Bool
     let onTap: () -> Void
+    let onGearTap: () -> Void
     
     @State private var thumbnailImage: UIImage?
     
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 ZStack(alignment: .topTrailing) {
                     if let image = thumbnailImage {
                         Image(uiImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(maxWidth: .infinity)
+                                .aspectRatio(1, contentMode: .fit)
+                                .clipped()
                     } else {
                         Rectangle()
                             .fill(Color.gray.opacity(0.3))
@@ -1357,7 +1411,28 @@ private struct SelectableLocationTileView: View {
                             )
                     }
                     
-                    if isInSelectionMode {
+                    // Gear icon overlay (top-right corner)
+                    if !isInSelectionMode {
+                        VStack {
+                            HStack {
+                                Spacer()
+                                Button(action: {
+                                    onGearTap()
+                                }) {
+                                    Image(systemName: "gearshape.fill")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .padding(8)
+                                        .background(Color.black.opacity(0.6))
+                                        .clipShape(Circle())
+                                        .shadow(color: .black.opacity(0.3), radius: 2)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(8)
+                            }
+                            Spacer()
+                        }
+                    } else if isInSelectionMode {
                         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                             .font(.title)
                             .foregroundColor(isSelected ? .blue : .white)
@@ -1365,24 +1440,22 @@ private struct SelectableLocationTileView: View {
                             .padding(8)
                     }
                 }
-                .frame(height: 120)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(isSelected ? Color.blue : Color.white, lineWidth: isSelected ? 3 : 2)
                 )
-                .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
-                
+                .shadow(radius: 4, y: 2)
+
                 Text(summary.name)
                     .font(.headline)
-                    .fontWeight(.semibold)
                     .foregroundColor(.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 
-                Text(formatDate(summary.updatedISO))
+                /*Text(formatDate(summary.updatedISO))
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.7))
+                    .foregroundColor(.white.opacity(0.7))*/
             }
         }
         .buttonStyle(.plain)

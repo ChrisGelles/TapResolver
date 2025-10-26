@@ -38,6 +38,7 @@ struct TapResolverApp: App {
     // ARCHITECTURAL ADDITION: Single source of truth for live beacon state
     // Consolidates polling logic previously duplicated in RSSILabelsOverlay and ScanQualityViewModel
     @StateObject private var beaconState = BeaconStateManager()
+    @StateObject private var arWorldMapStore = ARWorldMapStore()
     
     @State private var showAuthorNamePrompt = AppSettings.needsAuthorName
 
@@ -56,6 +57,7 @@ struct TapResolverApp: App {
                 .environmentObject(orientationManager)
                 .environmentObject(scanUtility)
                 .environmentObject(beaconState)  // Inject BeaconStateManager into view hierarchy
+                .environmentObject(arWorldMapStore)
                 .onAppear {
                     LocationMigration.runIfNeeded()
                     squareMetrics.setMetricSquareStore(metricSquares)
