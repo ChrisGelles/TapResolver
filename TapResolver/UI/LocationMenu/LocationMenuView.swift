@@ -98,6 +98,10 @@ struct LocationMenuView: View {
     @State private var importWizardState: ImportWizardState?
     @State private var importError: String?
     @State private var wizardContext: WizardContext?
+    
+    // Delete confirmation state
+    @State private var locationToDelete: String?
+    @State private var showDeleteConfirmation = false
 
     enum BackupMode {
         case none, selectForBackup, selectForRestore
@@ -185,6 +189,16 @@ struct LocationMenuView: View {
                                     }
                                 }
                                 .aspectRatio(1, contentMode: .fit)
+                                .contextMenu {
+                                    if backupMode == .none {
+                                        Button(role: .destructive) {
+                                            locationToDelete = summary.id
+                                            showDeleteConfirmation = true
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
+                                }
                             }
 
                             // --- Square "New Map" tile at the end of the grid ---
@@ -337,6 +351,22 @@ struct LocationMenuView: View {
                 }
             } message: {
                 Text("This will overwrite \(selectedLocationIDs.count) location(s) with data from the backup file.\n\nAll existing data for these locations will be permanently replaced.")
+            }
+            .alert("Delete Location?", isPresented: $showDeleteConfirmation) {
+                Button("Cancel", role: .cancel) {
+                    locationToDelete = nil
+                }
+                Button("Delete", role: .destructive) {
+                    if let locationID = locationToDelete {
+                        deleteLocation(locationID)
+                    }
+                    locationToDelete = nil
+                }
+            } message: {
+                if let locationID = locationToDelete,
+                   let location = locationSummaries.first(where: { $0.id == locationID }) {
+                    Text("Are you sure you want to delete '\(location.name)'? This action cannot be undone.")
+                }
             }
         }
     }
@@ -1023,6 +1053,39 @@ struct LocationMenuView: View {
                 let backupKey = key.replacingOccurrences(of: "locations.\(sourceLocationID).", with: "locations.\(backupLocationID).")
                 defaults.set(value, forKey: backupKey)
             }
+        }
+    }
+    
+    private func deleteLocation(_ locationID: String) {
+        print("\n🗑️ Deleting location: \(locationID)")
+        
+        do {
+            let ctx = PersistenceContext.shared
+            let locationDir = ctx.docs.appendingPathComponent("locations/\(locationID)")
+            
+            // 1. Delete directory
+            if FileManager.default.fileExists(atPath: locationDir.path) {
+                try FileManager.default.removeItem(at: locationDir)
+                print("   ✓ Deleted directory")
+            }
+            
+            // 2. Clear UserDefaults keys
+            let defaults = UserDefaults.standard
+            let allKeys = defaults.dictionaryRepresentation().keys
+            let locationKeys = allKeys.filter { $0.contains("locations.\(locationID).") }
+            
+            for key in locationKeys {
+                defaults.removeObject(forKey: key)
+            }
+            print("   ✓ Cleared \(locationKeys.count) UserDefaults keys")
+            
+            // 3. Reload location list
+            loadLocationSummaries()
+            
+            print("✅ Location deleted successfully\n")
+            
+        } catch {
+            print("❌ Delete failed: \(error)\n")
         }
     }
 }
