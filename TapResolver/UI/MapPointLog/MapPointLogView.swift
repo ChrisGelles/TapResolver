@@ -275,7 +275,7 @@ struct MapPointLogView: View {
     private func sessionListPanel(pointID: String, geometry: GeometryProxy) -> some View {
         let drawerActualHeight = calculateDrawerHeight(geometry: geometry)
         let panelHeight = min(drawerActualHeight * 1.1, geometry.size.height * 0.5)
-        let panelWidth = geometry.size.width * 0.5
+        let panelWidth = geometry.size.width * 0.9
         
         return MapPointSessionListView(pointID: pointID, onDismiss: {
             withAnimation(.easeInOut(duration: 0.35)) {
@@ -284,6 +284,7 @@ struct MapPointLogView: View {
         })
         .frame(width: panelWidth)
         .frame(height: panelHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.black.opacity(0.9))
         .shadow(color: .black.opacity(0.15), radius: 8, x: 2, y: 0)
         .environmentObject(mapPointStore)

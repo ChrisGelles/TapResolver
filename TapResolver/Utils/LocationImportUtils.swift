@@ -384,7 +384,13 @@ enum LocationImportUtils {
         
         let baseName = proposedName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? fileURL.deletingPathExtension().lastPathComponent
-        return try createLocation(fromImage: srcImage, preferredName: baseName, originalData: data, originalExt: fileURL.pathExtension, maxDisplayDimension: maxDisplayDimension)
+        
+        // Use original image with NO scaling
+        return try createLocation(fromImage: srcImage,
+                                  preferredName: baseName,
+                                  originalData: data,
+                                  originalExt: fileURL.pathExtension,
+                                  maxDisplayDimension: .infinity)  // No cap - use original size
     }
 
     /// Create a new location from a UIImage (e.g., from Photos picker).
@@ -400,11 +406,13 @@ enum LocationImportUtils {
         }
         let ext = image.pngData() != nil ? "png" : "jpg"
         let baseName = preferredName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "New Map"
+        
+        // Use original image with NO scaling
         return try createLocation(fromImage: image.normalized(),
                                   preferredName: baseName,
                                   originalData: data,
                                   originalExt: ext,
-                                  maxDisplayDimension: maxDisplayDimension)
+                                  maxDisplayDimension: .infinity)  // No cap - use original size
     }
 
     /// Enumerate all existing locations for the Location Menu grid.
@@ -910,8 +918,8 @@ enum LocationImportUtils {
         let originalURL = assetsDir.appendingPathComponent(originalName)
         try writeAtomic(data: originalData, to: originalURL)
 
-        // Downscale for display
-        let displayImage = image.downscaled(longEdge: maxDisplayDimension)
+        // Use original image directly - no downscaling
+        let displayImage = image
         guard let displayData = displayImage.pngData() else { throw LocationImportError.writeFailed("PNG encode failed") }
         let displayURL = assetsDir.appendingPathComponent(displayName)
         try writeAtomic(data: displayData, to: displayURL)
