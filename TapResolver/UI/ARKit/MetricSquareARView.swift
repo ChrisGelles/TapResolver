@@ -62,18 +62,74 @@ struct MetricSquareARView: View {
                 VStack {
                     Spacer()
                     
-                    HStack {
-                        if relocalizationStatus.contains("✅") {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                        } else {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    VStack(spacing: 12) {
+                        HStack {
+                            if relocalizationStatus.contains("✅") {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                            } else if relocalizationStatus.contains("⚠️") {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.orange)
+                            } else {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            }
+                            
+                            Text(relocalizationStatus)
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(.white)
                         }
                         
-                        Text(relocalizationStatus)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.white)
+                        // Helpful tips during relocalization
+                        if relocalizationStatus.contains("Matching") || relocalizationStatus.contains("Initializing") {
+                            Text("💡 Look for distinctive features like corners, furniture, or artwork")
+                                .font(.system(size: 13))
+                                .foregroundColor(.white.opacity(0.9))
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 8)
+                        }
+                        
+                        // Failed relocalization options
+                        if relocalizationStatus.contains("⚠️") {
+                            HStack(spacing: 12) {
+                                Button(action: {
+                                    // Clear error state first
+                                    relocalizationStatus = ""
+                                    
+                                    // Close and reopen to restart AR session
+                                    isPresented = false
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                        isPresented = true
+                                    }
+                                }) {
+                                    Text("Try Again")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 8)
+                                        .background(Color.blue)
+                                        .cornerRadius(8)
+                                }
+                                .buttonStyle(.plain)
+                                
+                                Button(action: {
+                                    // Clear status and close
+                                    relocalizationStatus = ""
+                                    withAnimation {
+                                        isPresented = false
+                                    }
+                                }) {
+                                    Text("Exit")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 8)
+                                        .background(Color.red)
+                                        .cornerRadius(8)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)

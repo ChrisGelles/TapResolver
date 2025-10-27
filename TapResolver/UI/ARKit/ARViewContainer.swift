@@ -71,9 +71,11 @@ struct ARViewContainer: UIViewRepresentable {
         if let worldMap = worldMapStore.loadWorldMap() {
             configuration.initialWorldMap = worldMap
             context.coordinator.isRelocalizing = true
+            context.coordinator.relocalizationStartTime = Date()
             print("🗺️ Loading saved AR World Map for marker placement")
         } else {
             print("⚠️ No saved AR World Map - starting fresh tracking")
+            context.coordinator.isRelocalized = true  // No relocalization needed
         }
         
         // Run the session with proper initialization
@@ -135,6 +137,8 @@ struct ARViewContainer: UIViewRepresentable {
         var isRelocalizing: Bool = false
         var relocalizationStatus: Binding<String>?
         private var lastTrackingState: ARCamera.TrackingState?
+        var isRelocalized: Bool = false
+        var relocalizationStartTime: Date?
         
         // MapPointStore reference
         var mapPointStore: MapPointStore?
@@ -314,6 +318,12 @@ struct ARViewContainer: UIViewRepresentable {
             guard let crosshair = crosshairNode,
                   !crosshair.isHidden else { return }
             
+            // Block placement until relocalized
+            guard isRelocalized else {
+                print("⚠️ Cannot place marker - waiting for relocalization")
+                return
+            }
+            
             let position = crosshair.simdPosition
             
             // Metric Square mode
@@ -363,7 +373,7 @@ struct ARViewContainer: UIViewRepresentable {
             let lineHeight = CGFloat(userHeight)
             let line = SCNCylinder(radius: 0.00125, height: lineHeight) // 0.25cm = 2.5mm
             let lineMaterial = SCNMaterial()
-            lineMaterial.diffuse.contents = UIColor(red: 0/255, green: 50/255, blue: 98/255, alpha: 0.8)
+            lineMaterial.diffuse.contents = UIColor(red: 0/255, green: 50/255, blue: 98/255, alpha: 0.95)
             line.materials = [lineMaterial]
             
             let lineNode = SCNNode(geometry: line)
@@ -373,7 +383,7 @@ struct ARViewContainer: UIViewRepresentable {
             // Sphere at top (3cm diameter)
             let sphere = SCNSphere(radius: 0.015) // 1.5cm radius = 3cm diameter
             let sphereMaterial = SCNMaterial()
-            sphereMaterial.diffuse.contents = UIColor(red: 0/255, green: 125/255, blue: 184/255, alpha: 0.8)
+            sphereMaterial.diffuse.contents = UIColor(red: 0/255, green: 125/255, blue: 184/255, alpha: 0.98)
             sphereMaterial.specular.contents = UIColor.white
             sphereMaterial.shininess = 0.8
             sphere.materials = [sphereMaterial]
@@ -619,6 +629,15 @@ struct ARViewContainer: UIViewRepresentable {
         func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
             guard isRelocalizing else { return }
             
+            // Check for relocalization timeout (15 seconds)
+            if let startTime = relocalizationStartTime,
+               Date().timeIntervalSince(startTime) > 15.0,
+               !isRelocalized {
+                relocalizationStatus?.wrappedValue = "⚠️ Relocalization failed"
+                print("⚠️ Relocalization timeout - unable to match saved map")
+                return
+            }
+            
             if lastTrackingState != camera.trackingState {
                 lastTrackingState = camera.trackingState
                 
@@ -643,6 +662,10 @@ struct ARViewContainer: UIViewRepresentable {
                     relocalizationStatus?.wrappedValue = "✅ Tracking locked"
                     print("✅ Relocalization successful - tracking locked to saved map")
                     
+                    // Mark as relocalized and load markers
+                    isRelocalized = true
+                    loadAllARMarkers()
+                    
                     // Stop showing relocalization status after 2 seconds
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                         self.isRelocalizing = false
@@ -652,6 +675,67 @@ struct ARViewContainer: UIViewRepresentable {
                     relocalizationStatus?.wrappedValue = "Relocalization: Unknown"
                 }
             }
+        }
+        
+        // MARK: - AR Marker Management
+        
+        private func loadAllARMarkers() {
+            guard let mapPointStore = mapPointStore,
+                  let arView = arView else {
+                return
+            }
+            
+            print("📍 Loading AR Markers into scene...")
+            
+            let allMarkers = mapPointStore.arMarkers
+            guard !allMarkers.isEmpty else {
+                print("   No AR Markers to load")
+                return
+            }
+            
+            for marker in allMarkers {
+                let isActiveMarker = marker.linkedMapPointID == mapPointID
+                let markerNode = createMarkerNode(
+                    at: marker.arPosition,
+                    isActive: isActiveMarker
+                )
+                markerNode.name = "arMarker_\(marker.id.uuidString)"
+                arView.scene.rootNode.addChildNode(markerNode)
+                
+                print("   ✅ Loaded AR Marker for MapPoint \(marker.linkedMapPointID)")
+            }
+            
+            print("📍 Loaded \(allMarkers.count) AR Marker(s)")
+        }
+        
+        private func createMarkerNode(at position: simd_float3, isActive: Bool) -> SCNNode {
+            let markerNode = SCNNode()
+            markerNode.simdPosition = position
+            
+            // Vertical line (post)
+            let lineHeight = Double(userHeight) - 0.03
+            let line = SCNCylinder(radius: 0.001, height: lineHeight)
+            let lineMaterial = SCNMaterial()
+            lineMaterial.diffuse.contents = UIColor(red: 0/255, green: 125/255, blue: 184/255, alpha: isActive ? 0.95 : 0.85)
+            line.materials = [lineMaterial]
+            
+            let lineNode = SCNNode(geometry: line)
+            lineNode.position = SCNVector3(0, Float(lineHeight / 2), 0)
+            markerNode.addChildNode(lineNode)
+            
+            // Sphere at top
+            let sphere = SCNSphere(radius: 0.015)
+            let sphereMaterial = SCNMaterial()
+            sphereMaterial.diffuse.contents = UIColor(red: 0/255, green: 125/255, blue: 184/255, alpha: isActive ? 0.98 : 0.88)
+            sphereMaterial.specular.contents = UIColor.white
+            sphereMaterial.shininess = 0.8
+            sphere.materials = [sphereMaterial]
+            
+            let sphereNode = SCNNode(geometry: sphere)
+            sphereNode.position = SCNVector3(0, Float(lineHeight), 0)
+            markerNode.addChildNode(sphereNode)
+            
+            return markerNode
         }
     }
     

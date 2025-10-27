@@ -190,6 +190,9 @@ public final class MapPointStore: ObservableObject {
         ) { [weak self] _ in
             print("📍 MapPointStore: Location changed, reloading...")
             self?.reloadForActiveLocation()
+            
+            // Reload AR markers for new location
+            self?.loadARMarkers()
         }
     }
 
@@ -287,6 +290,7 @@ public final class MapPointStore: ObservableObject {
         let y: CGFloat
         let createdDate: Date
         let sessions: [ScanSession]
+        let linkedARMarkerID: UUID?
     }
 
     internal func save() {
@@ -312,7 +316,8 @@ public final class MapPointStore: ObservableObject {
             x: $0.mapPoint.x,
             y: $0.mapPoint.y,
             createdDate: $0.createdDate,
-            sessions: $0.sessions
+            sessions: $0.sessions,
+            linkedARMarkerID: $0.linkedARMarkerID
         )}
         ctx.write(pointsKey, value: dto)
         if let activeID = activePointID {
@@ -338,12 +343,14 @@ public final class MapPointStore: ObservableObject {
             // Museum diagnostic removed - use external tools for detailed inspection
             
             self.points = dto.map { dtoItem in
-                MapPoint(
+                var point = MapPoint(
                     id: dtoItem.id,
                     mapPoint: CGPoint(x: dtoItem.x, y: dtoItem.y),
                     createdDate: dtoItem.createdDate,
                     sessions: dtoItem.sessions
                 )
+                point.linkedARMarkerID = dtoItem.linkedARMarkerID
+                return point
             }
             // Only log if there are points loaded
             if !points.isEmpty {
@@ -354,23 +361,36 @@ public final class MapPointStore: ObservableObject {
         }
         
         // Load AR Markers
+        loadARMarkers()
+        
+        // REMOVED: No longer load activePointID from UserDefaults
+        // User must explicitly select a MapPoint each session
+        
+        // Removed verbose logging - data loaded successfully
+    }
+    
+    private func loadARMarkers() {
+        
+        print("🔍 DEBUG: loadARMarkers() called for location '\(ctx.locationID)'")  // ADD THIS LINE
+        
         let markersKey = "ARMarkers_v1"
         if let markersData = ctx.read(markersKey, as: Data.self) {
             do {
-                arMarkers = try JSONDecoder().decode([ARMarker].self, from: markersData)
-                print("📍 Loaded \(arMarkers.count) AR Marker(s)")
+                //arMarkers = try JSONDecoder().decode([ARMarker].self, from: markersData)
+                
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                arMarkers = try decoder.decode([ARMarker].self, from: markersData)
+                
+                print("📍 Loaded \(arMarkers.count) AR Marker(s) for location '\(ctx.locationID)'")
             } catch {
                 print("⚠️ Failed to decode AR Markers: \(error)")
                 arMarkers = []
             }
         } else {
             arMarkers = []
+            print("📍 No AR Markers found for location '\(ctx.locationID)'")
         }
-        
-        // REMOVED: No longer load activePointID from UserDefaults
-        // User must explicitly select a MapPoint each session
-        
-        // Removed verbose logging - data loaded successfully
     }
     
     // MARK: - Session Management
