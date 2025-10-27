@@ -44,21 +44,43 @@ struct ARViewContainer: UIViewRepresentable {
     let squareColor: UIColor?
     let squareSideMeters: Double?
     
+    let worldMapStore: ARWorldMapStore
+    @Binding var relocalizationStatus: String
+    let mapPointStore: MapPointStore
+    
     func makeUIView(context: Context) -> ARSCNView {
         let arView = ARSCNView()
         
         // Set the delegate
         arView.delegate = context.coordinator
+        arView.session.delegate = context.coordinator
         
         // Create and set an empty scene
         arView.scene = SCNScene()
         
         // Configure AR session
         let configuration = ARWorldTrackingConfiguration()
-        configuration.planeDetection = [.horizontal, .vertical] // Detect both plane types
+        configuration.planeDetection = [.horizontal, .vertical]
         
-        // Run the session
-        arView.session.run(configuration)
+        // Enable LiDAR if available
+        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+            configuration.sceneReconstruction = .mesh
+        }
+        
+        // Load saved world map if it exists
+        if let worldMap = worldMapStore.loadWorldMap() {
+            configuration.initialWorldMap = worldMap
+            context.coordinator.isRelocalizing = true
+            print("🗺️ Loading saved AR World Map for marker placement")
+        } else {
+            print("⚠️ No saved AR World Map - starting fresh tracking")
+        }
+        
+        // Run the session with proper initialization
+        arView.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+        
+        // Show feature points for debugging
+        arView.debugOptions = [.showFeaturePoints]
         
         // Add crosshair reticle
         let crosshair = context.coordinator.createCrosshair()
@@ -74,6 +96,8 @@ struct ARViewContainer: UIViewRepresentable {
         context.coordinator.metricSquareID = metricSquareID
         context.coordinator.squareColor = squareColor
         context.coordinator.squareSideMeters = squareSideMeters
+        context.coordinator.mapPointStore = mapPointStore
+        context.coordinator.mapPointID = mapPointID
         
         print("📷 AR Camera session started")
         
@@ -85,10 +109,12 @@ struct ARViewContainer: UIViewRepresentable {
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        let coordinator = Coordinator()
+        coordinator.relocalizationStatus = $relocalizationStatus
+        return coordinator
     }
     
-    class Coordinator: NSObject, ARSCNViewDelegate {
+    class Coordinator: NSObject, ARSCNViewDelegate, ARSessionDelegate {
         
         weak var arView: ARSCNView?
         var crosshairNode: SCNNode?
@@ -104,6 +130,15 @@ struct ARViewContainer: UIViewRepresentable {
         var squareSideMeters: Double?
         var squarePlacementState: SquarePlacementState = .idle
         var squareNodes: [SCNNode] = []
+        
+        // Relocalization tracking
+        var isRelocalizing: Bool = false
+        var relocalizationStatus: Binding<String>?
+        private var lastTrackingState: ARCamera.TrackingState?
+        
+        // MapPointStore reference
+        var mapPointStore: MapPointStore?
+        var mapPointID: UUID = UUID()
         
         // MARK: - Crosshair Creation
         
@@ -354,6 +389,16 @@ struct ARViewContainer: UIViewRepresentable {
             crosshairNode?.isHidden = true
             
             print("✅ Marker placed at height: \(userHeight)m")
+            
+            // Save AR Marker
+            if let mapPointStore = mapPointStore,
+               let mapPoint = mapPointStore.points.first(where: { $0.id == mapPointID }) {
+                mapPointStore.createARMarker(
+                    linkedMapPointID: mapPointID,
+                    arPosition: position,
+                    mapCoordinates: mapPoint.mapPoint
+                )
+            }
         }
         
         // MARK: - Metric Square Placement
@@ -567,6 +612,46 @@ struct ARViewContainer: UIViewRepresentable {
         
         func sessionInterruptionEnded(_ session: ARSession) {
             print("✅ AR Session interruption ended")
+        }
+        
+        // MARK: - ARSessionDelegate
+        
+        func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
+            guard isRelocalizing else { return }
+            
+            if lastTrackingState != camera.trackingState {
+                lastTrackingState = camera.trackingState
+                
+                switch camera.trackingState {
+                case .notAvailable:
+                    relocalizationStatus?.wrappedValue = "Relocalization: Camera not available"
+                case .limited(let reason):
+                    let reasonText: String
+                    switch reason {
+                    case .initializing:
+                        relocalizationStatus?.wrappedValue = "Relocalization: Initializing..."
+                    case .relocalizing:
+                        relocalizationStatus?.wrappedValue = "Relocalization: Matching saved map..."
+                    case .excessiveMotion:
+                        relocalizationStatus?.wrappedValue = "Relocalization: Move slower"
+                    case .insufficientFeatures:
+                        relocalizationStatus?.wrappedValue = "Relocalization: Look around slowly"
+                    @unknown default:
+                        relocalizationStatus?.wrappedValue = "Relocalization: Limited"
+                    }
+                case .normal:
+                    relocalizationStatus?.wrappedValue = "✅ Tracking locked"
+                    print("✅ Relocalization successful - tracking locked to saved map")
+                    
+                    // Stop showing relocalization status after 2 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        self.isRelocalizing = false
+                        self.relocalizationStatus?.wrappedValue = ""
+                    }
+                @unknown default:
+                    relocalizationStatus?.wrappedValue = "Relocalization: Unknown"
+                }
+            }
         }
     }
     

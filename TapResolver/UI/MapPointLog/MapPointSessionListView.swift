@@ -73,6 +73,67 @@ struct MapPointSessionListView: View {
             Divider()
                 .background(Color.white.opacity(0.3))
             
+            // AR Markers section
+            if let markerID = mapPointStore.points.first(where: { $0.id.uuidString == pointID })?.linkedARMarkerID,
+               let marker = mapPointStore.arMarkers.first(where: { $0.id == markerID }) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("AR Markers")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+                    
+                    HStack(spacing: 8) {
+                        // AR Marker label
+                        Text("AR Marker")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.blue.opacity(0.3))
+                            .cornerRadius(6)
+                        
+                        // Edit button
+                        Button(action: {
+                            print("🚧 Edit AR Marker: \(marker.id) - Not yet implemented")
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "flag.fill")
+                                    .font(.system(size: 12))
+                                Text("Edit")
+                                    .font(.system(size: 13, weight: .medium))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.orange.opacity(0.3))
+                            .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Delete button
+                        Button(action: {
+                            mapPointStore.deleteARMarker(marker.id)
+                        }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(6)
+                                .background(Color.red.opacity(0.3))
+                                .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(8)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 12)
+            }
+            
             // Sessions list
             if isLoading {
                 VStack(spacing: 12) {

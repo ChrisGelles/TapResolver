@@ -21,7 +21,9 @@ struct ARCalibrationView: View {
     let mapPointID: UUID
     
     @EnvironmentObject private var mapPointStore: MapPointStore
+    @EnvironmentObject private var worldMapStore: ARWorldMapStore
     @State private var markerPlaced = false
+    @State private var relocalizationStatus: String = ""
     
     var body: some View {
         ZStack {
@@ -32,7 +34,10 @@ struct ARCalibrationView: View {
                 markerPlaced: $markerPlaced,
                 metricSquareID: nil,
                 squareColor: nil,
-                squareSideMeters: nil
+                squareSideMeters: nil,
+                worldMapStore: worldMapStore,
+                relocalizationStatus: $relocalizationStatus,
+                mapPointStore: mapPointStore
             )
             .ignoresSafeArea()
             
@@ -56,6 +61,32 @@ struct ARCalibrationView: View {
                 }
                 
                 Spacer()
+            }
+            
+            // Relocalization status overlay
+            if !relocalizationStatus.isEmpty {
+                VStack {
+                    Spacer()
+                    
+                    HStack {
+                        if relocalizationStatus.contains("✅") {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                        } else {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        }
+                        
+                        Text(relocalizationStatus)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.black.opacity(0.75))
+                    .cornerRadius(10)
+                    .padding(.bottom, 40)
+                }
             }
         }
         .zIndex(10000)

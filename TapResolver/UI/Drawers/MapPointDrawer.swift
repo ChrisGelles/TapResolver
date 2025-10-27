@@ -179,6 +179,8 @@ struct MapPointListItem: View {
     let isActive: Bool
     var onSelect: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
+    
+    @EnvironmentObject private var mapPointStore: MapPointStore
 
     var body: some View {
         HStack(spacing: 2) {
@@ -197,6 +199,13 @@ struct MapPointListItem: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isActive ? "Deactivate map point" : "Activate map point")
+            
+            // AR Marker indicator flag
+            if point.linkedARMarkerID != nil {
+                Image(systemName: "flag.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.orange)
+            }
             
             Spacer(minLength: 0)
 

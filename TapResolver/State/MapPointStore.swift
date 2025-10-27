@@ -8,6 +8,7 @@
 import SwiftUI
 import CoreGraphics
 import Combine
+import simd
 
 // Notification for when map points reload
 extension Notification.Name {
@@ -31,6 +32,7 @@ public final class MapPointStore: ObservableObject {
         public var mapPoint: CGPoint    // map-local (untransformed) coords
         public let createdDate: Date
         public var sessions: [ScanSession] = []  // Full scan session data stored in UserDefaults
+        var linkedARMarkerID: UUID?  // Optional - links to ARMarker if one exists
         
         // Initializer that accepts existing ID or generates new one
         init(id: UUID? = nil, mapPoint: CGPoint, createdDate: Date? = nil, sessions: [ScanSession] = []) {
@@ -38,6 +40,7 @@ public final class MapPointStore: ObservableObject {
             self.mapPoint = mapPoint
             self.createdDate = createdDate ?? Date()
             self.sessions = sessions
+            self.linkedARMarkerID = nil
         }
     }
     
@@ -96,6 +99,7 @@ public final class MapPointStore: ObservableObject {
     }
 
     @Published public internal(set) var points: [MapPoint] = []
+    @Published var arMarkers: [ARMarker] = []
     @Published public private(set) var activePointID: UUID? = nil
     
     /// Get the currently active map point
@@ -349,6 +353,20 @@ public final class MapPointStore: ObservableObject {
             self.points = []
         }
         
+        // Load AR Markers
+        let markersKey = "ARMarkers_v1"
+        if let markersData = ctx.read(markersKey, as: Data.self) {
+            do {
+                arMarkers = try JSONDecoder().decode([ARMarker].self, from: markersData)
+                print("📍 Loaded \(arMarkers.count) AR Marker(s)")
+            } catch {
+                print("⚠️ Failed to decode AR Markers: \(error)")
+                arMarkers = []
+            }
+        } else {
+            arMarkers = []
+        }
+        
         // REMOVED: No longer load activePointID from UserDefaults
         // User must explicitly select a MapPoint each session
         
@@ -564,6 +582,70 @@ public final class MapPointStore: ObservableObject {
         print("   Map points still exist at their coordinates")
         print("   Ready for fresh scanning sessions")
         print(String(repeating: "=", count: 80) + "\n")
+    }
+    
+    private func saveARMarkers() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        
+        do {
+            let data = try encoder.encode(arMarkers)
+            ctx.write("ARMarkers_v1", value: data)
+            print("💾 Saved \(arMarkers.count) AR Marker(s)")
+        } catch {
+            print("❌ Failed to save AR Markers: \(error)")
+        }
+    }
+    
+    // MARK: - AR Marker Management
+    
+    func createARMarker(linkedMapPointID: UUID, arPosition: simd_float3, mapCoordinates: CGPoint) {
+        let marker = ARMarker(
+            linkedMapPointID: linkedMapPointID,
+            arPosition: arPosition,
+            mapCoordinates: mapCoordinates
+        )
+        
+        arMarkers.append(marker)
+        
+        // Link the MapPoint to this marker
+        if let index = points.firstIndex(where: { $0.id == linkedMapPointID }) {
+            points[index].linkedARMarkerID = marker.id
+        }
+        
+        saveARMarkers()
+        save()  // Save the updated MapPoint as well
+        
+        print("✅ Created AR Marker \(marker.id) linked to MapPoint \(linkedMapPointID)")
+    }
+    
+    func deleteARMarker(_ markerID: UUID) {
+        guard let marker = arMarkers.first(where: { $0.id == markerID }) else {
+            print("⚠️ AR Marker \(markerID) not found")
+            return
+        }
+        
+        // Unlink from MapPoint
+        if let index = points.firstIndex(where: { $0.linkedARMarkerID == markerID }) {
+            points[index].linkedARMarkerID = nil
+        }
+        
+        // Remove marker
+        arMarkers.removeAll { $0.id == markerID }
+        
+        saveARMarkers()
+        save()
+        
+        print("🗑️ Deleted AR Marker \(markerID)")
+    }
+    
+    func getARMarker(for mapPointID: UUID) -> ARMarker? {
+        return arMarkers.first { $0.linkedMapPointID == mapPointID }
+    }
+    
+    func getAllARMarkersForLocation() -> [ARMarker] {
+        return arMarkers
     }
     
     deinit {
