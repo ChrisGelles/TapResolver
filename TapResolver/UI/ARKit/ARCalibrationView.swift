@@ -24,6 +24,8 @@ struct ARCalibrationView: View {
     @EnvironmentObject private var worldMapStore: ARWorldMapStore
     @State private var markerPlaced = false
     @State private var relocalizationStatus: String = ""
+    @State private var selectedMarkerID: UUID?
+    @State private var showDeleteConfirmation = false
     
     var body: some View {
         ZStack {
@@ -37,7 +39,8 @@ struct ARCalibrationView: View {
                 squareSideMeters: nil,
                 worldMapStore: worldMapStore,
                 relocalizationStatus: $relocalizationStatus,
-                mapPointStore: mapPointStore
+                mapPointStore: mapPointStore,
+                selectedMarkerID: $selectedMarkerID
             )
             .ignoresSafeArea()
             
@@ -144,9 +147,59 @@ struct ARCalibrationView: View {
                     .padding(.bottom, 40)
                 }
             }
+            
+            // Delete button for selected marker
+            if selectedMarkerID != nil {
+                VStack {
+                    Spacer()
+                    
+                    HStack {
+                        Spacer()
+                        
+                        Button(action: {
+                            showDeleteConfirmation = true
+                        }) {
+                            Image(systemName: "trash.fill")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 56, height: 56)
+                                .background(Color.red)
+                                .cornerRadius(12)
+                                .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 20)
+                        .padding(.bottom, 100)
+                    }
+                }
+            }
+        }
+        .alert("Delete AR Marker?", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                deleteSelectedMarker()
+            }
+        } message: {
+            Text("This will permanently remove the AR marker. This action cannot be undone.")
         }
         .zIndex(10000)
         .transition(.move(edge: .leading))
+    }
+    
+    private func deleteSelectedMarker() {
+        guard let markerID = selectedMarkerID else { return }
+        
+        // Post notification to trigger coordinator deletion
+        NotificationCenter.default.post(
+            name: NSNotification.Name("DeleteARMarker"),
+            object: nil,
+            userInfo: ["markerID": markerID]
+        )
+        
+        // Clear selection
+        selectedMarkerID = nil
+        
+        print("📢 Posted delete notification for marker \(markerID)")
     }
     
     private func getUserHeight() -> Double {

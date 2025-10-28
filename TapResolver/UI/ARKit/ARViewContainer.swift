@@ -47,6 +47,7 @@ struct ARViewContainer: UIViewRepresentable {
     let worldMapStore: ARWorldMapStore
     @Binding var relocalizationStatus: String
     let mapPointStore: MapPointStore
+    @Binding var selectedMarkerID: UUID?
     
     func makeUIView(context: Context) -> ARSCNView {
         let arView = ARSCNView()
@@ -101,6 +102,24 @@ struct ARViewContainer: UIViewRepresentable {
         context.coordinator.mapPointStore = mapPointStore
         context.coordinator.mapPointID = mapPointID
         
+        // Listen for delete notifications
+        context.coordinator.deleteNotificationObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("DeleteARMarker"),
+            object: nil,
+            queue: .main
+        ) { [weak coordinator = context.coordinator] notification in
+            if let markerID = notification.userInfo?["markerID"] as? UUID {
+                print("📥 Coordinator received delete notification for \(markerID)")
+                
+                // Set the selected marker ID if needed
+                if coordinator?.selectedMarkerID == nil {
+                    coordinator?.selectedMarkerID = markerID
+                }
+                
+                coordinator?.deleteSelectedMarker()
+            }
+        }
+        
         print("📷 AR Camera session started")
         
         return arView
@@ -113,6 +132,7 @@ struct ARViewContainer: UIViewRepresentable {
     func makeCoordinator() -> Coordinator {
         let coordinator = Coordinator()
         coordinator.relocalizationStatus = $relocalizationStatus
+        coordinator.selectedMarkerIDBinding = $selectedMarkerID
         return coordinator
     }
     
@@ -143,6 +163,9 @@ struct ARViewContainer: UIViewRepresentable {
         // MapPointStore reference
         var mapPointStore: MapPointStore?
         var mapPointID: UUID = UUID()
+        var selectedMarkerID: UUID?
+        var selectionRingNode: SCNNode?
+        var selectedMarkerIDBinding: Binding<UUID?>?
         
         // MARK: - Crosshair Creation
         
@@ -315,6 +338,57 @@ struct ARViewContainer: UIViewRepresentable {
         // MARK: - Marker Placement
         
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard let arView = arView else { return }
+            
+            // Get tap location
+            let tapLocation = gesture.location(in: arView)
+            
+            // Check if we tapped an existing AR marker
+            // Use more generous hit test options for better detection
+            let hitTestOptions: [SCNHitTestOption: Any] = [
+                .boundingBoxOnly: false,
+                .searchMode: SCNHitTestSearchMode.all.rawValue
+            ]
+            let hitResults = arView.hitTest(tapLocation, options: hitTestOptions)
+            
+            // Search through all hit nodes (including parent nodes)
+            for hit in hitResults {
+                var currentNode: SCNNode? = hit.node
+                
+                // Check this node and all parents for sphere marker
+                while currentNode != nil {
+                    if let nodeName = currentNode?.name,
+                       nodeName.hasPrefix("arMarkerSphere_") {
+                        // Extract marker UUID from node name
+                        let uuidString = nodeName.replacingOccurrences(of: "arMarkerSphere_", with: "")
+                        if let markerUUID = UUID(uuidString: uuidString) {
+                            print("🎯 Hit detected on marker sphere: \(markerUUID)")
+                            handleMarkerSelection(markerUUID, sphereNode: currentNode!)
+                            return
+                        }
+                    }
+                    
+                    // Also check parent marker node
+                    if let nodeName = currentNode?.name,
+                       nodeName.hasPrefix("arMarker_") {
+                        let uuidString = nodeName.replacingOccurrences(of: "arMarker_", with: "")
+                        if let markerUUID = UUID(uuidString: uuidString) {
+                            print("🎯 Hit detected on marker node: \(markerUUID)")
+                            // Find the sphere child node
+                            if let sphereNode = currentNode?.childNodes.first(where: { $0.geometry is SCNSphere }) {
+                                handleMarkerSelection(markerUUID, sphereNode: sphereNode)
+                                return
+                            }
+                        }
+                    }
+                    
+                    currentNode = currentNode?.parent
+                }
+            }
+            
+            print("📍 No marker hit - checking for surface to place new marker")
+            
+            // Not tapping a marker - proceed with marker placement
             guard let crosshair = crosshairNode,
                   !crosshair.isHidden else { return }
             
@@ -322,6 +396,15 @@ struct ARViewContainer: UIViewRepresentable {
             guard isRelocalized else {
                 print("⚠️ Cannot place marker - waiting for relocalization")
                 return
+            }
+            
+            // Block placement if this map point already has an AR marker
+            if let mapPointStore = mapPointStore {
+                let existingMarker = mapPointStore.arMarkers.first { $0.linkedMapPointID == mapPointID }
+                if existingMarker != nil {
+                    showBlockedPlacementMessage("Cannot place marker - this map point already has an AR marker. Delete it first.")
+                    return
+                }
             }
             
             let position = crosshair.simdPosition
@@ -408,6 +491,11 @@ struct ARViewContainer: UIViewRepresentable {
                     arPosition: position,
                     mapCoordinates: mapPoint.mapPoint
                 )
+                
+                // Name the sphere for hit detection - use the marker ID that was just created
+                if let createdMarker = mapPointStore.arMarkers.last {
+                    sphereNode.name = "arMarkerSphere_\(createdMarker.id.uuidString)"
+                }
             }
         }
         
@@ -677,6 +765,64 @@ struct ARViewContainer: UIViewRepresentable {
             }
         }
         
+        // MARK: - Marker Selection
+        
+        private func handleMarkerSelection(_ markerID: UUID, sphereNode: SCNNode) {
+            // Toggle selection
+            if selectedMarkerID == markerID {
+                // Deselect
+                deselectMarker()
+                print("🔵 Deselected AR Marker \(markerID)")
+            } else {
+                // Select this marker
+                deselectMarker() // Clear previous selection first
+                selectedMarkerID = markerID
+                addSelectionRing(to: sphereNode)
+                
+                // Update binding to show delete button
+                DispatchQueue.main.async {
+                    self.selectedMarkerIDBinding?.wrappedValue = markerID
+                }
+                
+                print("🎯 Selected AR Marker \(markerID)")
+            }
+        }
+        
+        private func deselectMarker() {
+            // Restore blue color to previously selected sphere
+            if let selectedID = selectedMarkerID,
+               let arView = arView,
+               let markerNode = arView.scene.rootNode.childNode(withName: "arMarker_\(selectedID.uuidString)", recursively: false),
+               let sphereNode = markerNode.childNodes.first(where: { $0.name?.hasPrefix("arMarkerSphere_") ?? false }),
+               let geometry = sphereNode.geometry,
+               let material = geometry.materials.first {
+                
+                // Restore blue color
+                material.diffuse.contents = UIColor(red: 0/255, green: 125/255, blue: 184/255, alpha: 0.98)
+                material.emission.contents = UIColor.clear
+                
+                print("🔵 Restored sphere to blue (deselected)")
+            }
+            
+            selectedMarkerID = nil
+            
+            // Clear binding to hide delete button
+            DispatchQueue.main.async {
+                self.selectedMarkerIDBinding?.wrappedValue = nil
+            }
+        }
+        
+        private func addSelectionRing(to sphereNode: SCNNode) {
+            // Change sphere color to orange for selection
+            if let geometry = sphereNode.geometry,
+               let material = geometry.materials.first {
+                material.diffuse.contents = UIColor.orange
+                material.emission.contents = UIColor.orange.withAlphaComponent(0.3)
+            }
+            
+            print("🟠 Changed sphere to orange (selected)")
+        }
+        
         // MARK: - AR Marker Management
         
         private func loadAllARMarkers() {
@@ -700,6 +846,12 @@ struct ARViewContainer: UIViewRepresentable {
                     isActive: isActiveMarker
                 )
                 markerNode.name = "arMarker_\(marker.id.uuidString)"
+                
+                // Name the sphere node for hit detection
+                if let sphereNode = markerNode.childNodes.first(where: { $0.geometry is SCNSphere }) {
+                    sphereNode.name = "arMarkerSphere_\(marker.id.uuidString)"
+                }
+                
                 arView.scene.rootNode.addChildNode(markerNode)
                 
                 print("   ✅ Loaded AR Marker for MapPoint \(marker.linkedMapPointID)")
@@ -735,7 +887,54 @@ struct ARViewContainer: UIViewRepresentable {
             sphereNode.position = SCNVector3(0, Float(lineHeight), 0)
             markerNode.addChildNode(sphereNode)
             
+            print("🔨 Created marker node - will be named by caller")
+            
             return markerNode
+        }
+        
+        // MARK: - User Feedback
+        
+        private func showBlockedPlacementMessage(_ message: String) {
+            // This will show in console for now
+            // Could add visual overlay in future
+            print("🚫 \(message)")
+        }
+        
+        // MARK: - Marker Deletion
+        
+        func deleteSelectedMarker() {
+            guard let markerID = selectedMarkerID,
+                  let mapPointStore = mapPointStore,
+                  let arView = arView else {
+                print("⚠️ Cannot delete: missing requirements")
+                return
+            }
+            
+            print("🗑️ Coordinator: Deleting AR Marker \(markerID)")
+            
+            // Remove from scene
+            if let markerNode = arView.scene.rootNode.childNode(withName: "arMarker_\(markerID.uuidString)", recursively: false) {
+                markerNode.removeFromParentNode()
+                print("   ✅ Removed from AR scene")
+            } else {
+                print("   ⚠️ Marker node not found in scene")
+            }
+            
+            // Deselect first
+            deselectMarker()
+            
+            // Remove from store
+            mapPointStore.deleteARMarker(markerID)
+            
+            print("✅ Coordinator: AR Marker deletion complete")
+        }
+        
+        var deleteNotificationObserver: NSObjectProtocol?
+        
+        deinit {
+            if let observer = deleteNotificationObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
         }
     }
     

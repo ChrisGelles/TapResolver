@@ -16,6 +16,7 @@ struct MetricSquareARView: View {
     @EnvironmentObject private var worldMapStore: ARWorldMapStore
     @EnvironmentObject private var mapPointStore: MapPointStore
     @State private var relocalizationStatus: String = ""
+    @State private var selectedMarkerID: UUID? = nil
     
     var body: some View {
         ZStack {
@@ -30,7 +31,8 @@ struct MetricSquareARView: View {
                     squareSideMeters: square.meters,
                     worldMapStore: worldMapStore,
                     relocalizationStatus: $relocalizationStatus,
-                    mapPointStore: mapPointStore
+                    mapPointStore: mapPointStore,
+                    selectedMarkerID: $selectedMarkerID
                 )
                 .ignoresSafeArea()
             }
