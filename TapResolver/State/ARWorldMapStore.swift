@@ -48,6 +48,12 @@ public final class ARWorldMapStore: ObservableObject {
     @Published public var metadata: WorldMapMetadata = WorldMapMetadata()
     @Published public var isLoading: Bool = false
     
+    // MARK: - Patch-Based System (NEW)
+
+    @Published public var patches: [WorldMapPatch] = []
+    @Published public var anchorFeatures: [AnchorFeature] = []
+    @Published public var anchorAreaInstances: [AnchorAreaInstance] = []
+    
     // MARK: - File Paths
     
     private func worldMapURL() -> URL {
@@ -76,11 +82,48 @@ public final class ARWorldMapStore: ObservableObject {
         return locationDir.appendingPathComponent("arWorldMapMetadata.json")
     }
     
+    // MARK: - Patch-Based File Paths
+
+    private func arSpatialDirectory() -> URL {
+        let locationDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("locations")
+            .appendingPathComponent(ctx.locationID)
+            .appendingPathComponent("ar_spatial")
+        
+        try? FileManager.default.createDirectory(at: locationDir, withIntermediateDirectories: true)
+        return locationDir
+    }
+
+    private func patchesDirectory() -> URL {
+        let dir = arSpatialDirectory().appendingPathComponent("patches")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func auxiliaryDirectory() -> URL {
+        let dir = arSpatialDirectory().appendingPathComponent("auxiliary")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func patchMetadataURL() -> URL {
+        return arSpatialDirectory().appendingPathComponent("patch_metadata.json")
+    }
+
+    private func anchorRegistryURL() -> URL {
+        return arSpatialDirectory().appendingPathComponent("anchor_registry.json")
+    }
+
+    private func anchorAreasURL() -> URL {
+        return arSpatialDirectory().appendingPathComponent("anchor_areas.json")
+    }
+    
     // MARK: - Initialization
     
     public init() {
         print("🧠 ARWorldMapStore init")
         loadMetadata()
+        loadPatchData()
         
         // Listen for location changes
         NotificationCenter.default.addObserver(
@@ -94,6 +137,7 @@ public final class ARWorldMapStore: ObservableObject {
     @objc private func locationDidChange() {
         print("📍 ARWorldMapStore: Location changed, reloading metadata")
         loadMetadata()
+        loadPatchData()
     }
     
     // MARK: - Metadata Persistence
@@ -247,6 +291,79 @@ public final class ARWorldMapStore: ObservableObject {
             print("❌ Failed to delete ARWorldMap: \(error)")
         }
     }
+    
+    // MARK: - Patch-Based Persistence
+
+    public func loadPatchData() {
+        // Load patches
+        do {
+            let data = try Data(contentsOf: patchMetadataURL())
+            patches = try JSONDecoder().decode([WorldMapPatch].self, from: data)
+            print("📂 Loaded \(patches.count) world map patches")
+        } catch {
+            patches = []
+            print("📂 No patch metadata found (starting fresh)")
+        }
+        
+        // Load anchor features
+        do {
+            let data = try Data(contentsOf: anchorRegistryURL())
+            anchorFeatures = try JSONDecoder().decode([AnchorFeature].self, from: data)
+            print("📂 Loaded \(anchorFeatures.count) anchor features")
+        } catch {
+            anchorFeatures = []
+            print("📂 No anchor registry found (starting fresh)")
+        }
+        
+        // Load anchor area instances
+        do {
+            let data = try Data(contentsOf: anchorAreasURL())
+            anchorAreaInstances = try JSONDecoder().decode([AnchorAreaInstance].self, from: data)
+            print("📂 Loaded \(anchorAreaInstances.count) anchor area instances")
+        } catch {
+            anchorAreaInstances = []
+            print("📂 No anchor areas found (starting fresh)")
+        }
+    }
+
+    public func savePatchData() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        
+        // Save patches
+        do {
+            let data = try encoder.encode(patches)
+            try data.write(to: patchMetadataURL(), options: .atomic)
+            print("💾 Saved \(patches.count) patches")
+        } catch {
+            print("❌ Failed to save patches: \(error)")
+        }
+        
+        // Save anchor features
+        do {
+            let data = try encoder.encode(anchorFeatures)
+            try data.write(to: anchorRegistryURL(), options: .atomic)
+            print("💾 Saved \(anchorFeatures.count) anchor features")
+        } catch {
+            print("❌ Failed to save anchor features: \(error)")
+        }
+        
+        // Save anchor area instances
+        do {
+            let data = try encoder.encode(anchorAreaInstances)
+            try data.write(to: anchorAreasURL(), options: .atomic)
+            print("💾 Saved \(anchorAreaInstances.count) anchor area instances")
+        } catch {
+            print("❌ Failed to save anchor area instances: \(error)")
+        }
+    }
+
+    // OPTION B: Raw feature data persistence (ready to activate)
+    // private func saveRawFeatureData(_ data: Data, for zoneID: UUID) {
+    //     let url = auxiliaryDirectory().appendingPathComponent("zone_\(zoneID.uuidString)_features.bin")
+    //     try? data.write(to: url)
+    //     print("💾 Saved raw feature data for zone \(zoneID)")
+    // }
     
     // MARK: - Utilities
     

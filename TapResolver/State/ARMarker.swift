@@ -80,3 +80,4 @@ extension ARMarker {
         try container.encode(createdAt, forKey: .createdAt)
     }
 }
+
