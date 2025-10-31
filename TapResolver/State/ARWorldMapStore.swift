@@ -238,11 +238,12 @@ public final class ARWorldMapStore: ObservableObject {
 
     public func savePatch(_ worldMap: ARWorldMap,
                          patchName: String,
+                         patchID: UUID? = nil,  // ← NEW PARAMETER
                          action: String = "initial_scan",
                          duration_s: Double = 0.0,
                          areaCovered: String = "Unknown area") {
         
-        let patchID = UUID()
+        let patchID = patchID ?? UUID()  // Use provided UUID or generate new
         let filename = "patch_\(patchID.uuidString).ardata"
         let patchURL = patchesDirectory().appendingPathComponent(filename)
         

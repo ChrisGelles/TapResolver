@@ -52,6 +52,8 @@ struct ARWorldMapManagementView: View {
             .environmentObject(worldMapStore)
             .onDisappear {
                 selectedPatchID = nil  // Reset when closed
+                // Force refresh by reloading anchor data
+                worldMapStore.objectWillChange.send()
             }
         }
         .alert("Delete AR Environment?", isPresented: $showDeleteConfirmation) {
@@ -516,8 +518,41 @@ private struct PatchListItem: View {
                 .foregroundColor(.secondary)
             }
             
-            // Anchor features section
+            // Action buttons (moved BEFORE anchors)
+            HStack(spacing: 8) {
+                // Extend button
+                Button(action: onExtend) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 13))
+                        Text("Extend")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color.orange)
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                
+                // Delete button
+                Button(action: onDelete) {
+                    Image(systemName: "trash.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white)
+                        .frame(width: 44, height: 36)
+                        .background(Color.red)
+                        .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+            }
+            
+            // Anchor features section (moved AFTER buttons)
             if !anchorAreas.isEmpty {
+                Divider()
+                    .padding(.vertical, 4)
+                
                 VStack(alignment: .leading, spacing: 4) {
                     Text("🎯 Anchor Features (\(anchorAreas.count)):")
                         .font(.system(size: 12, weight: .medium))
@@ -551,36 +586,6 @@ private struct PatchListItem: View {
                         }
                     }
                 }
-            }
-            
-            // Action buttons
-            HStack(spacing: 8) {
-                // Extend button
-                Button(action: onExtend) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 13))
-                        Text("Extend")
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.orange)
-                    .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
-                
-                // Delete button
-                Button(action: onDelete) {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 13))
-                        .foregroundColor(.white)
-                        .frame(width: 44, height: 36)
-                        .background(Color.red)
-                        .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
             }
         }
         .padding(10)

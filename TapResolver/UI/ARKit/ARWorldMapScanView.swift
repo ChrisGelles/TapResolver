@@ -41,6 +41,7 @@ struct ARWorldMapScanView: View {
     @State private var pendingAnchorName: String = ""
     @State private var pendingAnchorData: (anchor: ARAnchor, points: [RawFeaturePoint])? = nil
     @State private var placedAnchors: [(name: String, position: SIMD3<Float>, isLinked: Bool)] = []
+    @State private var currentPatchID: UUID?
     
     private let minFeaturePoints = 500  // Minimum for "good" quality
     
@@ -189,14 +190,25 @@ struct ARWorldMapScanView: View {
                                     .frame(width: 2, height: 20)
                             }
                             
-                            Text("Tap to mark anchor area")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.orange)
-                                .cornerRadius(8)
-                                .padding(.top, 12)
+                            if canPlaceAnchors {
+                                Text("Tap to mark anchor area")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.orange)
+                                    .cornerRadius(8)
+                                    .padding(.top, 12)
+                            } else {
+                                Text("Scanning... \(Int(max(0, 10 - scanDuration)))s until ready")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.gray)
+                                    .cornerRadius(8)
+                                    .padding(.top, 12)
+                            }
                         }
                         
                         Spacer()
@@ -219,6 +231,12 @@ struct ARWorldMapScanView: View {
             }
         }
         .onAppear {
+            // Generate patch ID immediately for new patches (needed for anchor areas)
+            if !isExtending && currentPatchID == nil {
+                currentPatchID = UUID()
+                print("🆔 Generated patch ID for new scan: \(currentPatchID!)")
+            }
+            
             scanStartTime = Date()
             startDurationTimer()
             
@@ -398,7 +416,9 @@ struct ARWorldMapScanView: View {
             HStack(spacing: 12) {
                 // Mark Anchor toggle
                 Button(action: {
-                    isMarkingAnchors.toggle()
+                    if canPlaceAnchors {
+                        isMarkingAnchors.toggle()
+                    }
                 }) {
                     VStack(spacing: 4) {
                         Image(systemName: isMarkingAnchors ? "paintbrush.fill" : "paintbrush")
@@ -409,9 +429,13 @@ struct ARWorldMapScanView: View {
                     .foregroundColor(.white)
                     .frame(width: 90)
                     .padding(.vertical, 10)
-                    .background(isMarkingAnchors ? Color.orange : Color.white.opacity(0.2))
+                    .background(
+                        isMarkingAnchors ? Color.orange :
+                        canPlaceAnchors ? Color.white.opacity(0.2) : Color.gray.opacity(0.3)
+                    )
                     .cornerRadius(10)
                 }
+                .disabled(!canPlaceAnchors)
                 
                 // Save button
                 saveButton
@@ -533,7 +557,7 @@ struct ARWorldMapScanView: View {
             object: nil,
             userInfo: [
                 "isPatch": true,
-                "patchID": patchID,
+                "patchID": patchID,  // patchID is already unwrapped by guard
                 "duration": scanDuration,
                 "areaCovered": "Extended area"
             ]
@@ -558,16 +582,24 @@ struct ARWorldMapScanView: View {
         
         isSaving = true
         
+        // Build userInfo with conditional patchID
+        var userInfo: [String: Any] = [
+            "isPatch": true,
+            "patchName": trimmedName,
+            "action": "initial_scan",
+            "duration": scanDuration,
+            "areaCovered": "Scanned area"
+        ]
+
+        // Add patchID for new patch creation (so anchors link to it)
+        if let newPatchID = currentPatchID {
+            userInfo["patchID"] = newPatchID
+        }
+
         NotificationCenter.default.post(
             name: .saveARWorldMap,
             object: nil,
-            userInfo: [
-                "isPatch": true,
-                "patchName": trimmedName,
-                "action": "initial_scan",
-                "duration": scanDuration,
-                "areaCovered": "Scanned area"
-            ]
+            userInfo: userInfo
         )
         
         // Close after brief delay
@@ -607,6 +639,11 @@ struct ARWorldMapScanView: View {
             // When creating new patch, just need minimum duration
             canSave = scanDuration >= 3.0
         }
+    }
+
+    private var canPlaceAnchors: Bool {
+        // For anchor placement, need more feature points
+        return scanDuration >= 10.0
     }
     
     private func formatDuration(_ duration: TimeInterval) -> String {
@@ -686,6 +723,11 @@ struct ARWorldMapScanView: View {
     }
     
     private func handleAnchorTap() {
+        guard canPlaceAnchors else {
+            print("⚠️ Cannot place anchor yet - SLAM not ready")
+            return
+        }
+        
         // Request anchor placement from coordinator
         NotificationCenter.default.post(
             name: NSNotification.Name("PlaceAnchorArea"),
@@ -701,12 +743,30 @@ struct ARWorldMapScanView: View {
         }
         
         let trimmedName = pendingAnchorName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let currentPatchID = patchIDToExtend ?? UUID() // This should be the actual current patch
+        
+        // Get the correct patch ID
+        let targetPatchID: UUID
+        if let extendingID = patchIDToExtend {
+            // Extending existing patch
+            targetPatchID = extendingID
+        } else if let newPatchID = currentPatchID {
+            // New patch being created
+            targetPatchID = newPatchID
+        } else {
+            // Fallback: create new ID for this scan
+            let newID = UUID()
+            currentPatchID = newID
+            targetPatchID = newID
+        }
         
         // Check if name already exists in this patch
-        if worldMapStore.featureExists(named: trimmedName, inPatch: currentPatchID) {
+        if worldMapStore.featureExists(named: trimmedName, inPatch: targetPatchID) {
             print("❌ Feature '\(trimmedName)' already exists in this patch")
-            // Show error to user
+            // TODO: Show error to user
+            showAnchorNamePrompt = false
+            pendingAnchorName = ""
+            pendingAnchorData = nil
+            resumeARSession()
             return
         }
         
@@ -716,7 +776,7 @@ struct ARWorldMapScanView: View {
         // Add to store
         worldMapStore.addAnchorArea(
             featureName: trimmedName,
-            patchID: currentPatchID,
+            patchID: targetPatchID,
             arAnchorID: data.anchor.identifier,
             localPosition: SIMD3<Float>(data.anchor.transform.columns.3.x,
                                         data.anchor.transform.columns.3.y,
@@ -1056,11 +1116,13 @@ struct ARWorldMapScanViewContainer: UIViewRepresentable {
                         let action = userInfo["action"] as? String ?? "initial_scan"
                         let duration = userInfo["duration"] as? Double ?? 0.0
                         let areaCovered = userInfo["areaCovered"] as? String ?? "Unknown area"
+                        let providedPatchID = userInfo["patchID"] as? UUID  // ← EXTRACT PROVIDED UUID
                         
                         DispatchQueue.main.async { [weak self] in
                             self?.worldMapStore?.savePatch(
                                 worldMap,
                                 patchName: patchName,
+                                patchID: providedPatchID,  // ← PASS IT TO STORE
                                 action: action,
                                 duration_s: duration,
                                 areaCovered: areaCovered
@@ -1127,8 +1189,8 @@ struct ARWorldMapScanViewContainer: UIViewRepresentable {
             let anchor = ARAnchor(transform: anchorTransform)
             arView.session.add(anchor: anchor)
             
-            // Capture raw feature points within 0.5m radius
-            let rawPoints = captureRawFeatures(around: anchorTransform, radius: 0.5, frame: frame)
+            // Capture raw feature points within 1.0m radius
+            let rawPoints = captureRawFeatures(around: anchorTransform, radius: 1.0, frame: frame)
             
             print("📍 Placed anchor at \(anchorTransform.columns.3)")
             print("   Captured \(rawPoints.count) raw feature points")
@@ -1211,7 +1273,21 @@ struct ARWorldMapScanViewContainer: UIViewRepresentable {
             
             let textNode = SCNNode(geometry: text)
             textNode.scale = SCNVector3(0.002, 0.002, 0.002) // Scale down text
-            textNode.position = SCNVector3(0, 0.08, 0) // Above disk
+            
+            // Center the text (with bounds checking)
+            let (min, max) = text.boundingBox
+            let textWidth = max.x - min.x
+            let textHeight = max.y - min.y
+
+            // Check for valid bounds
+            if textWidth.isFinite && textHeight.isFinite && textWidth > 0 && textHeight > 0 {
+                textNode.pivot = SCNMatrix4MakeTranslation((max.x + min.x) / 2, min.y, 0)
+                textNode.position = SCNVector3(0, 0.08, 0)
+            } else {
+                // Fallback if bounds are invalid
+                textNode.position = SCNVector3(0, 0.08, 0)
+                print("⚠️ Text bounds invalid, using default position")
+            }
             
             // Billboard constraint (text always faces camera)
             let billboardConstraint = SCNBillboardConstraint()
