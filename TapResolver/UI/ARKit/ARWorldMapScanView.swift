@@ -19,6 +19,7 @@ import ARKit
 struct ARWorldMapScanView: View {
     @Binding var isPresented: Bool
     let patchIDToExtend: UUID?
+    let isAnchorMode: Bool  // NEW: Distinguish extend vs anchor mode
     @EnvironmentObject private var worldMapStore: ARWorldMapStore
     
     @State private var mappingStatus: ARFrame.WorldMappingStatus = .notAvailable
@@ -45,7 +46,11 @@ struct ARWorldMapScanView: View {
     private let minFeaturePoints = 500  // Minimum for "good" quality
     
     private var isExtending: Bool {
-        return patchIDToExtend != nil
+        return patchIDToExtend != nil && !isAnchorMode
+    }
+
+    private var isSettingAnchors: Bool {
+        return patchIDToExtend != nil && isAnchorMode
     }
     
     private var existingFeatureNames: [String] {
@@ -236,6 +241,32 @@ struct ARWorldMapScanView: View {
                 if !isRelocalized {
                     isRelocalized = true
                     print("✅ Relocalization successful")
+                    
+                    // Show existing anchor disks from this patch
+                    if let patchID = patchIDToExtend {
+                        // Load and display existing anchors
+                        let instances = worldMapStore.anchorAreas(forPatch: patchID)
+                        for instance in instances {
+                            guard let featureName = worldMapStore.featureName(for: instance.id) else { continue }
+                            
+                            // Check if linked
+                            let feature = worldMapStore.anchorFeatures.first { $0.id == instance.featureID }
+                            let isLinked = (feature?.instanceIDs.count ?? 0) > 1
+                            
+                            // Notify coordinator to render disk
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("RenderExistingAnchor"),
+                                object: nil,
+                                userInfo: [
+                                    "instance": instance,
+                                    "name": featureName,
+                                    "isLinked": isLinked
+                                ]
+                            )
+                        }
+                        
+                        print("🎯 Loaded \(instances.count) existing anchor(s) for this patch")
+                    }
                 }
             }
             
@@ -333,6 +364,12 @@ struct ARWorldMapScanView: View {
     
     private var statusBadge: some View {
         VStack(alignment: .trailing, spacing: 4) {
+            if isAnchorMode {
+                Text("🎯 Set Anchors Mode")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.orange)
+            }
+            
             Text(statusText)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(.white)
@@ -396,21 +433,23 @@ struct ARWorldMapScanView: View {
             
             // Control buttons row
             HStack(spacing: 12) {
-                // Mark Anchor toggle
-                Button(action: {
-                    isMarkingAnchors.toggle()
-                }) {
-                    VStack(spacing: 4) {
-                        Image(systemName: isMarkingAnchors ? "paintbrush.fill" : "paintbrush")
-                            .font(.system(size: 20))
-                        Text("Mark Anchor")
-                            .font(.system(size: 11, weight: .medium))
+                // Mark Anchor toggle - ONLY in anchor mode
+                if isAnchorMode {
+                    Button(action: {
+                        isMarkingAnchors.toggle()
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: isMarkingAnchors ? "paintbrush.fill" : "paintbrush")
+                                .font(.system(size: 20))
+                            Text("Mark Anchor")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .frame(width: 90)
+                        .padding(.vertical, 10)
+                        .background(isMarkingAnchors ? Color.orange : Color.white.opacity(0.2))
+                        .cornerRadius(10)
                     }
-                    .foregroundColor(.white)
-                    .frame(width: 90)
-                    .padding(.vertical, 10)
-                    .background(isMarkingAnchors ? Color.orange : Color.white.opacity(0.2))
-                    .cornerRadius(10)
                 }
                 
                 // Save button
@@ -502,7 +541,7 @@ struct ARWorldMapScanView: View {
                         .font(.system(size: 20))
                 }
                 
-                Text(isSaving ? "Saving..." : (isExtending ? "Save Extension" : "Save Patch"))
+                Text(isSaving ? "Saving..." : (isAnchorMode ? "Save Features" : (isExtending ? "Save Extension" : "Save Patch")))
                     .font(.system(size: 18, weight: .semibold))
             }
             .foregroundColor(.white)
@@ -517,6 +556,13 @@ struct ARWorldMapScanView: View {
     // MARK: - Actions
     
     private func saveExtension() {
+        // In anchor mode, don't save spatial data
+        if isAnchorMode {
+            print("🎯 Anchor mode - features saved, spatial data unchanged")
+            isPresented = false
+            return
+        }
+        
         guard let patchID = patchIDToExtend,
               let patch = worldMapStore.patches.first(where: { $0.id == patchID }) else {
             print("❌ Cannot extend: Patch not found")
@@ -892,6 +938,13 @@ struct ARWorldMapScanViewContainer: UIViewRepresentable {
                 name: NSNotification.Name("AnchorPlaced"),
                 object: nil
             )
+            
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleRenderExistingAnchor),
+                name: NSNotification.Name("RenderExistingAnchor"),
+                object: nil
+            )
         }
         
         deinit {
@@ -1156,6 +1209,28 @@ struct ARWorldMapScanViewContainer: UIViewRepresentable {
             }
             
             // Add visual disk at anchor location
+            addVisualDisk(at: anchor, name: name, isLinked: isLinked, to: arView)
+        }
+
+        @objc private func handleRenderExistingAnchor(_ notification: Notification) {
+            guard let arView = arView,
+                  let userInfo = notification.userInfo,
+                  let instance = userInfo["instance"] as? AnchorAreaInstance,
+                  let name = userInfo["name"] as? String,
+                  let isLinked = userInfo["isLinked"] as? Bool else {
+                return
+            }
+            
+            // Create anchor from stored position
+            let transform = simd_float4x4(
+                SIMD4<Float>(1, 0, 0, 0),
+                SIMD4<Float>(0, 1, 0, 0),
+                SIMD4<Float>(0, 0, 1, 0),
+                SIMD4<Float>(instance.centerPosition.x, instance.centerPosition.y, instance.centerPosition.z, 1)
+            )
+            let anchor = ARAnchor(transform: transform)
+            
+            // Add visual disk
             addVisualDisk(at: anchor, name: name, isLinked: isLinked, to: arView)
         }
 

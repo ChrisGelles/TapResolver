@@ -26,6 +26,8 @@ struct ARWorldMapManagementView: View {
     @State private var showDeleteAnchorConfirmation = false
     @State private var showDeleteFeatureConfirmation = false
     @State private var featureToDelete: UUID?
+    @State private var selectedPatchIDForAnchors: UUID?
+    @State private var isAnchorMode: Bool = false
     
     var body: some View {
         VStack(spacing: 20) {
@@ -96,11 +98,15 @@ struct ARWorldMapManagementView: View {
         .sheet(isPresented: $showScanView) {
             ARWorldMapScanView(
                 isPresented: $showScanView,
-                patchIDToExtend: selectedPatchID
+                patchIDToExtend: isAnchorMode ? selectedPatchIDForAnchors : selectedPatchID,
+                isAnchorMode: isAnchorMode
             )
             .environmentObject(worldMapStore)
             .onDisappear {
-                selectedPatchID = nil  // Reset when closed
+                // Reset mode when sheet closes
+                isAnchorMode = false
+                selectedPatchID = nil
+                selectedPatchIDForAnchors = nil
             }
         }
         .alert("Delete AR Environment?", isPresented: $showDeleteConfirmation) {
@@ -435,6 +441,12 @@ struct ARWorldMapManagementView: View {
                             worldMapStore: worldMapStore,
                             onExtend: {
                                 selectedPatchID = patch.id
+                                isAnchorMode = false
+                                showScanView = true
+                            },
+                            onSetAnchors: {
+                                selectedPatchIDForAnchors = patch.id
+                                isAnchorMode = true
                                 showScanView = true
                             },
                             onDelete: {
@@ -636,6 +648,7 @@ private struct PatchListItem: View {
     let anchorAreas: [AnchorAreaInstance]
     let worldMapStore: ARWorldMapStore
     let onExtend: () -> Void
+    let onSetAnchors: () -> Void  // NEW: Set Anchors mode
     let onDelete: () -> Void
     let onDeleteAnchor: (UUID) -> Void
     
@@ -708,32 +721,45 @@ private struct PatchListItem: View {
             
             // Action buttons
             HStack(spacing: 8) {
-                // Extend button
+                // Left button - Extend Patch
                 Button(action: onExtend) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 13))
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12))
                         Text("Extend")
                             .font(.system(size: 13, weight: .semibold))
                     }
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 10)
                     .background(Color.orange)
-                    .cornerRadius(6)
+                    .cornerRadius(8)
                 }
-                .buttonStyle(.plain)
+                
+                // Right button - Set Anchors
+                Button(action: onSetAnchors) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "pin.circle")
+                            .font(.system(size: 12))
+                        Text("Set Anchors")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Color.orange)
+                    .cornerRadius(8)
+                }
                 
                 // Delete button
                 Button(action: onDelete) {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 13))
+                    Image(systemName: "trash")
+                        .font(.system(size: 14))
                         .foregroundColor(.white)
-                        .frame(width: 44, height: 36)
+                        .frame(width: 40, height: 40)
                         .background(Color.red)
-                        .cornerRadius(6)
+                        .cornerRadius(8)
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(10)
