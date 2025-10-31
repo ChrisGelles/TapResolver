@@ -24,11 +24,60 @@ struct ARWorldMapManagementView: View {
     @State private var showDeletePatchConfirmation = false
     @State private var anchorToDelete: UUID? = nil
     @State private var showDeleteAnchorConfirmation = false
+    @State private var showDeleteFeatureConfirmation = false
+    @State private var featureToDelete: UUID?
     
     var body: some View {
         VStack(spacing: 20) {
             // Header
             header
+            
+            // Anchor Features Section
+            if !worldMapStore.anchorFeatures.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "pin.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(.orange)
+                        
+                        Text("Anchor Features")
+                            .font(.system(size: 16, weight: .semibold))
+                        
+                        Spacer()
+                        
+                        Text("\(worldMapStore.anchorFeatures.count)")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.orange)
+                            .cornerRadius(12)
+                    }
+                    .padding(.horizontal, 20)
+                    
+                    ScrollView {
+                        VStack(spacing: 4) {
+                            ForEach(worldMapStore.anchorFeatures) { feature in
+                                FeatureListItem(
+                                    feature: feature,
+                                    worldMapStore: worldMapStore,
+                                    onDelete: {
+                                        featureToDelete = feature.id
+                                        showDeleteFeatureConfirmation = true
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 200)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(10)
+                    .padding(.horizontal, 20)
+                }
+                
+                Divider()
+                    .padding(.horizontal, 20)
+            }
             
             // Show patches if they exist
             if !worldMapStore.patches.isEmpty {
@@ -99,6 +148,23 @@ struct ARWorldMapManagementView: View {
                 }
             } else {
                 Text("This will permanently delete the anchor feature and its archived data.")
+            }
+        }
+        .confirmationDialog(
+            "Delete Anchor Feature",
+            isPresented: $showDeleteFeatureConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let featureID = featureToDelete {
+                    deleteFeature(featureID)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            if let featureID = featureToDelete,
+               let feature = worldMapStore.anchorFeatures.first(where: { $0.id == featureID }) {
+                Text("Delete '\(feature.name)'? This will remove all instances across all patches.")
             }
         }
     }
@@ -473,6 +539,93 @@ struct ARWorldMapManagementView: View {
     
     private func deleteAnchor(_ anchorID: UUID) {
         worldMapStore.deleteAnchorArea(anchorID)
+    }
+    
+    private func deleteFeature(_ featureID: UUID) {
+        guard let feature = worldMapStore.anchorFeatures.first(where: { $0.id == featureID }) else {
+            print("❌ Feature not found: \(featureID)")
+            return
+        }
+        
+        // Delete all instances of this feature
+        let instanceIDs = feature.instanceIDs
+        for instanceID in instanceIDs {
+            worldMapStore.deleteAnchorArea(instanceID)
+        }
+        
+        // If orphaned, manually remove the feature
+        if feature.instanceIDs.isEmpty {
+            worldMapStore.anchorFeatures.removeAll { $0.id == featureID }
+            worldMapStore.savePatchData()
+        }
+        
+        print("✅ Deleted anchor feature '\(feature.name)' with \(instanceIDs.count) instance(s)")
+    }
+}
+
+// MARK: - Feature List Item
+
+private struct FeatureListItem: View {
+    let feature: AnchorFeature
+    let worldMapStore: ARWorldMapStore
+    let onDelete: () -> Void
+    
+    private var patchNames: [String] {
+        var names: [String] = []
+        for instanceID in feature.instanceIDs {
+            if let instance = worldMapStore.anchorAreaInstances.first(where: { $0.id == instanceID }),
+               let patch = worldMapStore.patches.first(where: { $0.id == instance.patchID }) {
+                names.append(patch.name)
+            }
+        }
+        return names
+    }
+    
+    private var isOrphaned: Bool {
+        return feature.instanceIDs.isEmpty
+    }
+    
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            // Icon
+            Image(systemName: isOrphaned ? "exclamationmark.triangle.fill" : "link.circle.fill")
+                .font(.system(size: 16))
+                .foregroundColor(isOrphaned ? .red : .orange)
+                .frame(width: 24)
+            
+            // Feature info
+            VStack(alignment: .leading, spacing: 2) {
+                Text(feature.name)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.primary)
+                
+                if isOrphaned {
+                    Text("⚠️ Orphaned (no patches)")
+                        .font(.system(size: 12))
+                        .foregroundColor(.red)
+                } else {
+                    Text(patchNames.joined(separator: ", "))
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            
+            Spacer()
+            
+            // Delete button
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .font(.system(size: 14))
+                    .foregroundColor(.red)
+                    .frame(width: 32, height: 32)
+                    .background(Color(.systemGray5))
+                    .cornerRadius(8)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.05))
     }
 }
 

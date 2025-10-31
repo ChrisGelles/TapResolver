@@ -3,7 +3,7 @@ import Combine
 
 final class LocationManager: ObservableObject {
     @Published var currentLocationID: String
-    @Published var showLocationMenu: Bool = false
+    @Published var showLocationMenu: Bool = true  // Start at Location Menu
 
     private var bag = Set<AnyCancellable>()
 

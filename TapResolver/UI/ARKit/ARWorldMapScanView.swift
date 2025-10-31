@@ -1196,37 +1196,46 @@ struct ARWorldMapScanViewContainer: UIViewRepresentable {
                                   isLinked: Bool,
                                   to arView: ARSCNView) {
             
-            // Create disk geometry
-            let disk = SCNSphere(radius: 0.05) // 5cm radius disk
-            disk.firstMaterial?.diffuse.contents = isLinked ? UIColor.green : UIColor.yellow
-            disk.firstMaterial?.transparency = 0.8
+            // Create disk geometry (flat cylinder, not sphere)
+            let disk = SCNCylinder(radius: 0.15, height: 0.002)
+            disk.firstMaterial?.diffuse.contents = isLinked ? UIColor.green.withAlphaComponent(0.7) : UIColor.yellow.withAlphaComponent(0.7)
             
-            // Create node
+            // Create parent node at anchor position
+            let parentNode = SCNNode()
+            let transform = anchor.transform
+            parentNode.position = SCNVector3(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+            
+            // Create disk node (child of parent)
             let diskNode = SCNNode(geometry: disk)
+            //diskNode.eulerAngles.x = .pi / 2  // Rotate to lay flat
+            parentNode.addChildNode(diskNode)
             
             // Add text label
-            let text = SCNText(string: name, extrusionDepth: 0.01)
-            text.font = UIFont.systemFont(ofSize: 0.05)
+            let text = SCNText(string: name, extrusionDepth: 0.5)
+            text.font = UIFont.boldSystemFont(ofSize: 8)
+            text.flatness = 0.1
             text.firstMaterial?.diffuse.contents = UIColor.white
             
             let textNode = SCNNode(geometry: text)
-            textNode.scale = SCNVector3(0.002, 0.002, 0.002) // Scale down text
-            textNode.position = SCNVector3(0, 0.08, 0) // Above disk
+            textNode.scale = SCNVector3(0.002, 0.002, 0.002)
+            
+            // Center text above disk
+            let (min, max) = textNode.boundingBox
+            let width = CGFloat(max.x - min.x)
+            textNode.position = SCNVector3(-Float(width) * 0.001, 0.2, 0)  // 20cm above disk
             
             // Billboard constraint (text always faces camera)
             let billboardConstraint = SCNBillboardConstraint()
             billboardConstraint.freeAxes = [.Y]
             textNode.constraints = [billboardConstraint]
             
-            diskNode.addChildNode(textNode)
+            parentNode.addChildNode(textNode)
             
-            // Add to scene
-            if let anchorNode = arView.node(for: anchor) {
-                anchorNode.addChildNode(diskNode)
-                placedAnchorDisks[anchor.identifier] = diskNode
-                
-                print("✅ Added visual disk for '\(name)' (\(isLinked ? "🟢 linked" : "🟡 new"))")
-            }
+            // Add directly to scene root (don't wait for ARKit anchor node)
+            arView.scene.rootNode.addChildNode(parentNode)
+            placedAnchorDisks[anchor.identifier] = parentNode
+            
+            print("✅ Added visual disk for '\(name)' (\(isLinked ? "🟢 linked" : "🟡 new"))")
         }
     }
 }
