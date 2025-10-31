@@ -25,15 +25,12 @@ struct ARWorldMapManagementView: View {
             // Header
             header
             
-            if worldMapStore.metadata.exists {
-                // Status card
-                statusCard
-                
-                // Scan history
-                scanHistorySection
-                
-                // Actions
-                actionsSection
+            // Show patches if they exist
+            if !worldMapStore.patches.isEmpty {
+                patchesSection
+            } else if worldMapStore.metadata.exists {
+                // Legacy single world map exists
+                legacyWorldMapSection
             } else {
                 // No map exists
                 emptyStateView
@@ -216,10 +213,10 @@ struct ARWorldMapManagementView: View {
                 showScanView = true
             }) {
                 HStack {
-                    Image(systemName: "arrow.triangle.branch")
+                    Image(systemName: "plus.viewfinder")
                         .font(.system(size: 18))
                     
-                    Text("Extend AR Environment")
+                    Text("Scan New Patch")
                         .font(.system(size: 16, weight: .semibold))
                 }
                 .foregroundColor(.white)
@@ -270,10 +267,10 @@ struct ARWorldMapManagementView: View {
                 showScanView = true
             }) {
                 HStack {
-                    Image(systemName: "camera.fill")
+                    Image(systemName: "plus.viewfinder")
                         .font(.system(size: 18))
                     
-                    Text("Scan AR Environment")
+                    Text("Scan New Patch")
                         .font(.system(size: 16, weight: .semibold))
                 }
                 .foregroundColor(.white)
@@ -288,6 +285,82 @@ struct ARWorldMapManagementView: View {
         .padding(.top, 60)
     }
     
+    // MARK: - Patches Section
+
+    private var patchesSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Section header
+            HStack {
+                Image(systemName: "square.3.layers.3d")
+                    .font(.system(size: 20))
+                    .foregroundColor(.blue)
+                
+                Text("Map Patches")
+                    .font(.system(size: 16, weight: .semibold))
+                
+                Spacer()
+                
+                Text("\(worldMapStore.patches.count)")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.blue)
+                    .cornerRadius(12)
+            }
+            
+            // Patches list
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(worldMapStore.patches.sorted(by: { $0.createdDate > $1.createdDate })) { patch in
+                        PatchListItem(patch: patch)
+                    }
+                }
+            }
+            .frame(maxHeight: 300)
+            
+            // Actions
+            VStack(spacing: 12) {
+                // Scan new patch
+                Button(action: {
+                    showScanView = true
+                }) {
+                    HStack {
+                        Image(systemName: "plus.viewfinder")
+                            .font(.system(size: 18))
+                        
+                        Text("Scan New Patch")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.blue)
+                    .cornerRadius(10)
+                }
+            }
+        }
+    }
+
+    // MARK: - Legacy World Map Section
+
+    private var legacyWorldMapSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Legacy World Map")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.secondary)
+            
+            statusCard
+            
+            Text("This location uses the old single world map format. New scans will create patches.")
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+            
+            // Actions
+            actionsSection
+        }
+    }
+    
     // MARK: - Utilities
     
     private func formatDate(_ isoString: String) -> String {
@@ -300,5 +373,50 @@ struct ARWorldMapManagementView: View {
         displayFormatter.dateStyle = .medium
         displayFormatter.timeStyle = .short
         return displayFormatter.string(from: date)
+    }
+}
+
+// MARK: - Patch List Item
+
+private struct PatchListItem: View {
+    let patch: WorldMapPatch
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(patch.name)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.primary)
+                
+                Spacer()
+                
+                Text("v\(patch.version)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.blue)
+                    .cornerRadius(6)
+            }
+            
+            HStack(spacing: 12) {
+                Label("\(String(format: "%.1f", patch.fileSize_mb)) MB", systemImage: "doc.fill")
+                Label("\(patch.featurePointCount)", systemImage: "dot.scope")
+                Spacer()
+                Text(formatDate(patch.createdDate))
+            }
+            .font(.system(size: 11))
+            .foregroundColor(.secondary)
+        }
+        .padding(10)
+        .background(Color(.systemBackground))
+        .cornerRadius(8)
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }

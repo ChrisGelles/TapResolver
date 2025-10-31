@@ -234,6 +234,89 @@ public final class ARWorldMapStore: ObservableObject {
         }
     }
     
+    // MARK: - Save Patch
+
+    public func savePatch(_ worldMap: ARWorldMap,
+                         patchName: String,
+                         action: String = "initial_scan",
+                         duration_s: Double = 0.0,
+                         areaCovered: String = "Unknown area") {
+        
+        let patchID = UUID()
+        let filename = "patch_\(patchID.uuidString).ardata"
+        let patchURL = patchesDirectory().appendingPathComponent(filename)
+        
+        print("💾 Saving new world map patch: '\(patchName)'")
+        
+        // Save ARWorldMap file
+        do {
+            let data = try NSKeyedArchiver.archivedData(withRootObject: worldMap, requiringSecureCoding: true)
+            try data.write(to: patchURL, options: .atomic)
+            
+            let fileSize = Double(data.count) / 1_048_576.0  // Convert to MB
+            
+            // Create patch metadata
+            let patch = WorldMapPatch(
+                id: patchID,
+                name: patchName,
+                worldMapFilename: filename,
+                featurePointCount: worldMap.rawFeaturePoints.points.count,
+                planeCount: worldMap.anchors.filter { $0 is ARPlaneAnchor }.count,
+                areaCoveredDescription: areaCovered,
+                scanDuration_s: duration_s
+            )
+            
+            // Update patch with file size
+            var mutablePatch = patch
+            mutablePatch.fileSize_mb = fileSize
+            
+            // Add to patches array
+            patches.append(mutablePatch)
+            
+            // Save patches metadata
+            savePatchData()
+            
+            print("✅ Saved patch '\(patchName)':")
+            print("   ID: \(patchID)")
+            print("   File: \(filename)")
+            print("   Size: \(String(format: "%.1f", fileSize)) MB")
+            print("   Feature Points: \(worldMap.rawFeaturePoints.points.count)")
+            print("   Planes: \(mutablePatch.planeCount)")
+            
+        } catch {
+            print("❌ Failed to save patch: \(error)")
+        }
+    }
+
+    // MARK: - Load Patch
+
+    public func loadPatch(_ patchID: UUID) -> ARWorldMap? {
+        guard let patch = patches.first(where: { $0.id == patchID }) else {
+            print("❌ Patch not found: \(patchID)")
+            return nil
+        }
+        
+        let patchURL = patchesDirectory().appendingPathComponent(patch.worldMapFilename)
+        
+        do {
+            let data = try Data(contentsOf: patchURL)
+            guard let worldMap = try NSKeyedUnarchiver.unarchivedObject(ofClass: ARWorldMap.self, from: data) else {
+                print("❌ Failed to decode patch world map")
+                return nil
+            }
+            
+            print("✅ Loaded patch '\(patch.name)'")
+            print("   Feature Points: \(worldMap.rawFeaturePoints.points.count)")
+            print("   Anchors: \(worldMap.anchors.count)")
+            
+            return worldMap
+            
+        } catch {
+            print("❌ Failed to load patch: \(error)")
+            return nil
+        }
+    }
+    
     // MARK: - Load World Map
     
     public func loadWorldMap() -> ARWorldMap? {

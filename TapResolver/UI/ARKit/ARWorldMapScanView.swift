@@ -29,6 +29,8 @@ struct ARWorldMapScanView: View {
     @State private var isSaving: Bool = false
     @State private var isExtending: Bool = false
     @State private var saveWindowEndTime: Date? = nil
+    @State private var showNamePrompt = false
+    @State private var patchName: String = ""
     
     private let minFeaturePoints = 500  // Minimum for "good" quality
     
@@ -66,6 +68,18 @@ struct ARWorldMapScanView: View {
         }
         .onChange(of: featurePointCount) { _, _ in
             updateSaveEligibility(mappingStatus)
+        }
+        .sheet(isPresented: $showNamePrompt) {
+            PatchNamePromptView(
+                patchName: $patchName,
+                onSave: {
+                    saveAsPatch()
+                },
+                onCancel: {
+                    showNamePrompt = false
+                }
+            )
+            .presentationDetents([.height(280)])
         }
     }
     
@@ -227,7 +241,8 @@ struct ARWorldMapScanView: View {
     
     private var saveButton: some View {
         Button(action: {
-            saveWorldMap()
+            // Prompt for patch name instead of saving immediately
+            showNamePrompt = true
         }) {
             HStack {
                 if isSaving {
@@ -239,7 +254,7 @@ struct ARWorldMapScanView: View {
                         .font(.system(size: 20))
                 }
                 
-                Text(isSaving ? "Saving..." : (isExtending ? "Save Extension" : "Save AR Environment"))
+                Text(isSaving ? "Saving..." : "Save AR Environment")
                     .font(.system(size: 18, weight: .semibold))
             }
             .foregroundColor(.white)
@@ -252,6 +267,39 @@ struct ARWorldMapScanView: View {
     }
     
     // MARK: - Actions
+    
+    private func saveAsPatch() {
+        guard !isSaving else { return }
+        
+        // Validate patch name
+        let trimmedName = patchName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            print("❌ Cannot save patch with empty name")
+            return
+        }
+        
+        isSaving = true
+        
+        NotificationCenter.default.post(
+            name: .saveARWorldMap,
+            object: nil,
+            userInfo: [
+                "isPatch": true,
+                "patchName": trimmedName,
+                "action": isExtending ? "extension" : "initial_scan",
+                "duration": scanDuration,
+                "areaCovered": "Scanned area"
+            ]
+        )
+        
+        // Close after brief delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            isSaving = false
+            showNamePrompt = false
+            patchName = "" // Reset for next time
+            isPresented = false
+        }
+    }
     
     private func saveWorldMap() {
         isSaving = true
@@ -274,20 +322,9 @@ struct ARWorldMapScanView: View {
     }
     
     private func updateSaveEligibility(_ status: ARFrame.WorldMappingStatus) {
-        let meetsThreshold = (status == .mapped || status == .extending) && featurePointCount >= minFeaturePoints
-        
-        // Peak detector: once threshold is met, keep button green for 5 seconds
-        if meetsThreshold {
-            saveWindowEndTime = Date().addingTimeInterval(5.0)
-            canSave = true
-        } else if let endTime = saveWindowEndTime, Date() < endTime {
-            // Still within the 5-second window
-            canSave = true
-        } else {
-            // Threshold not met and window expired
-            canSave = false
-            saveWindowEndTime = nil
-        }
+        // Allow save after 3 seconds of scanning, regardless of tracking quality
+        // This handles cases where SLAM initialization is slow
+        canSave = scanDuration >= 3.0
     }
     
     private func formatDuration(_ duration: TimeInterval) -> String {
@@ -494,25 +531,65 @@ struct ARWorldMapScanViewContainer: UIViewRepresentable {
         }
         
         private func handleSaveRequest(_ notification: Notification) {
-            guard let arView = arView,
-                  let userInfo = notification.userInfo,
-                  let action = userInfo["action"] as? String,
-                  let duration = userInfo["duration_s"] as? Double,
-                  let area = userInfo["areaCovered"] as? String else {
-                print("❌ Invalid save request")
+            guard let arView = arView else {
+                print("❌ Cannot save: No AR view")
                 return
             }
             
-            arView.session.getCurrentWorldMap { [weak self] worldMap, error in
-                guard let worldMap = worldMap else {
-                    print("❌ Failed to get world map: \(error?.localizedDescription ?? "Unknown error")")
+            print("💾 Capturing world map...")
+            
+            arView.session.getCurrentWorldMap { worldMap, error in
+                if let error = error {
+                    print("❌ Failed to get world map: \(error)")
                     return
                 }
                 
-                self?.worldMapStore?.saveWorldMap(worldMap,
-                                                  action: action,
-                                                  duration_s: duration,
-                                                  areaCovered: area)
+                guard let worldMap = worldMap else {
+                    print("❌ World map is nil")
+                    return
+                }
+                
+                guard let userInfo = notification.userInfo else {
+                    print("❌ No userInfo in save notification")
+                    return
+                }
+                
+                // Check if this is a patch save
+                if let isPatch = userInfo["isPatch"] as? Bool, isPatch {
+                    // Save as patch
+                    guard let patchName = userInfo["patchName"] as? String else {
+                        print("❌ No patch name provided")
+                        return
+                    }
+                    
+                    let action = userInfo["action"] as? String ?? "initial_scan"
+                    let duration = userInfo["duration"] as? Double ?? 0.0
+                    let areaCovered = userInfo["areaCovered"] as? String ?? "Unknown area"
+                    
+                    DispatchQueue.main.async { [weak self] in
+                        self?.worldMapStore?.savePatch(
+                            worldMap,
+                            patchName: patchName,
+                            action: action,
+                            duration_s: duration,
+                            areaCovered: areaCovered
+                        )
+                    }
+                } else {
+                    // Legacy save (backward compatibility)
+                    let action = userInfo["action"] as? String ?? "initial_scan"
+                    let duration = userInfo["duration_s"] as? Double ?? 0.0
+                    let areaCovered = userInfo["areaCovered"] as? String ?? "Unknown area"
+                    
+                    DispatchQueue.main.async { [weak self] in
+                        self?.worldMapStore?.saveWorldMap(
+                            worldMap,
+                            action: action,
+                            duration_s: duration,
+                            areaCovered: areaCovered
+                        )
+                    }
+                }
             }
         }
     }
