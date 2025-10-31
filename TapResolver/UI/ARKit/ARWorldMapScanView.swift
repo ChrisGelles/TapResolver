@@ -254,7 +254,7 @@ struct ARWorldMapScanView: View {
                         .font(.system(size: 20))
                 }
                 
-                Text(isSaving ? "Saving..." : "Save AR Environment")
+                Text(isSaving ? "Saving..." : "Save Patch")
                     .font(.system(size: 18, weight: .semibold))
             }
             .foregroundColor(.white)
