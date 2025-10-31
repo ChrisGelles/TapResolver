@@ -288,6 +288,68 @@ public final class ARWorldMapStore: ObservableObject {
         }
     }
 
+    // MARK: - Update Existing Patch
+
+    public func updatePatch(_ patchID: UUID,
+                           with worldMap: ARWorldMap,
+                           duration_s: Double = 0.0,
+                           areaCovered: String = "Extended area") {
+        
+        guard let existingPatchIndex = patches.firstIndex(where: { $0.id == patchID }) else {
+            print("❌ Cannot update: Patch not found")
+            return
+        }
+        
+        var patch = patches[existingPatchIndex]
+        let patchURL = patchesDirectory().appendingPathComponent(patch.worldMapFilename)
+        
+        print("💾 Updating existing patch: '\(patch.name)' (v\(patch.version))")
+        
+        // Backup current version before overwriting
+        if FileManager.default.fileExists(atPath: patchURL.path) {
+            let backupFilename = "patch_\(patchID.uuidString)_v\(patch.version).ardata"
+            let backupURL = patchesDirectory().appendingPathComponent(backupFilename)
+            
+            do {
+                try FileManager.default.copyItem(at: patchURL, to: backupURL)
+                print("💾 Backed up v\(patch.version) to \(backupFilename)")
+            } catch {
+                print("⚠️ Failed to backup: \(error)")
+            }
+        }
+        
+        // Save updated world map (overwrite)
+        do {
+            let data = try NSKeyedArchiver.archivedData(withRootObject: worldMap, requiringSecureCoding: true)
+            try data.write(to: patchURL, options: .atomic)
+            
+            let fileSize = Double(data.count) / 1_048_576.0
+            let newVersion = patch.version + 1
+            
+            // Update metadata
+            patch.version = newVersion
+            patch.fileSize_mb = fileSize
+            patch.featurePointCount = worldMap.rawFeaturePoints.points.count
+            patch.planeCount = worldMap.anchors.filter { $0 is ARPlaneAnchor }.count
+            patch.lastExtendedDate = Date()
+            patch.scanDuration_s += duration_s
+            
+            // Update in array
+            patches[existingPatchIndex] = patch
+            
+            // Save metadata
+            savePatchData()
+            
+            print("✅ Updated patch '\(patch.name)' to v\(newVersion):")
+            print("   Size: \(String(format: "%.1f", fileSize)) MB")
+            print("   Feature Points: \(worldMap.rawFeaturePoints.points.count)")
+            print("   Planes: \(patch.planeCount)")
+            
+        } catch {
+            print("❌ Failed to update patch: \(error)")
+        }
+    }
+
     // MARK: - Load Patch
 
     public func loadPatch(_ patchID: UUID) -> ARWorldMap? {
@@ -314,6 +376,174 @@ public final class ARWorldMapStore: ObservableObject {
         } catch {
             print("❌ Failed to load patch: \(error)")
             return nil
+        }
+    }
+    
+    // MARK: - Anchor Feature Management
+
+    /// Get or create an anchor feature by name
+    public func getOrCreateFeature(named name: String) -> AnchorFeature {
+        if let existing = anchorFeatures.first(where: { $0.name == name }) {
+            return existing
+        }
+        
+        let newFeature = AnchorFeature(id: UUID(), name: name)
+        anchorFeatures.append(newFeature)
+        savePatchData()
+        print("✅ Created new anchor feature: '\(name)'")
+        return newFeature
+    }
+
+    /// Add an anchor area instance
+    public func addAnchorArea(featureName: String,
+                             patchID: UUID,
+                             arAnchorID: UUID,
+                             localPosition: SIMD3<Float>,
+                             rawFeaturePoints: [RawFeaturePoint]) {
+        
+        // Get or create the feature
+        var feature = getOrCreateFeature(named: featureName)
+        
+        // Create instance
+        let instance = AnchorAreaInstance(
+            id: UUID(),
+            featureID: feature.id,
+            patchID: patchID,
+            centerPosition: localPosition,
+            surfaceNormal: SIMD3<Float>(0, 1, 0),
+            radius: 0.5,
+            transform: simd_float4x4(1),
+            arAnchorID: arAnchorID
+        )
+        
+        // Add to collections
+        anchorAreaInstances.append(instance)
+        
+        // Update feature's instance list
+        if !feature.instanceIDs.contains(instance.id) {
+            feature.instanceIDs.append(instance.id)
+            if let index = anchorFeatures.firstIndex(where: { $0.id == feature.id }) {
+                anchorFeatures[index] = feature
+            }
+        }
+        
+        // Save
+        savePatchData()
+        
+        // Save raw features to binary file
+        saveRawFeatures(instance.id, points: rawFeaturePoints)
+        
+        print("✅ Added anchor area '\(featureName)' to patch")
+        print("   Instance ID: \(instance.id)")
+        print("   Archived \(rawFeaturePoints.count) raw feature points")
+    }
+
+    /// Get all anchor areas for a specific patch
+    public func anchorAreas(forPatch patchID: UUID) -> [AnchorAreaInstance] {
+        return anchorAreaInstances.filter { $0.patchID == patchID }
+    }
+
+    /// Get feature name for an instance
+    public func featureName(for instanceID: UUID) -> String? {
+        guard let instance = anchorAreaInstances.first(where: { $0.id == instanceID }),
+              let feature = anchorFeatures.first(where: { $0.id == instance.featureID }) else {
+            return nil
+        }
+        return feature.name
+    }
+
+    /// Check if feature name already exists in patch
+    public func featureExists(named name: String, inPatch patchID: UUID) -> Bool {
+        return anchorAreaInstances.contains { area in
+            guard let feature = anchorFeatures.first(where: { $0.id == area.featureID }) else {
+                return false
+            }
+            return feature.name == name && area.patchID == patchID
+        }
+    }
+
+    /// Get all existing feature names
+    public func existingFeatureNames() -> [String] {
+        return anchorFeatures.map { $0.name }.sorted()
+    }
+
+    /// Delete anchor area instance
+    public func deleteAnchorArea(_ instanceID: UUID) {
+        guard let instance = anchorAreaInstances.first(where: { $0.id == instanceID }) else {
+            print("❌ Anchor area not found")
+            return
+        }
+        
+        let featureID = instance.featureID
+        
+        // Remove instance
+        anchorAreaInstances.removeAll { $0.id == instanceID }
+        
+        // Update feature's instance list
+        if let featureIndex = anchorFeatures.firstIndex(where: { $0.id == featureID }) {
+            var feature = anchorFeatures[featureIndex]
+            feature.instanceIDs.removeAll { $0 == instanceID }
+            
+            // If no more instances, delete the feature
+            if feature.instanceIDs.isEmpty {
+                anchorFeatures.remove(at: featureIndex)
+                print("🗑️ Deleted anchor feature '\(feature.name)' (last instance)")
+            } else {
+                anchorFeatures[featureIndex] = feature
+            }
+        }
+        
+        // Delete raw feature file
+        deleteRawFeatures(instanceID)
+        
+        // Save
+        savePatchData()
+        
+        print("✅ Deleted anchor area instance")
+    }
+
+    /// Check if feature is linked across patches
+    public func isFeatureLinked(_ featureID: UUID) -> Bool {
+        guard let feature = anchorFeatures.first(where: { $0.id == featureID }) else {
+            return false
+        }
+        
+        let uniquePatches = Set(anchorAreaInstances
+            .filter { $0.featureID == featureID }
+            .map { $0.patchID })
+        
+        return uniquePatches.count > 1
+    }
+
+    // MARK: - Raw Feature Point Persistence
+
+    private func saveRawFeatures(_ instanceID: UUID, points: [RawFeaturePoint]) {
+        let filename = "anchor_\(instanceID.uuidString)_features.bin"
+        let fileURL = auxiliaryDirectory().appendingPathComponent(filename)
+        
+        do {
+            let data = try JSONEncoder().encode(points)
+            try data.write(to: fileURL, options: .atomic)
+            
+            let sizeMB = Double(data.count) / 1_048_576.0
+            print("💾 Saved \(points.count) raw features (\(String(format: "%.1f", sizeMB)) MB)")
+            
+        } catch {
+            print("❌ Failed to save raw features: \(error)")
+        }
+    }
+
+    private func deleteRawFeatures(_ instanceID: UUID) {
+        let filename = "anchor_\(instanceID.uuidString)_features.bin"
+        let fileURL = auxiliaryDirectory().appendingPathComponent(filename)
+        
+        do {
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                try FileManager.default.removeItem(at: fileURL)
+                print("🗑️ Deleted raw features file")
+            }
+        } catch {
+            print("❌ Failed to delete raw features: \(error)")
         }
     }
     
