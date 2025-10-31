@@ -102,6 +102,11 @@ public final class MapPointStore: ObservableObject {
     @Published var arMarkers: [ARMarker] = []
     @Published public private(set) var activePointID: UUID? = nil
     
+    // Interpolation mode state
+    @Published var isInterpolationMode: Bool = false
+    @Published var interpolationFirstPointID: UUID? = nil
+    @Published var interpolationSecondPointID: UUID? = nil
+    
     /// Get the currently active map point
     public var activePoint: MapPoint? {
         guard let activeID = activePointID else { return nil }
@@ -670,6 +675,57 @@ public final class MapPointStore: ObservableObject {
     
     deinit {
         print("ðŸ'¥ MapPointStore \(String(instanceID.prefix(8)))... deinitialized")
+    }
+    
+    // MARK: - Interpolation Mode
+
+    func startInterpolationMode(firstPointID: UUID) {
+        guard points.contains(where: { $0.id == firstPointID }) else {
+            print("❌ Cannot start interpolation: first point not found")
+            return
+        }
+        
+        isInterpolationMode = true
+        interpolationFirstPointID = firstPointID
+        interpolationSecondPointID = nil
+        
+        print("🔗 Interpolation mode started with point: \(firstPointID)")
+    }
+
+    func selectSecondPoint(secondPointID: UUID) {
+        guard isInterpolationMode else {
+            print("❌ Not in interpolation mode")
+            return
+        }
+        
+        guard points.contains(where: { $0.id == secondPointID }) else {
+            print("❌ Second point not found")
+            return
+        }
+        
+        guard secondPointID != interpolationFirstPointID else {
+            print("❌ Cannot select same point twice")
+            return
+        }
+        
+        interpolationSecondPointID = secondPointID
+        
+        print("🔗 Second point selected: \(secondPointID)")
+        print("✅ Ready for interpolation between \(interpolationFirstPointID!) and \(secondPointID)")
+    }
+
+    func cancelInterpolationMode() {
+        isInterpolationMode = false
+        interpolationFirstPointID = nil
+        interpolationSecondPointID = nil
+        
+        print("❌ Interpolation mode cancelled")
+    }
+
+    func canStartInterpolation() -> Bool {
+        return isInterpolationMode && 
+               interpolationFirstPointID != nil && 
+               interpolationSecondPointID != nil
     }
     
 }

@@ -20,18 +20,40 @@ struct MapPointOverlay: View {
             if hud.isMapPointOpen {
                 ForEach(mapPointStore.points) { point in
                     let isActive = mapPointStore.isActive(point.id)
+                    
+                    // Determine point color based on interpolation state
+                    let pointColor: Color = {
+                        if mapPointStore.interpolationFirstPointID == point.id {
+                            return .orange  // First point in interpolation
+                        } else if mapPointStore.interpolationSecondPointID == point.id {
+                            return .green   // Second point in interpolation
+                        } else if isActive {
+                            return Color(hex: 0x10fff1)  // Normal selection (cyan)
+                        } else {
+                            return .blue    // Unselected
+                        }
+                    }()
+                    
                     Circle()
-                        .fill(isActive ? Color(hex: 0x10fff1).opacity(0.9) : Color.blue.opacity(0.6))
+                        .fill(pointColor.opacity(0.9))
                         .overlay(
                             Circle()
-                                .stroke(Color.black, lineWidth: isActive ? 2 : 0)
+                                .stroke(Color.black, lineWidth: isActive || mapPointStore.interpolationFirstPointID == point.id || mapPointStore.interpolationSecondPointID == point.id ? 2 : 0)
                         )
                         .frame(width: 12, height: 12)
                         .position(point.mapPoint) // Use map-local coordinates directly
                         .allowsHitTesting(true)
                         .onTapGesture {
                             print("MapPoint tapped: \(point.id)")
-                            mapPointStore.selectPoint(id: point.id)
+                            
+                            // Handle selection based on mode
+                            if mapPointStore.isInterpolationMode && mapPointStore.interpolationSecondPointID == nil {
+                                // Selecting second point for interpolation
+                                mapPointStore.selectSecondPoint(secondPointID: point.id)
+                            } else {
+                                // Normal selection
+                                mapPointStore.selectPoint(id: point.id)
+                            }
                         }
                 }
             }

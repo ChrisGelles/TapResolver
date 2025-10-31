@@ -67,6 +67,7 @@ struct HUDContainer: View {
             .overlay { txPowerOverlay }
             .overlay { keypadOverlay }
             .overlay { arViewOverlay }
+            .overlay(alignment: .top) { interpolationModeBanner }
         }
     
     // MARK: - View Composition Helpers
@@ -216,6 +217,32 @@ struct HUDContainer: View {
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
             }
             
+            // Interpolation mode button (appears when one point selected)
+            if let selectedID = mapPointStore.activePointID,
+               !mapPointStore.isInterpolationMode,
+               mapPointStore.interpolationFirstPointID == nil {
+                
+                Button(action: {
+                    mapPointStore.startInterpolationMode(firstPointID: selectedID)
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "line.3.horizontal.circle")
+                            .font(.system(size: 24))
+                            .foregroundColor(.orange)
+                        
+                        Text("Connect")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.orange)
+                    }
+                    .frame(width: 60, height: 60)
+                    .background(Color.white)
+                    .cornerRadius(12)
+                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                }
+                .transition(.move(edge: .leading).combined(with: .opacity))
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
+            }
+            
             // AR Calibration button for Metric Square (only when square active)
             if metricSquares.activeSquareID != nil {
                 Button(action: {
@@ -326,6 +353,45 @@ struct HUDContainer: View {
                 squareID: activeID
             )
             .allowsHitTesting(true)
+        }
+    }
+    
+    @ViewBuilder
+    private var interpolationModeBanner: some View {
+        if mapPointStore.isInterpolationMode {
+            VStack(spacing: 0) {
+                // Push banner down below status bar
+                Color.clear
+                    .frame(height: 60)
+                
+                HStack {
+                    Image(systemName: "link.circle.fill")
+                        .font(.system(size: 16))
+                    
+                    Text(mapPointStore.interpolationSecondPointID == nil 
+                         ? "Select second Map Point" 
+                         : "Ready to interpolate")
+                        .font(.system(size: 14, weight: .semibold))
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        mapPointStore.cancelInterpolationMode()
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color.orange)
+                .foregroundColor(.white)
+                
+                Spacer()
+            }
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.isInterpolationMode)
         }
     }
     
