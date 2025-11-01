@@ -496,6 +496,13 @@ struct ARViewContainer: UIViewRepresentable {
                 if let createdMarker = mapPointStore.arMarkers.last {
                     sphereNode.name = "arMarkerSphere_\(createdMarker.id.uuidString)"
                 }
+                
+                // Post notification for interpolation mode tracking
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("ARMarkerPlaced"),
+                    object: nil,
+                    userInfo: ["position": position]
+                )
             }
         }
         
