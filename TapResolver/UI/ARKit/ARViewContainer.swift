@@ -454,7 +454,7 @@ struct ARViewContainer: UIViewRepresentable {
             markerPlaced = true
         }
         
-        private func placeMarker(at position: simd_float3) {
+        func placeMarker(at position: simd_float3) {
             guard let arView = arView else { return }
             
             let markerNode = SCNNode()

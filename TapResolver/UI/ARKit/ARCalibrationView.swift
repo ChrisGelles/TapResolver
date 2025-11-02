@@ -329,25 +329,77 @@ struct ARCalibrationView: View {
     }
     
     private func proceedToInterpolation() {
-        guard markerAPlaced && markerBPlaced else {
-            print("❌ Both markers must be placed first")
+        guard interpolationCount > 0,
+              let firstID = interpolationFirstPointID,
+              let secondID = interpolationSecondPointID,
+              let pointA = mapPointStore.points.first(where: { $0.id == firstID }),
+              let pointB = mapPointStore.points.first(where: { $0.id == secondID }) else {
+            print("❌ Cannot interpolate: missing data")
             return
         }
         
-        print("🎯 Milestone 2 Complete!")
-        print("   Marker A: \(markerAPosition!)")
-        print("   Marker B: \(markerBPosition!)")
+        print("🔨 Creating \(interpolationCount) interpolated Map Point(s)...")
+        print("   Point A: \(pointA.mapPoint)")
+        print("   Point B: \(pointB.mapPoint)")
         
-        let distance = simd_distance(markerAPosition!, markerBPosition!)
-        print("   Distance: \(String(format: "%.2f", distance))m")
-        print("   Line connecting markers should be visible on ground")
-        print("   Ready for Milestone 3: Interpolation Calculation")
+        // Interpolate in map space
+        let mapA = pointA.mapPoint
+        let mapB = pointB.mapPoint
         
-        // TODO: Milestone 3 will handle actual interpolation
-        // For now, just show confirmation
+        for i in 1...interpolationCount {
+            let t = CGFloat(i) / CGFloat(interpolationCount + 1)
+            let interpolatedMapPoint = CGPoint(
+                x: mapA.x + t * (mapB.x - mapA.x),
+                y: mapA.y + t * (mapB.y - mapA.y)
+            )
+            
+            // Create new Map Point using existing method (same as green "+" button)
+            let success = mapPointStore.addPoint(at: interpolatedMapPoint)
+            
+            if success {
+                print("   ✅ Created Map Point \(i)/\(interpolationCount) at (\(Int(interpolatedMapPoint.x)), \(Int(interpolatedMapPoint.y)))")
+            } else {
+                print("   ⚠️ Map Point \(i) not created (location occupied)")
+            }
+        }
         
-        // DON'T close yet - user can see the result
-        // isPresented = false
+        // Save all changes
+        mapPointStore.save()
+        
+        print("💾 Saved \(interpolationCount) new Map Point(s)")
+        print("🎉 Interpolation complete!")
+        
+        // Place AR markers at interpolation positions
+        placeInterpolatedARMarkers()
+    }
+    
+    private func placeInterpolatedARMarkers() {
+        guard let coordinator = ARViewContainer.Coordinator.current,
+              let markerA = coordinator.sessionMarkerA?.position,
+              let markerB = coordinator.sessionMarkerB?.position else {
+            print("❌ Cannot place AR markers: session markers not found")
+            return
+        }
+        
+        print("📍 Placing \(interpolationCount) AR marker(s) at interpolation positions...")
+        
+        // Clear cross-marks
+        coordinator.updateInterpolationCrossMarks(count: 0)
+        
+        // Calculate and place markers
+        let direction = markerB - markerA
+        
+        for i in 1...interpolationCount {
+            let t = Float(i) / Float(interpolationCount + 1)
+            let position = markerA + t * direction
+            
+            // Place marker at interpolated position
+            coordinator.placeMarker(at: position)
+            
+            print("   📍 Placed AR marker \(i)/\(interpolationCount)")
+        }
+        
+        print("✅ All interpolation AR markers placed - ready for manual exit")
     }
     
     private func calculateMaxNewMarkers() {
