@@ -90,7 +90,9 @@ struct ARCalibrationView: View {
                     bottomButtonSection
                 }
             } else {
-                // Normal mode - keep existing close button
+                // Normal mode - PiP + Drawer + Close button
+                
+                // Close button (upper-left)
                 VStack {
                     HStack {
                         Button(action: {
@@ -111,6 +113,48 @@ struct ARCalibrationView: View {
                     
                     Spacer()
                 }
+                
+                // PiP Map (upper right)
+                VStack {
+                    HStack {
+                        Spacer()
+                        
+                        PiPMapView(
+                            firstPointID: mapPointStore.activePointID,
+                            secondPointID: nil
+                        )
+                        .environmentObject(mapPointStore)
+                        .environmentObject(locationManager)
+                        .frame(
+                            width: ARInterpolationLayout.pipMapWidth,
+                            height: ARInterpolationLayout.pipMapHeight
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius)
+                                .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                        )
+                        .padding(.top, 40)
+                        .padding(.trailing, ARInterpolationLayout.pipMapRightMargin)
+                    }
+                    
+                    Spacer()
+                }
+                .zIndex(5000)
+                
+                // Map Point Drawer (right side, below PiP)
+                VStack {
+                    HStack {
+                        Spacer()
+                        
+                        MapPointDrawer()
+                            .padding(.top, 40 + ARInterpolationLayout.pipMapHeight + 20)
+                            .padding(.trailing, 20)
+                    }
+                    
+                    Spacer()
+                }
+                .zIndex(5000)
             }
             
             // Relocalization status overlay
@@ -654,32 +698,20 @@ struct PiPMapView: View {
     
     var body: some View {
         GeometryReader { geo in
-            if let image = mapImage,
-               let pointA = mapPointStore.points.first(where: { $0.id == firstPointID }),
-               let pointB = mapPointStore.points.first(where: { $0.id == secondPointID }) {
-                
-                ZStack {
-                    // Use existing MapContainer infrastructure
-                    MapContainer(mapImage: image)
-                        .environmentObject(pipTransform)
-                        .environmentObject(pipProcessor)
-                        .frame(width: image.size.width, height: image.size.height)
-                        .allowsHitTesting(false)  // Disable all gestures
-                    
-                    // Overlay for the two points and line
-                    PiPPointsOverlay(pointA: pointA.mapPoint, pointB: pointB.mapPoint)
-                        .frame(width: image.size.width, height: image.size.height)
-                }
-                .scaleEffect(calculateScale(pointA: pointA.mapPoint, pointB: pointB.mapPoint, frameSize: geo.size, imageSize: image.size))
-                .offset(calculateOffset(pointA: pointA.mapPoint, pointB: pointB.mapPoint, frameSize: geo.size, imageSize: image.size))
-                .frame(width: geo.size.width, height: geo.size.height)
-                .clipped()
-                .overlay(
-                    RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius)
-                        .stroke(Color.cyan, lineWidth: 3)
-                )
-                .onAppear {
-                    setupPiPTransform(image: image, frameSize: geo.size)
+            if let image = mapImage {
+                // Single point mode or dual point mode
+                if let pointID = firstPointID,
+                   secondPointID == nil,
+                   let point = mapPointStore.points.first(where: { $0.id == pointID }) {
+                    // Single point mode - center on one point
+                    singlePointView(image: image, point: point, geo: geo)
+                } else if let pointA = mapPointStore.points.first(where: { $0.id == firstPointID }),
+                          let pointB = mapPointStore.points.first(where: { $0.id == secondPointID }) {
+                    // Dual point mode - interpolation view
+                    dualPointView(image: image, pointA: pointA, pointB: pointB, geo: geo)
+                } else {
+                    // No points selected - show full map
+                    fullMapView(image: image, geo: geo)
                 }
             } else {
                 Rectangle()
@@ -779,6 +811,98 @@ struct PiPMapView: View {
         print("   Offset from image center: (\(Int(offsetFromImageCenter_X)), \(Int(offsetFromImageCenter_Y)))")
         print("   Scale: \(String(format: "%.3f", scale))")
         print("   Final offset (scaled): (\(Int(offsetX)), \(Int(offsetY)))")
+        
+        return CGSize(width: offsetX, height: offsetY)
+    }
+    
+    @ViewBuilder
+    private func singlePointView(image: UIImage, point: MapPointStore.MapPoint, geo: GeometryProxy) -> some View {
+        ZStack {
+            MapContainer(mapImage: image)
+                .environmentObject(pipTransform)
+                .environmentObject(pipProcessor)
+                .frame(width: image.size.width, height: image.size.height)
+                .allowsHitTesting(false)
+            
+            // Single point overlay
+            Circle()
+                .fill(Color.cyan)
+                .frame(width: 12, height: 12)
+                .position(point.mapPoint)
+        }
+        .scaleEffect(calculateSinglePointScale(point: point.mapPoint, frameSize: geo.size, imageSize: image.size))
+        .offset(calculateSinglePointOffset(point: point.mapPoint, frameSize: geo.size, imageSize: image.size))
+        .frame(width: geo.size.width, height: geo.size.height)
+        .clipped()
+        .overlay(
+            RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius)
+                .stroke(Color.cyan, lineWidth: 3)
+        )
+        .onAppear {
+            setupPiPTransform(image: image, frameSize: geo.size)
+        }
+    }
+    
+    @ViewBuilder
+    private func dualPointView(image: UIImage, pointA: MapPointStore.MapPoint, pointB: MapPointStore.MapPoint, geo: GeometryProxy) -> some View {
+        ZStack {
+            MapContainer(mapImage: image)
+                .environmentObject(pipTransform)
+                .environmentObject(pipProcessor)
+                .frame(width: image.size.width, height: image.size.height)
+                .allowsHitTesting(false)
+            
+            PiPPointsOverlay(pointA: pointA.mapPoint, pointB: pointB.mapPoint)
+                .frame(width: image.size.width, height: image.size.height)
+        }
+        .scaleEffect(calculateScale(pointA: pointA.mapPoint, pointB: pointB.mapPoint, frameSize: geo.size, imageSize: image.size))
+        .offset(calculateOffset(pointA: pointA.mapPoint, pointB: pointB.mapPoint, frameSize: geo.size, imageSize: image.size))
+        .frame(width: geo.size.width, height: geo.size.height)
+        .clipped()
+        .overlay(
+            RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius)
+                .stroke(Color.cyan, lineWidth: 3)
+        )
+        .onAppear {
+            setupPiPTransform(image: image, frameSize: geo.size)
+        }
+    }
+    
+    @ViewBuilder
+    private func fullMapView(image: UIImage, geo: GeometryProxy) -> some View {
+        MapContainer(mapImage: image)
+            .environmentObject(pipTransform)
+            .environmentObject(pipProcessor)
+            .frame(width: image.size.width, height: image.size.height)
+            .allowsHitTesting(false)
+            .scaleEffect(0.1)  // Show full map at small scale
+            .frame(width: geo.size.width, height: geo.size.height)
+            .clipped()
+            .onAppear {
+                setupPiPTransform(image: image, frameSize: geo.size)
+            }
+    }
+    
+    private func calculateSinglePointScale(point: CGPoint, frameSize: CGSize, imageSize: CGSize) -> CGFloat {
+        // Show area around single point with 30% padding
+        let visibleRegion: CGFloat = 400  // pixels of map to show
+        let paddedRegion = visibleRegion * 1.3
+        
+        let scaleX = frameSize.width / paddedRegion
+        let scaleY = frameSize.height / paddedRegion
+        
+        return min(scaleX, scaleY)
+    }
+    
+    private func calculateSinglePointOffset(point: CGPoint, frameSize: CGSize, imageSize: CGSize) -> CGSize {
+        let scale = calculateSinglePointScale(point: point, frameSize: frameSize, imageSize: imageSize)
+        
+        let imageCenter = imageSize.width / 2
+        let offsetFromImageCenter_X = imageCenter - point.x
+        let offsetFromImageCenter_Y = imageCenter - point.y
+        
+        let offsetX = offsetFromImageCenter_X * scale
+        let offsetY = offsetFromImageCenter_Y * scale
         
         return CGSize(width: offsetX, height: offsetY)
     }

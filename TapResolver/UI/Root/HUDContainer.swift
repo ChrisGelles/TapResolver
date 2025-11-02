@@ -193,29 +193,26 @@ struct HUDContainer: View {
                     print("🔍 DEBUG: Total points in store = \(mapPointStore.points.count)")
                 }
             
-            if mapPointStore.activePointID != nil {
-                let _ = print()
-                
-                Button(action: {
-                    print("Launching AR View Tools")
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        showARCalibration = true
-                    }
-                }) {
-                    Image(systemName: "cube.fill")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(width: 56, height: 56)
-                        .background(
-                            Circle()
-                                .fill(Color.blue.opacity(0.9))
-                                .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
-                        )
+            // AR Calibration button (always visible)
+            Button(action: {
+                print("Launching AR View Tools")
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    showARCalibration = true
                 }
-                .buttonStyle(.plain)
-                .transition(.move(edge: .leading).combined(with: .opacity))
-                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
+            }) {
+                Image(systemName: "cube.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 56, height: 56)
+                    .background(
+                        Circle()
+                            .fill(Color.blue.opacity(0.9))
+                            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                    )
             }
+            .buttonStyle(.plain)
+            .transition(.move(edge: .leading).combined(with: .opacity))
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
             
             // Interpolation mode button (appears when one point selected)
             if let selectedID = mapPointStore.activePointID,
