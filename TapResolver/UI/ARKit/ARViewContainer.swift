@@ -1088,6 +1088,57 @@ struct ARViewContainer: UIViewRepresentable {
             print("   Scene has \(arView.scene.rootNode.childNodes.count) nodes")
         }
         
+        func updateInterpolationCrossMarks(count: Int) {
+            guard let arView = arView,
+                  let lineNode = arView.scene.rootNode.childNode(withName: "interpolation_line", recursively: true),
+                  let cylinder = lineNode.geometry as? SCNCylinder else {
+                print("⚠️ Cannot update cross-marks: line not found")
+                return
+            }
+            
+            // Remove existing cross-marks from line
+            lineNode.childNodes
+                .filter { $0.name?.hasPrefix("cross_mark_") ?? false }
+                .forEach { $0.removeFromParentNode() }
+            
+            guard count > 0 else {
+                print("✏️ Cleared cross-marks (count = 0)")
+                return
+            }
+            
+            let lineLength = Float(cylinder.height)
+            
+            for i in 1...count {
+                let t = Float(i) / Float(count + 1)
+                
+                // Position along line's local Y-axis (cylinder's height dimension)
+                // Line is centered at origin, so map [0,1] to [-length/2, +length/2]
+                let yPosition = (t - 0.5) * lineLength
+                
+                // Create cross-mark perpendicular to line
+                let crossLength: Float = 0.15
+                let crossLine = SCNCylinder(radius: 0.001, height: CGFloat(crossLength))
+                crossLine.firstMaterial?.diffuse.contents = UIColor.white
+                
+                let crossNode = SCNNode(geometry: crossLine)
+                crossNode.name = "cross_mark_\(i)"
+                
+                // Position in line's local coordinate system (along Y-axis)
+                crossNode.position = SCNVector3(0, yPosition, 0)
+                
+                // Rotate 90° around Z-axis to be perpendicular to line
+                // Line's Y-axis is its length, so cross goes along X-axis
+                crossNode.eulerAngles = SCNVector3(0, 0, Float.pi / 2)
+                
+                // Add as child of line (inherits line's world transform)
+                lineNode.addChildNode(crossNode)
+                
+                print("  ✏️ Cross-mark \(i) at t=\(String(format: "%.2f", t)), y=\(String(format: "%.2f", yPosition))")
+            }
+            
+            print("✏️ Drew \(count) cross-mark(s) on interpolation line")
+        }
+        
         deinit {
             if let observer = deleteNotificationObserver {
                 NotificationCenter.default.removeObserver(observer)

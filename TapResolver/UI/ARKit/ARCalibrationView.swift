@@ -48,6 +48,10 @@ struct ARCalibrationView: View {
     @State private var distanceMismatchPercent: CGFloat = 0
     @State private var lastRaycastPosition: simd_float3? = nil
     
+    // Interpolation slider
+    @State private var interpolationCount: Int = 0
+    @State private var maxNewMarkers: Int = 0
+    
     var body: some View {
         ZStack {
             // AR Camera feed
@@ -286,6 +290,7 @@ struct ARCalibrationView: View {
         markerAPlaced = true
         markerAPosition = coordinator.lastPlacedPosition
         print("✅ Marker A placed")
+        calculateMaxNewMarkers()
     }
     
     private func placeMarkerB() {
@@ -320,6 +325,7 @@ struct ARCalibrationView: View {
         }
         
         print("✅ Marker B placed")
+        calculateMaxNewMarkers()
     }
     
     private func proceedToInterpolation() {
@@ -344,10 +350,60 @@ struct ARCalibrationView: View {
         // isPresented = false
     }
     
+    private func calculateMaxNewMarkers() {
+        guard let posA = markerAPosition, let posB = markerBPosition else {
+            maxNewMarkers = 0
+            return
+        }
+        
+        let distance = simd_distance(posA, posB)
+        
+        // For N new markers: spacing = distance / (N + 1)
+        // Minimum spacing: 1.0m
+        // Therefore: N <= floor(distance / 1.0) - 1
+        maxNewMarkers = max(0, Int(floor(distance / 1.0)) - 1)
+        interpolationCount = min(interpolationCount, maxNewMarkers) // Clamp current value
+        
+        print("📊 Interpolation: distance=\(String(format: "%.2f", distance))m, max markers=\(maxNewMarkers)")
+    }
+    
+    private func updateCrossMarks() {
+        guard let coordinator = ARViewContainer.Coordinator.current else { return }
+        coordinator.updateInterpolationCrossMarks(count: interpolationCount)
+    }
+    
     // MARK: - New Interpolation UI Components
     
     private var bottomButtonSection: some View {
-        HStack(spacing: ARInterpolationLayout.buttonGap) {
+        VStack(spacing: 0) {
+            // Slider for interpolation count (only visible after both markers placed)
+            if bothMarkersPlaced && maxNewMarkers > 0 {
+                VStack(spacing: 8) {
+                    Text(interpolationCount == 1 ? "1 new marker" : "\(interpolationCount) new markers")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white)
+                    
+                    Slider(
+                        value: Binding(
+                            get: { Double(interpolationCount) },
+                            set: { interpolationCount = Int($0.rounded()) }
+                        ),
+                        in: 0...Double(maxNewMarkers),
+                        step: 1.0,
+                        onEditingChanged: { editing in
+                            if !editing {
+                                // Slider released - update cross-marks
+                                updateCrossMarks()
+                            }
+                        }
+                    )
+                    .accentColor(.white)
+                }
+                .padding(.horizontal, ARInterpolationLayout.buttonSideMargin)
+                .padding(.bottom, 12)
+            }
+            
+            HStack(spacing: ARInterpolationLayout.buttonGap) {
             // Place Marker A button
             Button(action: placeMarkerA) {
                 VStack(spacing: 4) {
@@ -397,9 +453,10 @@ struct ARCalibrationView: View {
                 .cornerRadius(ARInterpolationLayout.buttonCornerRadius)
             }
             .disabled(!bothMarkersPlaced)
+            }
+            .padding(.horizontal, ARInterpolationLayout.buttonSideMargin)
+            .padding(.bottom, ARInterpolationLayout.bottomButtonSectionBottomPadding)
         }
-        .padding(.horizontal, ARInterpolationLayout.buttonSideMargin)
-        .padding(.bottom, ARInterpolationLayout.bottomButtonSectionBottomPadding)
     }
     
     private var bothMarkersPlaced: Bool {
@@ -457,25 +514,24 @@ struct ARCalibrationView: View {
         let dy = pixelB.y - pixelA.y
         let pixelDistance = sqrt(dx * dx + dy * dy)
         
-        // Get active metric square's pixels per meter
-        guard let activeSquare = metricSquares.squares.first else {
-            print("⚠️ No metric square found - cannot calculate map distance")
-            return Float(pixelDistance) // Return raw pixels if no calibration
+        // Calculate map distance if metric square is available
+        if let activeSquare = metricSquares.squares.first {
+            let pixelsPerMeter = activeSquare.side / activeSquare.meters
+            let distanceInMeters = Float(pixelDistance / pixelsPerMeter)
+            
+            print("📐 Map distance calculation:")
+            print("   Point A: (\(Int(pixelA.x)), \(Int(pixelA.y)))")
+            print("   Point B: (\(Int(pixelB.x)), \(Int(pixelB.y)))")
+            print("   Pixel distance: \(String(format: "%.1f", pixelDistance))")
+            print("   Pixels per meter: \(String(format: "%.1f", pixelsPerMeter))")
+            print("   Distance in meters: \(String(format: "%.2f", distanceInMeters))m")
+            
+            return distanceInMeters
+        } else {
+            print("⚠️ Metric Square Unknown - map distance unavailable")
+            print("ℹ️ Proceeding with AR measurements only")
+            return 0
         }
-        
-        let pixelsPerMeter = activeSquare.side / activeSquare.meters
-        
-        // Convert to meters
-        let distanceInMeters = Float(pixelDistance / pixelsPerMeter)
-        
-        print("📐 Map distance calculation:")
-        print("   Point A: (\(Int(pixelA.x)), \(Int(pixelA.y)))")
-        print("   Point B: (\(Int(pixelB.x)), \(Int(pixelB.y)))")
-        print("   Pixel distance: \(String(format: "%.1f", pixelDistance))")
-        print("   Pixels per meter: \(String(format: "%.1f", pixelsPerMeter))")
-        print("   Distance in meters: \(String(format: "%.2f", distanceInMeters))m")
-        
-        return distanceInMeters
     }
     
     private var arDistance: Float {
