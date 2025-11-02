@@ -1106,6 +1106,15 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
+            // Calculate line direction for perpendicular alignment
+            guard let markerA = sessionMarkerA?.position,
+                  let markerB = sessionMarkerB?.position else {
+                print("⚠️ Session markers not available")
+                return
+            }
+            let direction = markerB - markerA
+            let lineDirection = simd_normalize(direction)
+            
             let lineLength = Float(cylinder.height)
             
             for i in 1...count {
@@ -1126,12 +1135,23 @@ struct ARViewContainer: UIViewRepresentable {
                 // Position in line's local coordinate system (along Y-axis)
                 crossNode.position = SCNVector3(0, yPosition, 0)
                 
-                // Rotate 90° around Z-axis to be perpendicular to line
-                // Line's Y-axis is its length, so cross goes along X-axis
-                crossNode.eulerAngles = SCNVector3(0, 0, Float.pi / 2)
-                
-                // Add as child of line (inherits line's world transform)
+                // Add as child of line FIRST (inherits line's world transform)
                 lineNode.addChildNode(crossNode)
+                
+                // AFTER adding as child, override rotation to be ground-relative
+                // Calculate world position to get the actual AR coordinates
+                let worldPos = lineNode.convertPosition(SCNVector3(0, yPosition, 0), to: nil)
+                
+                // Calculate perpendicular direction in XZ plane (ground plane)
+                // Project line direction onto ground by zeroing Y component
+                let lineDir2D = simd_float3(lineDirection.x, 0, lineDirection.z)
+                let lineDirNormalized = simd_normalize(lineDir2D)
+                
+                // Perpendicular is 90° rotation in XZ plane
+                let perpAngle = atan2(lineDirNormalized.x, lineDirNormalized.z)
+                
+                // Set world-space rotation: lie flat and perpendicular to line
+                crossNode.eulerAngles = SCNVector3(Float.pi / 2, perpAngle, 0)
                 
                 print("  ✏️ Cross-mark \(i) at t=\(String(format: "%.2f", t)), y=\(String(format: "%.2f", yPosition))")
             }
