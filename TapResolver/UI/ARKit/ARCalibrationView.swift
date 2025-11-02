@@ -26,6 +26,7 @@ struct ARCalibrationView: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var worldMapStore: ARWorldMapStore
     @EnvironmentObject private var metricSquares: MetricSquareStore
+    @EnvironmentObject private var locationManager: LocationManager
     @State private var markerPlaced = false
     @State private var relocalizationStatus: String = ""
     @State private var selectedMarkerID: UUID?
@@ -612,18 +613,201 @@ struct ARCalibrationView: View {
         VStack {
             HStack {
                 Spacer()
-                // Placeholder for PiP map
-                Rectangle()
-                    .fill(Color.blue.opacity(0.3))
-                    .frame(
-                        width: ARInterpolationLayout.pipMapWidth,
-                        height: ARInterpolationLayout.pipMapHeight
-                    )
-                    .cornerRadius(ARInterpolationLayout.pipMapCornerRadius)
-                    .padding(.top, ARInterpolationLayout.pipMapTopMargin)
-                    .padding(.trailing, ARInterpolationLayout.pipMapRightMargin)
+                
+                // Mini map using existing MapContainer infrastructure
+                PiPMapView(
+                    firstPointID: interpolationFirstPointID,
+                    secondPointID: interpolationSecondPointID
+                )
+                .environmentObject(mapPointStore)
+                .environmentObject(locationManager)
+                .frame(
+                    width: ARInterpolationLayout.pipMapWidth,
+                    height: ARInterpolationLayout.pipMapHeight
+                )
+                .clipShape(RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius)
+                        .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                )
+                .padding(.top, ARInterpolationLayout.pipMapTopMargin)
+                .padding(.trailing, ARInterpolationLayout.pipMapRightMargin)
             }
             Spacer()
+        }
+    }
+}
+
+// MARK: - PiP Map View
+
+struct PiPMapView: View {
+    let firstPointID: UUID?
+    let secondPointID: UUID?
+    
+    @EnvironmentObject private var mapPointStore: MapPointStore
+    @EnvironmentObject private var locationManager: LocationManager
+    
+    @StateObject private var pipTransform = MapTransformStore()
+    @StateObject private var pipProcessor = TransformProcessor()
+    
+    @State private var mapImage: UIImage?
+    
+    var body: some View {
+        GeometryReader { geo in
+            if let image = mapImage,
+               let pointA = mapPointStore.points.first(where: { $0.id == firstPointID }),
+               let pointB = mapPointStore.points.first(where: { $0.id == secondPointID }) {
+                
+                ZStack {
+                    // Use existing MapContainer infrastructure
+                    MapContainer(mapImage: image)
+                        .environmentObject(pipTransform)
+                        .environmentObject(pipProcessor)
+                        .frame(width: image.size.width, height: image.size.height)
+                        .allowsHitTesting(false)  // Disable all gestures
+                    
+                    // Overlay for the two points and line
+                    PiPPointsOverlay(pointA: pointA.mapPoint, pointB: pointB.mapPoint)
+                        .frame(width: image.size.width, height: image.size.height)
+                }
+                .scaleEffect(calculateScale(pointA: pointA.mapPoint, pointB: pointB.mapPoint, frameSize: geo.size, imageSize: image.size))
+                .offset(calculateOffset(pointA: pointA.mapPoint, pointB: pointB.mapPoint, frameSize: geo.size, imageSize: image.size))
+                .frame(width: geo.size.width, height: geo.size.height)
+                .clipped()
+                .overlay(
+                    RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius)
+                        .stroke(Color.cyan, lineWidth: 3)
+                )
+                .onAppear {
+                    setupPiPTransform(image: image, frameSize: geo.size)
+                }
+            } else {
+                Rectangle()
+                    .fill(Color.blue.opacity(0.3))
+            }
+        }
+        .onAppear {
+            loadMapImage()
+        }
+    }
+    
+    private func loadMapImage() {
+        let locationID = locationManager.currentLocationID
+        
+        // Try Documents first
+        if let image = LocationImportUtils.loadDisplayImage(locationID: locationID) {
+            mapImage = image
+            return
+        }
+        
+        // Fallback to bundled assets
+        let assetName: String
+        switch locationID {
+        case "home": assetName = "myFirstFloor_v03-metric"
+        case "museum": assetName = "MuseumMap-8k"
+        default: return
+        }
+        
+        mapImage = UIImage(named: assetName)
+    }
+    
+    private func setupPiPTransform(image: UIImage, frameSize: CGSize) {
+        pipProcessor.setMapSize(CGSize(width: image.size.width, height: image.size.height))
+        pipProcessor.setScreenCenter(CGPoint(x: frameSize.width / 2, y: frameSize.height / 2))
+    }
+    
+    private func calculateScale(pointA: CGPoint, pointB: CGPoint, frameSize: CGSize, imageSize: CGSize) -> CGFloat {
+        print("🔍 PiP Scale Calculation:")
+        print("   Point A: (\(Int(pointA.x)), \(Int(pointA.y)))")
+        print("   Point B: (\(Int(pointB.x)), \(Int(pointB.y)))")
+        print("   PiP frame size: \(Int(frameSize.width))x\(Int(frameSize.height))")
+        print("   Map image size: \(Int(imageSize.width))x\(Int(imageSize.height))")
+        
+        // Calculate center point between A and B
+        let centerX = (pointA.x + pointB.x) / 2
+        let centerY = (pointA.y + pointB.y) / 2
+        
+        // Calculate max distances from center to either point
+        let maxXDistance = max(abs(pointA.x - centerX), abs(pointB.x - centerX))
+        let maxYDistance = max(abs(pointA.y - centerY), abs(pointB.y - centerY))
+        
+        // Add padding (10% extra space around points)
+        let paddingFactor: CGFloat = 1.1
+        let paddedXDistance = maxXDistance * 2 * paddingFactor
+        let paddedYDistance = maxYDistance * 2 * paddingFactor
+        
+        // Calculate scale factors for each dimension
+        let scaleX = frameSize.width / paddedXDistance
+        let scaleY = frameSize.height / paddedYDistance
+        
+        // Use the smaller scale to ensure both points fit
+        let finalScale = min(scaleX, scaleY)
+        
+        print("   Center point: (\(Int(centerX)), \(Int(centerY)))")
+        print("   Max X distance: \(Int(maxXDistance)), padded: \(Int(paddedXDistance))")
+        print("   Max Y distance: \(Int(maxYDistance)), padded: \(Int(paddedYDistance))")
+        print("   Scale X: \(String(format: "%.3f", scaleX))")
+        print("   Scale Y: \(String(format: "%.3f", scaleY))")
+        print("   Final scale: \(String(format: "%.3f", finalScale))")
+        
+        return finalScale
+    }
+    
+    private func calculateOffset(pointA: CGPoint, pointB: CGPoint, frameSize: CGSize, imageSize: CGSize) -> CGSize {
+        let scale = calculateScale(pointA: pointA, pointB: pointB, frameSize: frameSize, imageSize: imageSize)
+        
+        // Calculate average of the two points (center between them)
+        let Xavg = (pointA.x + pointB.x) / 2
+        let Yavg = (pointA.y + pointB.y) / 2
+        
+        // Image center (assuming 2048x2048)
+        let imageCenter = imageSize.width / 2
+        
+        // Offset from image center to average point
+        let offsetFromImageCenter_X = imageCenter - Xavg
+        let offsetFromImageCenter_Y = imageCenter - Yavg
+        
+        // Apply scale factor
+        let offsetX = offsetFromImageCenter_X * scale
+        let offsetY = offsetFromImageCenter_Y * scale
+        
+        print("🎯 PiP Offset Calculation:")
+        print("   Point A: (\(Int(pointA.x)), \(Int(pointA.y)))")
+        print("   Point B: (\(Int(pointB.x)), \(Int(pointB.y)))")
+        print("   Xavg: \(Int(Xavg)), Yavg: \(Int(Yavg))")
+        print("   Image center: \(Int(imageCenter))")
+        print("   Offset from image center: (\(Int(offsetFromImageCenter_X)), \(Int(offsetFromImageCenter_Y)))")
+        print("   Scale: \(String(format: "%.3f", scale))")
+        print("   Final offset (scaled): (\(Int(offsetX)), \(Int(offsetY)))")
+        
+        return CGSize(width: offsetX, height: offsetY)
+    }
+}
+
+struct PiPPointsOverlay: View {
+    let pointA: CGPoint
+    let pointB: CGPoint
+    
+    var body: some View {
+        ZStack {
+            // Line between points
+            Path { path in
+                path.move(to: pointA)
+                path.addLine(to: pointB)
+            }
+            .stroke(Color.white, lineWidth: 2)
+            
+            // Point A (orange)
+            Circle()
+                .fill(Color.orange)
+                .frame(width: 12, height: 12)
+                .position(pointA)
+            
+            // Point B (green)
+            Circle()
+                .fill(Color.green)
+                .frame(width: 12, height: 12)
+                .position(pointB)
         }
     }
 }
