@@ -44,21 +44,15 @@ struct ARInterpolationLayout {
     static let instructionsFontSize: CGFloat = 14
     
     // MARK: - Bottom Button Section
-    static let bottomButtonSectionHeight: CGFloat = 117
+    static let bottomButtonSectionHeight: CGFloat = 77  // Single row now
     static let bottomButtonSectionBottomPadding: CGFloat = 20
     
-    // Individual marker buttons
-    static let markerButtonHeight: CGFloat = 60
-    static let markerButtonGap: CGFloat = 12
-    static let markerButtonSideMargin: CGFloat = 20
-    static let markerButtonCornerRadius: CGFloat = 12
-    static let markerButtonFontSize: CGFloat = 16
-    
-    // Interpolate button
-    static let interpolateButtonHeight: CGFloat = 50
-    static let interpolateButtonTopGap: CGFloat = 12
-    static let interpolateButtonCornerRadius: CGFloat = 12
-    static let interpolateButtonFontSize: CGFloat = 18
+    // All three buttons in one row
+    static let buttonHeight: CGFloat = 60
+    static let buttonGap: CGFloat = 8
+    static let buttonSideMargin: CGFloat = 20
+    static let buttonCornerRadius: CGFloat = 12
+    static let buttonFontSize: CGFloat = 14  // Smaller for three across
     
     // MARK: - AR Visualization
     static let connectorLineWidth: CGFloat = 0.02  // meters in AR space
@@ -73,6 +67,8 @@ struct ARInterpolationLayout {
     // MARK: - Colors
     static let markerAColor = Color.orange
     static let markerBColor = Color.green
+    static let interpolateColor = Color.blue
+    static let interpolateDisabledColor = Color.gray
     static let mapDistanceColor = Color.blue
     static let arDistanceColor = Color.yellow
     static let warningColor = Color.red

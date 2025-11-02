@@ -25,14 +25,19 @@ struct ARCalibrationView: View {
     
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var worldMapStore: ARWorldMapStore
+    @EnvironmentObject private var metricSquares: MetricSquareStore
     @State private var markerPlaced = false
     @State private var relocalizationStatus: String = ""
     @State private var selectedMarkerID: UUID?
     @State private var showDeleteConfirmation = false
     
     // Interpolation mode tracking
-    @State private var isInterpolationMode: Bool = false
     @State private var currentTargetPointID: UUID? = nil
+    
+    // Computed property - derived from parameters
+    private var isInterpolationMode: Bool {
+        interpolationFirstPointID != nil && interpolationSecondPointID != nil
+    }
     
     // Independent marker placement tracking
     @State private var markerAPlaced: Bool = false
@@ -41,6 +46,7 @@ struct ARCalibrationView: View {
     @State private var markerBPosition: simd_float3? = nil
     @State private var showDistanceWarning: Bool = false
     @State private var distanceMismatchPercent: CGFloat = 0
+    @State private var lastRaycastPosition: simd_float3? = nil
     
     var body: some View {
         ZStack {
@@ -55,7 +61,10 @@ struct ARCalibrationView: View {
                 worldMapStore: worldMapStore,
                 relocalizationStatus: $relocalizationStatus,
                 mapPointStore: mapPointStore,
-                selectedMarkerID: $selectedMarkerID
+                selectedMarkerID: $selectedMarkerID,
+                isInterpolationMode: isInterpolationMode,
+                interpolationFirstPointID: interpolationFirstPointID,
+                interpolationSecondPointID: interpolationSecondPointID
             )
             .ignoresSafeArea()
             
@@ -217,19 +226,6 @@ struct ARCalibrationView: View {
         }
         .zIndex(10000)
         .transition(.move(edge: .leading))
-        .onAppear {
-            // Check if we're in interpolation mode
-            if let firstID = interpolationFirstPointID,
-               let secondID = interpolationSecondPointID {
-                isInterpolationMode = true
-                print("🔗 AR View opened in interpolation mode")
-                print("   First point: \(firstID)")
-                print("   Second point: \(secondID)")
-            } else {
-                isInterpolationMode = false
-                currentTargetPointID = mapPointID
-            }
-        }
     }
     
     private func deleteSelectedMarker() {
@@ -262,74 +258,152 @@ struct ARCalibrationView: View {
         return "Point (\(Int(point.mapPoint.x)), \(Int(point.mapPoint.y)))"
     }
     
+    // MARK: - Button Actions
+    
+    private func placeMarkerA() {
+        guard !markerAPlaced else {
+            print("🟠 Marker A already placed")
+            return
+        }
+        
+        guard let coordinator = ARViewContainer.Coordinator.current else {
+            print("❌ No coordinator reference")
+            return
+        }
+        
+        guard let pointA = mapPointStore.points.first(where: { $0.id == interpolationFirstPointID }) else {
+            print("❌ Cannot find Point A")
+            return
+        }
+        
+        print("🟠 Placing Marker A...")
+        coordinator.placeMarkerAt(
+            mapPointID: interpolationFirstPointID!,
+            mapPoint: pointA,
+            color: UIColor.orange
+        )
+        
+        markerAPlaced = true
+        markerAPosition = coordinator.lastPlacedPosition
+        print("✅ Marker A placed")
+    }
+    
+    private func placeMarkerB() {
+        guard !markerBPlaced else {
+            print("🟢 Marker B already placed")
+            return
+        }
+        
+        guard let coordinator = ARViewContainer.Coordinator.current else {
+            print("❌ No coordinator reference")
+            return
+        }
+        
+        guard let pointB = mapPointStore.points.first(where: { $0.id == interpolationSecondPointID }) else {
+            print("❌ Cannot find Point B")
+            return
+        }
+        
+        print("🟢 Placing Marker B...")
+        coordinator.placeMarkerAt(
+            mapPointID: interpolationSecondPointID!,
+            mapPoint: pointB,
+            color: UIColor.green
+        )
+        
+        markerBPlaced = true
+        markerBPosition = coordinator.lastPlacedPosition
+        
+        if let posA = markerAPosition {
+            let distance = simd_distance(posA, markerBPosition!)
+            print("📏 Distance between markers: \(String(format: "%.2f", distance))m")
+        }
+        
+        print("✅ Marker B placed")
+    }
+    
+    private func proceedToInterpolation() {
+        guard markerAPlaced && markerBPlaced else {
+            print("❌ Both markers must be placed first")
+            return
+        }
+        
+        print("🎯 Milestone 2 Complete!")
+        print("   Marker A: \(markerAPosition!)")
+        print("   Marker B: \(markerBPosition!)")
+        
+        let distance = simd_distance(markerAPosition!, markerBPosition!)
+        print("   Distance: \(String(format: "%.2f", distance))m")
+        print("   Line connecting markers should be visible on ground")
+        print("   Ready for Milestone 3: Interpolation Calculation")
+        
+        // TODO: Milestone 3 will handle actual interpolation
+        // For now, just show confirmation
+        
+        // DON'T close yet - user can see the result
+        // isPresented = false
+    }
+    
     // MARK: - New Interpolation UI Components
     
     private var bottomButtonSection: some View {
-        VStack(spacing: ARInterpolationLayout.markerButtonGap) {
-            // Two marker placement buttons
-            HStack(spacing: ARInterpolationLayout.markerButtonGap) {
-                // Place Marker A button
-                Button(action: {
-                    // TODO: Handle Marker A placement
-                    print("🟠 Place Marker A tapped")
-                }) {
-                    HStack(spacing: 8) {
-                        if markerAPlaced {
-                            Image(systemName: "checkmark.circle.fill")
-                        }
-                        Text(markerAPlaced ? "Marker A ✓" : "Place Marker A")
-                            .font(.system(size: ARInterpolationLayout.markerButtonFontSize, weight: .semibold))
+        HStack(spacing: ARInterpolationLayout.buttonGap) {
+            // Place Marker A button
+            Button(action: placeMarkerA) {
+                VStack(spacing: 4) {
+                    if markerAPlaced {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 16))
                     }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: ARInterpolationLayout.markerButtonHeight)
-                    .background(markerAPlaced ? ARInterpolationLayout.successColor : ARInterpolationLayout.markerAColor)
-                    .cornerRadius(ARInterpolationLayout.markerButtonCornerRadius)
+                    Text(markerAPlaced ? "A ✓" : "Marker A")
+                        .font(.system(size: ARInterpolationLayout.buttonFontSize, weight: .semibold))
                 }
-                
-                // Place Marker B button
-                Button(action: {
-                    // TODO: Handle Marker B placement
-                    print("🟢 Place Marker B tapped")
-                }) {
-                    HStack(spacing: 8) {
-                        if markerBPlaced {
-                            Image(systemName: "checkmark.circle.fill")
-                        }
-                        Text(markerBPlaced ? "Marker B ✓" : "Place Marker B")
-                            .font(.system(size: ARInterpolationLayout.markerButtonFontSize, weight: .semibold))
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: ARInterpolationLayout.markerButtonHeight)
-                    .background(markerBPlaced ? ARInterpolationLayout.successColor : ARInterpolationLayout.markerBColor)
-                    .cornerRadius(ARInterpolationLayout.markerButtonCornerRadius)
-                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: ARInterpolationLayout.buttonHeight)
+                .background(markerAPlaced ? ARInterpolationLayout.successColor : ARInterpolationLayout.markerAColor)
+                .cornerRadius(ARInterpolationLayout.buttonCornerRadius)
             }
             
-            // Interpolate button (only when both placed)
-            if markerAPlaced && markerBPlaced {
-                Button(action: {
-                    print("🎯 Interpolate tapped")
-                    // TODO: Proceed to Milestone 3
-                    isPresented = false
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "function")
-                        Text("INTERPOLATE!")
+            // Place Marker B button
+            Button(action: placeMarkerB) {
+                VStack(spacing: 4) {
+                    if markerBPlaced {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 16))
                     }
-                    .font(.system(size: ARInterpolationLayout.interpolateButtonFontSize, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: ARInterpolationLayout.interpolateButtonHeight)
-                    .background(showDistanceWarning ? Color.gray : ARInterpolationLayout.successColor)
-                    .cornerRadius(ARInterpolationLayout.interpolateButtonCornerRadius)
+                    Text(markerBPlaced ? "B ✓" : "Marker B")
+                        .font(.system(size: ARInterpolationLayout.buttonFontSize, weight: .semibold))
                 }
-                .disabled(showDistanceWarning && distanceMismatchPercent > ARInterpolationLayout.distanceCriticalThreshold)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: ARInterpolationLayout.buttonHeight)
+                .background(markerBPlaced ? ARInterpolationLayout.successColor : ARInterpolationLayout.markerBColor)
+                .cornerRadius(ARInterpolationLayout.buttonCornerRadius)
             }
+            
+            // Interpolate button
+            Button(action: proceedToInterpolation) {
+                VStack(spacing: 4) {
+                    Image(systemName: "function")
+                        .font(.system(size: 16))
+                    Text("Interpolate")
+                        .font(.system(size: ARInterpolationLayout.buttonFontSize, weight: .semibold))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: ARInterpolationLayout.buttonHeight)
+                .background(bothMarkersPlaced ? ARInterpolationLayout.interpolateColor : ARInterpolationLayout.interpolateDisabledColor)
+                .cornerRadius(ARInterpolationLayout.buttonCornerRadius)
+            }
+            .disabled(!bothMarkersPlaced)
         }
-        .padding(.horizontal, ARInterpolationLayout.markerButtonSideMargin)
+        .padding(.horizontal, ARInterpolationLayout.buttonSideMargin)
         .padding(.bottom, ARInterpolationLayout.bottomButtonSectionBottomPadding)
+    }
+    
+    private var bothMarkersPlaced: Bool {
+        return markerAPlaced && markerBPlaced
     }
     
     private var instructionsOverlay: some View {
@@ -366,10 +440,42 @@ struct ARCalibrationView: View {
         return String(format: "%.1f", distance)
     }
     
-    // Placeholder distance calculations
+    // Calculate map distance using pixel coordinates and metric square calibration
     private var mapDistance: Float {
-        // TODO: Calculate from map coordinates
-        return 6.8
+        guard let pointA = mapPointStore.points.first(where: { $0.id == interpolationFirstPointID }),
+              let pointB = mapPointStore.points.first(where: { $0.id == interpolationSecondPointID }) else {
+            print("⚠️ Cannot find map points for distance calculation")
+            return 0
+        }
+        
+        // Get pixel coordinates
+        let pixelA = pointA.mapPoint
+        let pixelB = pointB.mapPoint
+        
+        // Calculate Euclidean distance in pixels
+        let dx = pixelB.x - pixelA.x
+        let dy = pixelB.y - pixelA.y
+        let pixelDistance = sqrt(dx * dx + dy * dy)
+        
+        // Get active metric square's pixels per meter
+        guard let activeSquare = metricSquares.squares.first else {
+            print("⚠️ No metric square found - cannot calculate map distance")
+            return Float(pixelDistance) // Return raw pixels if no calibration
+        }
+        
+        let pixelsPerMeter = activeSquare.side / activeSquare.meters
+        
+        // Convert to meters
+        let distanceInMeters = Float(pixelDistance / pixelsPerMeter)
+        
+        print("📐 Map distance calculation:")
+        print("   Point A: (\(Int(pixelA.x)), \(Int(pixelA.y)))")
+        print("   Point B: (\(Int(pixelB.x)), \(Int(pixelB.y)))")
+        print("   Pixel distance: \(String(format: "%.1f", pixelDistance))")
+        print("   Pixels per meter: \(String(format: "%.1f", pixelsPerMeter))")
+        print("   Distance in meters: \(String(format: "%.2f", distanceInMeters))m")
+        
+        return distanceInMeters
     }
     
     private var arDistance: Float {

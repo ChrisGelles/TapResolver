@@ -360,7 +360,7 @@ struct HUDContainer: View {
     
     @ViewBuilder
     private var interpolationModeBanner: some View {
-        if mapPointStore.isInterpolationMode {
+        if mapPointStore.isInterpolationMode && !showARCalibration {
             VStack(spacing: 0) {
                 // Push banner down below status bar
                 Color.clear

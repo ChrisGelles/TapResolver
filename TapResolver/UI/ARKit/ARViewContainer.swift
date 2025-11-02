@@ -49,6 +49,11 @@ struct ARViewContainer: UIViewRepresentable {
     let mapPointStore: MapPointStore
     @Binding var selectedMarkerID: UUID?
     
+    // Interpolation mode (optional - defaults to false/nil for backward compatibility)
+    var isInterpolationMode: Bool = false
+    var interpolationFirstPointID: UUID? = nil
+    var interpolationSecondPointID: UUID? = nil
+    
     func makeUIView(context: Context) -> ARSCNView {
         let arView = ARSCNView()
         
@@ -120,6 +125,7 @@ struct ARViewContainer: UIViewRepresentable {
             }
         }
         
+        
         print("📷 AR Camera session started")
         
         return arView
@@ -133,16 +139,27 @@ struct ARViewContainer: UIViewRepresentable {
         let coordinator = Coordinator()
         coordinator.relocalizationStatus = $relocalizationStatus
         coordinator.selectedMarkerIDBinding = $selectedMarkerID
+        coordinator.isInterpolationMode = isInterpolationMode
+        coordinator.interpolationFirstPointID = interpolationFirstPointID
+        coordinator.interpolationSecondPointID = interpolationSecondPointID
+        
+        // Set static reference for button access
+        Coordinator.current = coordinator
+        
         return coordinator
     }
     
     class Coordinator: NSObject, ARSCNViewDelegate, ARSessionDelegate {
+        
+        // Static reference for button access
+        static weak var current: Coordinator? = nil
         
         weak var arView: ARSCNView?
         var crosshairNode: SCNNode?
         var userHeight: Float = 1.05
         var markerPlaced: Bool = false
         var markerNode: SCNNode?
+        var lastPlacedPosition: simd_float3? = nil
         
         private var detectedPlanes: [UUID: SCNNode] = [:]
         
@@ -166,6 +183,16 @@ struct ARViewContainer: UIViewRepresentable {
         var selectedMarkerID: UUID?
         var selectionRingNode: SCNNode?
         var selectedMarkerIDBinding: Binding<UUID?>?
+        
+        // Interpolation mode
+        var isInterpolationMode: Bool = false
+        var interpolationFirstPointID: UUID?
+        var interpolationSecondPointID: UUID?
+        var deleteNotificationObserver: NSObjectProtocol?
+        
+        // Session-temporary markers for interpolation visualization
+        var sessionMarkerA: (position: simd_float3, mapPointID: UUID)? = nil
+        var sessionMarkerB: (position: simd_float3, mapPointID: UUID)? = nil
         
         // MARK: - Crosshair Creation
         
@@ -339,6 +366,12 @@ struct ARViewContainer: UIViewRepresentable {
         
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             guard let arView = arView else { return }
+            
+            // Don't handle taps in interpolation mode - buttons handle placement
+            guard !isInterpolationMode else {
+                print("👆 Tap ignored - use buttons to place markers in interpolation mode")
+                return
+            }
             
             // Get tap location
             let tapLocation = gesture.location(in: arView)
@@ -936,7 +969,111 @@ struct ARViewContainer: UIViewRepresentable {
             print("✅ Coordinator: AR Marker deletion complete")
         }
         
-        var deleteNotificationObserver: NSObjectProtocol?
+        // MARK: - Interpolation Marker Placement
+        
+        /// Called by buttons to place markers in interpolation mode
+        func placeMarkerAt(mapPointID: UUID, mapPoint: MapPointStore.MapPoint, color: UIColor) {
+            guard let arView = arView else {
+                print("❌ ARView not available")
+                return
+            }
+            
+            // Perform raycast from center of screen
+            let screenCenter = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
+            let raycastQuery = arView.raycastQuery(from: screenCenter, allowing: .estimatedPlane, alignment: .any)
+            
+            guard let query = raycastQuery,
+                  let result = arView.session.raycast(query).first else {
+                print("❌ No surface detected at crosshair - point at a surface")
+                return
+            }
+            
+            let position = result.worldTransform.columns.3
+            let arPosition = simd_float3(position.x, position.y, position.z)
+            
+            // Session markers are temporary - don't persist during interpolation
+            // (Future: persistent AR Markers will be for visual feature anchors)
+            // mapPointStore?.createARMarker(
+            //     linkedMapPointID: mapPointID,
+            //     arPosition: arPosition,
+            //     mapCoordinates: mapPoint.mapPoint
+            // )
+            
+            // Use existing marker placement function (creates circle + post + sphere)
+            placeMarker(at: arPosition)
+            
+            // THEN update the sphere color to match button
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                if let markerNode = arView.scene.rootNode.childNodes.last {
+                    // Find the sphere child node
+                    for child in markerNode.childNodes {
+                        if let sphere = child.geometry as? SCNSphere {
+                            sphere.firstMaterial?.diffuse.contents = color.withAlphaComponent(0.98)
+                            sphere.firstMaterial?.emission.contents = color.withAlphaComponent(0.2)
+                        }
+                    }
+                }
+            }
+            
+            // Store position
+            lastPlacedPosition = arPosition
+            
+            print("✅ Marker placed for \(mapPointID) at \(arPosition)")
+            
+            // Track session markers in interpolation mode
+            if isInterpolationMode {
+                if mapPointID == interpolationFirstPointID {
+                    sessionMarkerA = (position: arPosition, mapPointID: mapPointID)
+                    print("✅ Session Marker A stored at \(arPosition)")
+                } else if mapPointID == interpolationSecondPointID {
+                    sessionMarkerB = (position: arPosition, mapPointID: mapPointID)
+                    print("✅ Session Marker B stored at \(arPosition)")
+                }
+                
+                // If both session markers are now placed, draw connecting line
+                if let markerA = sessionMarkerA, let markerB = sessionMarkerB {
+                    print("🎯 Both session markers placed - drawing line")
+                    drawConnectingLine(from: markerA.position, to: markerB.position)
+                }
+            }
+        }
+        
+        /// Draw line connecting two markers on ground plane
+        func drawConnectingLine(from positionA: simd_float3, to positionB: simd_float3) {
+            guard let arView = arView else { return }
+            
+            // Remove any existing line
+            arView.scene.rootNode.childNode(withName: "interpolation_line", recursively: true)?.removeFromParentNode()
+            
+            // Calculate line geometry
+            let direction = positionB - positionA
+            let distance = simd_length(direction)
+            
+            // Create line as thin cylinder on ground
+            let line = SCNCylinder(radius: 0.01, height: CGFloat(distance))
+            line.firstMaterial?.diffuse.contents = UIColor.white
+            
+            let lineNode = SCNNode(geometry: line)
+            lineNode.name = "interpolation_line"
+            
+            // Position line at midpoint (at marker ground level)
+            let midpoint = (positionA + positionB) / 2
+            lineNode.position = SCNVector3(midpoint.x, midpoint.y + 0.005, midpoint.z)
+            
+            // Rotate to point from A to B (horizontal only)
+            let angle = atan2(direction.x, direction.z)
+            lineNode.eulerAngles = SCNVector3(Float.pi / 2, -angle, 0)
+            
+            arView.scene.rootNode.addChildNode(lineNode)
+            
+            print("📏 Drew connecting line: \(String(format: "%.2f", distance))m")
+            print("🔍 LINE DEBUG:")
+            print("   Position: \(lineNode.position)")
+            print("   Rotation: \(lineNode.eulerAngles)")
+            print("   Geometry: radius=\(line.radius), height=\(line.height)")
+            print("   Parent: \(lineNode.parent?.name ?? "nil")")
+            print("   Scene has \(arView.scene.rootNode.childNodes.count) nodes")
+        }
         
         deinit {
             if let observer = deleteNotificationObserver {
@@ -948,6 +1085,11 @@ struct ARViewContainer: UIViewRepresentable {
     static func dismantleUIView(_ uiView: ARSCNView, coordinator: Coordinator) {
         uiView.session.pause()
         print("⏸️ AR Camera session paused")
+        
+        // Clear session markers
+        coordinator.sessionMarkerA = nil
+        coordinator.sessionMarkerB = nil
+        print("🧹 Cleared session markers")
     }
 }
 
