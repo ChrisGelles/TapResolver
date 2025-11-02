@@ -1050,7 +1050,7 @@ struct ARViewContainer: UIViewRepresentable {
             let distance = simd_length(direction)
             
             // Create line as thin cylinder on ground
-            let line = SCNCylinder(radius: 0.01, height: CGFloat(distance))
+            let line = SCNCylinder(radius: 0.001, height: CGFloat(distance))
             line.firstMaterial?.diffuse.contents = UIColor.white
             
             let lineNode = SCNNode(geometry: line)
@@ -1060,9 +1060,22 @@ struct ARViewContainer: UIViewRepresentable {
             let midpoint = (positionA + positionB) / 2
             lineNode.position = SCNVector3(midpoint.x, midpoint.y + 0.005, midpoint.z)
             
-            // Rotate to point from A to B (horizontal only)
-            let angle = atan2(direction.x, direction.z)
-            lineNode.eulerAngles = SCNVector3(Float.pi / 2, -angle, 0)
+            // Calculate full 3D rotation to align cylinder with direction vector
+            // Cylinder's default orientation is along Y-axis, so rotate Y-axis to align with direction
+            let upVector = simd_normalize(direction)
+            let defaultUp = simd_float3(0, 1, 0)
+            
+            // Calculate rotation needed using quaternion from two vectors
+            let rotationAxis = simd_cross(defaultUp, upVector)
+            let rotationAngle = acos(simd_dot(defaultUp, upVector))
+            
+            if simd_length(rotationAxis) > 0.0001 {
+                let normalizedAxis = simd_normalize(rotationAxis)
+                lineNode.simdOrientation = simd_quatf(angle: rotationAngle, axis: normalizedAxis)
+            } else if simd_dot(defaultUp, upVector) < 0 {
+                // Vectors are opposite (180° rotation)
+                lineNode.simdOrientation = simd_quatf(angle: .pi, axis: simd_float3(1, 0, 0))
+            }
             
             arView.scene.rootNode.addChildNode(lineNode)
             
