@@ -792,14 +792,29 @@ struct ARCalibrationView: View {
             return
         }
         
-        // TODO: Request marker placement from AR coordinator
-        // For now, use placeholder AR position
-        let placeholderARPosition = simd_float3(0, 0, 0)
+        // Get the AR coordinator from ARViewContainer.Coordinator.current
+        guard let coordinator = ARViewContainer.Coordinator.current else {
+            print("❌ No coordinator reference available")
+            return
+        }
+        
+        // Place marker using existing placeMarkerAt method (same as interpolation mode)
+        coordinator.placeMarkerAt(
+            mapPointID: selectedPointID,
+            mapPoint: selectedPoint,
+            color: UIColor.orange
+        )
+        
+        // Get the AR position from the coordinator's lastPlacedPosition
+        guard let arPosition = coordinator.lastPlacedPosition else {
+            print("❌ Failed to get AR position from coordinator")
+            return
+        }
         
         let marker = CalibrationMarker(
             mapPointID: selectedPointID,
             mapPoint: selectedPoint.mapPoint,
-            arPosition: placeholderARPosition,
+            arPosition: arPosition,
             placedAt: Date()
         )
         
@@ -807,7 +822,7 @@ struct ARCalibrationView: View {
         
         print("📍 Placed calibration marker \(calibrationMarkers.count)/3")
         print("   Map Point: (\(Int(selectedPoint.mapPoint.x)), \(Int(selectedPoint.mapPoint.y)))")
-        print("   AR Position: \(placeholderARPosition) (placeholder)")
+        print("   AR Position: \(arPosition)")
         
         // Check if calibration complete
         if calibrationMarkers.count == 3 {
