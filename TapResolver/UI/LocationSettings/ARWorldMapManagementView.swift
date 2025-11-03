@@ -17,6 +17,7 @@ import SwiftUI
 
 struct ARWorldMapManagementView: View {
     @EnvironmentObject private var worldMapStore: ARWorldMapStore
+    @EnvironmentObject private var mapPointStore: MapPointStore
     @State private var showScanView = false
     @State private var showDeleteConfirmation = false
     @State private var selectedPatchID: UUID? = nil
@@ -28,11 +29,60 @@ struct ARWorldMapManagementView: View {
     @State private var featureToDelete: UUID?
     @State private var selectedPatchIDForAnchors: UUID?
     @State private var isAnchorMode: Bool = false
+    @State private var showDeleteMarkerConfirmation = false
+    @State private var markerToDelete: UUID? = nil
     
     var body: some View {
         VStack(spacing: 20) {
             // Header
             header
+            
+            // AR Markers Section
+            if !mapPointStore.arMarkers.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "mappin.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(.blue)
+                        
+                        Text("AR Markers")
+                            .font(.system(size: 16, weight: .semibold))
+                        
+                        Spacer()
+                        
+                        Text("\(mapPointStore.arMarkers.count)")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.blue)
+                            .cornerRadius(12)
+                    }
+                    .padding(.horizontal, 20)
+                    
+                    ScrollView {
+                        VStack(spacing: 4) {
+                            ForEach(mapPointStore.arMarkers) { marker in
+                                ARMarkerListItem(
+                                    marker: marker,
+                                    mapPointStore: mapPointStore,
+                                    onDelete: {
+                                        markerToDelete = marker.id
+                                        showDeleteMarkerConfirmation = true
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 200)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(10)
+                    .padding(.horizontal, 20)
+                }
+                
+                Divider()
+                    .padding(.horizontal, 20)
+            }
             
             // Anchor Features Section
             if !worldMapStore.anchorFeatures.isEmpty {
@@ -171,6 +221,24 @@ struct ARWorldMapManagementView: View {
             if let featureID = featureToDelete,
                let feature = worldMapStore.anchorFeatures.first(where: { $0.id == featureID }) {
                 Text("Delete '\(feature.name)'? This will remove all instances across all patches.")
+            }
+        }
+        .alert("Delete AR Marker?", isPresented: $showDeleteMarkerConfirmation) {
+            Button("Cancel", role: .cancel) {
+                markerToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                if let markerID = markerToDelete {
+                    deleteARMarker(markerID)
+                }
+                markerToDelete = nil
+            }
+        } message: {
+            if let markerID = markerToDelete,
+               let marker = mapPointStore.arMarkers.first(where: { $0.id == markerID }) {
+                Text("This will permanently delete the AR marker. The linked map point will remain, but you'll need to place a new AR marker if you want to use AR features at this location.")
+            } else {
+                Text("This will permanently delete the AR marker.")
             }
         }
     }
@@ -572,6 +640,28 @@ struct ARWorldMapManagementView: View {
         }
         
         print("✅ Deleted anchor feature '\(feature.name)' with \(instanceIDs.count) instance(s)")
+    }
+    
+    // MARK: - AR Marker Deletion
+    
+    private func deleteARMarker(_ markerID: UUID) {
+        print("🗑️ Deleting AR Marker: \(markerID)")
+        
+        // Remove from MapPointStore
+        mapPointStore.arMarkers.removeAll { $0.id == markerID }
+        
+        // Unlink from any MapPoints
+        for idx in 0..<mapPointStore.points.count {
+            if mapPointStore.points[idx].linkedARMarkerID == markerID {
+                mapPointStore.points[idx].linkedARMarkerID = nil
+                print("   Unlinked from MapPoint: \(mapPointStore.points[idx].id)")
+            }
+        }
+        
+        // Save changes
+        mapPointStore.save()
+        
+        print("✅ AR Marker deleted successfully")
     }
 }
 

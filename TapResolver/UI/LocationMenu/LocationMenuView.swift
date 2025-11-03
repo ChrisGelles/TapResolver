@@ -80,6 +80,7 @@ struct WizardContext {
 struct LocationMenuView: View {
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
+    @EnvironmentObject private var mapPointStore: MapPointStore
     @State private var locationSummaries: [LocationSummary] = []
     @State private var showingImportSheet = false
     @State private var showingPhotosPicker = false
@@ -266,6 +267,7 @@ struct LocationMenuView: View {
                         if let _ = selectedLocationForAR {
                             ARWorldMapManagementView()
                                 .environmentObject(arWorldMapStore)
+                                .environmentObject(mapPointStore)
                         }
                     }
                     

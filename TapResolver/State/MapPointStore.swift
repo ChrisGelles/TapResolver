@@ -335,6 +335,9 @@ public final class MapPointStore: ObservableObject {
         for point in points {
             print("   â€¢ \(String(point.id.uuidString.prefix(8)))... @ (\(Int(point.mapPoint.x)),\(Int(point.mapPoint.y))) - \(point.sessions.count) sessions")
         }
+        
+        // Save AR Markers
+        saveARMarkers()
     }
 
     private func load() {
