@@ -712,6 +712,18 @@ struct PiPMapView: View {
                         .frame(width: image.size.width, height: image.size.height)
                         .allowsHitTesting(false)
                     
+                    // Show ALL map points as context
+                    ForEach(mapPointStore.points) { point in
+                        Circle()
+                            .fill(Color.white.opacity(0.6))
+                            .frame(width: 6, height: 6)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.black.opacity(0.8), lineWidth: 1)
+                            )
+                            .position(point.mapPoint)
+                    }
+                    
                     // Overlay points based on mode
                     if let pointID = firstPointID,
                        secondPointID == nil,
