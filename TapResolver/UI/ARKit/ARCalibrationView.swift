@@ -715,11 +715,11 @@ struct PiPMapView: View {
                     // Show ALL map points as context
                     ForEach(mapPointStore.points) { point in
                         Circle()
-                            .fill(Color.white.opacity(0.6))
-                            .frame(width: 6, height: 6)
+                            .fill(Color.blue.opacity(0.4))
+                            .frame(width: 12, height: 12)
                             .overlay(
                                 Circle()
-                                    .stroke(Color.black.opacity(0.8), lineWidth: 1)
+                                    .stroke(Color.black.opacity(1), lineWidth: 2)
                             )
                             .position(point.mapPoint)
                     }
