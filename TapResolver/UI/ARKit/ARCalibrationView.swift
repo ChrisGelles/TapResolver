@@ -256,6 +256,7 @@ struct ARCalibrationView: View {
                 }
             }
             
+            /*
             // Relocalization status overlay
             if !relocalizationStatus.isEmpty {
                 VStack {
@@ -337,6 +338,7 @@ struct ARCalibrationView: View {
                     .padding(.bottom, 40)
                 }
             }
+            */
             
             // Delete button for selected marker (only in normal mode)
             if selectedMarkerID != nil && !isInterpolationMode {
@@ -998,11 +1000,13 @@ struct PiPMapView: View {
     }
     
     private func calculateScale(pointA: CGPoint, pointB: CGPoint, frameSize: CGSize, imageSize: CGSize) -> CGFloat {
+        /*
         print("🔍 PiP Scale Calculation:")
         print("   Point A: (\(Int(pointA.x)), \(Int(pointA.y)))")
         print("   Point B: (\(Int(pointB.x)), \(Int(pointB.y)))")
         print("   PiP frame size: \(Int(frameSize.width))x\(Int(frameSize.height))")
         print("   Map image size: \(Int(imageSize.width))x\(Int(imageSize.height))")
+        */
         
         // Calculate center point between A and B
         let centerX = (pointA.x + pointB.x) / 2
@@ -1024,12 +1028,14 @@ struct PiPMapView: View {
         // Use the smaller scale to ensure both points fit
         let finalScale = min(scaleX, scaleY)
         
+        /*
         print("   Center point: (\(Int(centerX)), \(Int(centerY)))")
         print("   Max X distance: \(Int(maxXDistance)), padded: \(Int(paddedXDistance))")
         print("   Max Y distance: \(Int(maxYDistance)), padded: \(Int(paddedYDistance))")
         print("   Scale X: \(String(format: "%.3f", scaleX))")
         print("   Scale Y: \(String(format: "%.3f", scaleY))")
         print("   Final scale: \(String(format: "%.3f", finalScale))")
+        */
         
         return finalScale
     }
@@ -1052,6 +1058,7 @@ struct PiPMapView: View {
         let offsetX = offsetFromImageCenter_X * scale
         let offsetY = offsetFromImageCenter_Y * scale
         
+        /*
         print("🎯 PiP Offset Calculation:")
         print("   Point A: (\(Int(pointA.x)), \(Int(pointA.y)))")
         print("   Point B: (\(Int(pointB.x)), \(Int(pointB.y)))")
@@ -1060,6 +1067,7 @@ struct PiPMapView: View {
         print("   Offset from image center: (\(Int(offsetFromImageCenter_X)), \(Int(offsetFromImageCenter_Y)))")
         print("   Scale: \(String(format: "%.3f", scale))")
         print("   Final offset (scaled): (\(Int(offsetX)), \(Int(offsetY)))")
+        */
         
         return CGSize(width: offsetX, height: offsetY)
     }
