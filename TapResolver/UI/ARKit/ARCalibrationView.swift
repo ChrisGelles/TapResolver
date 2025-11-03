@@ -695,27 +695,38 @@ struct PiPMapView: View {
     @StateObject private var pipProcessor = TransformProcessor()
     
     @State private var mapImage: UIImage?
+    @State private var isAnimating: Bool = false
     
     var body: some View {
         GeometryReader { geo in
-            if let image = mapImage {
-                // Single point mode or dual point mode
-                if let pointID = firstPointID,
-                   secondPointID == nil,
-                   let point = mapPointStore.points.first(where: { $0.id == pointID }) {
-                    // Single point mode - center on one point
-                    singlePointView(image: image, point: point, geo: geo)
-                } else if let pointA = mapPointStore.points.first(where: { $0.id == firstPointID }),
-                          let pointB = mapPointStore.points.first(where: { $0.id == secondPointID }) {
-                    // Dual point mode - interpolation view
-                    dualPointView(image: image, pointA: pointA, pointB: pointB, geo: geo)
+            Group {
+                if let image = mapImage {
+                    // Single point mode or dual point mode
+                    if let pointID = firstPointID,
+                       secondPointID == nil,
+                       let point = mapPointStore.points.first(where: { $0.id == pointID }) {
+                        // Single point mode - center on one point
+                        singlePointView(image: image, point: point, geo: geo, isAnimating: isAnimating)
+                    } else if let pointA = mapPointStore.points.first(where: { $0.id == firstPointID }),
+                              let pointB = mapPointStore.points.first(where: { $0.id == secondPointID }) {
+                        // Dual point mode - interpolation view
+                        dualPointView(image: image, pointA: pointA, pointB: pointB, geo: geo)
+                    } else {
+                        // No points selected - show full map
+                        fullMapView(image: image, geo: geo)
+                    }
                 } else {
-                    // No points selected - show full map
-                    fullMapView(image: image, geo: geo)
+                    Rectangle()
+                        .fill(Color.blue.opacity(0.3))
                 }
-            } else {
-                Rectangle()
-                    .fill(Color.blue.opacity(0.3))
+            }
+            .animation(.easeInOut(duration: 0.5), value: firstPointID)
+            .animation(.easeInOut(duration: 0.5), value: secondPointID)
+        }
+        .onChange(of: firstPointID) { _ in
+            isAnimating = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                isAnimating = false
             }
         }
         .onAppear {
@@ -816,7 +827,7 @@ struct PiPMapView: View {
     }
     
     @ViewBuilder
-    private func singlePointView(image: UIImage, point: MapPointStore.MapPoint, geo: GeometryProxy) -> some View {
+    private func singlePointView(image: UIImage, point: MapPointStore.MapPoint, geo: GeometryProxy, isAnimating: Bool) -> some View {
         ZStack {
             MapContainer(mapImage: image)
                 .environmentObject(pipTransform)
@@ -824,11 +835,13 @@ struct PiPMapView: View {
                 .frame(width: image.size.width, height: image.size.height)
                 .allowsHitTesting(false)
             
-            // Single point overlay
-            Circle()
-                .fill(Color.cyan)
-                .frame(width: 12, height: 12)
-                .position(point.mapPoint)
+            // Single point overlay - hidden during animation
+            if !isAnimating {
+                /*Circle()
+                    .fill(Color.cyan)
+                    .frame(width: 12, height: 12)
+                    .position(point.mapPoint)*/
+            }
         }
         .scaleEffect(calculateSinglePointScale(point: point.mapPoint, frameSize: geo.size, imageSize: image.size))
         .offset(calculateSinglePointOffset(point: point.mapPoint, frameSize: geo.size, imageSize: image.size))
@@ -870,12 +883,17 @@ struct PiPMapView: View {
     
     @ViewBuilder
     private func fullMapView(image: UIImage, geo: GeometryProxy) -> some View {
+        // Use dual-point calculation with map corners to show full map
+        let cornerA = CGPoint(x: 0, y: 0)
+        let cornerB = CGPoint(x: image.size.width, y: image.size.height)
+        
         MapContainer(mapImage: image)
             .environmentObject(pipTransform)
             .environmentObject(pipProcessor)
             .frame(width: image.size.width, height: image.size.height)
             .allowsHitTesting(false)
-            .scaleEffect(0.1)  // Show full map at small scale
+            .scaleEffect(calculateScale(pointA: cornerA, pointB: cornerB, frameSize: geo.size, imageSize: image.size))
+            .offset(calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: geo.size, imageSize: image.size))
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
             .onAppear {

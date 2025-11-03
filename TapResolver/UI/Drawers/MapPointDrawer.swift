@@ -72,7 +72,6 @@ struct MapPointDrawer: View {
                 }
                 Button {
                     if hud.isMapPointOpen { 
-                        mapPointStore.deactivateAll()
                         hud.closeAll() 
                     } else { 
                         hud.openMapPoint()
