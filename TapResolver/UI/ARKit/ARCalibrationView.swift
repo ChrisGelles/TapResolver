@@ -17,6 +17,13 @@ import SwiftUI
 import Foundation
 import simd
 
+struct CalibrationMarker {
+    let mapPointID: UUID
+    let mapPoint: CGPoint
+    let arPosition: simd_float3
+    let placedAt: Date
+}
+
 struct ARCalibrationView: View {
     @Binding var isPresented: Bool
     let mapPointID: UUID?  // Optional now - nil in interpolation mode
@@ -52,6 +59,11 @@ struct ARCalibrationView: View {
     // Interpolation slider
     @State private var interpolationCount: Int = 0
     @State private var maxNewMarkers: Int = 0
+    
+    // Calibration mode tracking
+    @State private var isCalibrationMode: Bool = false
+    @State private var calibrationMarkers: [CalibrationMarker] = []
+    @State private var arCoordinator: ARViewContainer.Coordinator?
     
     var body: some View {
         ZStack {
@@ -114,6 +126,33 @@ struct ARCalibrationView: View {
                     Spacer()
                 }
                 
+                // Calibration mode button (upper-left, below close button)
+                if !isInterpolationMode && !isCalibrationMode {
+                    VStack {
+                        HStack {
+                            Button(action: {
+                                isCalibrationMode = true
+                                calibrationMarkers.removeAll()
+                            }) {
+                                Image(systemName: "location.north.line.fill")
+                                    .font(.system(size: 24, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(12)
+                                    .background(Color.blue.opacity(0.8))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.top, 110)
+                            .padding(.leading, 20)
+                            
+                            Spacer()
+                        }
+                        
+                        Spacer()
+                    }
+                    .zIndex(10001)
+                }
+                
                 // PiP Map (upper right)
                 VStack {
                     HStack {
@@ -121,7 +160,8 @@ struct ARCalibrationView: View {
                         
                         PiPMapView(
                             firstPointID: mapPointStore.activePointID,
-                            secondPointID: nil
+                            secondPointID: nil,
+                            markedPointIDs: markedPointIDs
                         )
                         .environmentObject(mapPointStore)
                         .environmentObject(locationManager)
@@ -155,6 +195,65 @@ struct ARCalibrationView: View {
                     Spacer()
                 }
                 .zIndex(5000)
+                
+                // Place Marker button (bottom center, calibration mode only)
+                if isCalibrationMode && mapPointStore.activePointID != nil {
+                    VStack {
+                        Spacer()
+                        
+                        Button(action: {
+                            placeCalibrationMarker()
+                        }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "flag.fill")
+                                    .font(.system(size: 28))
+                                
+                                Text("Place Marker \(calibrationMarkers.count + 1)/3")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 12)
+                            .background(Color.green.opacity(0.9))
+                            .cornerRadius(12)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.bottom, 60)
+                    }
+                    .zIndex(10002)
+                }
+                
+                // Calibration progress indicator
+                if isCalibrationMode {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            
+                            HStack(spacing: 8) {
+                                ForEach(0..<3, id: \.self) { index in
+                                    Circle()
+                                        .fill(index < calibrationMarkers.count ? Color.green : Color.white.opacity(0.3))
+                                        .frame(width: 12, height: 12)
+                                }
+                                
+                                Text("\(calibrationMarkers.count)/3")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.white)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.black.opacity(0.7))
+                            .cornerRadius(8)
+                            .padding(.top, ARInterpolationLayout.pipMapTopMargin + ARInterpolationLayout.pipMapHeight + 280)
+                            .padding(.trailing, 20)
+                        }
+                        
+                        Spacer()
+                    }
+                    .zIndex(10003)
+                }
             }
             
             // Relocalization status overlay
@@ -661,7 +760,8 @@ struct ARCalibrationView: View {
                 // Mini map using existing MapContainer infrastructure
                 PiPMapView(
                     firstPointID: interpolationFirstPointID,
-                    secondPointID: interpolationSecondPointID
+                    secondPointID: interpolationSecondPointID,
+                    markedPointIDs: markedPointIDs
                 )
                 .environmentObject(mapPointStore)
                 .environmentObject(locationManager)
@@ -680,6 +780,55 @@ struct ARCalibrationView: View {
             Spacer()
         }
     }
+    
+    private func placeCalibrationMarker() {
+        guard let selectedPointID = mapPointStore.activePointID,
+              let selectedPoint = mapPointStore.points.first(where: { $0.id == selectedPointID }),
+              calibrationMarkers.count < 3 else { return }
+        
+        // Check if point already has a marker in this calibration
+        if calibrationMarkers.contains(where: { $0.mapPointID == selectedPointID }) {
+            print("⚠️ This point already has a calibration marker")
+            return
+        }
+        
+        // TODO: Request marker placement from AR coordinator
+        // For now, use placeholder AR position
+        let placeholderARPosition = simd_float3(0, 0, 0)
+        
+        let marker = CalibrationMarker(
+            mapPointID: selectedPointID,
+            mapPoint: selectedPoint.mapPoint,
+            arPosition: placeholderARPosition,
+            placedAt: Date()
+        )
+        
+        calibrationMarkers.append(marker)
+        
+        print("📍 Placed calibration marker \(calibrationMarkers.count)/3")
+        print("   Map Point: (\(Int(selectedPoint.mapPoint.x)), \(Int(selectedPoint.mapPoint.y)))")
+        print("   AR Position: \(placeholderARPosition) (placeholder)")
+        
+        // Check if calibration complete
+        if calibrationMarkers.count == 3 {
+            performCalibration()
+        }
+    }
+    
+    private func performCalibration() {
+        print("✅ Calibration complete with 3 markers!")
+        // TODO: Calculate transformation matrix
+        // TODO: Enable auto-placement mode
+        
+        // For now, just exit calibration mode
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            isCalibrationMode = false
+        }
+    }
+    
+    private var markedPointIDs: Set<UUID> {
+        Set(calibrationMarkers.map { $0.mapPointID })
+    }
 }
 
 // MARK: - PiP Map View
@@ -687,6 +836,7 @@ struct ARCalibrationView: View {
 struct PiPMapView: View {
     let firstPointID: UUID?
     let secondPointID: UUID?
+    let markedPointIDs: Set<UUID>
     
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
@@ -714,9 +864,10 @@ struct PiPMapView: View {
                     
                     // Show ALL map points as context
                     ForEach(mapPointStore.points) { point in
+                        let hasMarker = markedPointIDs.contains(point.id)
                         Circle()
-                            .fill(Color.blue.opacity(0.4))
-                            .frame(width: 12, height: 12)
+                            .fill(hasMarker ? Color.orange : Color.blue.opacity(0.4))
+                            .frame(width: hasMarker ? 14 : 12, height: hasMarker ? 14 : 12)
                             .overlay(
                                 Circle()
                                     .stroke(Color.black.opacity(1), lineWidth: 2)
