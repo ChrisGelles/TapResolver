@@ -100,6 +100,11 @@ public final class MapPointStore: ObservableObject {
 
     @Published public internal(set) var points: [MapPoint] = []
     @Published var arMarkers: [ARMarker] = []
+    
+    // Calibration state (session-only, never persisted)
+    @Published var calibrationPoints: [CalibrationMarker] = []
+    @Published var isCalibrated: Bool = false
+    
     @Published public private(set) var activePointID: UUID? = nil
     
     // Interpolation mode state

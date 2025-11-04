@@ -16,6 +16,7 @@
 import SwiftUI
 import Foundation
 import simd
+import ARKit
 
 struct CalibrationMarker {
     let mapPointID: UUID
@@ -832,15 +833,138 @@ struct ARCalibrationView: View {
         }
     }
     
+    // MARK: - Barycentric Calculation Helpers
+    
+    private func barycentricWeights(point p: CGPoint, 
+                                     triangle: (CGPoint, CGPoint, CGPoint)) -> (w1: Float, w2: Float, w3: Float) {
+        let (p1, p2, p3) = triangle
+        
+        // Convert to Float for calculation
+        let px = Float(p.x)
+        let py = Float(p.y)
+        let p1x = Float(p1.x)
+        let p1y = Float(p1.y)
+        let p2x = Float(p2.x)
+        let p2y = Float(p2.y)
+        let p3x = Float(p3.x)
+        let p3y = Float(p3.y)
+        
+        // Calculate area of full triangle using cross product
+        let denom = (p2y - p3y) * (p1x - p3x) + (p3x - p2x) * (p1y - p3y)
+        
+        guard abs(denom) > 0.001 else {
+            // Degenerate triangle - return centroid
+            return (1.0/3.0, 1.0/3.0, 1.0/3.0)
+        }
+        
+        // Calculate barycentric coordinates
+        let w1 = ((p2y - p3y) * (px - p3x) + (p3x - p2x) * (py - p3y)) / denom
+        let w2 = ((p3y - p1y) * (px - p3x) + (p1x - p3x) * (py - p3y)) / denom
+        let w3 = 1.0 - w1 - w2
+        
+        return (w1, w2, w3)
+    }
+    
+    private func getFloorPlaneY(from coordinator: ARViewContainer.Coordinator?) -> Float? {
+        guard let arView = coordinator?.arView else { return nil }
+        
+        // Get all detected horizontal planes
+        guard let currentFrame = arView.session.currentFrame else { return nil }
+        
+        let planes = currentFrame.anchors
+            .compactMap { $0 as? ARPlaneAnchor }
+            .filter { $0.alignment == .horizontal }
+        
+        // Use the largest plane (most likely the floor)
+        let floorPlane = planes.max(by: { $0.extent.x * $0.extent.z < $1.extent.x * $1.extent.z })
+        
+        return floorPlane?.transform.columns.3.y
+    }
+    
     private func performCalibration() {
         print("✅ Calibration complete with 3 markers!")
-        // TODO: Calculate transformation matrix
-        // TODO: Enable auto-placement mode
+        print("   Calculating AR positions for all MapPoints...")
         
-        // For now, just exit calibration mode
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            isCalibrationMode = false
+        // Store calibration data in MapPointStore
+        mapPointStore.calibrationPoints = calibrationMarkers
+        mapPointStore.isCalibrated = true
+        
+        // Generate AR markers for all MapPoints
+        generateARMarkersFromCalibration()
+        
+        // Render the generated markers in AR scene
+        if let coordinator = ARViewContainer.Coordinator.current {
+            coordinator.renderGeneratedMarkers(from: mapPointStore)
         }
+        
+        // Exit calibration mode after a brief delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            isCalibrationMode = false
+            print("🎯 Calibration mode exited - \(mapPointStore.arMarkers.count) markers generated")
+        }
+    }
+    
+    private func generateARMarkersFromCalibration() {
+        guard calibrationMarkers.count == 3 else {
+            print("❌ Need exactly 3 calibration markers")
+            return
+        }
+        
+        // Get the 3 calibration points
+        let p1_2D = calibrationMarkers[0].mapPoint
+        let p2_2D = calibrationMarkers[1].mapPoint
+        let p3_2D = calibrationMarkers[2].mapPoint
+        
+        let P1_3D = calibrationMarkers[0].arPosition
+        let P2_3D = calibrationMarkers[1].arPosition
+        let P3_3D = calibrationMarkers[2].arPosition
+        
+        // Get floor plane Y-coordinate from ARKit
+        let coordinator = ARViewContainer.Coordinator.current
+        let floorY = getFloorPlaneY(from: coordinator) ?? P1_3D.y
+        
+        // Get user height (use from first calibration marker)
+        let userHeight = Float(getUserHeight())
+        let markerY = floorY + userHeight
+        
+        print("📏 Floor Y: \(floorY)m, User Height: \(userHeight)m, Marker Y: \(markerY)m")
+        
+        // Clear existing generated markers (keep calibration markers separate)
+        mapPointStore.arMarkers.removeAll()
+        
+        // Generate AR marker for each MapPoint
+        for point in mapPointStore.points {
+            // Skip calibration points (already have orange markers)
+            if calibrationMarkers.contains(where: { $0.mapPointID == point.id }) {
+                continue
+            }
+            
+            // Calculate barycentric weights in 2D
+            let weights = barycentricWeights(
+                point: point.mapPoint,
+                triangle: (p1_2D, p2_2D, p3_2D)
+            )
+            
+            // Apply weights to horizontal positions (X, Z)
+            let arX = weights.w1 * P1_3D.x + weights.w2 * P2_3D.x + weights.w3 * P3_3D.x
+            let arZ = weights.w1 * P1_3D.z + weights.w2 * P2_3D.z + weights.w3 * P3_3D.z
+            
+            // Use fixed height from floor + user height
+            let arPosition = simd_float3(arX, markerY, arZ)
+            
+            // Create AR marker (session-temporary, not persisted)
+            let marker = ARMarker(
+                linkedMapPointID: point.id,
+                arPosition: arPosition,
+                mapCoordinates: point.mapPoint
+            )
+            
+            mapPointStore.arMarkers.append(marker)
+        }
+        
+        print("✨ Generated \(mapPointStore.arMarkers.count) AR markers from calibration")
+        
+        // Do NOT call save() - these markers are session-temporary
     }
     
     private var markedPointIDs: Set<UUID> {

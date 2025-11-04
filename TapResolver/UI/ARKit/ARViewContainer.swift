@@ -1038,6 +1038,43 @@ struct ARViewContainer: UIViewRepresentable {
             }
         }
         
+        // MARK: - Generated Marker Rendering
+        
+        /// Render all generated AR markers as blue spheres
+        func renderGeneratedMarkers(from mapPointStore: MapPointStore) {
+            guard let arView = self.arView else {
+                print("❌ No AR view available for rendering")
+                return
+            }
+            
+            print("🎨 Rendering \(mapPointStore.arMarkers.count) generated markers...")
+            
+            // Remove any existing generated marker nodes
+            arView.scene.rootNode.childNodes
+                .filter { $0.name?.hasPrefix("generated_marker_") == true }
+                .forEach { $0.removeFromParentNode() }
+            
+            // Create sphere node for each generated marker
+            for marker in mapPointStore.arMarkers {
+                // Create blue sphere
+                let sphere = SCNSphere(radius: 0.1) // 10cm radius
+                sphere.firstMaterial?.diffuse.contents = UIColor.blue
+                sphere.firstMaterial?.emission.contents = UIColor.blue.withAlphaComponent(0.3)
+                
+                let sphereNode = SCNNode(geometry: sphere)
+                sphereNode.position = SCNVector3(
+                    marker.arPosition.x,
+                    marker.arPosition.y,
+                    marker.arPosition.z
+                )
+                sphereNode.name = "generated_marker_\(marker.id.uuidString)"
+                
+                arView.scene.rootNode.addChildNode(sphereNode)
+            }
+            
+            print("✅ Rendered \(mapPointStore.arMarkers.count) blue marker spheres")
+        }
+        
         /// Draw line connecting two markers on ground plane
         func drawConnectingLine(from positionA: simd_float3, to positionB: simd_float3) {
             guard let arView = arView else { return }
