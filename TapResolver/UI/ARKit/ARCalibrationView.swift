@@ -889,12 +889,15 @@ struct ARCalibrationView: View {
         mapPointStore.calibrationPoints = calibrationMarkers
         mapPointStore.isCalibrated = true
         
+        // Store calibration MapPoint IDs for color differentiation
+        let calibrationPointIDs = calibrationMarkers.map { $0.mapPointID }
+        
         // Generate AR markers for all MapPoints
         generateARMarkersFromCalibration()
         
         // Render the generated markers in AR scene
         if let coordinator = ARViewContainer.Coordinator.current {
-            coordinator.renderGeneratedMarkers(from: mapPointStore)
+            coordinator.renderGeneratedMarkers(from: mapPointStore, calibrationIDs: calibrationPointIDs)
         }
         
         // Exit calibration mode after a brief delay
@@ -925,20 +928,15 @@ struct ARCalibrationView: View {
         
         // Get user height (use from first calibration marker)
         let userHeight = Float(getUserHeight())
-        let markerY = floorY + userHeight
+        let markerY = floorY  // Place marker base on floor, structure creates height
         
-        print("📏 Floor Y: \(floorY)m, User Height: \(userHeight)m, Marker Y: \(markerY)m")
+        print("📏 Floor Y: \(floorY)m, User Height: \(userHeight)m (markers placed on floor)")
         
         // Clear existing generated markers (keep calibration markers separate)
         mapPointStore.arMarkers.removeAll()
         
         // Generate AR marker for each MapPoint
         for point in mapPointStore.points {
-            // Skip calibration points (already have orange markers)
-            if calibrationMarkers.contains(where: { $0.mapPointID == point.id }) {
-                continue
-            }
-            
             // Calculate barycentric weights in 2D
             let weights = barycentricWeights(
                 point: point.mapPoint,
@@ -962,7 +960,7 @@ struct ARCalibrationView: View {
             mapPointStore.arMarkers.append(marker)
         }
         
-        print("✨ Generated \(mapPointStore.arMarkers.count) AR markers from calibration")
+        print("✨ Generated \(mapPointStore.arMarkers.count) AR markers from calibration (includes 3 calibration points)")
         
         // Do NOT call save() - these markers are session-temporary
     }

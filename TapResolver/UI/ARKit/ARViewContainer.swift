@@ -454,13 +454,22 @@ struct ARViewContainer: UIViewRepresentable {
             markerPlaced = true
         }
         
-        func placeMarker(at position: simd_float3) {
-            guard let arView = arView else { return }
-            
+        // MARK: - AR Marker Creation Helper
+        
+        /// Create a complete AR marker node with floor circle, vertical line, and topping sphere
+        /// - Parameters:
+        ///   - position: 3D position in AR space
+        ///   - sphereColor: Color for the topping sphere
+        ///   - markerID: UUID for node naming
+        ///   - userHeight: Height of the vertical line (meters)
+        /// - Returns: Configured SCNNode ready to add to scene
+        private func createARMarkerNode(at position: simd_float3, 
+                                         sphereColor: UIColor,
+                                         markerID: UUID,
+                                         userHeight: Float) -> SCNNode {
             let markerNode = SCNNode()
             markerNode.simdPosition = position
-            // Force world-aligned orientation (identity rotation) so floor circle lays flat
-            //markerNode.simdWorldOrientation = simd_quatf(angle: 0, axis: simd_float3(0, 1, 0))
+            markerNode.name = "arMarker_\(markerID.uuidString)"
             
             // Floor circle (10cm diameter)
             let circleRadius: CGFloat = 0.1 // 5cm radius = 10cm diameter
@@ -472,7 +481,6 @@ struct ARViewContainer: UIViewRepresentable {
             
             let circleNode = SCNNode(geometry: circle)
             circleNode.eulerAngles = SCNVector3Zero
-//            circleNode.eulerAngles.x = .pi
             markerNode.addChildNode(circleNode)
             
             // Circle fill
@@ -496,17 +504,37 @@ struct ARViewContainer: UIViewRepresentable {
             lineNode.position = SCNVector3(0, Float(lineHeight / 2), 0)
             markerNode.addChildNode(lineNode)
             
-            // Sphere at top (3cm diameter)
-            let sphere = SCNSphere(radius: 0.015) // 1.5cm radius = 3cm diameter
+            // Sphere at top (color specified by parameter) - 6cm diameter
+            let sphere = SCNSphere(radius: 0.03) // 3cm radius = 6cm diameter
             let sphereMaterial = SCNMaterial()
-            sphereMaterial.diffuse.contents = UIColor(red: 0/255, green: 125/255, blue: 184/255, alpha: 0.98)
+            sphereMaterial.diffuse.contents = sphereColor
             sphereMaterial.specular.contents = UIColor.white
             sphereMaterial.shininess = 0.8
             sphere.materials = [sphereMaterial]
             
             let sphereNode = SCNNode(geometry: sphere)
             sphereNode.position = SCNVector3(0, Float(lineHeight), 0)
+            sphereNode.name = "arMarkerSphere_\(markerID.uuidString)"
             markerNode.addChildNode(sphereNode)
+            
+            return markerNode
+        }
+        
+        // MARK: - Marker Placement
+        
+        func placeMarker(at position: simd_float3) {
+            guard let arView = arView else { return }
+            
+            // Blue sphere color for manually placed markers
+            let sphereColor = UIColor(red: 0/255, green: 125/255, blue: 184/255, alpha: 0.98)
+            
+            // Create marker node using helper
+            let markerNode = createARMarkerNode(
+                at: position,
+                sphereColor: sphereColor,
+                markerID: mapPointID,
+                userHeight: userHeight
+            )
             
             arView.scene.rootNode.addChildNode(markerNode)
             self.markerNode = markerNode
@@ -524,11 +552,6 @@ struct ARViewContainer: UIViewRepresentable {
                     arPosition: position,
                     mapCoordinates: mapPoint.mapPoint
                 )
-                
-                // Name the sphere for hit detection - use the marker ID that was just created
-                if let createdMarker = mapPointStore.arMarkers.last {
-                    sphereNode.name = "arMarkerSphere_\(createdMarker.id.uuidString)"
-                }
                 
                 // Post notification for interpolation mode tracking
                 NotificationCenter.default.post(
@@ -1040,8 +1063,8 @@ struct ARViewContainer: UIViewRepresentable {
         
         // MARK: - Generated Marker Rendering
         
-        /// Render all generated AR markers as blue spheres
-        func renderGeneratedMarkers(from mapPointStore: MapPointStore) {
+        /// Render all generated AR markers using shared marker creation logic
+        func renderGeneratedMarkers(from mapPointStore: MapPointStore, calibrationIDs: [UUID]) {
             guard let arView = self.arView else {
                 print("❌ No AR view available for rendering")
                 return
@@ -1054,25 +1077,29 @@ struct ARViewContainer: UIViewRepresentable {
                 .filter { $0.name?.hasPrefix("generated_marker_") == true }
                 .forEach { $0.removeFromParentNode() }
             
-            // Create sphere node for each generated marker
+            // Create full AR marker for each generated marker
             for marker in mapPointStore.arMarkers {
-                // Create blue sphere
-                let sphere = SCNSphere(radius: 0.1) // 10cm radius
-                sphere.firstMaterial?.diffuse.contents = UIColor.blue
-                sphere.firstMaterial?.emission.contents = UIColor.blue.withAlphaComponent(0.3)
+                // Determine color: orange for calibration points, red for others
+                let isCalibrationPoint = calibrationIDs.contains(marker.linkedMapPointID)
+                let sphereColor = isCalibrationPoint 
+                    ? UIColor(red: 1.0, green: 0.6, blue: 0.0, alpha: 0.98)  // Orange
+                    : UIColor(red: 0.8, green: 0.05, blue: 0.1, alpha: 0.98)  // Red
                 
-                let sphereNode = SCNNode(geometry: sphere)
-                sphereNode.position = SCNVector3(
-                    marker.arPosition.x,
-                    marker.arPosition.y,
-                    marker.arPosition.z
+                let markerNode = createARMarkerNode(
+                    at: marker.arPosition,
+                    sphereColor: sphereColor,
+                    markerID: marker.id,
+                    userHeight: userHeight
                 )
-                sphereNode.name = "generated_marker_\(marker.id.uuidString)"
                 
-                arView.scene.rootNode.addChildNode(sphereNode)
+                // Override name for generated markers
+                markerNode.name = "generated_marker_\(marker.id.uuidString)"
+                
+                arView.scene.rootNode.addChildNode(markerNode)
             }
             
-            print("✅ Rendered \(mapPointStore.arMarkers.count) blue marker spheres")
+            let calibrationCount = mapPointStore.arMarkers.filter { calibrationIDs.contains($0.linkedMapPointID) }.count
+            print("✅ Rendered \(mapPointStore.arMarkers.count) AR markers (\(calibrationCount) orange calibration, \(mapPointStore.arMarkers.count - calibrationCount) red)")
         }
         
         /// Draw line connecting two markers on ground plane
