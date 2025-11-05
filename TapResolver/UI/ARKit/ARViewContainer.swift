@@ -1014,34 +1014,21 @@ struct ARViewContainer: UIViewRepresentable {
             let position = result.worldTransform.columns.3
             let arPosition = simd_float3(position.x, position.y, position.z)
             
-            // Session markers are temporary - don't persist during interpolation
-            // (Future: persistent AR Markers will be for visual feature anchors)
-            // mapPointStore?.createARMarker(
-            //     linkedMapPointID: mapPointID,
-            //     arPosition: arPosition,
-            //     mapCoordinates: mapPoint.mapPoint
-            // )
+            // Create marker node directly using helper (session-temporary, no persistence)
+            let markerNode = createARMarkerNode(
+                at: arPosition,
+                sphereColor: color,
+                markerID: mapPointID,
+                userHeight: userHeight
+            )
             
-            // Use existing marker placement function (creates circle + post + sphere)
-            placeMarker(at: arPosition)
-            
-            // THEN update the sphere color to match button
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                if let markerNode = arView.scene.rootNode.childNodes.last {
-                    // Find the sphere child node
-                    for child in markerNode.childNodes {
-                        if let sphere = child.geometry as? SCNSphere {
-                            sphere.firstMaterial?.diffuse.contents = color.withAlphaComponent(0.98)
-                            sphere.firstMaterial?.emission.contents = color.withAlphaComponent(0.2)
-                        }
-                    }
-                }
-            }
+            arView.scene.rootNode.addChildNode(markerNode)
             
             // Store position
             lastPlacedPosition = arPosition
             
             print("✅ Marker placed for \(mapPointID) at \(arPosition)")
+            print("🔶 Session-temporary marker (not persisted)")
             
             // Track session markers in interpolation mode
             if isInterpolationMode {
@@ -1076,6 +1063,13 @@ struct ARViewContainer: UIViewRepresentable {
             arView.scene.rootNode.childNodes
                 .filter { $0.name?.hasPrefix("generated_marker_") == true }
                 .forEach { $0.removeFromParentNode() }
+            
+            // Explicitly remove the 3 calibration markers by ID to prevent doubles
+            for calibrationID in calibrationIDs {
+                if let calibrationNode = arView.scene.rootNode.childNode(withName: "arMarker_\(calibrationID.uuidString)", recursively: false) {
+                    calibrationNode.removeFromParentNode()
+                }
+            }
             
             // Create full AR marker for each generated marker
             for marker in mapPointStore.arMarkers {
