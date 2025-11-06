@@ -111,40 +111,47 @@ struct ARCalibrationView: View {
                 
                 // Top row: [controls grid] ---spacer--- [PiP map]
                 VStack {
-                    HStack(alignment: .top) {
-                        // --- Controls grid pinned to LEFT edge ---
-                        ControlsGrid(
-                            isPresented: $isPresented,
-                            isCalibrationMode: $isCalibrationMode,
-                            isAnchorMode: $isAnchorMode,
-                            calibrationMarkers: $calibrationMarkers
-                        )
-                        .padding(.leading, ARInterpolationLayout.controlsLeftMargin)
+                    GeometryReader { geo in
+                        HStack(alignment: .top, spacing: 0) {
+                            // --- Controls grid pinned to LEFT edge ---
+                            ControlsGrid(
+                                isPresented: $isPresented,
+                                isCalibrationMode: $isCalibrationMode,
+                                isAnchorMode: $isAnchorMode,
+                                calibrationMarkers: $calibrationMarkers
+                            )
+                            .padding(.leading, ARInterpolationLayout.controlsLeftMargin)
+                            
+                            Spacer() // fills remaining space
+                            
+                            // --- PiP Map pinned to RIGHT edge ---
+                            PiPMapView(
+                                firstPointID: mapPointStore.activePointID,
+                                secondPointID: nil,
+                                markedPointIDs: markedPointIDs
+                            )
+                            .environmentObject(mapPointStore)
+                            .environmentObject(locationManager)
+                            .frame(
+                                width: min(
+                                    ARInterpolationLayout.pipMapWidth,
+                                    geo.size.width - 124 - ARInterpolationLayout.controlsLeftMargin - 16
+                                ),
+                                height: ARInterpolationLayout.pipMapHeight
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius)
+                                    .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                            )
+                            .padding(.trailing, ARInterpolationLayout.pipMapRightMargin)
+                            .offset(x: -60, y: 0) // Nudge left by 60 pixels
+                        }
                         .padding(.top, ARInterpolationLayout.pipMapTopMargin)
-
-                        Spacer(minLength: 2) // middle gap managed by the layout
-
-                        // --- PiP Map pinned to RIGHT edge ---
-                        PiPMapView(
-                            firstPointID: mapPointStore.activePointID,
-                            secondPointID: nil,
-                            markedPointIDs: markedPointIDs
-                        )
-                        .environmentObject(mapPointStore)
-                        .environmentObject(locationManager)
-                        .frame(
-                            width: ARInterpolationLayout.pipMapWidth,
-                            height: ARInterpolationLayout.pipMapHeight
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius)
-                                .stroke(Color.white.opacity(0.3), lineWidth: 2)
-                        )
-                        .padding(.trailing, ARInterpolationLayout.pipMapRightMargin)
-                        .padding(.top, ARInterpolationLayout.pipMapTopMargin)
+                        .frame(maxWidth: .infinity)
                     }
-
+                    .frame(height: 124 + ARInterpolationLayout.pipMapTopMargin) // controls grid height + top margin
+                    
                     Spacer()
                 }
                 .zIndex(10001) // stay above AR content
@@ -157,7 +164,7 @@ struct ARCalibrationView: View {
                         
                         MapPointDrawer()
                             .padding(.top, 40 + ARInterpolationLayout.pipMapHeight + 20)
-                            .padding(.trailing, 20)
+                            .padding(.trailing, 0)
                     }
                     
                     Spacer()
