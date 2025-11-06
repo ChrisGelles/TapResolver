@@ -15,16 +15,19 @@ struct ARMarker: Identifiable, Codable {
     var arPosition: simd_float3  // [x, y, z] in AR world space (meters)
     var mapCoordinates: CGPoint  // 2D position matching the linked MapPoint
     let createdAt: Date
+    var isAnchor: Bool
     
     init(id: UUID = UUID(),
          linkedMapPointID: UUID,
          arPosition: simd_float3,
-         mapCoordinates: CGPoint) {
+         mapCoordinates: CGPoint,
+         isAnchor: Bool = false) {
         self.id = id
         self.linkedMapPointID = linkedMapPointID
         self.arPosition = arPosition
         self.mapCoordinates = mapCoordinates
         self.createdAt = Date()
+        self.isAnchor = isAnchor
     }
 }
 
@@ -37,6 +40,7 @@ extension ARMarker {
         case arPosition
         case mapCoordinates
         case createdAt
+        case isAnchor
     }
     
     init(from decoder: Decoder) throws {
@@ -68,6 +72,7 @@ extension ARMarker {
         mapCoordinates = CGPoint(x: coordArray[0], y: coordArray[1])
         
         createdAt = try container.decode(Date.self, forKey: .createdAt)
+        isAnchor = try container.decodeIfPresent(Bool.self, forKey: .isAnchor) ?? false
     }
     
     func encode(to encoder: Encoder) throws {
@@ -78,6 +83,7 @@ extension ARMarker {
         try container.encode([arPosition.x, arPosition.y, arPosition.z], forKey: .arPosition)
         try container.encode([mapCoordinates.x, mapCoordinates.y], forKey: .mapCoordinates)
         try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(isAnchor, forKey: .isAnchor)
     }
 }
 

@@ -54,6 +54,9 @@ struct ARViewContainer: UIViewRepresentable {
     var interpolationFirstPointID: UUID? = nil
     var interpolationSecondPointID: UUID? = nil
     
+    // Anchor mode (optional)
+    var isAnchorMode: Bool = false
+    
     func makeUIView(context: Context) -> ARSCNView {
         let arView = ARSCNView()
         
@@ -106,6 +109,7 @@ struct ARViewContainer: UIViewRepresentable {
         context.coordinator.squareSideMeters = squareSideMeters
         context.coordinator.mapPointStore = mapPointStore
         context.coordinator.mapPointID = mapPointID
+        context.coordinator.isAnchorMode = isAnchorMode
         
         // Listen for delete notifications
         context.coordinator.deleteNotificationObserver = NotificationCenter.default.addObserver(
@@ -193,6 +197,9 @@ struct ARViewContainer: UIViewRepresentable {
         // Session-temporary markers for interpolation visualization
         var sessionMarkerA: (position: simd_float3, mapPointID: UUID)? = nil
         var sessionMarkerB: (position: simd_float3, mapPointID: UUID)? = nil
+        
+        // Anchor mode tracking
+        var isAnchorMode: Bool = false
         
         // MARK: - Crosshair Creation
         
@@ -367,6 +374,12 @@ struct ARViewContainer: UIViewRepresentable {
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             guard let arView = arView else { return }
             
+            // Handle anchor mode placement
+            if isAnchorMode {
+                handleAnchorModeTap(gesture.location(in: arView))
+                return
+            }
+            
             // Don't handle taps in interpolation mode - buttons handle placement
             guard !isInterpolationMode else {
                 print("👆 Tap ignored - use buttons to place markers in interpolation mode")
@@ -516,6 +529,20 @@ struct ARViewContainer: UIViewRepresentable {
             sphereNode.position = SCNVector3(0, Float(lineHeight), 0)
             sphereNode.name = "arMarkerSphere_\(markerID.uuidString)"
             markerNode.addChildNode(sphereNode)
+            
+            // Add distinctive badge for anchor markers
+            if let mapPointStore = mapPointStore {
+                let isAnchorMarker = mapPointStore.arMarkers.first { $0.id == markerID }?.isAnchor ?? false
+                
+                if isAnchorMarker {
+                    let badge = SCNNode()
+                    let badgeGeometry = SCNSphere(radius: 0.05)
+                    badgeGeometry.firstMaterial?.diffuse.contents = UIColor.systemTeal
+                    badge.geometry = badgeGeometry
+                    badge.position = SCNVector3(0, 0.15, 0)
+                    sphereNode.addChildNode(badge)
+                }
+            }
             
             return markerNode
         }
@@ -1221,6 +1248,70 @@ struct ARViewContainer: UIViewRepresentable {
             }
             
             print("✏️ Drew \(count) cross-mark(s) on interpolation line")
+        }
+        
+        // MARK: - Anchor Mode Handlers
+        
+        func handleAnchorModeTap(_ location: CGPoint) {
+            guard let selectedID = mapPointStore?.activePointID else {
+                print("🚫 No map point selected for anchor")
+                return
+            }
+            
+            guard let arView = arView else {
+                print("🚫 AR view not available")
+                return
+            }
+            
+            // Check if anchor already exists
+            if let mapPointStore = mapPointStore,
+               mapPointStore.arMarkers.contains(where: { $0.linkedMapPointID == selectedID && $0.isAnchor }) {
+                print("🚫 Anchor marker already exists for this point")
+                return
+            }
+            
+            // Raycast to find surface
+            let raycastQuery = arView.raycastQuery(from: location, allowing: .estimatedPlane, alignment: .any)
+            guard let query = raycastQuery,
+                  let result = arView.session.raycast(query).first else {
+                print("🚫 No surface detected")
+                return
+            }
+            
+            let transform = result.worldTransform
+            let position = simd_float3(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+            
+            // Get map point coordinates
+            guard let mapPoint = mapPointStore?.points.first(where: { $0.id == selectedID }) else {
+                print("🚫 Map point not found")
+                return
+            }
+            
+            // Create anchor marker
+            let marker = ARMarker(
+                linkedMapPointID: selectedID,
+                arPosition: position,
+                mapCoordinates: mapPoint.mapPoint,
+                isAnchor: true
+            )
+            
+            mapPointStore?.arMarkers.append(marker)
+            
+            // Create and add node to scene
+            let markerNode = createARMarkerNode(
+                at: position,
+                sphereColor: .cyan,
+                markerID: marker.id,
+                userHeight: userHeight
+            )
+            markerNode.name = "arMarker_\(marker.id)"
+            arView.scene.rootNode.addChildNode(markerNode)
+            
+            print("✅ Placed anchor marker at \(position)")
+            print("🔶 Anchor marker for MapPoint: \(selectedID)")
+            
+            // Exit anchor mode
+            isAnchorMode = false
         }
         
         deinit {

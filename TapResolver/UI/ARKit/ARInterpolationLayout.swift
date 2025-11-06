@@ -24,6 +24,9 @@ struct ARInterpolationLayout {
     static let pipMapCornerRadius: CGFloat = 12
     static let pipMapOpacity: Double = 0.9
     
+    // MARK: - Controls Grid
+    static let controlsLeftMargin: CGFloat = 20
+    
     // Calculated values
     static var pipMapWidth: CGFloat {
         screenWidth * pipMapWidthRatio

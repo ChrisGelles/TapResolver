@@ -66,6 +66,9 @@ struct ARCalibrationView: View {
     @State private var calibrationMarkers: [CalibrationMarker] = []
     @State private var arCoordinator: ARViewContainer.Coordinator?
     
+    // Anchor mode tracking
+    @State private var isAnchorMode = false
+    
     var body: some View {
         ZStack {
             // AR Camera feed
@@ -82,7 +85,8 @@ struct ARCalibrationView: View {
                 selectedMarkerID: $selectedMarkerID,
                 isInterpolationMode: isInterpolationMode,
                 interpolationFirstPointID: interpolationFirstPointID,
-                interpolationSecondPointID: interpolationSecondPointID
+                interpolationSecondPointID: interpolationSecondPointID,
+                isAnchorMode: isAnchorMode
             )
             .ignoresSafeArea()
             
@@ -105,60 +109,22 @@ struct ARCalibrationView: View {
             } else {
                 // Normal mode - PiP + Drawer + Close button
                 
-                // Close button (upper-left)
+                // Top row: [controls grid] ---spacer--- [PiP map]
                 VStack {
-                    HStack {
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                isPresented = false
-                            }
-                        }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 32, weight: .medium))
-                                .foregroundColor(.white)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, 60)
-                        .padding(.leading, 20)
-                        
-                        Spacer()
-                    }
-                    
-                    Spacer()
-                }
-                
-                // Calibration mode button (upper-left, below close button)
-                if !isInterpolationMode && !isCalibrationMode {
-                    VStack {
-                        HStack {
-                            Button(action: {
-                                isCalibrationMode = true
-                                calibrationMarkers.removeAll()
-                            }) {
-                                Image(systemName: "location.north.line.fill")
-                                    .font(.system(size: 24, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .padding(12)
-                                    .background(Color.blue.opacity(0.8))
-                                    .clipShape(Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.top, 110)
-                            .padding(.leading, 20)
-                            
-                            Spacer()
-                        }
-                        
-                        Spacer()
-                    }
-                    .zIndex(10001)
-                }
-                
-                // PiP Map (upper right)
-                VStack {
-                    HStack {
-                        Spacer()
-                        
+                    HStack(alignment: .top) {
+                        // --- Controls grid pinned to LEFT edge ---
+                        ControlsGrid(
+                            isPresented: $isPresented,
+                            isCalibrationMode: $isCalibrationMode,
+                            isAnchorMode: $isAnchorMode,
+                            calibrationMarkers: $calibrationMarkers
+                        )
+                        .padding(.leading, ARInterpolationLayout.controlsLeftMargin)
+                        .padding(.top, ARInterpolationLayout.pipMapTopMargin)
+
+                        Spacer(minLength: 2) // middle gap managed by the layout
+
+                        // --- PiP Map pinned to RIGHT edge ---
                         PiPMapView(
                             firstPointID: mapPointStore.activePointID,
                             secondPointID: nil,
@@ -175,13 +141,14 @@ struct ARCalibrationView: View {
                             RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius)
                                 .stroke(Color.white.opacity(0.3), lineWidth: 2)
                         )
-                        .padding(.top, 40)
                         .padding(.trailing, ARInterpolationLayout.pipMapRightMargin)
+                        .padding(.top, ARInterpolationLayout.pipMapTopMargin)
                     }
-                    
+
                     Spacer()
                 }
-                .zIndex(5000)
+                .zIndex(10001) // stay above AR content
+
                 
                 // Map Point Drawer (right side, below PiP)
                 VStack {
@@ -221,6 +188,29 @@ struct ARCalibrationView: View {
                         }
                         .buttonStyle(.plain)
                         .padding(.bottom, 60)
+                    }
+                    .zIndex(10002)
+                }
+                
+                // Anchor mode bottom button
+                if isAnchorMode && mapPointStore.activePointID != nil && !hasAnchorMarkerForSelectedPoint() {
+                    VStack {
+                        Spacer()
+                        
+                        Button(action: {
+                            // Tap handler will place marker
+                            print("🔶 Ready to place anchor marker")
+                        }) {
+                            Text("Tap to Place Anchor Marker")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.cyan)
+                                .cornerRadius(10)
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, 50)
                     }
                     .zIndex(10002)
                 }
@@ -967,6 +957,73 @@ struct ARCalibrationView: View {
     
     private var markedPointIDs: Set<UUID> {
         Set(calibrationMarkers.map { $0.mapPointID })
+    }
+    
+    // MARK: - Anchor Helpers
+    
+    private func hasAnchorMarkerForSelectedPoint() -> Bool {
+        guard let selectedID = mapPointStore.activePointID else { return false }
+        return mapPointStore.arMarkers.contains { marker in
+            marker.linkedMapPointID == selectedID && marker.isAnchor
+        }
+    }
+}
+
+// MARK: - Controls Grid
+
+private struct ControlsGrid: View {
+    @Binding var isPresented: Bool
+    @Binding var isCalibrationMode: Bool
+    @Binding var isAnchorMode: Bool
+    @Binding var calibrationMarkers: [CalibrationMarker]
+    
+    var body: some View {
+        let cell = GridItem(.fixed(56), spacing: 12, alignment: .leading)
+        
+        LazyVGrid(columns: [cell, cell], alignment: .leading, spacing: 12) {
+            // 1) Close (X)
+            Button {
+                withAnimation(.easeInOut(duration: 0.3)) { isPresented = false }
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 32, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(width: 56, height: 56)
+                    .background(Color.black.opacity(0.35))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            
+            // 2) Triangle (Calibration)
+            Button {
+                isCalibrationMode = true
+                calibrationMarkers.removeAll()
+            } label: {
+                Image(systemName: "triangle")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(width: 56, height: 56)
+                    .background(Color.blue.opacity(0.8))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            
+            // 3) Anchor
+            Button {
+                isAnchorMode.toggle()
+            } label: {
+                Text("⚓︎")
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundColor(isAnchorMode ? .cyan : .white)
+                    .frame(width: 56, height: 56)
+                    .background((isAnchorMode ? Color.cyan.opacity(0.3) : Color.blue.opacity(0.8)))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            
+            // 4) Placeholder (future slot)
+            Color.clear.frame(width: 56, height: 56)
+        }
     }
 }
 
