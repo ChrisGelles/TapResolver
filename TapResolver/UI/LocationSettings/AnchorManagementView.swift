@@ -26,8 +26,19 @@ struct AnchorManagementView: View {
                 } else {
                     ForEach(mapPointStore.anchorPackages, id: \.id) { package in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Anchor: \(package.id.uuidString.prefix(8))...")
-                                .font(.headline)
+                            HStack {
+                                Text("Anchor: \(package.id.uuidString.prefix(8))...")
+                                    .font(.headline)
+                                
+                                Spacer()
+                                
+                                // Signature image indicator
+                                if package.referenceImages.contains(where: { $0.captureType == .signature }) {
+                                    Image(systemName: "camera.fill")
+                                        .foregroundColor(.green)
+                                        .font(.title3)
+                                }
+                            }
                             
                             if let mapPoint = mapPointStore.points.first(where: { $0.id == package.mapPointID }) {
                                 Text("Map Point: (\(Int(mapPoint.mapPoint.x)), \(Int(mapPoint.mapPoint.y)))")
@@ -35,10 +46,27 @@ struct AnchorManagementView: View {
                                     .foregroundColor(.secondary)
                             }
                             
+                            // Show signature image thumbnail if available
+                            if let signatureImage = package.referenceImages.first(where: { $0.captureType == .signature }) {
+                                if let uiImage = UIImage(data: signatureImage.imageData) {
+                                    Image(uiImage: uiImage)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(height: 120)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(Color.green, lineWidth: 2)
+                                        )
+                                }
+                            }
+                            
                             HStack {
                                 Label("\(package.spatialData.featureCloud.pointCount) points", systemImage: "circle.grid.cross")
                                 Spacer()
                                 Label("\(package.spatialData.planes.count) planes", systemImage: "square.stack.3d.up")
+                                Spacer()
+                                Label("\(package.referenceImages.count) images", systemImage: "photo")
                                 Spacer()
                                 Text("\(package.spatialData.totalDataSize / 1024) KB")
                                     .font(.caption)

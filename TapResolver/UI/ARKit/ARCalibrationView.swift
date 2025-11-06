@@ -256,17 +256,13 @@ struct ARCalibrationView: View {
                                     coordinator.captureSignatureImage(mapPointID: mapPointID, position: position)
                                 }
                             }) {
-                                VStack(spacing: 4) {
-                                    Image(systemName: coordinator.signatureImageCaptured ? "checkmark.circle.fill" : "camera.fill")
-                                        .font(.system(size: 24))
-                                    Text(coordinator.signatureImageCaptured ? "Captured" : "Key Image")
-                                        .font(.caption)
-                                        .fontWeight(.semibold)
-                                }
-                                .foregroundColor(.white)
-                                .frame(width: 80, height: 80)
-                                .background(coordinator.signatureImageCaptured ? Color.green : Color.blue)
-                                .clipShape(Circle())
+                                Image(systemName: coordinator.signatureImageCaptured ? "checkmark.circle.fill" : "camera.fill")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(.white)
+                                    .frame(width: 70, height: 70)
+                                    .background(coordinator.signatureImageCaptured ? Color.green : Color.blue)
+                                    .clipShape(Circle())
+                                    .shadow(radius: 4)
                             }
                             .padding(.trailing, 20)
                             .padding(.bottom, 20)
