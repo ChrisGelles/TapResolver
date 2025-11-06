@@ -1762,12 +1762,21 @@ struct ARViewContainer: UIViewRepresentable {
             print("   Is tracked: \(imageAnchor.isTracked)")
             
             // Parse package ID from image name
+            // Format: {UUID}-{captureType} where UUID contains hyphens
             let components = imageName.split(separator: "-")
-            guard let packageIDString = components.first,
-                  let packageID = UUID(uuidString: String(packageIDString)) else {
-                print("⚠️ Could not parse package ID from image name")
+            guard components.count >= 2 else {
+                print("⚠️ Invalid image name format: \(imageName)")
                 return
             }
+            
+            // Take all but the last component (the capture type) and rejoin with hyphens
+            let packageIDString = components.dropLast().joined(separator: "-")
+            guard let packageID = UUID(uuidString: packageIDString) else {
+                print("⚠️ Could not create UUID from: \(packageIDString)")
+                return
+            }
+            
+            print("✅ Parsed package ID: \(packageID)")
             
             // Find matching anchor package
             guard let package = activeRelocalizationPackages.first(where: { $0.id == packageID }) else {
