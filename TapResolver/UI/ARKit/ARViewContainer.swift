@@ -212,6 +212,17 @@ struct ARViewContainer: UIViewRepresentable {
         var currentCaptureMapPointID: UUID? = nil
         var currentCapturePosition: simd_float3? = nil
         
+        // Accumulated data during anchor capture session
+        var accumulatedFeaturePoints: [simd_float3] = []
+        var accumulatedPlanes: [UUID: ARPlaneAnchor] = [:]  // Dictionary to track unique planes
+        var accumulatedReferenceImages: [AnchorReferenceImage] = []
+        var captureStartTime: Date? = nil
+        
+        // Quality thresholds for auto-capture (track what we've captured)
+        var capturedFloorFar = false
+        var capturedFloorClose = false
+        var capturedWalls = false
+        
         // MARK: - Crosshair Creation
         
         func createCrosshair() -> SCNNode {
@@ -1334,13 +1345,17 @@ struct ARViewContainer: UIViewRepresentable {
             // Feature points (0-40 points)
             if let featurePoints = frame.rawFeaturePoints {
                 let pointCount = featurePoints.points.count
-                let featureScore = min(40, Int(Float(pointCount) / 200.0 * 40.0))
+                // Use accumulated count instead of current frame count
+                let accumulatedCount = max(accumulatedFeaturePoints.count, pointCount)
+                let featureScore = min(40, Int(Float(accumulatedCount) / 200.0 * 40.0))
                 score += featureScore
             }
             
             // Planes detected (0-30 points)
             let planeCount = frame.anchors.filter { $0 is ARPlaneAnchor }.count
-            let planeScore = min(30, planeCount * 10)
+            // Use accumulated plane count
+            let accumulatedPlaneCount = max(accumulatedPlanes.count, planeCount)
+            let planeScore = min(30, accumulatedPlaneCount * 10)
             score += planeScore
             
             // Tracking quality (0-30 points)
@@ -1372,6 +1387,17 @@ struct ARViewContainer: UIViewRepresentable {
         }
         
         private func startQualityMonitoring(mapPointID: UUID, position: simd_float3) {
+            // Clear accumulated data for new capture session
+            accumulatedFeaturePoints.removeAll()
+            accumulatedPlanes.removeAll()
+            accumulatedReferenceImages.removeAll()
+            captureStartTime = Date()
+            capturedFloorFar = false
+            capturedFloorClose = false
+            capturedWalls = false
+            
+            print("🔄 Started new accumulation session")
+            
             // Reset state
             signatureImageCaptured = false
             anchorCountdown = nil
@@ -1385,9 +1411,93 @@ struct ARViewContainer: UIViewRepresentable {
                 DispatchQueue.main.async {
                     self.anchorQualityScore = score
                     self.anchorInstruction = self.signatureImageCaptured ? "Key Image Captured" : instruction
-                    print("📊 Quality: \(score)% - \(instruction)")
+                    
+                    // Accumulate feature points and planes
+                    self.accumulateARData(at: position, captureRadius: 5.0)
+                    
+                    // Auto-capture reference images at quality thresholds
+                    if score >= 70 && !self.capturedFloorFar {
+                        self.captureReferenceImage(type: .floorFar)
+                        self.capturedFloorFar = true
+                    }
+                    
+                    if score >= 80 && !self.capturedFloorClose {
+                        self.captureReferenceImage(type: .floorClose)
+                        self.capturedFloorClose = true
+                    }
+                    
+                    if score >= 85 && !self.capturedWalls {
+                        // Capture 4 wall directions
+                        self.captureReferenceImage(type: .wallNorth)
+                        self.captureReferenceImage(type: .wallSouth)
+                        self.captureReferenceImage(type: .wallEast)
+                        self.captureReferenceImage(type: .wallWest)
+                        self.capturedWalls = true
+                    }
+                    
+                    print("📊 Quality: \(score)% - \(instruction) [Points: \(self.accumulatedFeaturePoints.count), Planes: \(self.accumulatedPlanes.count), Images: \(self.accumulatedReferenceImages.count)]")
                 }
             }
+        }
+        
+        func accumulateARData(at position: simd_float3, captureRadius: Float) {
+            guard let arView = arView,
+                  let frame = arView.session.currentFrame else { return }
+            
+            // Accumulate feature points within radius
+            let rawPoints = frame.rawFeaturePoints?.points ?? []
+            for point in rawPoints {
+                let distance = simd_distance(point, position)
+                if distance <= captureRadius {
+                    // Only add if not too close to existing points (deduplicate)
+                    let isDuplicate = accumulatedFeaturePoints.contains { existing in
+                        simd_distance(existing, point) < 0.05  // 5cm threshold
+                    }
+                    if !isDuplicate {
+                        accumulatedFeaturePoints.append(point)
+                    }
+                }
+            }
+            
+            // Accumulate plane anchors (automatically deduplicates via dictionary)
+            for anchor in frame.anchors {
+                if let planeAnchor = anchor as? ARPlaneAnchor {
+                    let planeCenter = simd_make_float3(planeAnchor.transform.columns.3)
+                    let distance = simd_distance(planeCenter, position)
+                    if distance <= captureRadius {
+                        accumulatedPlanes[planeAnchor.identifier] = planeAnchor
+                    }
+                }
+            }
+        }
+        
+        func captureReferenceImage(type: AnchorReferenceImage.CaptureType) {
+            guard let arView = arView,
+                  let frame = arView.session.currentFrame else {
+                print("❌ Cannot capture reference image - no AR frame")
+                return
+            }
+            
+            // Convert AR frame to JPEG
+            let image = CIImage(cvPixelBuffer: frame.capturedImage)
+            let context = CIContext()
+            
+            guard let cgImage = context.createCGImage(image, from: image.extent) else {
+                print("❌ Failed to create CGImage for \(type.rawValue)")
+                return
+            }
+            
+            let uiImage = UIImage(cgImage: cgImage)
+            
+            guard let jpegData = uiImage.jpegData(compressionQuality: 0.7) else {
+                print("❌ Failed to create JPEG for \(type.rawValue)")
+                return
+            }
+            
+            let referenceImage = AnchorReferenceImage(captureType: type, imageData: jpegData)
+            accumulatedReferenceImages.append(referenceImage)
+            
+            print("📸 Auto-captured \(type.rawValue) reference image (\(jpegData.count / 1024) KB)")
         }
         
         private func startCountdown(mapPointID: UUID, position: simd_float3) {
@@ -1438,57 +1548,92 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
-            print("📸 Capturing signature image + spatial data")
+            print("📸 Finalizing anchor package with signature image")
             
-            // Convert AR frame to JPEG for signature image
+            // Capture signature image
             let image = CIImage(cvPixelBuffer: frame.capturedImage)
             let context = CIContext()
             
             guard let cgImage = context.createCGImage(image, from: image.extent) else {
-                print("❌ Failed to create CGImage")
+                print("❌ Failed to create CGImage for signature")
                 return
             }
             
             let uiImage = UIImage(cgImage: cgImage)
             
             guard let jpegData = uiImage.jpegData(compressionQuality: 0.8) else {
-                print("❌ Failed to create JPEG data")
+                print("❌ Failed to create JPEG for signature")
                 return
             }
             
-            print("✅ Signature image captured (\(jpegData.count) bytes)")
+            let signatureImage = AnchorReferenceImage(captureType: .signature, imageData: jpegData)
+            accumulatedReferenceImages.append(signatureImage)
             
-            // Capture spatial data
-            if let spatialData = captureSpatialData(at: position, captureRadius: 5.0),
-               let mapPointStore = mapPointStore,
-               let mapPoint = mapPointStore.points.first(where: { $0.id == mapPointID }) {
-                
-                // Create anchor package
-                mapPointStore.createAnchorPackage(
-                    mapPointID: mapPointID,
-                    mapCoordinates: mapPoint.mapPoint,
-                    anchorPosition: position,
-                    spatialData: spatialData
+            print("✅ Signature image captured (\(jpegData.count / 1024) KB)")
+            
+            // Build spatial data from accumulated data
+            let featureCloud = AnchorFeatureCloud(
+                points: accumulatedFeaturePoints,
+                anchorPosition: position,
+                captureRadius: 5.0
+            )
+            
+            let planeData = accumulatedPlanes.values.map { planeAnchor in
+                AnchorPlaneData(
+                    planeID: planeAnchor.identifier,
+                    transform: planeAnchor.transform,
+                    extent: AnchorPlaneData.PlaneExtent(
+                        width: planeAnchor.planeExtent.width,
+                        height: planeAnchor.planeExtent.height
+                    ),
+                    alignment: planeAnchor.alignment == .horizontal ? .horizontal : .vertical
                 )
-                
-                // Add signature image to the just-created package
-                if let index = mapPointStore.anchorPackages.firstIndex(where: { $0.mapPointID == mapPointID && $0.anchorPosition == position }) {
-                    var updatedPackage = mapPointStore.anchorPackages[index]
-                    let signatureImage = AnchorReferenceImage(captureType: .signature, imageData: jpegData)
-                    updatedPackage.referenceImages.append(signatureImage)
-                    mapPointStore.anchorPackages[index] = updatedPackage
-                    mapPointStore.saveAnchorPackages()
-                    print("✅ Added signature image to anchor package")
-                }
             }
+            
+            let spatialData = AnchorSpatialData(
+                featureCloud: featureCloud,
+                planes: planeData
+            )
+            
+            print("📊 Final accumulated data:")
+            print("   Feature points: \(accumulatedFeaturePoints.count)")
+            print("   Planes: \(planeData.count)")
+            print("   Reference images: \(accumulatedReferenceImages.count)")
+            print("   Total spatial data: \(spatialData.totalDataSize / 1024) KB")
+            
+            // Create anchor package with accumulated data
+            guard let mapPointStore = mapPointStore,
+                  let mapPoint = mapPointStore.points.first(where: { $0.id == mapPointID }) else {
+                print("❌ Cannot find map point")
+                return
+            }
+            
+            var package = AnchorPointPackage(
+                mapPointID: mapPointID,
+                mapCoordinates: mapPoint.mapPoint,
+                anchorPosition: position
+            )
+            
+            package.spatialData = spatialData
+            package.referenceImages = accumulatedReferenceImages
+            
+            // Add to store
+            mapPointStore.anchorPackages.append(package)
+            mapPointStore.saveAnchorPackages()
+            
+            print("✅ Created Anchor Package \(package.id) for MapPoint \(mapPointID)")
+            print("   Complete with \(accumulatedReferenceImages.count) reference images")
             
             // Stop quality monitoring
             qualityUpdateTimer?.invalidate()
             isCapturingAnchor = false
             anchorQualityScore = 0
             anchorInstruction = "Move device slowly to detect surfaces"
-            currentCaptureMapPointID = nil
-            currentCapturePosition = nil
+            
+            // Clear accumulated data
+            accumulatedFeaturePoints.removeAll()
+            accumulatedPlanes.removeAll()
+            accumulatedReferenceImages.removeAll()
             
             print("✅ Anchor package complete with signature image")
         }
