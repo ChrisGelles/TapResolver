@@ -1386,7 +1386,7 @@ struct ARViewContainer: UIViewRepresentable {
                     print("📊 Quality: \(score)% - \(instruction)")
                     
                     // Trigger auto-completion if quality is excellent
-                    if score >= 71 && self.anchorCountdown == nil {
+                    if score >= 90 && self.anchorCountdown == nil {
                         self.startCountdown(mapPointID: mapPointID, position: position)
                     }
                 }
@@ -1394,7 +1394,7 @@ struct ARViewContainer: UIViewRepresentable {
         }
         
         private func startCountdown(mapPointID: UUID, position: simd_float3) {
-            anchorCountdown = 3
+            anchorCountdown = 10
             
             countdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
                 guard let self = self else {

@@ -71,6 +71,7 @@ struct ARCalibrationView: View {
     
     // Anchor mode tracking
     @State private var isAnchorMode = false
+    @State private var showAnchorManagementSheet = false
     
     var body: some View {
         ZStack {
@@ -121,12 +122,13 @@ struct ARCalibrationView: View {
                     GeometryReader { geo in
                         HStack(alignment: .top, spacing: 0) {
                             // --- Controls grid pinned to LEFT edge ---
-                            ControlsGrid(
-                                isPresented: $isPresented,
-                                isCalibrationMode: $isCalibrationMode,
-                                isAnchorMode: $isAnchorMode,
-                                calibrationMarkers: $calibrationMarkers
-                            )
+                        ControlsGrid(
+                            isPresented: $isPresented,
+                            isCalibrationMode: $isCalibrationMode,
+                            isAnchorMode: $isAnchorMode,
+                            calibrationMarkers: $calibrationMarkers,
+                            showAnchorManagementSheet: $showAnchorManagementSheet
+                        )
                             .padding(.leading, ARInterpolationLayout.controlsLeftMargin)
                             
                             Spacer() // fills remaining space
@@ -432,6 +434,9 @@ struct ARCalibrationView: View {
             }
         } message: {
             Text("This will permanently remove the AR marker. This action cannot be undone.")
+        }
+        .sheet(isPresented: $showAnchorManagementSheet) {
+            AnchorManagementView(mapPointStore: mapPointStore)
         }
         .zIndex(10000)
         .transition(.move(edge: .leading))
@@ -1045,6 +1050,7 @@ private struct ControlsGrid: View {
     @Binding var isCalibrationMode: Bool
     @Binding var isAnchorMode: Bool
     @Binding var calibrationMarkers: [CalibrationMarker]
+    @Binding var showAnchorManagementSheet: Bool
     
     var body: some View {
         let cell = GridItem(.fixed(56), spacing: 12, alignment: .leading)
@@ -1090,8 +1096,18 @@ private struct ControlsGrid: View {
             }
             .buttonStyle(.plain)
             
-            // 4) Placeholder (future slot)
-            Color.clear.frame(width: 56, height: 56)
+            // 4) Manage Anchors
+            Button {
+                showAnchorManagementSheet = true
+            } label: {
+                Image(systemName: "list.bullet.rectangle")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(width: 56, height: 56)
+                    .background(Color.purple.opacity(0.8))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
         }
     }
 }

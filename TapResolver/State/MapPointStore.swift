@@ -688,6 +688,30 @@ public final class MapPointStore: ObservableObject {
         print("   Data size: \(spatialData.totalDataSize) bytes")
     }
     
+    func deleteAnchorPackage(_ packageID: UUID) {
+        guard let index = anchorPackages.firstIndex(where: { $0.id == packageID }) else {
+            print("⚠️ Anchor package \(packageID) not found")
+            return
+        }
+        
+        let package = anchorPackages[index]
+        anchorPackages.remove(at: index)
+        saveAnchorPackages()
+        
+        print("🗑️ Deleted Anchor Package \(packageID)")
+        print("   Was for MapPoint: \(package.mapPointID)")
+        print("   Remaining packages: \(anchorPackages.count)")
+    }
+    
+    func deleteAllAnchorPackagesForMapPoint(_ mapPointID: UUID) {
+        let beforeCount = anchorPackages.count
+        anchorPackages.removeAll { $0.mapPointID == mapPointID }
+        saveAnchorPackages()
+        
+        let deletedCount = beforeCount - anchorPackages.count
+        print("🗑️ Deleted \(deletedCount) Anchor Package(s) for MapPoint \(mapPointID)")
+    }
+    
     // MARK: - AR Marker Management
     
     func createARMarker(linkedMapPointID: UUID, arPosition: simd_float3, mapCoordinates: CGPoint) {
