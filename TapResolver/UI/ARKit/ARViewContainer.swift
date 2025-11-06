@@ -1025,10 +1025,10 @@ struct ARViewContainer: UIViewRepresentable {
         // MARK: - Interpolation Marker Placement
         
         /// Called by buttons to place markers in interpolation mode
-        func placeMarkerAt(mapPointID: UUID, mapPoint: MapPointStore.MapPoint, color: UIColor) {
+        func placeMarkerAt(mapPointID: UUID, mapPoint: MapPointStore.MapPoint, color: UIColor) -> UUID {
             guard let arView = arView else {
                 print("❌ ARView not available")
-                return
+                return UUID()  // Return dummy ID on failure
             }
             
             // Perform raycast from center of screen
@@ -1038,7 +1038,7 @@ struct ARViewContainer: UIViewRepresentable {
             guard let query = raycastQuery,
                   let result = arView.session.raycast(query).first else {
                 print("❌ No surface detected at crosshair - point at a surface")
-                return
+                return UUID()  // Return dummy ID on failure
             }
             
             let position = result.worldTransform.columns.3
@@ -1071,7 +1071,17 @@ struct ARViewContainer: UIViewRepresentable {
             // Store position
             lastPlacedPosition = arPosition
             
+            // Generate unique marker ID for this node
+            let markerID = UUID()
+            
+            // Set the marker node name with this ID (find last added node)
+            if let markerNode = arView.scene.rootNode.childNodes.last {
+                markerNode.name = "arMarker_\(markerID.uuidString)"
+            }
+            
             print("✅ Marker placed for \(mapPointID) at \(arPosition)")
+            print("🔶 Session-temporary marker (not persisted)")
+            print("   Node ID: \(markerID)")
             
             // Track session markers in interpolation mode
             if isInterpolationMode {
@@ -1089,6 +1099,8 @@ struct ARViewContainer: UIViewRepresentable {
                     drawConnectingLine(from: markerA.position, to: markerB.position)
                 }
             }
+            
+            return markerID
         }
         
         // MARK: - Generated Marker Rendering
@@ -1107,11 +1119,14 @@ struct ARViewContainer: UIViewRepresentable {
                 .filter { $0.name?.hasPrefix("generated_marker_") == true }
                 .forEach { $0.removeFromParentNode() }
             
-            // Explicitly remove the 3 calibration marker nodes by their IDs to prevent overlaps
-            for calibrationID in calibrationIDs {
-                if let calibrationNode = arView.scene.rootNode.childNode(withName: "arMarker_\(calibrationID.uuidString)", recursively: false) {
+            // Get the actual marker IDs from the calibration points
+            let calibrationMarkerIDs = mapPointStore.calibrationPoints.map { $0.id }
+            
+            // Explicitly remove the 3 calibration marker nodes by their marker IDs
+            for markerID in calibrationMarkerIDs {
+                if let calibrationNode = arView.scene.rootNode.childNode(withName: "arMarker_\(markerID.uuidString)", recursively: false) {
                     calibrationNode.removeFromParentNode()
-                    print("🧹 Removed calibration marker node: \(calibrationID)")
+                    print("🧹 Removed calibration marker node: \(markerID)")
                 }
             }
             

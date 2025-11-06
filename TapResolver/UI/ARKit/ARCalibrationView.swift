@@ -19,6 +19,7 @@ import simd
 import ARKit
 
 struct CalibrationMarker {
+    let id: UUID  // Marker node ID
     let mapPointID: UUID
     let mapPoint: CGPoint
     let arPosition: simd_float3
@@ -808,8 +809,8 @@ struct ARCalibrationView: View {
             return
         }
         
-        // Place marker using existing placeMarkerAt method (same as interpolation mode)
-        coordinator.placeMarkerAt(
+        // Place marker using existing placeMarkerAt method (returns marker ID)
+        let markerID = coordinator.placeMarkerAt(
             mapPointID: selectedPointID,
             mapPoint: selectedPoint,
             color: UIColor.orange
@@ -822,6 +823,7 @@ struct ARCalibrationView: View {
         }
         
         let marker = CalibrationMarker(
+            id: markerID,  // Use the actual marker ID from the node
             mapPointID: selectedPointID,
             mapPoint: selectedPoint.mapPoint,
             arPosition: arPosition,
