@@ -1107,6 +1107,14 @@ struct ARViewContainer: UIViewRepresentable {
                 .filter { $0.name?.hasPrefix("generated_marker_") == true }
                 .forEach { $0.removeFromParentNode() }
             
+            // Explicitly remove the 3 calibration marker nodes by their IDs to prevent overlaps
+            for calibrationID in calibrationIDs {
+                if let calibrationNode = arView.scene.rootNode.childNode(withName: "arMarker_\(calibrationID.uuidString)", recursively: false) {
+                    calibrationNode.removeFromParentNode()
+                    print("🧹 Removed calibration marker node: \(calibrationID)")
+                }
+            }
+            
             // Create full AR marker for each generated marker
             for marker in mapPointStore.arMarkers {
                 // Determine color: orange for calibration points, red for others
