@@ -153,7 +153,7 @@ struct ARViewContainer: UIViewRepresentable {
         return coordinator
     }
     
-    class Coordinator: NSObject, ARSCNViewDelegate, ARSessionDelegate {
+    class Coordinator: NSObject, ObservableObject, ARSCNViewDelegate, ARSessionDelegate {
         
         // Static reference for button access
         static weak var current: Coordinator? = nil
@@ -200,6 +200,15 @@ struct ARViewContainer: UIViewRepresentable {
         
         // Anchor mode tracking
         var isAnchorMode: Bool = false
+        
+        // Anchor capture state
+        @Published var isCapturingAnchor = false
+        @Published var anchorQualityScore = 0
+        @Published var anchorInstruction = "Move device slowly to detect surfaces"
+        @Published var anchorCountdown: Int? = nil
+        @Published var signatureImageCaptured = false
+        private var qualityUpdateTimer: Timer?
+        private var countdownTimer: Timer?
         
         // MARK: - Crosshair Creation
         
@@ -1205,6 +1214,259 @@ struct ARViewContainer: UIViewRepresentable {
             print("   Scene has \(arView.scene.rootNode.childNodes.count) nodes")
         }
         
+        // MARK: - Spatial Data Capture
+        
+        /// Extract feature points and planes around anchor position
+        func captureSpatialData(at anchorPosition: simd_float3, captureRadius: Float = 5.0) -> AnchorSpatialData? {
+            guard let arView = arView,
+                  let frame = arView.session.currentFrame else {
+                print("❌ Cannot capture spatial data - no AR frame available")
+                return nil
+            }
+            
+            print("📸 Capturing spatial data at \(anchorPosition)")
+            print("   Capture radius: \(captureRadius)m")
+            
+            // Extract feature points
+            let featureCloud = extractFeaturePoints(
+                from: frame,
+                around: anchorPosition,
+                radius: captureRadius
+            )
+            
+            // Extract plane anchors
+            let planes = extractPlaneAnchors(
+                from: frame,
+                around: anchorPosition,
+                radius: captureRadius
+            )
+            
+            let spatialData = AnchorSpatialData(
+                featureCloud: featureCloud,
+                planes: planes
+            )
+            
+            print("✅ Captured spatial data:")
+            print("   Feature points: \(featureCloud.pointCount)")
+            print("   Planes: \(planes.count)")
+            print("   Total size: \(spatialData.totalDataSize) bytes")
+            
+            return spatialData
+        }
+        
+        /// Extract raw feature points within radius
+        private func extractFeaturePoints(from frame: ARFrame, around center: simd_float3, radius: Float) -> AnchorFeatureCloud {
+            guard let rawFeaturePoints = frame.rawFeaturePoints else {
+                print("⚠️ No raw feature points available")
+                return AnchorFeatureCloud(points: [], anchorPosition: center, captureRadius: radius)
+            }
+            
+            // Filter points within radius
+            var nearbyPoints: [simd_float3] = []
+            
+            for i in 0..<rawFeaturePoints.points.count {
+                let point = rawFeaturePoints.points[i]
+                let distance = simd_distance(point, center)
+                
+                if distance <= radius {
+                    nearbyPoints.append(point)
+                }
+            }
+            
+            print("   Filtered \(nearbyPoints.count) feature points within \(radius)m")
+            
+            return AnchorFeatureCloud(
+                points: nearbyPoints,
+                anchorPosition: center,
+                captureRadius: radius
+            )
+        }
+        
+        /// Extract plane anchors within radius
+        private func extractPlaneAnchors(from frame: ARFrame, around center: simd_float3, radius: Float) -> [AnchorPlaneData] {
+            var planes: [AnchorPlaneData] = []
+            
+            for anchor in frame.anchors {
+                guard let planeAnchor = anchor as? ARPlaneAnchor else { continue }
+                
+                let planePosition = simd_float3(
+                    planeAnchor.transform.columns.3.x,
+                    planeAnchor.transform.columns.3.y,
+                    planeAnchor.transform.columns.3.z
+                )
+                
+                let distance = simd_distance(planePosition, center)
+                
+                if distance <= radius {
+                    let planeData = AnchorPlaneData(
+                        planeID: planeAnchor.identifier,
+                        transform: planeAnchor.transform,
+                        extent: AnchorPlaneData.PlaneExtent(
+                            width: planeAnchor.planeExtent.width,
+                            height: planeAnchor.planeExtent.height
+                        ),
+                        alignment: planeAnchor.alignment == .horizontal ? .horizontal : .vertical
+                    )
+                    
+                    planes.append(planeData)
+                    
+                    print("   Found \(planeData.alignment.rawValue) plane: \(planeData.extent.width)m x \(planeData.extent.height)m")
+                }
+            }
+            
+            return planes
+        }
+        
+        // MARK: - Anchor Quality Calculation
+        
+        /// Calculate anchor quality score (0-100)
+        func calculateAnchorQuality() -> (score: Int, instruction: String) {
+            guard let arView = arView,
+                  let frame = arView.session.currentFrame else {
+                return (0, "Initializing AR tracking...")
+            }
+            
+            var score = 0
+            var instruction = "Move device slowly to detect surfaces"
+            
+            // Feature points (0-40 points)
+            if let featurePoints = frame.rawFeaturePoints {
+                let pointCount = featurePoints.points.count
+                let featureScore = min(40, Int(Float(pointCount) / 200.0 * 40.0))
+                score += featureScore
+            }
+            
+            // Planes detected (0-30 points)
+            let planeCount = frame.anchors.filter { $0 is ARPlaneAnchor }.count
+            let planeScore = min(30, planeCount * 10)
+            score += planeScore
+            
+            // Tracking quality (0-30 points)
+            switch frame.camera.trackingState {
+            case .normal:
+                score += 30
+            case .limited(.initializing):
+                score += 10
+            case .limited(.relocalizing):
+                score += 15
+            case .limited(.excessiveMotion):
+                score += 5
+                instruction = "Slow down - move device more slowly"
+            case .limited(.insufficientFeatures):
+                score += 5
+                instruction = "Point at surfaces with more detail"
+            default:
+                break
+            }
+            
+            // Update instruction based on score
+            if score > 70 {
+                instruction = "✓ Excellent anchor data captured!"
+            } else if score > 40 {
+                instruction = "Good! Keep moving to capture more detail"
+            }
+            
+            return (score, instruction)
+        }
+        
+        private func startQualityMonitoring(mapPointID: UUID, position: simd_float3) {
+            // Reset state
+            signatureImageCaptured = false
+            anchorCountdown = nil
+            
+            // Update quality every 0.5 seconds
+            qualityUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                
+                let (score, instruction) = self.calculateAnchorQuality()
+                
+                DispatchQueue.main.async {
+                    self.anchorQualityScore = score
+                    self.anchorInstruction = self.signatureImageCaptured ? "Key Image Captured" : instruction
+                    print("📊 Quality: \(score)% - \(instruction)")
+                    
+                    // Trigger auto-completion if quality is excellent
+                    if score >= 71 && self.anchorCountdown == nil {
+                        self.startCountdown(mapPointID: mapPointID, position: position)
+                    }
+                }
+            }
+        }
+        
+        private func startCountdown(mapPointID: UUID, position: simd_float3) {
+            anchorCountdown = 3
+            
+            countdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+                guard let self = self else {
+                    timer.invalidate()
+                    return
+                }
+                
+                if let count = self.anchorCountdown, count > 1 {
+                    self.anchorCountdown = count - 1
+                } else {
+                    timer.invalidate()
+                    self.completeAnchorCapture(mapPointID: mapPointID, position: position)
+                }
+            }
+        }
+        
+        private func completeAnchorCapture(mapPointID: UUID, position: simd_float3) {
+            qualityUpdateTimer?.invalidate()
+            countdownTimer?.invalidate()
+            
+            // Capture spatial data
+            if let spatialData = captureSpatialData(at: position, captureRadius: 5.0),
+               let mapPointStore = mapPointStore,
+               let mapPoint = mapPointStore.points.first(where: { $0.id == mapPointID }) {
+                
+                mapPointStore.createAnchorPackage(
+                    mapPointID: mapPointID,
+                    mapCoordinates: mapPoint.mapPoint,
+                    anchorPosition: position,
+                    spatialData: spatialData
+                )
+            }
+            
+            // Reset capture state
+            isCapturingAnchor = false
+            anchorQualityScore = 0
+            anchorInstruction = "Move device slowly to detect surfaces"
+        }
+        
+        func captureSignatureImage() {
+            guard let arView = arView,
+                  let frame = arView.session.currentFrame else {
+                print("❌ Cannot capture signature image - no AR frame")
+                return
+            }
+            
+            // Convert AR frame to JPEG
+            let image = CIImage(cvPixelBuffer: frame.capturedImage)
+            let context = CIContext()
+            
+            guard let cgImage = context.createCGImage(image, from: image.extent) else {
+                print("❌ Failed to create CGImage")
+                return
+            }
+            
+            let uiImage = UIImage(cgImage: cgImage)
+            
+            guard let jpegData = uiImage.jpegData(compressionQuality: 0.8) else {
+                print("❌ Failed to create JPEG data")
+                return
+            }
+            
+            // Store signature image (will be added to anchor package on completion)
+            // For now, just mark as captured
+            signatureImageCaptured = true
+            anchorInstruction = "Key Image Captured"
+            
+            print("📸 Signature image captured (\(jpegData.count) bytes)")
+            
+            // TODO: Store jpegData with anchor package when saved
+        }
+        
         func updateInterpolationCrossMarks(count: Int) {
             guard let arView = arView,
                   let lineNode = arView.scene.rootNode.childNode(withName: "interpolation_line", recursively: true),
@@ -1335,6 +1597,14 @@ struct ARViewContainer: UIViewRepresentable {
             
             print("✅ Placed anchor marker at \(position)")
             print("🔶 Anchor marker for MapPoint: \(selectedID)")
+            
+            // Start quality monitoring for anchor capture
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.isCapturingAnchor = true
+                self.startQualityMonitoring(mapPointID: selectedID, position: position)
+                print("🎯 Started quality monitoring for anchor")
+            }
             
             // Exit anchor mode
             isAnchorMode = false

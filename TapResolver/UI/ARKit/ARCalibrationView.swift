@@ -65,7 +65,9 @@ struct ARCalibrationView: View {
     // Calibration mode tracking
     @State private var isCalibrationMode: Bool = false
     @State private var calibrationMarkers: [CalibrationMarker] = []
-    @State private var arCoordinator: ARViewContainer.Coordinator?
+    
+    // AR Coordinator (for accessing quality monitoring state)
+    @State private var arCoordinatorWrapper: CoordinatorWrapper = CoordinatorWrapper()
     
     // Anchor mode tracking
     @State private var isAnchorMode = false
@@ -90,6 +92,10 @@ struct ARCalibrationView: View {
                 isAnchorMode: isAnchorMode
             )
             .ignoresSafeArea()
+            .onAppear {
+                // Capture coordinator reference for UI updates
+                arCoordinatorWrapper.coordinator = ARViewContainer.Coordinator.current
+            }
             
             // New Interpolation UI (only in interpolation mode)
             if isInterpolationMode {
@@ -233,6 +239,36 @@ struct ARCalibrationView: View {
                     .zIndex(10002)
                 }
                 
+                // Signature image button (during anchor capture)
+                if let coordinator = arCoordinatorWrapper.coordinator, coordinator.isCapturingAnchor {
+                    VStack {
+                        Spacer()
+                        
+                        HStack {
+                            Spacer()
+                            
+                            Button(action: {
+                                arCoordinatorWrapper.coordinator?.captureSignatureImage()
+                            }) {
+                                VStack(spacing: 4) {
+                                    Image(systemName: coordinator.signatureImageCaptured ? "checkmark.circle.fill" : "camera.fill")
+                                        .font(.system(size: 24))
+                                    Text(coordinator.signatureImageCaptured ? "Captured" : "Key Image")
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                }
+                                .foregroundColor(.white)
+                                .frame(width: 80, height: 80)
+                                .background(coordinator.signatureImageCaptured ? Color.green : Color.blue)
+                                .clipShape(Circle())
+                            }
+                            .padding(.trailing, 20)
+                            .padding(.bottom, 20)
+                        }
+                    }
+                    .zIndex(10005)
+                }
+                
                 // Calibration progress indicator
                 if isCalibrationMode {
                     VStack {
@@ -348,6 +384,20 @@ struct ARCalibrationView: View {
                 }
             }
             */
+            
+            // Anchor Quality Overlay (during anchor capture)
+            if let coordinator = arCoordinatorWrapper.coordinator, coordinator.isCapturingAnchor {
+                VStack {
+                    Spacer()
+                    AnchorQualityOverlay(
+                        qualityScore: coordinator.anchorQualityScore,
+                        instruction: coordinator.anchorInstruction,
+                        countdown: coordinator.anchorCountdown
+                    )
+                    .padding(.bottom, 80)  // Space for button bar
+                }
+                .zIndex(10004)
+            }
             
             // Delete button for selected marker (only in normal mode)
             if selectedMarkerID != nil && !isInterpolationMode {
@@ -1296,5 +1346,28 @@ struct PiPPointsOverlay: View {
                 .frame(width: 12, height: 12)
                 .position(pointB)
         }
+    }
+}
+
+// MARK: - Coordinator Wrapper
+
+class CoordinatorWrapper: ObservableObject {
+    weak var coordinator: ARViewContainer.Coordinator? {
+        didSet {
+            startObserving()
+        }
+    }
+    
+    private var timer: Timer?
+    
+    private func startObserving() {
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+    }
+    
+    deinit {
+        timer?.invalidate()
     }
 }
