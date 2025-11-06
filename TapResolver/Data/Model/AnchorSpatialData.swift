@@ -50,6 +50,7 @@ struct AnchorReferenceImage: Codable {
         case wallSouth = "wall_south"
         case wallEast = "wall_east"
         case wallWest = "wall_west"
+        case signature = "signature"
     }
     
     init(captureType: CaptureType, imageData: Data) {

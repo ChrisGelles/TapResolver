@@ -635,7 +635,7 @@ public final class MapPointStore: ObservableObject {
         }
     }
     
-    private func saveAnchorPackages() {
+    func saveAnchorPackages() {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601

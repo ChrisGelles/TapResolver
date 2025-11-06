@@ -250,7 +250,11 @@ struct ARCalibrationView: View {
                             Spacer()
                             
                             Button(action: {
-                                arCoordinatorWrapper.coordinator?.captureSignatureImage()
+                                if let coordinator = arCoordinatorWrapper.coordinator,
+                                   let mapPointID = coordinator.currentCaptureMapPointID,
+                                   let position = coordinator.currentCapturePosition {
+                                    coordinator.captureSignatureImage(mapPointID: mapPointID, position: position)
+                                }
                             }) {
                                 VStack(spacing: 4) {
                                     Image(systemName: coordinator.signatureImageCaptured ? "checkmark.circle.fill" : "camera.fill")

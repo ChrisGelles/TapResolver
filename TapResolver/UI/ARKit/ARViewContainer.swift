@@ -209,6 +209,8 @@ struct ARViewContainer: UIViewRepresentable {
         @Published var signatureImageCaptured = false
         private var qualityUpdateTimer: Timer?
         private var countdownTimer: Timer?
+        var currentCaptureMapPointID: UUID? = nil
+        var currentCapturePosition: simd_float3? = nil
         
         // MARK: - Crosshair Creation
         
@@ -1384,11 +1386,6 @@ struct ARViewContainer: UIViewRepresentable {
                     self.anchorQualityScore = score
                     self.anchorInstruction = self.signatureImageCaptured ? "Key Image Captured" : instruction
                     print("📊 Quality: \(score)% - \(instruction)")
-                    
-                    // Trigger auto-completion if quality is excellent
-                    if score >= 90 && self.anchorCountdown == nil {
-                        self.startCountdown(mapPointID: mapPointID, position: position)
-                    }
                 }
             }
         }
@@ -1434,14 +1431,16 @@ struct ARViewContainer: UIViewRepresentable {
             anchorInstruction = "Move device slowly to detect surfaces"
         }
         
-        func captureSignatureImage() {
+        func captureSignatureImage(mapPointID: UUID, position: simd_float3) {
             guard let arView = arView,
                   let frame = arView.session.currentFrame else {
                 print("❌ Cannot capture signature image - no AR frame")
                 return
             }
             
-            // Convert AR frame to JPEG
+            print("📸 Capturing signature image + spatial data")
+            
+            // Convert AR frame to JPEG for signature image
             let image = CIImage(cvPixelBuffer: frame.capturedImage)
             let context = CIContext()
             
@@ -1457,14 +1456,41 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
-            // Store signature image (will be added to anchor package on completion)
-            // For now, just mark as captured
-            signatureImageCaptured = true
-            anchorInstruction = "Key Image Captured"
+            print("✅ Signature image captured (\(jpegData.count) bytes)")
             
-            print("📸 Signature image captured (\(jpegData.count) bytes)")
+            // Capture spatial data
+            if let spatialData = captureSpatialData(at: position, captureRadius: 5.0),
+               let mapPointStore = mapPointStore,
+               let mapPoint = mapPointStore.points.first(where: { $0.id == mapPointID }) {
+                
+                // Create anchor package
+                mapPointStore.createAnchorPackage(
+                    mapPointID: mapPointID,
+                    mapCoordinates: mapPoint.mapPoint,
+                    anchorPosition: position,
+                    spatialData: spatialData
+                )
+                
+                // Add signature image to the just-created package
+                if let index = mapPointStore.anchorPackages.firstIndex(where: { $0.mapPointID == mapPointID && $0.anchorPosition == position }) {
+                    var updatedPackage = mapPointStore.anchorPackages[index]
+                    let signatureImage = AnchorReferenceImage(captureType: .signature, imageData: jpegData)
+                    updatedPackage.referenceImages.append(signatureImage)
+                    mapPointStore.anchorPackages[index] = updatedPackage
+                    mapPointStore.saveAnchorPackages()
+                    print("✅ Added signature image to anchor package")
+                }
+            }
             
-            // TODO: Store jpegData with anchor package when saved
+            // Stop quality monitoring
+            qualityUpdateTimer?.invalidate()
+            isCapturingAnchor = false
+            anchorQualityScore = 0
+            anchorInstruction = "Move device slowly to detect surfaces"
+            currentCaptureMapPointID = nil
+            currentCapturePosition = nil
+            
+            print("✅ Anchor package complete with signature image")
         }
         
         func updateInterpolationCrossMarks(count: Int) {
@@ -1602,6 +1628,8 @@ struct ARViewContainer: UIViewRepresentable {
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 self.isCapturingAnchor = true
+                self.currentCaptureMapPointID = selectedID
+                self.currentCapturePosition = position
                 self.startQualityMonitoring(mapPointID: selectedID, position: position)
                 print("🎯 Started quality monitoring for anchor")
             }
