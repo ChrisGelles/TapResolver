@@ -205,8 +205,18 @@ struct ARCalibrationView: View {
                         Spacer()
                         
                         Button(action: {
-                            // Tap handler will place marker
-                            print("🔶 Ready to place anchor marker")
+                            // Place marker at screen center
+                            let screenCenter = CGPoint(
+                                x: UIScreen.main.bounds.width / 2,
+                                y: UIScreen.main.bounds.height / 2
+                            )
+                            
+                            guard let coordinator = ARViewContainer.Coordinator.current else {
+                                print("❌ No coordinator reference available")
+                                return
+                            }
+                            
+                            coordinator.handleAnchorModeTap(screenCenter)
                         }) {
                             Text("Tap to Place Anchor Marker")
                                 .font(.headline)

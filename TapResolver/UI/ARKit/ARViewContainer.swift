@@ -374,8 +374,11 @@ struct ARViewContainer: UIViewRepresentable {
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             guard let arView = arView else { return }
             
+            print("🔵 TAP DETECTED - isAnchorMode: \(isAnchorMode)")
+            
             // Handle anchor mode placement
             if isAnchorMode {
+                print("🟢 Routing to anchor mode handler")
                 handleAnchorModeTap(gesture.location(in: arView))
                 return
             }
