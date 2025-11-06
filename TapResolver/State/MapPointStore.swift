@@ -100,6 +100,7 @@ public final class MapPointStore: ObservableObject {
 
     @Published public internal(set) var points: [MapPoint] = []
     @Published var arMarkers: [ARMarker] = []
+    @Published var anchorPackages: [AnchorPointPackage] = []
     
     // Calibration state (session-only, never persisted)
     @Published var calibrationPoints: [CalibrationMarker] = []
@@ -376,6 +377,9 @@ public final class MapPointStore: ObservableObject {
         // Load AR Markers
         loadARMarkers()
         
+        // Load Anchor Packages
+        loadAnchorPackages()
+        
         // REMOVED: No longer load activePointID from UserDefaults
         // User must explicitly select a MapPoint each session
         
@@ -629,6 +633,59 @@ public final class MapPointStore: ObservableObject {
         } catch {
             print("❌ Failed to save AR Markers: \(error)")
         }
+    }
+    
+    private func saveAnchorPackages() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        
+        do {
+            let data = try encoder.encode(anchorPackages)
+            ctx.write("AnchorPackages_v1", value: data)
+            print("💾 Saved \(anchorPackages.count) Anchor Package(s)")
+        } catch {
+            print("❌ Failed to save Anchor Packages: \(error)")
+        }
+    }
+    
+    private func loadAnchorPackages() {
+        let packagesKey = "AnchorPackages_v1"
+        if let packagesData = ctx.read(packagesKey, as: Data.self) {
+            do {
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                anchorPackages = try decoder.decode([AnchorPointPackage].self, from: packagesData)
+                print("📍 Loaded \(anchorPackages.count) Anchor Package(s) for location '\(ctx.locationID)'")
+            } catch {
+                print("⚠️ Failed to decode Anchor Packages: \(error)")
+                anchorPackages = []
+            }
+        } else {
+            anchorPackages = []
+            print("📍 No Anchor Packages found for location '\(ctx.locationID)'")
+        }
+    }
+    
+    func createAnchorPackage(mapPointID: UUID, mapCoordinates: CGPoint, anchorPosition: simd_float3, spatialData: AnchorSpatialData) {
+        let package = AnchorPointPackage(
+            mapPointID: mapPointID,
+            mapCoordinates: mapCoordinates,
+            anchorPosition: anchorPosition,
+            visualDescription: nil
+        )
+        
+        // Update with captured spatial data
+        var updatedPackage = package
+        updatedPackage.spatialData = spatialData
+        
+        anchorPackages.append(updatedPackage)
+        saveAnchorPackages()
+        
+        print("✅ Created Anchor Package \(package.id) for MapPoint \(mapPointID)")
+        print("   Feature points: \(spatialData.featureCloud.pointCount)")
+        print("   Planes: \(spatialData.planes.count)")
+        print("   Data size: \(spatialData.totalDataSize) bytes")
     }
     
     // MARK: - AR Marker Management
