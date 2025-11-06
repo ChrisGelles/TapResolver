@@ -17,6 +17,28 @@ import SwiftUI
 import ARKit
 import SceneKit
 
+enum RelocalizationState {
+    case idle
+    case searching
+    case imageTracking
+    case featureMatching
+    case validating
+    case success
+    case failed
+    
+    var displayMessage: String {
+        switch self {
+        case .idle: return ""
+        case .searching: return "Look around slowly to find anchor points..."
+        case .imageTracking: return "Scanning environment..."
+        case .featureMatching: return "Matching spatial features..."
+        case .validating: return "Validating position..."
+        case .success: return "✓ Anchor point found!"
+        case .failed: return "Unable to find anchor point"
+        }
+    }
+}
+
 // MARK: - AR Marker Data
 
 struct ARMarkerData {
@@ -222,6 +244,15 @@ struct ARViewContainer: UIViewRepresentable {
         var capturedFloorFar = false
         var capturedFloorClose = false
         var capturedWalls = false
+        
+        // Relocalization mode
+        var isRelocalizationMode = false
+        var relocalizationState: RelocalizationState = .idle
+        var foundAnchorTransforms: [UUID: simd_float4x4] = [:]  // Anchor ID -> transform matrix
+        var activeRelocalizationPackages: [AnchorPointPackage] = []
+        
+        // Coordinate system transform (2D map -> 3D AR)
+        var mapToARTransform: simd_float4x4? = nil
         
         // MARK: - Crosshair Creation
         
@@ -876,6 +907,17 @@ struct ARViewContainer: UIViewRepresentable {
                     }
                 @unknown default:
                     relocalizationStatus?.wrappedValue = "Relocalization: Unknown"
+                }
+            }
+        }
+        
+        func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
+            // Handle image anchor detection during relocalization
+            if isRelocalizationMode {
+                for anchor in anchors {
+                    if let imageAnchor = anchor as? ARImageAnchor {
+                        handleDetectedImage(imageAnchor)
+                    }
                 }
             }
         }
@@ -1636,6 +1678,147 @@ struct ARViewContainer: UIViewRepresentable {
             accumulatedReferenceImages.removeAll()
             
             print("✅ Anchor package complete with signature image")
+        }
+        
+        func startRelocalization() {
+            guard let mapPointStore = mapPointStore else {
+                print("❌ No MapPointStore available")
+                return
+            }
+            
+            print("🔍 Starting relocalization mode")
+            print("   Available anchor packages: \(mapPointStore.anchorPackages.count)")
+            
+            // Load all anchor packages for this location
+            activeRelocalizationPackages = mapPointStore.anchorPackages
+            
+            if activeRelocalizationPackages.isEmpty {
+                print("⚠️ No anchor packages available for relocalization")
+                relocalizationState = .failed
+                return
+            }
+            
+            // Enter relocalization mode
+            isRelocalizationMode = true
+            relocalizationState = .searching
+            
+            // Prepare reference images for ARKit tracking
+            prepareReferenceImages()
+            
+            print("✅ Relocalization mode active")
+            print("   Loaded \(activeRelocalizationPackages.count) anchor package(s)")
+        }
+        
+        func stopRelocalization() {
+            print("🛑 Stopping relocalization mode")
+            isRelocalizationMode = false
+            relocalizationState = .idle
+            activeRelocalizationPackages.removeAll()
+        }
+        
+        func prepareReferenceImages() {
+            guard let arView = arView else { return }
+            
+            print("🖼️ Preparing reference images for ARKit tracking...")
+            
+            var referenceImages = Set<ARReferenceImage>()
+            
+            for package in activeRelocalizationPackages {
+                for refImage in package.referenceImages {
+                    // Convert image data to UIImage
+                    guard let uiImage = UIImage(data: refImage.imageData),
+                          let cgImage = uiImage.cgImage else {
+                        print("⚠️ Failed to convert image for package \(package.id)")
+                        continue
+                    }
+                    
+                    // Create ARReferenceImage
+                    // Physical width estimate: assume image represents ~2m width in real world
+                    let arRefImage = ARReferenceImage(cgImage, orientation: .up, physicalWidth: 2.0)
+                    arRefImage.name = "\(package.id.uuidString)-\(refImage.captureType.rawValue)"
+                    
+                    referenceImages.insert(arRefImage)
+                }
+            }
+            
+            print("✅ Prepared \(referenceImages.count) reference images for tracking")
+            
+            // Update AR configuration with reference images
+            let configuration = ARWorldTrackingConfiguration()
+            configuration.planeDetection = [.horizontal, .vertical]
+            configuration.detectionImages = referenceImages
+            configuration.maximumNumberOfTrackedImages = 2  // Track up to 2 images simultaneously
+            
+            arView.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+            
+            relocalizationState = .imageTracking
+        }
+        
+        func handleDetectedImage(_ imageAnchor: ARImageAnchor) {
+            guard let imageName = imageAnchor.referenceImage.name else { return }
+            
+            print("🎯 Detected reference image: \(imageName)")
+            print("   Position: \(imageAnchor.transform.columns.3)")
+            print("   Is tracked: \(imageAnchor.isTracked)")
+            
+            // Parse package ID from image name
+            let components = imageName.split(separator: "-")
+            guard let packageIDString = components.first,
+                  let packageID = UUID(uuidString: String(packageIDString)) else {
+                print("⚠️ Could not parse package ID from image name")
+                return
+            }
+            
+            // Find matching anchor package
+            guard let package = activeRelocalizationPackages.first(where: { $0.id == packageID }) else {
+                print("⚠️ Could not find anchor package for detected image")
+                return
+            }
+            
+            print("✅ Matched to anchor package for MapPoint: \(package.mapPointID)")
+            
+            // Store transform for validation
+            foundAnchorTransforms[packageID] = imageAnchor.transform
+            
+            relocalizationState = .validating
+            
+            // Validate and calculate coordinate transform
+            validateAndCalculateTransform(package: package, detectedTransform: imageAnchor.transform)
+        }
+        
+        func validateAndCalculateTransform(package: AnchorPointPackage, detectedTransform: simd_float4x4) {
+            print("🔍 Validating detected anchor position...")
+            
+            // Extract position from transform
+            let detectedPosition = simd_make_float3(detectedTransform.columns.3)
+            let savedPosition = package.anchorPosition
+            
+            let distance = simd_distance(detectedPosition, savedPosition)
+            print("   Distance from saved position: \(String(format: "%.2f", distance))m")
+            
+            // TODO: Phase 2 - Implement full validation
+            // For now, accept if within reasonable range
+            if distance < 5.0 {  // 5m tolerance for now
+                relocalizationState = .success
+                print("✅ Anchor position validated!")
+                
+                // Calculate coordinate transform (stub for now)
+                calculateMapToARTransform(package: package, arPosition: detectedPosition)
+            } else {
+                print("⚠️ Position validation failed - too far from saved position")
+                relocalizationState = .featureMatching  // Fall back to feature matching
+            }
+        }
+        
+        func calculateMapToARTransform(package: AnchorPointPackage, arPosition: simd_float3) {
+            // TODO: Phase 4 - Implement proper 2D->3D transform calculation
+            print("📐 Calculating map-to-AR coordinate transform...")
+            print("   Map coordinates: \(package.mapCoordinates)")
+            print("   AR position: \(arPosition)")
+            
+            // Stub: Just store identity for now
+            mapToARTransform = matrix_identity_float4x4
+            print("✅ Transform calculated (stub)")
         }
         
         func updateInterpolationCrossMarks(count: Int) {

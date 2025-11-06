@@ -401,6 +401,39 @@ struct ARCalibrationView: View {
                 .zIndex(10004)
             }
             
+            // Relocalization status overlay
+            if let coordinator = arCoordinatorWrapper.coordinator,
+               coordinator.isRelocalizationMode,
+               coordinator.relocalizationState != .idle {
+                VStack {
+                    Spacer()
+                    
+                    HStack {
+                        if coordinator.relocalizationState == .searching || coordinator.relocalizationState == .imageTracking {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        } else if coordinator.relocalizationState == .success {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(.green)
+                        } else if coordinator.relocalizationState == .failed {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(.red)
+                        }
+                        
+                        Text(coordinator.relocalizationState.displayMessage)
+                            .font(.headline)
+                            .foregroundColor(.white)
+                    }
+                    .padding()
+                    .background(Color.black.opacity(0.7))
+                    .cornerRadius(12)
+                    .padding(.bottom, 120)
+                }
+                .zIndex(10006)
+            }
+            
             // Delete button for selected marker (only in normal mode)
             if selectedMarkerID != nil && !isInterpolationMode {
                 VStack {
@@ -1105,6 +1138,26 @@ private struct ControlsGrid: View {
                     .foregroundColor(.white)
                     .frame(width: 56, height: 56)
                     .background(Color.purple.opacity(0.8))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            
+            // 5) Find Anchor Points (Relocalization)
+            Button {
+                if let coordinator = ARViewContainer.Coordinator.current {
+                    if coordinator.isRelocalizationMode {
+                        coordinator.stopRelocalization()
+                    } else {
+                        coordinator.startRelocalization()
+                    }
+                }
+            } label: {
+                let isActive = ARViewContainer.Coordinator.current?.isRelocalizationMode == true
+                Image(systemName: isActive ? "location.fill" : "location")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundColor(isActive ? .green : .white)
+                    .frame(width: 56, height: 56)
+                    .background(isActive ? Color.green.opacity(0.3) : Color.orange.opacity(0.8))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
             }
             .buttonStyle(.plain)
