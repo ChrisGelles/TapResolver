@@ -41,9 +41,18 @@ struct AnchorManagementView: View {
                             }
                             
                             if let mapPoint = mapPointStore.points.first(where: { $0.id == package.mapPointID }) {
-                                Text("Map Point: (\(Int(mapPoint.mapPoint.x)), \(Int(mapPoint.mapPoint.y)))")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                                HStack {
+                                    Text("Map Point: (\(Int(mapPoint.mapPoint.x)), \(Int(mapPoint.mapPoint.y)))")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    
+                                    Spacer()
+                                    
+                                    Text("Data: \(formatDataSize(package))")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .fontWeight(.medium)
+                                }
                             }
                             
                             // Show signature image thumbnail if available
@@ -94,5 +103,25 @@ struct AnchorManagementView: View {
                 }
             }
         }
+    }
+    
+    private func formatDataSize(_ package: AnchorPointPackage) -> String {
+        // Calculate total size: spatial data + all images
+        let spatialSize = package.spatialData.totalDataSize
+        let imagesSize = package.referenceImages.reduce(0) { $0 + $1.imageData.count }
+        let totalSize = spatialSize + imagesSize
+        
+        // Format as MB, KB, or bytes
+        let mbSize = Double(totalSize) / (1024 * 1024)
+        if mbSize >= 1.0 {
+            return String(format: "%.1f MB", mbSize)
+        }
+        
+        let kbSize = Double(totalSize) / 1024
+        if kbSize >= 1.0 {
+            return String(format: "%.0f KB", kbSize)
+        }
+        
+        return "\(totalSize) bytes"
     }
 }
