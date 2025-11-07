@@ -1718,14 +1718,18 @@ struct ARViewContainer: UIViewRepresentable {
             prepareReferenceImages()
             
             if let arView = arView {
-                let planeCount = arView.scene.rootNode.childNodes.filter { $0.name?.contains("plane") == true }.count
-                if planeCount == 0 {
-                    print("⚠️ No ground planes detected yet - markers may not align properly")
-                    print("   Move device around to help ARKit detect the ground")
-                } else {
-                    print("✅ Ground planes detected - ready for accurate anchor placement")
-                }
+            let allAnchors = arView.session.currentFrame?.anchors ?? []
+            let horizontalPlanes = allAnchors.compactMap { $0 as? ARPlaneAnchor }
+                .filter { $0.alignment == .horizontal }
+            
+            if horizontalPlanes.isEmpty {
+                print("⚠️ No ground planes detected yet")
+                print("   (AR session running - planes may be detected soon)")
+            } else {
+                print("✅ \(horizontalPlanes.count) ground plane(s) already detected and ready")
+                print("   Using existing AR session data for anchor placement")
             }
+        }
             
             print("✅ Relocalization mode active")
             print("   Loaded \(activeRelocalizationPackages.count) anchor package(s)")
@@ -1803,6 +1807,14 @@ struct ARViewContainer: UIViewRepresentable {
             
             print("✅ Prepared \(referenceImages.count) reference images for tracking")
             
+            // Show current AR session state
+            print("📊 AR Session state at relocalization start:")
+            if let frame = arView.session.currentFrame {
+                print("   Tracking: \(frame.camera.trackingState)")
+                print("   Feature points: \(frame.rawFeaturePoints?.points.count ?? 0)")
+                print("   Total anchors: \(frame.anchors.count)")
+            }
+            
             // Update AR configuration with reference images
             let configuration = ARWorldTrackingConfiguration()
             configuration.planeDetection = [.horizontal, .vertical]
@@ -1879,9 +1891,13 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
-            // CRITICAL: Check if we have any horizontal planes detected
-            let horizontalPlanes = arView.session.currentFrame?.anchors.compactMap { $0 as? ARPlaneAnchor }
-                .filter { $0.alignment == .horizontal } ?? []
+            // CRITICAL: Check ALL anchors in the session (not just current frame)
+            // Planes persist across frames once detected
+            let allAnchors = arView.session.currentFrame?.anchors ?? []
+            let horizontalPlanes = allAnchors.compactMap { $0 as? ARPlaneAnchor }
+                .filter { $0.alignment == .horizontal }
+            
+            print("   Session tracking \(allAnchors.count) anchor(s), \(horizontalPlanes.count) horizontal plane(s)")
             
             if horizontalPlanes.isEmpty {
                 print("⏳ Waiting for ground plane detection...")
