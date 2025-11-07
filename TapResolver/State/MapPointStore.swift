@@ -202,8 +202,8 @@ public final class MapPointStore: ObservableObject {
             print("📍 MapPointStore: Location changed, reloading...")
             self?.reloadForActiveLocation()
             
-            // Reload AR markers for new location
-            self?.loadARMarkers()
+            // AR markers are now session-only; skip reloading persisted markers
+            // self?.loadARMarkers()
         }
     }
 
@@ -338,7 +338,7 @@ public final class MapPointStore: ObservableObject {
         print("💾 Saved \(points.count) Map Point(s) to UserDefaults for location: \(ctx.locationID)")
         
         // Save AR Markers
-        saveARMarkers()
+        // saveARMarkers()  // AR Markers no longer persisted
     }
 
     private func load() {
@@ -372,6 +372,7 @@ public final class MapPointStore: ObservableObject {
         // Load AR Markers
         loadARMarkers()
         
+        // AR markers are session-only; skip loading persisted marker data
         // Load Anchor Packages
         loadAnchorPackages()
         
@@ -382,26 +383,23 @@ public final class MapPointStore: ObservableObject {
     }
     
     private func loadARMarkers() {
-        
-        print("🔍 DEBUG: loadARMarkers() called for location '\(ctx.locationID)'")  // ADD THIS LINE
-        
+        print("🔍 DEBUG: loadARMarkers() called for location '\(ctx.locationID)'")
         let markersKey = "ARMarkers_v1"
         if let markersData = ctx.read(markersKey, as: Data.self) {
             do {
-                //arMarkers = try JSONDecoder().decode([ARMarker].self, from: markersData)
-                
                 let decoder = JSONDecoder()
                 decoder.dateDecodingStrategy = .iso8601
-                arMarkers = try decoder.decode([ARMarker].self, from: markersData)
-                
-                print("📍 Loaded \(arMarkers.count) AR Marker(s) for location '\(ctx.locationID)'")
-            } catch {
-                print("⚠️ Failed to decode AR Markers: \(error)")
+                let legacyMarkers = try decoder.decode([ARMarker].self, from: markersData)
                 arMarkers = []
+                print("📍 Legacy AR Markers in storage: \(legacyMarkers.count) (will not be loaded)")
+                print("   AR Markers are now created on-demand during AR sessions")
+            } catch {
+                arMarkers = []
+                print("⚠️ Failed to decode legacy AR Markers: \(error)")
             }
         } else {
             arMarkers = []
-            print("📍 No AR Markers found for location '\(ctx.locationID)'")
+            print("📍 No persisted AR Markers found (ephemeral session-only mode)")
         }
     }
     
@@ -723,8 +721,8 @@ public final class MapPointStore: ObservableObject {
             points[index].linkedARMarkerID = marker.id
         }
         
-        saveARMarkers()
-        save()  // Save the updated MapPoint as well
+        // saveARMarkers()  // AR Markers are session-only
+        // save()  // Skip persisting MapPoint for ephemeral markers
         
         print("✅ Created AR Marker \(marker.id) linked to MapPoint \(linkedMapPointID)")
     }
@@ -743,10 +741,11 @@ public final class MapPointStore: ObservableObject {
         // Remove marker
         arMarkers.removeAll { $0.id == markerID }
         
-        saveARMarkers()
+        saveARMarkers()  // Still saves for manual cleanup of legacy markers
         save()
         
-        print("🗑️ Deleted AR Marker \(markerID)")
+        print("🗑️ Deleted legacy AR Marker: \(markerID)")
+        print("   (Manual cleanup - new markers are not persisted)")
     }
     
     func getARMarker(for mapPointID: UUID) -> ARMarker? {

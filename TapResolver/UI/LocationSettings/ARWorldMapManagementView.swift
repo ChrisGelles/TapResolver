@@ -37,52 +37,28 @@ struct ARWorldMapManagementView: View {
             // Header
             header
             
-            // AR Markers Section
-            if !mapPointStore.arMarkers.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "mappin.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundColor(.blue)
-                        
-                        Text("AR Markers")
-                            .font(.system(size: 16, weight: .semibold))
-                        
-                        Spacer()
-                        
-                        Text("\(mapPointStore.arMarkers.count)")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.blue)
-                            .cornerRadius(12)
-                    }
-                    .padding(.horizontal, 20)
+            // AR Markers Section (ephemeral)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "mappin.circle")
+                        .font(.system(size: 18))
+                        .foregroundColor(.blue)
                     
-                    ScrollView {
-                        VStack(spacing: 4) {
-                            ForEach(mapPointStore.arMarkers) { marker in
-                                ARMarkerListItem(
-                                    marker: marker,
-                                    mapPointStore: mapPointStore,
-                                    onDelete: {
-                                        markerToDelete = marker.id
-                                        showDeleteMarkerConfirmation = true
-                                    }
-                                )
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 200)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(10)
-                    .padding(.horizontal, 20)
+                    Text("AR Markers (Ephemeral)")
+                        .font(.system(size: 16, weight: .semibold))
+                    
+                    Spacer()
                 }
+                .padding(.horizontal, 20)
                 
-                Divider()
+                Text("Markers are created automatically during AR sessions and are no longer persisted between launches.")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
                     .padding(.horizontal, 20)
             }
+            
+            Divider()
+                .padding(.horizontal, 20)
             
             // Anchor Features Section
             if !worldMapStore.anchorFeatures.isEmpty {

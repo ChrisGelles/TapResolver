@@ -110,6 +110,8 @@ struct ARViewContainer: UIViewRepresentable {
         }
         
         // Run the session with proper initialization
+        print("🎬 AR Session starting - markers will be created on-demand")
+        print("   Persisted AR Markers are ignored (ephemeral session only)")
         arView.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
         
         // Show feature points for debugging
@@ -1729,7 +1731,30 @@ struct ARViewContainer: UIViewRepresentable {
             print("   Loaded \(activeRelocalizationPackages.count) anchor package(s)")
         }
         
+        /// Clean up all AR markers from the scene
+        func cleanupAllARMarkers() {
+            guard let arView = arView else { return }
+            let markerNodes = arView.scene.rootNode.childNodes.filter { node in
+                node.name?.starts(with: "arMarker_") == true
+            }
+            let count = markerNodes.count
+            if count > 0 {
+                print("🧹 Cleaning up AR marker nodes from scene")
+            }
+            for node in markerNodes {
+                node.removeFromParentNode()
+            }
+            if count > 0 {
+                print("   Removed \(count) AR marker node(s)")
+            }
+        }
+
         func stopRelocalization() {
+            cleanupAllARMarkers()
+            guard relocalizationState != .idle else {
+                print("⚠️ Relocalization already idle")
+                return
+            }
             print("🛑 Stopping relocalization mode")
             isRelocalizationMode = false
             relocalizationState = .idle
@@ -1748,16 +1773,6 @@ struct ARViewContainer: UIViewRepresentable {
             pendingAnchorDetections.removeAll()
             
             placedAnchorMarkers.removeAll()
-            
-            if let arView = arView {
-                for package in activeRelocalizationPackages {
-                    if let markerNode = arView.scene.rootNode.childNode(withName: "arMarker_\(package.id.uuidString)", recursively: false) {
-                        markerNode.removeFromParentNode()
-                    }
-                }
-                print("🧹 Removed found anchor markers")
-            }
-            
             activeRelocalizationPackages.removeAll()
         }
         
@@ -2116,10 +2131,13 @@ struct ARViewContainer: UIViewRepresentable {
     }
     
     static func dismantleUIView(_ uiView: ARSCNView, coordinator: Coordinator) {
+        print("👋 AR View dismissing - cleaning up resources")
+        coordinator.cleanupAllARMarkers()
+        if coordinator.isRelocalizationMode || coordinator.relocalizationState != .idle {
+            coordinator.stopRelocalization()
+        }
         uiView.session.pause()
         print("⏸️ AR Camera session paused")
-        
-        // Clear session markers
         coordinator.sessionMarkerA = nil
         coordinator.sessionMarkerB = nil
         print("🧹 Cleared session markers")
