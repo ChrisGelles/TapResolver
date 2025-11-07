@@ -252,6 +252,7 @@ struct ARViewContainer: UIViewRepresentable {
         var activeRelocalizationPackages: [AnchorPointPackage] = []
         
         var placedAnchorMarkers: Set<UUID> = []  // Track which anchor packages have markers placed
+        var anchorDetectionCounts: [UUID: Int] = [:]  // Track how many times each anchor detected
         
         // Coordinate system transform (2D map -> 3D AR)
         var mapToARTransform: simd_float4x4? = nil
@@ -1712,6 +1713,15 @@ struct ARViewContainer: UIViewRepresentable {
             print("🛑 Stopping relocalization mode")
             isRelocalizationMode = false
             relocalizationState = .idle
+            
+            // Log detection statistics
+            for (packageID, count) in anchorDetectionCounts {
+                if count > 1 {
+                    print("📊 Anchor \(packageID.uuidString.prefix(8))... detected \(count) times (but only placed once)")
+                }
+            }
+            anchorDetectionCounts.removeAll()
+            
             placedAnchorMarkers.removeAll()
             
             if let arView = arView {
@@ -1782,16 +1792,26 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
-            // Only log first detection per package
-            if !placedAnchorMarkers.contains(packageID) {
-                print("🎯 Detected reference image for package: \(packageID)")
-            }
+            // Track detection count for diagnostics
+            anchorDetectionCounts[packageID, default: 0] += 1
+            let detectionCount = anchorDetectionCounts[packageID]!
+            print("🎯 Detected reference image for package: \(packageID) (detection #\(detectionCount))")
             
             // Find matching anchor package
             guard let package = activeRelocalizationPackages.first(where: { $0.id == packageID }) else {
                 print("⚠️ Could not find anchor package for detected image")
                 return
             }
+            
+            // NEW: Check if already placed - do this BEFORE validation
+            if placedAnchorMarkers.contains(packageID) {
+                // Already placed this anchor - silently ignore subsequent detections
+                // This prevents drift from multiple position calculations
+                return
+            }
+            
+            print("✅ Matched to anchor package for MapPoint: \(package.mapPointID)")
+            print("   This is the FIRST detection - will place marker")
             
             // Store transform for validation
             foundAnchorTransforms[packageID] = imageAnchor.transform
@@ -1849,9 +1869,8 @@ struct ARViewContainer: UIViewRepresentable {
         func placeFoundAnchorMarker(package: AnchorPointPackage, transformedPosition: simd_float3) {
             guard let arView = arView else { return }
             
-            if placedAnchorMarkers.contains(package.id) {
-                return
-            }
+            // Mark as placed IMMEDIATELY to prevent any race conditions
+            placedAnchorMarkers.insert(package.id)
             
             print("🔶 Placing visual marker for found Anchor Point")
             print("   MapPoint ID: \(package.mapPointID)")
@@ -1874,7 +1893,6 @@ struct ARViewContainer: UIViewRepresentable {
             }
             
             arView.scene.rootNode.addChildNode(markerNode)
-            placedAnchorMarkers.insert(package.id)
             
             print("✅ Found Anchor Point marker placed at SAVED position (ground-aligned)")
         }
