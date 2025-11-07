@@ -30,7 +30,7 @@ enum RelocalizationState {
         switch self {
         case .idle: return ""
         case .searching: return "Look around slowly to find anchor points..."
-        case .imageTracking: return "Scanning environment..."
+        case .imageTracking: return "Scanning for ground plane..."
         case .featureMatching: return "Matching spatial features..."
         case .validating: return "Validating position..."
         case .success: return "✓ Anchor point found!"
@@ -253,6 +253,7 @@ struct ARViewContainer: UIViewRepresentable {
         
         var placedAnchorMarkers: Set<UUID> = []  // Track which anchor packages have markers placed
         var anchorDetectionCounts: [UUID: Int] = [:]  // Track how many times each anchor detected
+        var pendingAnchorDetections: [UUID: simd_float4x4] = [:]  // Anchors detected but waiting for ground plane
         
         // Coordinate system transform (2D map -> 3D AR)
         var mapToARTransform: simd_float4x4? = nil
@@ -888,6 +889,25 @@ struct ARViewContainer: UIViewRepresentable {
         }
         
         func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
+            // Check if any new horizontal planes were added
+            let newHorizontalPlanes = anchors.compactMap { $0 as? ARPlaneAnchor }
+                .filter { $0.alignment == .horizontal }
+
+            if !newHorizontalPlanes.isEmpty && !pendingAnchorDetections.isEmpty {
+                print("✅ Ground plane detected - processing \(pendingAnchorDetections.count) pending anchor(s)")
+
+                // Process all pending anchor detections now that we have ground
+                for (packageID, detectedTransform) in pendingAnchorDetections {
+                    if let package = activeRelocalizationPackages.first(where: { $0.id == packageID }) {
+                        print("   Placing pending anchor: \(packageID)")
+                        validateAndCalculateTransform(package: package, detectedTransform: detectedTransform)
+                    }
+                }
+
+                // Clear pending
+                pendingAnchorDetections.removeAll()
+            }
+
             // Handle image anchor detection during relocalization
             if isRelocalizationMode {
                 for anchor in anchors {
@@ -1722,6 +1742,11 @@ struct ARViewContainer: UIViewRepresentable {
             }
             anchorDetectionCounts.removeAll()
             
+            if !pendingAnchorDetections.isEmpty {
+                print("🧹 Cleared \(pendingAnchorDetections.count) pending anchor detection(s)")
+            }
+            pendingAnchorDetections.removeAll()
+            
             placedAnchorMarkers.removeAll()
             
             if let arView = arView {
@@ -1825,6 +1850,7 @@ struct ARViewContainer: UIViewRepresentable {
         func validateAndCalculateTransform(package: AnchorPointPackage, detectedTransform: simd_float4x4) {
             print("🔍 Validation details:")
             
+            // Extract positions
             let detectedImagePosition = simd_make_float3(detectedTransform.columns.3)
             let savedAnchorPosition = package.anchorPosition
             
@@ -1838,9 +1864,28 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
-            let rayOrigin = detectedImagePosition
-            let rayDirection = simd_float3(0, -1, 0)
+            // CRITICAL: Check if we have any horizontal planes detected
+            let horizontalPlanes = arView.session.currentFrame?.anchors.compactMap { $0 as? ARPlaneAnchor }
+                .filter { $0.alignment == .horizontal } ?? []
             
+            if horizontalPlanes.isEmpty {
+                print("⏳ Waiting for ground plane detection...")
+                print("   Image detected but cannot place marker without ground reference")
+                
+                // Store for later placement when ground is detected
+                pendingAnchorDetections[package.id] = detectedTransform
+                relocalizationState = .imageTracking  // Still searching
+                return
+            }
+            
+            print("✅ Ground plane available - proceeding with placement")
+            
+            // Use the detected image position as reference point
+            // Project down to ground to find where anchor should be
+            let rayOrigin = detectedImagePosition
+            let rayDirection = simd_float3(0, -1, 0)  // Straight down
+            
+            // Create raycast query for ground
             let query = ARRaycastQuery(
                 origin: rayOrigin,
                 direction: rayDirection,
@@ -1851,12 +1896,32 @@ struct ARViewContainer: UIViewRepresentable {
             let results = arView.session.raycast(query)
             
             guard let firstResult = results.first else {
-                print("⚠️ Could not find ground plane from detected image")
-                relocalizationState = .success
-                placeFoundAnchorMarker(package: package, transformedPosition: detectedImagePosition)
+                print("⚠️ Could not raycast to ground from detected image")
+                print("   Using closest horizontal plane as fallback")
+                
+                // Fallback: use closest horizontal plane
+                if let closestPlane = horizontalPlanes.min(by: { plane1, plane2 in
+                    let dist1 = simd_distance(detectedImagePosition, simd_make_float3(plane1.transform.columns.3))
+                    let dist2 = simd_distance(detectedImagePosition, simd_make_float3(plane2.transform.columns.3))
+                    return dist1 < dist2
+                }) {
+                    let planeY = closestPlane.transform.columns.3.y
+                    let groundPosition = simd_float3(detectedImagePosition.x, planeY, detectedImagePosition.z)
+                    
+                    print("   Using plane at y=\(planeY)")
+                    print("   Ground position: \(groundPosition)")
+                    
+                    relocalizationState = .success
+                    placeFoundAnchorMarker(package: package, transformedPosition: groundPosition)
+                    return
+                }
+                
+                print("❌ No suitable ground plane found")
+                relocalizationState = .failed
                 return
             }
             
+            // Use the ground intersection point
             let groundPosition = simd_make_float3(firstResult.worldTransform.columns.3)
             
             print("   Transformed to ground position: \(groundPosition)")
