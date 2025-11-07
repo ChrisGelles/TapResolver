@@ -1540,6 +1540,12 @@ struct ARViewContainer: UIViewRepresentable {
             qualityUpdateTimer?.invalidate()
             countdownTimer?.invalidate()
             
+            guard let arView = arView,
+                  let currentFrame = arView.session.currentFrame else {
+                print("❌ Cannot finalize anchor capture - missing AR frame")
+                return
+            }
+            
             // Capture spatial data
             if let spatialData = captureSpatialData(at: position, captureRadius: 5.0),
                let mapPointStore = mapPointStore,
@@ -1549,6 +1555,7 @@ struct ARViewContainer: UIViewRepresentable {
                     mapPointID: mapPointID,
                     mapCoordinates: mapPoint.mapPoint,
                     anchorPosition: position,
+                    anchorSessionTransform: currentFrame.camera.transform,
                     spatialData: spatialData
                 )
             }
@@ -1567,6 +1574,10 @@ struct ARViewContainer: UIViewRepresentable {
             }
             
             print("📸 Finalizing anchor package with signature image")
+            
+            let anchorSessionTransform = frame.camera.transform
+            print("📊 Anchor created in session with camera transform:")
+            print("   Position: \(simd_make_float3(anchorSessionTransform.columns.3))")
             
             // Capture signature image
             let image = CIImage(cvPixelBuffer: frame.capturedImage)
@@ -1629,7 +1640,8 @@ struct ARViewContainer: UIViewRepresentable {
             var package = AnchorPointPackage(
                 mapPointID: mapPointID,
                 mapCoordinates: mapPoint.mapPoint,
-                anchorPosition: position
+                anchorPosition: position,
+                anchorSessionTransform: anchorSessionTransform
             )
             
             package.spatialData = spatialData
@@ -1681,6 +1693,16 @@ struct ARViewContainer: UIViewRepresentable {
             
             // Prepare reference images for ARKit tracking
             prepareReferenceImages()
+            
+            if let arView = arView {
+                let planeCount = arView.scene.rootNode.childNodes.filter { $0.name?.contains("plane") == true }.count
+                if planeCount == 0 {
+                    print("⚠️ No ground planes detected yet - markers may not align properly")
+                    print("   Move device around to help ARKit detect the ground")
+                } else {
+                    print("✅ Ground planes detected - ready for accurate anchor placement")
+                }
+            }
             
             print("✅ Relocalization mode active")
             print("   Loaded \(activeRelocalizationPackages.count) anchor package(s)")
@@ -1781,47 +1803,50 @@ struct ARViewContainer: UIViewRepresentable {
         }
         
         func validateAndCalculateTransform(package: AnchorPointPackage, detectedTransform: simd_float4x4) {
-            // Only log validation details once per package
-            if !placedAnchorMarkers.contains(package.id) {
-                print("🔍 Validating detected anchor position...")
+            print("🔍 Validation details:")
+            
+            let detectedImagePosition = simd_make_float3(detectedTransform.columns.3)
+            let savedAnchorPosition = package.anchorPosition
+            
+            print("   Detected image at (current session): \(detectedImagePosition)")
+            print("   Saved anchor position (old session): \(savedAnchorPosition)")
+            
+            guard let arView = arView,
+                  let currentFrame = arView.session.currentFrame else {
+                print("❌ No AR session available")
+                relocalizationState = .failed
+                return
             }
             
-            // Extract position from transform
-            let detectedPosition = simd_make_float3(detectedTransform.columns.3)
-            let savedPosition = package.anchorPosition
+            let rayOrigin = detectedImagePosition
+            let rayDirection = simd_float3(0, -1, 0)
             
-            let distance = simd_distance(detectedPosition, savedPosition)
-            print("   Distance from saved position: \(String(format: "%.2f", distance))m")
+            let query = ARRaycastQuery(
+                origin: rayOrigin,
+                direction: rayDirection,
+                allowing: .estimatedPlane,
+                alignment: .horizontal
+            )
             
-            // TODO: Phase 2 - Implement full validation
-            // For now, accept if within reasonable range
-            if distance < 5.0 {  // 5m tolerance for now
+            let results = arView.session.raycast(query)
+            
+            guard let firstResult = results.first else {
+                print("⚠️ Could not find ground plane from detected image")
                 relocalizationState = .success
-                print("✅ Anchor position validated!")
-                
-                // Calculate coordinate transform (stub for now)
-                calculateMapToARTransform(package: package, arPosition: detectedPosition)
-                
-                // Place visual marker at found anchor point
-                placeFoundAnchorMarker(package: package)
-            } else {
-                print("⚠️ Position validation failed - too far from saved position")
-                relocalizationState = .featureMatching  // Fall back to feature matching
+                placeFoundAnchorMarker(package: package, transformedPosition: detectedImagePosition)
+                return
             }
-        }
-        
-        func calculateMapToARTransform(package: AnchorPointPackage, arPosition: simd_float3) {
-            // TODO: Phase 4 - Implement proper 2D->3D transform calculation
-            print("📐 Calculating map-to-AR coordinate transform...")
-            print("   Map coordinates: \(package.mapCoordinates)")
-            print("   AR position: \(arPosition)")
             
-            // Stub: Just store identity for now
-            mapToARTransform = matrix_identity_float4x4
-            print("✅ Transform calculated (stub)")
+            let groundPosition = simd_make_float3(firstResult.worldTransform.columns.3)
+            
+            print("   Transformed to ground position: \(groundPosition)")
+            print("✅ Anchor position transformed to current session!")
+            
+            relocalizationState = .success
+            placeFoundAnchorMarker(package: package, transformedPosition: groundPosition)
         }
         
-        func placeFoundAnchorMarker(package: AnchorPointPackage) {
+        func placeFoundAnchorMarker(package: AnchorPointPackage, transformedPosition: simd_float3) {
             guard let arView = arView else { return }
             
             if placedAnchorMarkers.contains(package.id) {
@@ -1830,10 +1855,10 @@ struct ARViewContainer: UIViewRepresentable {
             
             print("🔶 Placing visual marker for found Anchor Point")
             print("   MapPoint ID: \(package.mapPointID)")
-            print("   Using SAVED anchor position: \(package.anchorPosition)")
+            print("   Transformed position (current session): \(transformedPosition)")
             
             let markerNode = createARMarkerNode(
-                at: package.anchorPosition,
+                at: transformedPosition,
                 sphereColor: .systemOrange,
                 markerID: package.id,
                 userHeight: 1.05,  // Standard AR Marker height

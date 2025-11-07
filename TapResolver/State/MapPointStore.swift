@@ -662,19 +662,19 @@ public final class MapPointStore: ObservableObject {
         }
     }
     
-    func createAnchorPackage(mapPointID: UUID, mapCoordinates: CGPoint, anchorPosition: simd_float3, spatialData: AnchorSpatialData) {
-        let package = AnchorPointPackage(
+    func createAnchorPackage(mapPointID: UUID, mapCoordinates: CGPoint, anchorPosition: simd_float3, anchorSessionTransform: simd_float4x4, spatialData: AnchorSpatialData) {
+        var package = AnchorPointPackage(
             mapPointID: mapPointID,
             mapCoordinates: mapCoordinates,
             anchorPosition: anchorPosition,
+            anchorSessionTransform: anchorSessionTransform,
             visualDescription: nil
         )
         
         // Update with captured spatial data
-        var updatedPackage = package
-        updatedPackage.spatialData = spatialData
+        package.spatialData = spatialData
         
-        anchorPackages.append(updatedPackage)
+        anchorPackages.append(package)
         saveAnchorPackages()
         
         print("✅ Created Anchor Package \(package.id) for MapPoint \(mapPointID)")

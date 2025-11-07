@@ -18,16 +18,18 @@ struct AnchorPointPackage: Codable {
     let mapPointID: UUID
     let mapCoordinates: CGPoint
     let anchorPosition: simd_float3
+    let anchorSessionTransform: simd_float4x4
     let captureDate: Date
     var spatialData: AnchorSpatialData
     var referenceImages: [AnchorReferenceImage]
     var visualDescription: String?
     
-    init(mapPointID: UUID, mapCoordinates: CGPoint, anchorPosition: simd_float3, visualDescription: String? = nil) {
+    init(mapPointID: UUID, mapCoordinates: CGPoint, anchorPosition: simd_float3, anchorSessionTransform: simd_float4x4, visualDescription: String? = nil) {
         self.id = UUID()
         self.mapPointID = mapPointID
         self.mapCoordinates = mapCoordinates
         self.anchorPosition = anchorPosition
+        self.anchorSessionTransform = anchorSessionTransform
         self.captureDate = Date()
         self.spatialData = AnchorSpatialData(featureCloud: AnchorFeatureCloud(points: [], anchorPosition: anchorPosition, captureRadius: 0), planes: [])
         self.referenceImages = []
@@ -107,7 +109,7 @@ struct AnchorPlaneData: Codable {
 
 extension AnchorPointPackage {
     enum CodingKeys: String, CodingKey {
-        case id, mapPointID, mapCoordinates, anchorPosition
+        case id, mapPointID, mapCoordinates, anchorPosition, anchorSessionTransform
         case captureDate, spatialData, referenceImages, visualDescription
     }
     
@@ -122,6 +124,17 @@ extension AnchorPointPackage {
         let posArray = try container.decode([Float].self, forKey: .anchorPosition)
         anchorPosition = simd_float3(posArray[0], posArray[1], posArray[2])
         
+        if let transformArray = try container.decodeIfPresent([Float].self, forKey: .anchorSessionTransform), transformArray.count == 16 {
+            anchorSessionTransform = simd_float4x4(
+                simd_float4(transformArray[0], transformArray[1], transformArray[2], transformArray[3]),
+                simd_float4(transformArray[4], transformArray[5], transformArray[6], transformArray[7]),
+                simd_float4(transformArray[8], transformArray[9], transformArray[10], transformArray[11]),
+                simd_float4(transformArray[12], transformArray[13], transformArray[14], transformArray[15])
+            )
+        } else {
+            anchorSessionTransform = matrix_identity_float4x4
+        }
+        
         captureDate = try container.decode(Date.self, forKey: .captureDate)
         spatialData = try container.decode(AnchorSpatialData.self, forKey: .spatialData)
         referenceImages = try container.decode([AnchorReferenceImage].self, forKey: .referenceImages)
@@ -134,6 +147,13 @@ extension AnchorPointPackage {
         try container.encode(mapPointID, forKey: .mapPointID)
         try container.encode([mapCoordinates.x, mapCoordinates.y], forKey: .mapCoordinates)
         try container.encode([anchorPosition.x, anchorPosition.y, anchorPosition.z], forKey: .anchorPosition)
+        let transformArray: [Float] = [
+            anchorSessionTransform.columns.0.x, anchorSessionTransform.columns.0.y, anchorSessionTransform.columns.0.z, anchorSessionTransform.columns.0.w,
+            anchorSessionTransform.columns.1.x, anchorSessionTransform.columns.1.y, anchorSessionTransform.columns.1.z, anchorSessionTransform.columns.1.w,
+            anchorSessionTransform.columns.2.x, anchorSessionTransform.columns.2.y, anchorSessionTransform.columns.2.z, anchorSessionTransform.columns.2.w,
+            anchorSessionTransform.columns.3.x, anchorSessionTransform.columns.3.y, anchorSessionTransform.columns.3.z, anchorSessionTransform.columns.3.w
+        ]
+        try container.encode(transformArray, forKey: .anchorSessionTransform)
         try container.encode(captureDate, forKey: .captureDate)
         try container.encode(spatialData, forKey: .spatialData)
         try container.encode(referenceImages, forKey: .referenceImages)
