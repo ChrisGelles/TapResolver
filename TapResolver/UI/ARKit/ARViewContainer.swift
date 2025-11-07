@@ -251,6 +251,8 @@ struct ARViewContainer: UIViewRepresentable {
         var foundAnchorTransforms: [UUID: simd_float4x4] = [:]  // Anchor ID -> transform matrix
         var activeRelocalizationPackages: [AnchorPointPackage] = []
         
+        var placedAnchorMarkers: Set<UUID> = []  // Track which anchor packages have markers placed
+        
         // Coordinate system transform (2D map -> 3D AR)
         var mapToARTransform: simd_float4x4? = nil
         
@@ -532,72 +534,45 @@ struct ARViewContainer: UIViewRepresentable {
         ///   - markerID: UUID for node naming
         ///   - userHeight: Height of the vertical line (meters)
         /// - Returns: Configured SCNNode ready to add to scene
-        private func createARMarkerNode(at position: simd_float3, 
-                                         sphereColor: UIColor,
-                                         markerID: UUID,
-                                         userHeight: Float) -> SCNNode {
+        private func createARMarkerNode(at position: simd_float3, sphereColor: UIColor, markerID: UUID, userHeight: Float, badgeColor: UIColor? = nil) -> SCNNode {
             let markerNode = SCNNode()
             markerNode.simdPosition = position
             markerNode.name = "arMarker_\(markerID.uuidString)"
             
-            // Floor circle (10cm diameter)
-            let circleRadius: CGFloat = 0.1 // 5cm radius = 10cm diameter
-            let circle = SCNTorus(ringRadius: circleRadius, pipeRadius: 0.002)
-            
-            let circleMaterial = SCNMaterial()
-            circleMaterial.diffuse.contents = UIColor(red: 71/255, green: 199/255, blue: 239/255, alpha: 0.7)
-            circle.materials = [circleMaterial]
-            
+            let circle = SCNTorus(ringRadius: 0.1, pipeRadius: 0.002)
+            circle.firstMaterial?.diffuse.contents = UIColor(red: 71/255, green: 199/255, blue: 239/255, alpha: 0.7)
             let circleNode = SCNNode(geometry: circle)
-            circleNode.eulerAngles = SCNVector3Zero
             markerNode.addChildNode(circleNode)
             
-            // Circle fill
-            let circleFill = SCNCylinder(radius: circleRadius, height: 0.001)
-            let fillMaterial = SCNMaterial()
-            fillMaterial.diffuse.contents = UIColor.white.withAlphaComponent(0.15)
-            circleFill.materials = [fillMaterial]
-            
+            let circleFill = SCNCylinder(radius: 0.1, height: 0.001)
+            circleFill.firstMaterial?.diffuse.contents = UIColor.white.withAlphaComponent(0.15)
             let fillNode = SCNNode(geometry: circleFill)
             fillNode.eulerAngles.x = .pi
             markerNode.addChildNode(fillNode)
             
-            // Vertical line (to user height)
-            let lineHeight = CGFloat(userHeight)
-            let line = SCNCylinder(radius: 0.00125, height: lineHeight) // 0.25cm = 2.5mm
-            let lineMaterial = SCNMaterial()
-            lineMaterial.diffuse.contents = UIColor(red: 0/255, green: 50/255, blue: 98/255, alpha: 0.95)
-            line.materials = [lineMaterial]
-            
+            let line = SCNCylinder(radius: 0.00125, height: CGFloat(userHeight))
+            line.firstMaterial?.diffuse.contents = UIColor(red: 0/255, green: 50/255, blue: 98/255, alpha: 0.95)
             let lineNode = SCNNode(geometry: line)
-            lineNode.position = SCNVector3(0, Float(lineHeight / 2), 0)
+            lineNode.position = SCNVector3(0, Float(line.height/2), 0)
             markerNode.addChildNode(lineNode)
             
-            // Sphere at top (color specified by parameter) - 6cm diameter
-            let sphere = SCNSphere(radius: 0.03) // 3cm radius = 6cm diameter
-            let sphereMaterial = SCNMaterial()
-            sphereMaterial.diffuse.contents = sphereColor
-            sphereMaterial.specular.contents = UIColor.white
-            sphereMaterial.shininess = 0.8
-            sphere.materials = [sphereMaterial]
-            
+            let sphere = SCNSphere(radius: 0.03)
+            sphere.firstMaterial?.diffuse.contents = sphereColor
+            sphere.firstMaterial?.specular.contents = UIColor.white
+            sphere.firstMaterial?.shininess = 0.8
             let sphereNode = SCNNode(geometry: sphere)
-            sphereNode.position = SCNVector3(0, Float(lineHeight), 0)
+            sphereNode.position = SCNVector3(0, Float(line.height), 0)
             sphereNode.name = "arMarkerSphere_\(markerID.uuidString)"
             markerNode.addChildNode(sphereNode)
             
-            // Add distinctive badge for anchor markers
-            if let mapPointStore = mapPointStore {
-                let isAnchorMarker = mapPointStore.arMarkers.first { $0.id == markerID }?.isAnchor ?? false
-                
-                if isAnchorMarker {
-                    let badge = SCNNode()
-                    let badgeGeometry = SCNSphere(radius: 0.05)
-                    badgeGeometry.firstMaterial?.diffuse.contents = UIColor.systemTeal
-                    badge.geometry = badgeGeometry
-                    badge.position = SCNVector3(0, 0.15, 0)
-                    sphereNode.addChildNode(badge)
-                }
+            if let badgeColor = badgeColor {
+                let badge = SCNNode()
+                let badgeGeometry = SCNSphere(radius: 0.05)
+                badgeGeometry.firstMaterial?.diffuse.contents = badgeColor
+                badge.geometry = badgeGeometry
+                badge.position = SCNVector3(0, 0.5, 0)
+                badge.name = "badge_\(markerID.uuidString)"
+                sphereNode.addChildNode(badge)
             }
             
             return markerNode
@@ -801,7 +776,7 @@ struct ARViewContainer: UIViewRepresentable {
             node.addChildNode(planeNode)
             detectedPlanes[planeAnchor.identifier] = planeNode
             
-            print("✅ Detected \(planeAnchor.alignment == .horizontal ? "horizontal" : "vertical") plane")
+            // Plane detection logging removed to reduce console noise
         }
         
         func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
@@ -1206,7 +1181,8 @@ struct ARViewContainer: UIViewRepresentable {
                     at: marker.arPosition,
                     sphereColor: sphereColor,
                     markerID: marker.id,
-                    userHeight: userHeight
+                    userHeight: userHeight,
+                    badgeColor: marker.isAnchor ? .systemTeal : nil
                 )
                 
                 // Override name for generated markers
@@ -1691,6 +1667,7 @@ struct ARViewContainer: UIViewRepresentable {
             
             // Load all anchor packages for this location
             activeRelocalizationPackages = mapPointStore.anchorPackages
+            placedAnchorMarkers.removeAll()
             
             if activeRelocalizationPackages.isEmpty {
                 print("⚠️ No anchor packages available for relocalization")
@@ -1713,6 +1690,17 @@ struct ARViewContainer: UIViewRepresentable {
             print("🛑 Stopping relocalization mode")
             isRelocalizationMode = false
             relocalizationState = .idle
+            placedAnchorMarkers.removeAll()
+            
+            if let arView = arView {
+                for package in activeRelocalizationPackages {
+                    if let markerNode = arView.scene.rootNode.childNode(withName: "arMarker_\(package.id.uuidString)", recursively: false) {
+                        markerNode.removeFromParentNode()
+                    }
+                }
+                print("🧹 Removed found anchor markers")
+            }
+            
             activeRelocalizationPackages.removeAll()
         }
         
@@ -1757,10 +1745,6 @@ struct ARViewContainer: UIViewRepresentable {
         func handleDetectedImage(_ imageAnchor: ARImageAnchor) {
             guard let imageName = imageAnchor.referenceImage.name else { return }
             
-            print("🎯 Detected reference image: \(imageName)")
-            print("   Position: \(imageAnchor.transform.columns.3)")
-            print("   Is tracked: \(imageAnchor.isTracked)")
-            
             // Parse package ID from image name
             // Format: {UUID}-{captureType} where UUID contains hyphens
             let components = imageName.split(separator: "-")
@@ -1776,15 +1760,16 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
-            print("✅ Parsed package ID: \(packageID)")
+            // Only log first detection per package
+            if !placedAnchorMarkers.contains(packageID) {
+                print("🎯 Detected reference image for package: \(packageID)")
+            }
             
             // Find matching anchor package
             guard let package = activeRelocalizationPackages.first(where: { $0.id == packageID }) else {
                 print("⚠️ Could not find anchor package for detected image")
                 return
             }
-            
-            print("✅ Matched to anchor package for MapPoint: \(package.mapPointID)")
             
             // Store transform for validation
             foundAnchorTransforms[packageID] = imageAnchor.transform
@@ -1796,7 +1781,10 @@ struct ARViewContainer: UIViewRepresentable {
         }
         
         func validateAndCalculateTransform(package: AnchorPointPackage, detectedTransform: simd_float4x4) {
-            print("🔍 Validating detected anchor position...")
+            // Only log validation details once per package
+            if !placedAnchorMarkers.contains(package.id) {
+                print("🔍 Validating detected anchor position...")
+            }
             
             // Extract position from transform
             let detectedPosition = simd_make_float3(detectedTransform.columns.3)
@@ -1813,6 +1801,9 @@ struct ARViewContainer: UIViewRepresentable {
                 
                 // Calculate coordinate transform (stub for now)
                 calculateMapToARTransform(package: package, arPosition: detectedPosition)
+                
+                // Place visual marker at found anchor point
+                placeFoundAnchorMarker(package: package)
             } else {
                 print("⚠️ Position validation failed - too far from saved position")
                 relocalizationState = .featureMatching  // Fall back to feature matching
@@ -1828,6 +1819,39 @@ struct ARViewContainer: UIViewRepresentable {
             // Stub: Just store identity for now
             mapToARTransform = matrix_identity_float4x4
             print("✅ Transform calculated (stub)")
+        }
+        
+        func placeFoundAnchorMarker(package: AnchorPointPackage) {
+            guard let arView = arView else { return }
+            
+            if placedAnchorMarkers.contains(package.id) {
+                return
+            }
+            
+            print("🔶 Placing visual marker for found Anchor Point")
+            print("   MapPoint ID: \(package.mapPointID)")
+            print("   Using SAVED anchor position: \(package.anchorPosition)")
+            
+            let markerNode = createARMarkerNode(
+                at: package.anchorPosition,
+                sphereColor: .systemOrange,
+                markerID: package.id,
+                userHeight: 1.05,  // Standard AR Marker height
+                badgeColor: .systemYellow
+            )
+            
+            if let badgeNode = markerNode.childNode(withName: "badge_\(package.id.uuidString)", recursively: true) {
+                let scaleUp = SCNAction.scale(to: 1.3, duration: 0.8)
+                let scaleDown = SCNAction.scale(to: 1.0, duration: 0.8)
+                let pulse = SCNAction.sequence([scaleUp, scaleDown])
+                let repeatPulse = SCNAction.repeatForever(pulse)
+                badgeNode.runAction(repeatPulse)
+            }
+            
+            arView.scene.rootNode.addChildNode(markerNode)
+            placedAnchorMarkers.insert(package.id)
+            
+            print("✅ Found Anchor Point marker placed at SAVED position (ground-aligned)")
         }
         
         func updateInterpolationCrossMarks(count: Int) {
@@ -1953,7 +1977,8 @@ struct ARViewContainer: UIViewRepresentable {
                 at: position,
                 sphereColor: .cyan,
                 markerID: marker.id,
-                userHeight: userHeight
+                userHeight: userHeight,
+                badgeColor: marker.isAnchor ? .systemTeal : nil
             )
             markerNode.name = "arMarker_\(marker.id)"
             arView.scene.rootNode.addChildNode(markerNode)

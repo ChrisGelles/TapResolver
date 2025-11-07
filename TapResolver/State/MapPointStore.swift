@@ -335,12 +335,7 @@ public final class MapPointStore: ObservableObject {
             ctx.write(activePointKey, value: activeID)
         }
         
-        print("ðŸ’¾ Saved Map Points to UserDefaults:")
-        print("   Location: \(ctx.locationID)")
-        print("   Points: \(points.count)")
-        for point in points {
-            print("   â€¢ \(String(point.id.uuidString.prefix(8)))... @ (\(Int(point.mapPoint.x)),\(Int(point.mapPoint.y))) - \(point.sessions.count) sessions")
-        }
+        print("💾 Saved \(points.count) Map Point(s) to UserDefaults for location: \(ctx.locationID)")
         
         // Save AR Markers
         saveARMarkers()
