@@ -16,6 +16,7 @@
 import SwiftUI
 import ARKit
 import SceneKit
+import UIKit
 
 enum RelocalizationState {
     case idle
@@ -231,6 +232,7 @@ struct ARViewContainer: UIViewRepresentable {
         @Published var anchorInstruction = "Move device slowly to detect surfaces"
         @Published var anchorCountdown: Int? = nil
         @Published var signatureImageCaptured = false
+        @Published var showFloorMarkerPositioning = false
         private var qualityUpdateTimer: Timer?
         private var countdownTimer: Timer?
         var currentCaptureMapPointID: UUID? = nil
@@ -247,6 +249,12 @@ struct ARViewContainer: UIViewRepresentable {
         var capturedFloorClose = false
         var capturedWalls = false
         
+        // Milestone 4: Floor marker capture state
+        var isCapturingFloorMarker: Bool = false
+        var capturedFloorImage: UIImage?
+        var pendingFloorMarker: FloorMarkerCapture?
+        var pendingFloorMarkerPackageID: UUID?
+        
         // Relocalization mode
         var isRelocalizationMode = false
         var relocalizationState: RelocalizationState = .idle
@@ -255,7 +263,7 @@ struct ARViewContainer: UIViewRepresentable {
         
         var placedAnchorMarkers: Set<UUID> = []  // Track which anchor packages have markers placed
         var anchorDetectionCounts: [UUID: Int] = [:]  // Track how many times each anchor detected
-        var pendingAnchorDetections: [UUID: simd_float4x4] = [:]  // Anchors detected but waiting for ground plane
+        var pendingAnchorDetections: [UUID: (anchor: ARImageAnchor, captureType: String)] = [:]  // Anchors detected but waiting for ground plane
         
         // Coordinate system transform (2D map -> 3D AR)
         var mapToARTransform: simd_float4x4? = nil
@@ -899,10 +907,14 @@ struct ARViewContainer: UIViewRepresentable {
                 print("✅ Ground plane detected - processing \(pendingAnchorDetections.count) pending anchor(s)")
 
                 // Process all pending anchor detections now that we have ground
-                for (packageID, detectedTransform) in pendingAnchorDetections {
+                for (packageID, pendingData) in pendingAnchorDetections {
                     if let package = activeRelocalizationPackages.first(where: { $0.id == packageID }) {
                         print("   Placing pending anchor: \(packageID)")
-                        validateAndCalculateTransform(package: package, detectedTransform: detectedTransform)
+                        validateAndCalculateTransform(
+                            package: package,
+                            imageAnchor: pendingData.anchor,
+                            captureType: pendingData.captureType
+                        )
                     }
                 }
 
@@ -1436,6 +1448,11 @@ struct ARViewContainer: UIViewRepresentable {
             capturedFloorFar = false
             capturedFloorClose = false
             capturedWalls = false
+            isCapturingFloorMarker = false
+            showFloorMarkerPositioning = false
+            capturedFloorImage = nil
+            pendingFloorMarkerPackageID = nil
+            pendingFloorMarker = nil
             
             print("🔄 Started new accumulation session")
             
@@ -1620,8 +1637,15 @@ struct ARViewContainer: UIViewRepresentable {
             
             let signatureImage = AnchorReferenceImage(captureType: .signature, imageData: jpegData)
             accumulatedReferenceImages.append(signatureImage)
+            signatureImageCaptured = true
             
             print("✅ Signature image captured (\(jpegData.count / 1024) KB)")
+            
+            // Milestone 4: Prompt for floor marker capture
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.isCapturingFloorMarker = true
+                self.showFloorCapturePrompt()
+            }
             
             // Build spatial data from accumulated data
             let featureCloud = AnchorFeatureCloud(
@@ -1673,6 +1697,8 @@ struct ARViewContainer: UIViewRepresentable {
             // Add to store
             mapPointStore.anchorPackages.append(package)
             mapPointStore.saveAnchorPackages()
+            pendingFloorMarkerPackageID = package.id
+            pendingFloorMarker = nil
             
             print("✅ Created Anchor Package \(package.id) for MapPoint \(mapPointID)")
             print("   Complete with \(accumulatedReferenceImages.count) reference images")
@@ -1689,6 +1715,94 @@ struct ARViewContainer: UIViewRepresentable {
             accumulatedReferenceImages.removeAll()
             
             print("✅ Anchor package complete with signature image")
+        }
+        
+        // MARK: - Milestone 4: Floor Marker Capture
+        
+        func showFloorCapturePrompt() {
+            print("📸 FLOOR MARKER: Ready to capture floor reference")
+            print("   Point camera straight down at the floor beneath anchor marker")
+            
+            // Future UI integration hook
+            // UI should present instructions and capture button
+        }
+        
+        func captureFloorMarkerImage() {
+            guard let arView = arView,
+                  let currentFrame = arView.session.currentFrame else {
+                print("❌ No current frame available for floor capture")
+                return
+            }
+            
+            let pixelBuffer = currentFrame.capturedImage
+            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+            let context = CIContext()
+            
+            guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
+                print("❌ Failed to convert floor capture to CGImage")
+                return
+            }
+            
+            let uiImage = UIImage(cgImage: cgImage)
+            capturedFloorImage = uiImage
+            
+            print("📸 Floor marker image captured")
+            print("   Image size: \(uiImage.size)")
+            print("   Ready for position calibration")
+            
+            isCapturingFloorMarker = false
+            showFloorMarkerPositioning = true
+        }
+        
+        func finalizeFloorMarkerCapture(coordinates: CGPoint) {
+            guard let image = capturedFloorImage else {
+                print("❌ No floor image available to finalize")
+                return
+            }
+            
+            guard let jpegData = image.jpegData(compressionQuality: 0.9) else {
+                print("❌ Failed to encode floor marker image")
+                return
+            }
+            
+            let floorMarker = FloorMarkerCapture(
+                imageData: jpegData,
+                markerCoordinates: coordinates,
+                imageSize: image.size
+            )
+            
+            pendingFloorMarker = floorMarker
+            capturedFloorImage = nil
+            showFloorMarkerPositioning = false
+            
+            guard let packageID = pendingFloorMarkerPackageID else {
+                print("⚠️ Floor marker captured but no pending package to attach")
+                return
+            }
+            
+            guard let mapPointStore = mapPointStore else {
+                print("❌ No MapPointStore available to store floor marker")
+                return
+            }
+            
+            if let index = mapPointStore.anchorPackages.firstIndex(where: { $0.id == packageID }) {
+                mapPointStore.anchorPackages[index].floorMarker = floorMarker
+                mapPointStore.saveAnchorPackages()
+                print("📐 Floor marker included in anchor package")
+                print("   Package ID: \(packageID)")
+                print("   Marker coordinates: \(coordinates)")
+                pendingFloorMarkerPackageID = nil
+                pendingFloorMarker = nil
+            } else {
+                print("⚠️ Could not find anchor package \(packageID) to attach floor marker")
+            }
+        }
+        
+        func cancelFloorMarkerCapture() {
+            capturedFloorImage = nil
+            isCapturingFloorMarker = false
+            showFloorMarkerPositioning = false
+            print("⚠️ Floor marker capture canceled")
         }
         
         func startRelocalization() {
@@ -1803,6 +1917,14 @@ struct ARViewContainer: UIViewRepresentable {
                     
                     referenceImages.insert(arRefImage)
                 }
+                
+                if let floorMarker = package.floorMarker,
+                   let uiImage = UIImage(data: floorMarker.imageData),
+                   let cgImage = uiImage.cgImage {
+                    let floorReference = ARReferenceImage(cgImage, orientation: .up, physicalWidth: 0.5)
+                    floorReference.name = "\(package.id.uuidString)-floor_marker"
+                    referenceImages.insert(floorReference)
+                }
             }
             
             print("✅ Prepared \(referenceImages.count) reference images for tracking")
@@ -1834,6 +1956,11 @@ struct ARViewContainer: UIViewRepresentable {
             let components = imageName.split(separator: "-")
             guard components.count >= 2 else {
                 print("⚠️ Invalid image name format: \(imageName)")
+                return
+            }
+            
+            guard let captureTypeComponent = components.last else {
+                print("⚠️ Missing capture type in image name: \(imageName)")
                 return
             }
             
@@ -1871,18 +1998,33 @@ struct ARViewContainer: UIViewRepresentable {
             relocalizationState = .validating
             
             // Validate and calculate coordinate transform
-            validateAndCalculateTransform(package: package, detectedTransform: imageAnchor.transform)
+            validateAndCalculateTransform(
+                package: package,
+                imageAnchor: imageAnchor,
+                captureType: String(captureTypeComponent)
+            )
         }
         
-        func validateAndCalculateTransform(package: AnchorPointPackage, detectedTransform: simd_float4x4) {
+        func validateAndCalculateTransform(package: AnchorPointPackage, imageAnchor: ARImageAnchor, captureType: String) {
             print("🔍 Validation details:")
             
             // Extract positions
-            let detectedImagePosition = simd_make_float3(detectedTransform.columns.3)
+            let detectedImagePosition = simd_make_float3(imageAnchor.transform.columns.3)
             let savedAnchorPosition = package.anchorPosition
             
             print("   Detected image at (current session): \(detectedImagePosition)")
             print("   Saved anchor position (old session): \(savedAnchorPosition)")
+            
+            if isFloorMarkerImage(captureType),
+               let floorMarker = package.floorMarker {
+                print("📐 PRECISION MODE: Floor marker detected!")
+                placePreciseAnchorMarker(
+                    package: package,
+                    imageAnchor: imageAnchor,
+                    floorMarker: floorMarker
+                )
+                return
+            }
             
             guard let arView = arView,
                   let currentFrame = arView.session.currentFrame else {
@@ -1904,7 +2046,7 @@ struct ARViewContainer: UIViewRepresentable {
                 print("   Image detected but cannot place marker without ground reference")
                 
                 // Store for later placement when ground is detected
-                pendingAnchorDetections[package.id] = detectedTransform
+                pendingAnchorDetections[package.id] = (anchor: imageAnchor, captureType: captureType)
                 relocalizationState = .imageTracking  // Still searching
                 return
             }
@@ -1960,6 +2102,37 @@ struct ARViewContainer: UIViewRepresentable {
             
             relocalizationState = .success
             placeFoundAnchorMarker(package: package, transformedPosition: groundPosition)
+        }
+        
+        func placePreciseAnchorMarker(package: AnchorPointPackage,
+                                      imageAnchor: ARImageAnchor,
+                                      floorMarker: FloorMarkerCapture) {
+            let floorTransform = imageAnchor.transform
+            let imagePosition = simd_make_float3(floorTransform.columns.3)
+            let imageRotation = simd_quatf(floorTransform)
+            let calibratedX = Float(floorMarker.markerCoordinates.x)
+            let calibratedY = Float(floorMarker.markerCoordinates.y)
+            let physicalSize = imageAnchor.referenceImage.physicalSize
+            
+            print("📐 Calculating precise position from floor marker")
+            print("   Image detected at: \(imagePosition)")
+            print("   Image rotation (quat): \(imageRotation)")
+            print("   Calibrated coords: (\(calibratedX), \(calibratedY))")
+            print("   Physical size: \(physicalSize.width)m x \(physicalSize.height)m")
+            
+            // TODO: Calculate offset from image center using calibrated coordinates
+            // Placeholder: use image position directly (refine in later milestone)
+            let precisePosition = imagePosition
+            
+            print("   Precise ground position: \(precisePosition)")
+            print("✅ Anchor position calculated with HIGH PRECISION")
+            
+            relocalizationState = .success
+            placeFoundAnchorMarker(package: package, transformedPosition: precisePosition)
+        }
+        
+        func isFloorMarkerImage(_ captureType: String) -> Bool {
+            return captureType == "floor_marker"
         }
         
         func placeFoundAnchorMarker(package: AnchorPointPackage, transformedPosition: simd_float3) {

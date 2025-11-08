@@ -24,6 +24,15 @@ struct AnchorPointPackage: Codable {
     var referenceImages: [AnchorReferenceImage]
     var visualDescription: String?
     
+    // Milestone 4: Precision floor marker
+    var floorMarker: FloorMarkerCapture?
+    
+    // Milestone 5: Wide-angle context (placeholder)
+    var contextCaptures: [WideAngleCapture] = []
+    
+    // Milestone 7: Beacon proximity (placeholder)
+    var proximityBeacons: [BeaconReference] = []
+    
     init(mapPointID: UUID, mapCoordinates: CGPoint, anchorPosition: simd_float3, anchorSessionTransform: simd_float4x4, visualDescription: String? = nil) {
         self.id = UUID()
         self.mapPointID = mapPointID
@@ -34,6 +43,9 @@ struct AnchorPointPackage: Codable {
         self.spatialData = AnchorSpatialData(featureCloud: AnchorFeatureCloud(points: [], anchorPosition: anchorPosition, captureRadius: 0), planes: [])
         self.referenceImages = []
         self.visualDescription = visualDescription
+        self.floorMarker = nil
+        self.contextCaptures = []
+        self.proximityBeacons = []
     }
 }
 
@@ -111,6 +123,7 @@ extension AnchorPointPackage {
     enum CodingKeys: String, CodingKey {
         case id, mapPointID, mapCoordinates, anchorPosition, anchorSessionTransform
         case captureDate, spatialData, referenceImages, visualDescription
+        case floorMarker, contextCaptures, proximityBeacons
     }
     
     init(from decoder: Decoder) throws {
@@ -139,6 +152,9 @@ extension AnchorPointPackage {
         spatialData = try container.decode(AnchorSpatialData.self, forKey: .spatialData)
         referenceImages = try container.decode([AnchorReferenceImage].self, forKey: .referenceImages)
         visualDescription = try container.decodeIfPresent(String.self, forKey: .visualDescription)
+        floorMarker = try container.decodeIfPresent(FloorMarkerCapture.self, forKey: .floorMarker)
+        contextCaptures = try container.decodeIfPresent([WideAngleCapture].self, forKey: .contextCaptures) ?? []
+        proximityBeacons = try container.decodeIfPresent([BeaconReference].self, forKey: .proximityBeacons) ?? []
     }
     
     func encode(to encoder: Encoder) throws {
@@ -158,6 +174,13 @@ extension AnchorPointPackage {
         try container.encode(spatialData, forKey: .spatialData)
         try container.encode(referenceImages, forKey: .referenceImages)
         try container.encodeIfPresent(visualDescription, forKey: .visualDescription)
+        try container.encodeIfPresent(floorMarker, forKey: .floorMarker)
+        if !contextCaptures.isEmpty {
+            try container.encode(contextCaptures, forKey: .contextCaptures)
+        }
+        if !proximityBeacons.isEmpty {
+            try container.encode(proximityBeacons, forKey: .proximityBeacons)
+        }
     }
 }
 

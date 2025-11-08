@@ -17,6 +17,7 @@ import SwiftUI
 import Foundation
 import simd
 import ARKit
+import UIKit
 
 struct CalibrationMarker {
     let id: UUID  // Marker node ID
@@ -68,6 +69,8 @@ struct ARCalibrationView: View {
     
     // AR Coordinator (for accessing quality monitoring state)
     @State private var arCoordinatorWrapper: CoordinatorWrapper = CoordinatorWrapper()
+    @State private var showFloorMarkerPositioning: Bool = false
+    @State private var capturedFloorImage: UIImage?
     
     // Anchor mode tracking
     @State private var isAnchorMode = false
@@ -96,6 +99,17 @@ struct ARCalibrationView: View {
             .onAppear {
                 // Capture coordinator reference for UI updates
                 arCoordinatorWrapper.coordinator = ARViewContainer.Coordinator.current
+            }
+            .onChange(of: arCoordinatorWrapper.coordinator?.showFloorMarkerPositioning ?? false) { shouldShow in
+                if shouldShow,
+                   let coordinator = arCoordinatorWrapper.coordinator,
+                   let image = coordinator.capturedFloorImage {
+                    capturedFloorImage = image
+                    showFloorMarkerPositioning = true
+                } else if !shouldShow {
+                    showFloorMarkerPositioning = false
+                    capturedFloorImage = nil
+                }
             }
             
             // New Interpolation UI (only in interpolation mode)
@@ -269,6 +283,46 @@ struct ARCalibrationView: View {
                         }
                     }
                     .zIndex(10005)
+                }
+                
+                // Floor marker capture prompt
+                if let coordinator = arCoordinatorWrapper.coordinator,
+                   coordinator.isCapturingFloorMarker {
+                    VStack {
+                        Spacer()
+                        
+                        VStack(spacing: 16) {
+                            Text("Capture Floor Marker")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            Text("Point the camera straight down at the floor marker under the anchor.")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.9))
+                                .multilineTextAlignment(.center)
+                            
+                            Button(action: {
+                                coordinator.captureFloorMarkerImage()
+                            }) {
+                                HStack {
+                                    Image(systemName: "camera.viewfinder")
+                                    Text("Capture Floor Marker")
+                                        .fontWeight(.semibold)
+                                }
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.orange)
+                                .foregroundColor(.white)
+                                .cornerRadius(12)
+                            }
+                        }
+                        .padding()
+                        .background(Color.black.opacity(0.8))
+                        .cornerRadius(16)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 120)
+                    }
+                    .zIndex(10006)
                 }
                 
                 // Calibration progress indicator
@@ -470,6 +524,26 @@ struct ARCalibrationView: View {
         }
         .sheet(isPresented: $showAnchorManagementSheet) {
             AnchorManagementView(mapPointStore: mapPointStore)
+        }
+        .sheet(isPresented: $showFloorMarkerPositioning) {
+            if let floorImage = capturedFloorImage,
+               let coordinator = arCoordinatorWrapper.coordinator {
+                FloorMarkerPositionView(
+                    floorImage: floorImage,
+                    onConfirm: { coordinates in
+                        coordinator.finalizeFloorMarkerCapture(coordinates: coordinates)
+                        capturedFloorImage = nil
+                        showFloorMarkerPositioning = false
+                    },
+                    onCancel: {
+                        coordinator.cancelFloorMarkerCapture()
+                        capturedFloorImage = nil
+                        showFloorMarkerPositioning = false
+                    }
+                )
+            } else {
+                Text("No floor marker image available")
+            }
         }
         .zIndex(10000)
         .transition(.move(edge: .leading))
