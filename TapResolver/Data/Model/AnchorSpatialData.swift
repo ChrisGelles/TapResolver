@@ -27,6 +27,9 @@ struct AnchorPointPackage: Codable {
     // Milestone 4: Precision floor marker
     var floorMarker: FloorMarkerCapture?
     
+    // Spatial relationship between floor marker and anchor
+    var floorMarkerToAnchorOffset: simd_float3?
+    
     // Milestone 5: Wide-angle context (placeholder)
     var contextCaptures: [WideAngleCapture] = []
     
@@ -44,6 +47,7 @@ struct AnchorPointPackage: Codable {
         self.referenceImages = []
         self.visualDescription = visualDescription
         self.floorMarker = nil
+        self.floorMarkerToAnchorOffset = nil
         self.contextCaptures = []
         self.proximityBeacons = []
     }
@@ -123,7 +127,7 @@ extension AnchorPointPackage {
     enum CodingKeys: String, CodingKey {
         case id, mapPointID, mapCoordinates, anchorPosition, anchorSessionTransform
         case captureDate, spatialData, referenceImages, visualDescription
-        case floorMarker, contextCaptures, proximityBeacons
+        case floorMarker, floorMarkerToAnchorOffset, contextCaptures, proximityBeacons
     }
     
     init(from decoder: Decoder) throws {
@@ -153,6 +157,12 @@ extension AnchorPointPackage {
         referenceImages = try container.decode([AnchorReferenceImage].self, forKey: .referenceImages)
         visualDescription = try container.decodeIfPresent(String.self, forKey: .visualDescription)
         floorMarker = try container.decodeIfPresent(FloorMarkerCapture.self, forKey: .floorMarker)
+        if let offsetArray = try container.decodeIfPresent([Float].self, forKey: .floorMarkerToAnchorOffset),
+           offsetArray.count == 3 {
+            floorMarkerToAnchorOffset = simd_float3(offsetArray[0], offsetArray[1], offsetArray[2])
+        } else {
+            floorMarkerToAnchorOffset = nil
+        }
         contextCaptures = try container.decodeIfPresent([WideAngleCapture].self, forKey: .contextCaptures) ?? []
         proximityBeacons = try container.decodeIfPresent([BeaconReference].self, forKey: .proximityBeacons) ?? []
     }
@@ -175,6 +185,9 @@ extension AnchorPointPackage {
         try container.encode(referenceImages, forKey: .referenceImages)
         try container.encodeIfPresent(visualDescription, forKey: .visualDescription)
         try container.encodeIfPresent(floorMarker, forKey: .floorMarker)
+        if let offset = floorMarkerToAnchorOffset {
+            try container.encode([offset.x, offset.y, offset.z], forKey: .floorMarkerToAnchorOffset)
+        }
         if !contextCaptures.isEmpty {
             try container.encode(contextCaptures, forKey: .contextCaptures)
         }

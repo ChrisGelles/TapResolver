@@ -254,6 +254,7 @@ struct ARViewContainer: UIViewRepresentable {
         var capturedFloorImage: UIImage?
         var pendingFloorMarker: FloorMarkerCapture?
         var pendingFloorMarkerPackageID: UUID?
+        private var capturedFloorMarkerOffset: simd_float3? = nil
         
         // Relocalization mode
         var isRelocalizationMode = false
@@ -1864,6 +1865,39 @@ struct ARViewContainer: UIViewRepresentable {
             
             print("📸 Floor marker image captured")
             print("   Image size: \(uiImage.size)")
+            print("📐 Calculating floor marker 3D position...")
+            
+            if let anchorPosition = currentCapturePosition {
+                
+                let centerPoint = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
+                if let raycastQuery = arView.raycastQuery(from: centerPoint, allowing: .existingPlaneGeometry, alignment: .horizontal) {
+                    let raycastResults = arView.session.raycast(raycastQuery)
+                    
+                    if let result = raycastResults.first {
+                        let floorMarkerPosition = simd_make_float3(result.worldTransform.columns.3)
+                        let offset = anchorPosition - floorMarkerPosition
+                        
+                        print("   Floor marker 3D position: \(floorMarkerPosition)")
+                        print("   Anchor position: \(anchorPosition)")
+                        print("   Calculated offset (anchor - floor): \(offset)")
+                        print("   Offset magnitude: \(simd_length(offset) * 100) cm")
+                        
+                        capturedFloorMarkerOffset = offset
+                    } else {
+                        print("   ⚠️ Could not determine floor marker position via raycast")
+                        print("   Package will be saved without spatial relationship data")
+                        capturedFloorMarkerOffset = nil
+                    }
+                } else {
+                    print("   ⚠️ Could not build raycast query for floor marker")
+                    print("   Package will be saved without spatial relationship data")
+                    capturedFloorMarkerOffset = nil
+                }
+            } else {
+                print("   ⚠️ Missing required data to calculate floor marker position")
+                capturedFloorMarkerOffset = nil
+            }
+            
             print("   Ready for position calibration")
             
             isCapturingFloorMarker = false
@@ -1893,24 +1927,35 @@ struct ARViewContainer: UIViewRepresentable {
             
             guard let packageID = pendingFloorMarkerPackageID else {
                 print("⚠️ Floor marker captured but no pending package to attach")
+                capturedFloorMarkerOffset = nil
                 return
             }
             
             guard let mapPointStore = mapPointStore else {
                 print("❌ No MapPointStore available to store floor marker")
+                capturedFloorMarkerOffset = nil
                 return
             }
             
             if let index = mapPointStore.anchorPackages.firstIndex(where: { $0.id == packageID }) {
                 mapPointStore.anchorPackages[index].floorMarker = floorMarker
+                mapPointStore.anchorPackages[index].floorMarkerToAnchorOffset = capturedFloorMarkerOffset
                 mapPointStore.saveAnchorPackages()
                 print("📐 Floor marker included in anchor package")
                 print("   Package ID: \(packageID)")
                 print("   Marker coordinates: \(coordinates)")
+                if let offset = capturedFloorMarkerOffset {
+                    print("   ✅ Stored floor marker offset: \(offset)")
+                    print("      Offset magnitude: \(simd_length(offset) * 100) cm")
+                } else {
+                    print("   ⚠️ No spatial offset stored - precision will be limited")
+                }
                 pendingFloorMarkerPackageID = nil
                 pendingFloorMarker = nil
+                capturedFloorMarkerOffset = nil
             } else {
                 print("⚠️ Could not find anchor package \(packageID) to attach floor marker")
+                capturedFloorMarkerOffset = nil
             }
         }
         
@@ -1918,6 +1963,7 @@ struct ARViewContainer: UIViewRepresentable {
             capturedFloorImage = nil
             isCapturingFloorMarker = false
             showFloorMarkerPositioning = false
+            capturedFloorMarkerOffset = nil
             print("⚠️ Floor marker capture canceled")
         }
         
@@ -1974,8 +2020,33 @@ struct ARViewContainer: UIViewRepresentable {
             
             print("✅ Relocalization mode active")
             print("   Loaded \(activeRelocalizationPackages.count) anchor package(s)")
+        
+        for package in activeRelocalizationPackages {
+            print("\n🔍 FLOOR MARKER DATA CHECK for package \(package.id.uuidString.prefix(8)):")
+            if let floorMarker = package.floorMarker {
+                print("   ✅ Floor marker exists")
+                print("      Image size: \(Int(floorMarker.imageSize.width)) x \(Int(floorMarker.imageSize.height)) pixels")
+                print("      Image data: \(floorMarker.imageData.count) bytes")
+                print("      Calibrated coords: (\(floorMarker.markerCoordinates.x), \(floorMarker.markerCoordinates.y))")
+                if let offset = package.floorMarkerToAnchorOffset {
+                    print("      ✅ Spatial offset stored: \(offset)")
+                    print("         Offset magnitude: \(simd_length(offset) * 100) cm")
+                } else {
+                    print("      ❌ NO spatial offset - precision limited")
+                }
+            } else {
+                print("   ❌ NO FLOOR MARKER - package was created before floor marker feature")
+                print("      This package needs to be recaptured to include floor marker")
+            }
             
-// (Diagnostic logging temporarily removed to avoid verbosity)
+            print("   Anchor point data:")
+            print("      MapPoint ID: \(package.mapPointID.uuidString)")
+            print("      Map coordinates: \(package.mapCoordinates)")
+            print("      Anchor position (old session): \(package.anchorPosition)")
+            print("      Session transform available: \(package.anchorSessionTransform != matrix_identity_float4x4)")
+        }
+        print("")
+            
         }
         
         /// Clean up all AR markers from the scene
@@ -2359,30 +2430,7 @@ struct ARViewContainer: UIViewRepresentable {
             print("   Floor marker detected at: \(imagePosition)")
             print("   Crosshairs offset applied: \(worldOffset)")
             print("   Precise floor marker position: \(precisePositionBeforeGroundProjection)")
-            print("")
-            print("   ⚠️ MISSING RELATIONSHIP DATA:")
-            print("      We know where the floor marker is NOW: \(precisePositionBeforeGroundProjection)")
-            print("      We know where the anchor was in OLD session: \(package.anchorPosition)")
-            print("      We DON'T know where floor marker was RELATIVE to anchor in old session")
-            print("      Therefore: We can't calculate where anchor should be NOW")
-            print("")
-            print("   This is why placement is ~1 foot off!")
-            print("   Need to recapture package with floor marker relationship data")
-            print("")
-            print("📋 CORRECT CALCULATION (when data available):")
-            print("   Step 1: Load saved_offset = anchor_position - floor_marker_position (from capture)")
-            print("   Step 2: Detect floor marker in new session → floor_marker_now")
-            print("   Step 3: Calculate anchor_now = floor_marker_now + saved_offset")
-            print("   Step 4: Place marker at anchor_now")
-            print("")
-            print("   CURRENTLY DOING (incorrect):")
-            print("   Step 1: Detect floor marker → floor_marker_now")
-            print("   Step 2: Apply tiny crosshairs offset (3mm)")
-            print("   Step 3: Place marker at floor_marker_now + 3mm")
-            print("   Step 4: ❌ This position has no relationship to actual anchor!")
-            print("")
             
-            // Validate image orientation (should be roughly horizontal for floor marker)
             let upDotY = simd_dot(imageUp, simd_float3(0, 1, 0))
             print("   Image orientation check:")
             print("      Up vector alignment with world Y: \(upDotY)")
@@ -2394,45 +2442,56 @@ struct ARViewContainer: UIViewRepresentable {
             
             print("   Precise position (before ground projection): \(precisePositionBeforeGroundProjection)")
             
-            guard let arView = arView else {
-                print("❌ No ARView available")
-                relocalizationState = .failed
-                return
-            }
-            
-            let allAnchors = arView.session.currentFrame?.anchors ?? []
-            let horizontalPlanes = allAnchors.compactMap { $0 as? ARPlaneAnchor }
-                .filter { $0.alignment == .horizontal }
-            
-            if horizontalPlanes.isEmpty {
-                print("⚠️ No ground planes available for projection")
-                print("   Using image Y coordinate: \(precisePositionBeforeGroundProjection.y)")
-                relocalizationState = .success
-                placeFoundAnchorMarker(package: package, transformedPosition: precisePositionBeforeGroundProjection)
-                return
-            }
-            
-            let closestPlane = horizontalPlanes.min(by: { plane1, plane2 in
-                let dist1 = abs(precisePositionBeforeGroundProjection.y - plane1.transform.columns.3.y)
-                let dist2 = abs(precisePositionBeforeGroundProjection.y - plane2.transform.columns.3.y)
-                return dist1 < dist2
-            })
-            
-            if let groundPlane = closestPlane {
-                let groundY = groundPlane.transform.columns.3.y
-                let groundPosition = simd_float3(precisePositionBeforeGroundProjection.x, groundY, precisePositionBeforeGroundProjection.z)
+            if let offset = package.floorMarkerToAnchorOffset {
+                print("\n✅ USING STORED SPATIAL RELATIONSHIP:")
+                print("   Stored offset (anchor - floor): \(offset)")
+                print("   Floor marker now at: \(precisePositionBeforeGroundProjection)")
                 
-                print("   Projected to ground plane at y=\(groundY)")
-                print("   Final precise ground position: \(groundPosition)")
-                print("✅ Anchor position calculated with HIGH PRECISION (floor marker + ground plane)")
+                let calculatedAnchorPosition = precisePositionBeforeGroundProjection + offset
+                print("   Calculated anchor position: \(calculatedAnchorPosition)")
+                print("   Offset magnitude: \(simd_length(offset) * 100) cm")
                 
-                relocalizationState = .success
-                placeFoundAnchorMarker(package: package, transformedPosition: groundPosition)
+                guard let arView = arView else {
+                    print("❌ No ARView available")
+                    relocalizationState = .failed
+                    return
+                }
+                
+                let allAnchors = arView.session.currentFrame?.anchors ?? []
+                let horizontalPlanes = allAnchors.compactMap { $0 as? ARPlaneAnchor }
+                    .filter { $0.alignment == .horizontal }
+                
+                if let groundPlane = horizontalPlanes.min(by: { plane1, plane2 in
+                    let dist1 = abs(calculatedAnchorPosition.y - plane1.transform.columns.3.y)
+                    let dist2 = abs(calculatedAnchorPosition.y - plane2.transform.columns.3.y)
+                    return dist1 < dist2
+                }) {
+                    let groundY = groundPlane.transform.columns.3.y
+                    let finalPosition = simd_float3(calculatedAnchorPosition.x, groundY, calculatedAnchorPosition.z)
+                    
+                    print("   Projected to ground plane at y=\(groundY)")
+                    print("   Final precise position: \(finalPosition)")
+                    print("✅ HIGH PRECISION PLACEMENT using spatial relationship + crosshairs")
+                    
+                    relocalizationState = .success
+                    placeFoundAnchorMarker(package: package, transformedPosition: finalPosition)
+                    return
+                } else {
+                    print("⚠️ No ground plane, using calculated position")
+                    relocalizationState = .success
+                    placeFoundAnchorMarker(package: package, transformedPosition: calculatedAnchorPosition)
+                    return
+                }
             } else {
-                print("⚠️ Could not find suitable ground plane")
-                print("   Using calculated position: \(precisePositionBeforeGroundProjection)")
+                print("\n⚠️ NO SPATIAL RELATIONSHIP DATA:")
+                print("   Package was created before spatial offset feature")
+                print("   OR floor marker position couldn't be determined at capture")
+                print("   Using floor marker position directly (will be inaccurate)")
+                print("   Need to recapture package to get precision")
+                
                 relocalizationState = .success
                 placeFoundAnchorMarker(package: package, transformedPosition: precisePositionBeforeGroundProjection)
+                return
             }
         }
         
