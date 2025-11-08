@@ -30,8 +30,8 @@ enum RelocalizationState {
     var displayMessage: String {
         switch self {
         case .idle: return ""
-        case .searching: return "Look around slowly to find anchor points..."
-        case .imageTracking: return "Scanning for ground plane..."
+        case .searching: return "Scanning for ground plane..."
+        case .imageTracking: return "Looking for anchor point..."
         case .featureMatching: return "Matching spatial features..."
         case .validating: return "Validating position..."
         case .success: return "✓ Anchor point found!"
@@ -439,6 +439,10 @@ struct ARViewContainer: UIViewRepresentable {
         // MARK: - Marker Placement
         
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            if relocalizationState != .idle {
+                print("⚠️ Tap ignored - in relocalization mode")
+                return
+            }
             guard let arView = arView else { return }
             
             print("🔵 TAP DETECTED - isAnchorMode: \(isAnchorMode)")
@@ -912,8 +916,8 @@ struct ARViewContainer: UIViewRepresentable {
                         print("   Placing pending anchor: \(packageID)")
                         validateAndCalculateTransform(
                             package: package,
-                            imageAnchor: pendingData.anchor,
-                            captureType: pendingData.captureType
+                            detectedTransform: pendingData.anchor.transform,
+                            imageAnchor: pendingData.anchor
                         )
                     }
                 }
@@ -922,12 +926,18 @@ struct ARViewContainer: UIViewRepresentable {
                 pendingAnchorDetections.removeAll()
             }
 
-            // Handle image anchor detection during relocalization
-            if isRelocalizationMode {
-                for anchor in anchors {
-                    if let imageAnchor = anchor as? ARImageAnchor {
-                        handleDetectedImage(imageAnchor)
-                    }
+            if !newHorizontalPlanes.isEmpty && relocalizationState == .searching {
+                print("✅ Ground plane detected during relocalization - transitioning to image tracking")
+                relocalizationState = .imageTracking
+            }
+
+            let imageAnchors = anchors.compactMap { $0 as? ARImageAnchor }
+            
+            if !imageAnchors.isEmpty {
+                print("📸 ARKit detected \(imageAnchors.count) image anchor(s)")
+                for imageAnchor in imageAnchors {
+                    print("   Image: \(imageAnchor.referenceImage.name ?? "unnamed")")
+                    handleDetectedImage(imageAnchor)
                 }
             }
         }
@@ -1831,19 +1841,30 @@ struct ARViewContainer: UIViewRepresentable {
             // Prepare reference images for ARKit tracking
             prepareReferenceImages()
             
+            var groundPlaneReady = false
             if let arView = arView {
-            let allAnchors = arView.session.currentFrame?.anchors ?? []
-            let horizontalPlanes = allAnchors.compactMap { $0 as? ARPlaneAnchor }
-                .filter { $0.alignment == .horizontal }
-            
-            if horizontalPlanes.isEmpty {
-                print("⚠️ No ground planes detected yet")
-                print("   (AR session running - planes may be detected soon)")
-            } else {
-                print("✅ \(horizontalPlanes.count) ground plane(s) already detected and ready")
-                print("   Using existing AR session data for anchor placement")
+                let allAnchors = arView.session.currentFrame?.anchors ?? []
+                let horizontalPlanes = allAnchors.compactMap { $0 as? ARPlaneAnchor }
+                    .filter { $0.alignment == .horizontal }
+                
+                if horizontalPlanes.isEmpty {
+                    print("⚠️ No ground planes detected yet")
+                    print("   (AR session running - planes may be detected soon)")
+                    groundPlaneReady = false
+                } else {
+                    print("✅ \(horizontalPlanes.count) ground plane(s) already detected and ready")
+                    print("   Using existing AR session data for anchor placement")
+                    groundPlaneReady = true
+                }
             }
-        }
+            
+            if groundPlaneReady {
+                print("🎯 Ground ready - starting image detection immediately")
+                relocalizationState = .imageTracking
+            } else {
+                print("⏳ Waiting for ground plane detection")
+                relocalizationState = .searching
+            }
             
             print("✅ Relocalization mode active")
             print("   Loaded \(activeRelocalizationPackages.count) anchor package(s)")
@@ -1900,6 +1921,7 @@ struct ARViewContainer: UIViewRepresentable {
             print("🖼️ Preparing reference images for ARKit tracking...")
             
             var referenceImages = Set<ARReferenceImage>()
+            var preparedImages: [ARReferenceImage] = []
             
             for package in activeRelocalizationPackages {
                 for refImage in package.referenceImages {
@@ -1916,18 +1938,23 @@ struct ARViewContainer: UIViewRepresentable {
                     arRefImage.name = "\(package.id.uuidString)-\(refImage.captureType.rawValue)"
                     
                     referenceImages.insert(arRefImage)
+                    preparedImages.append(arRefImage)
                 }
                 
                 if let floorMarker = package.floorMarker,
                    let uiImage = UIImage(data: floorMarker.imageData),
                    let cgImage = uiImage.cgImage {
-                    let floorReference = ARReferenceImage(cgImage, orientation: .up, physicalWidth: 0.5)
-                    floorReference.name = "\(package.id.uuidString)-floor_marker"
+                    let floorReference = ARReferenceImage(cgImage, orientation: .up, physicalWidth: 0.4)
+                    floorReference.name = "floor_marker_\(package.id.uuidString)"
                     referenceImages.insert(floorReference)
+                    preparedImages.append(floorReference)
+                    print("   ✓ Added floor marker image for package \(package.id.uuidString.prefix(8))")
                 }
             }
             
-            print("✅ Prepared \(referenceImages.count) reference images for tracking")
+            print("✅ Prepared \(preparedImages.count) reference images for tracking")
+            let imageNames = preparedImages.map { $0.name ?? "unnamed" }.joined(separator: ", ")
+            print("   Image types: \(imageNames)")
             
             // Show current AR session state
             print("📊 AR Session state at relocalization start:")
@@ -1940,10 +1967,23 @@ struct ARViewContainer: UIViewRepresentable {
             // Update AR configuration with reference images
             let configuration = ARWorldTrackingConfiguration()
             configuration.planeDetection = [.horizontal, .vertical]
-            configuration.detectionImages = referenceImages
+            
+            // Collect all reference images from active packages
+            let allImages = preparedImages
+            
+            // Set detection images for ARKit tracking
+            configuration.detectionImages = Set(allImages)
             configuration.maximumNumberOfTrackedImages = 2  // Track up to 2 images simultaneously
             
-            arView.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+            print("🔍 Configuring AR session for image tracking")
+            print("   Detection images: \(allImages.count)")
+            print("   Max tracked: 2")
+            
+            // Run configuration WITHOUT resetting tracking or removing anchors
+            // This preserves ground planes and existing AR session data
+            arView.session.run(configuration, options: [])
+            
+            print("✅ AR session updated with image tracking enabled")
             
             relocalizationState = .imageTracking
         }
@@ -1951,23 +1991,8 @@ struct ARViewContainer: UIViewRepresentable {
         func handleDetectedImage(_ imageAnchor: ARImageAnchor) {
             guard let imageName = imageAnchor.referenceImage.name else { return }
             
-            // Parse package ID from image name
-            // Format: {UUID}-{captureType} where UUID contains hyphens
-            let components = imageName.split(separator: "-")
-            guard components.count >= 2 else {
-                print("⚠️ Invalid image name format: \(imageName)")
-                return
-            }
-            
-            guard let captureTypeComponent = components.last else {
-                print("⚠️ Missing capture type in image name: \(imageName)")
-                return
-            }
-            
-            // Take all but the last component (the capture type) and rejoin with hyphens
-            let packageIDString = components.dropLast().joined(separator: "-")
-            guard let packageID = UUID(uuidString: packageIDString) else {
-                print("⚠️ Could not create UUID from: \(packageIDString)")
+            guard let packageID = extractPackageID(from: imageName) else {
+                print("⚠️ Could not extract package ID from image name: \(imageName)")
                 return
             }
             
@@ -2000,27 +2025,57 @@ struct ARViewContainer: UIViewRepresentable {
             // Validate and calculate coordinate transform
             validateAndCalculateTransform(
                 package: package,
-                imageAnchor: imageAnchor,
-                captureType: String(captureTypeComponent)
+                detectedTransform: imageAnchor.transform,
+                imageAnchor: imageAnchor
             )
         }
         
-        func validateAndCalculateTransform(package: AnchorPointPackage, imageAnchor: ARImageAnchor, captureType: String) {
+        func extractPackageID(from imageName: String) -> UUID? {
+            print("🔍 Extracting package ID from: \(imageName)")
+            
+            if imageName.starts(with: "floor_marker_") {
+                let uuidString = String(imageName.dropFirst("floor_marker_".count))
+                print("   Floor marker detected, UUID string: \(uuidString)")
+                if let uuid = UUID(uuidString: uuidString) {
+                    print("   ✓ Successfully parsed floor marker UUID: \(uuid.uuidString.prefix(8))")
+                    return uuid
+                } else {
+                    print("   ✗ Failed to parse UUID from: \(uuidString)")
+                    return nil
+                }
+            }
+            
+            let parts = imageName.components(separatedBy: "-")
+            if parts.count >= 5 {
+                let uuidString = parts[0...4].joined(separator: "-")
+                print("   Regular image, reconstructed UUID: \(uuidString)")
+                if let uuid = UUID(uuidString: uuidString) {
+                    print("   ✓ Successfully parsed UUID: \(uuid.uuidString.prefix(8))")
+                    return uuid
+                }
+            }
+            
+            print("   ✗ Could not parse UUID from image name")
+            return nil
+        }
+        
+        func validateAndCalculateTransform(package: AnchorPointPackage, detectedTransform: simd_float4x4, imageAnchor: ARImageAnchor? = nil) {
             print("🔍 Validation details:")
             
             // Extract positions
-            let detectedImagePosition = simd_make_float3(imageAnchor.transform.columns.3)
+            let detectedImagePosition = simd_make_float3(detectedTransform.columns.3)
             let savedAnchorPosition = package.anchorPosition
             
             print("   Detected image at (current session): \(detectedImagePosition)")
             print("   Saved anchor position (old session): \(savedAnchorPosition)")
             
-            if isFloorMarkerImage(captureType),
+            if let anchor = imageAnchor,
+               isFloorMarkerImage(anchor),
                let floorMarker = package.floorMarker {
                 print("📐 PRECISION MODE: Floor marker detected!")
                 placePreciseAnchorMarker(
                     package: package,
-                    imageAnchor: imageAnchor,
+                    imageAnchor: anchor,
                     floorMarker: floorMarker
                 )
                 return
@@ -2046,7 +2101,10 @@ struct ARViewContainer: UIViewRepresentable {
                 print("   Image detected but cannot place marker without ground reference")
                 
                 // Store for later placement when ground is detected
-                pendingAnchorDetections[package.id] = (anchor: imageAnchor, captureType: captureType)
+                if let anchor = imageAnchor {
+                    let captureName = anchor.referenceImage.name ?? ""
+                    pendingAnchorDetections[package.id] = (anchor: anchor, captureType: captureName)
+                }
                 relocalizationState = .imageTracking  // Still searching
                 return
             }
@@ -2112,27 +2170,78 @@ struct ARViewContainer: UIViewRepresentable {
             let imageRotation = simd_quatf(floorTransform)
             let calibratedX = Float(floorMarker.markerCoordinates.x)
             let calibratedY = Float(floorMarker.markerCoordinates.y)
-            let physicalSize = imageAnchor.referenceImage.physicalSize
             
             print("📐 Calculating precise position from floor marker")
             print("   Image detected at: \(imagePosition)")
             print("   Image rotation (quat): \(imageRotation)")
             print("   Calibrated coords: (\(calibratedX), \(calibratedY))")
-            print("   Physical size: \(physicalSize.width)m x \(physicalSize.height)m")
             
-            // TODO: Calculate offset from image center using calibrated coordinates
-            // Placeholder: use image position directly (refine in later milestone)
-            let precisePosition = imagePosition
+            let physicalWidth: Float = 0.4
+            let physicalHeight = Float(floorMarker.imageSize.height / floorMarker.imageSize.width) * physicalWidth
+            print("   Physical size: \(physicalWidth)m x \(physicalHeight)m")
             
-            print("   Precise ground position: \(precisePosition)")
-            print("✅ Anchor position calculated with HIGH PRECISION")
+            let offsetX = (calibratedX - 0.5) * physicalWidth
+            let offsetZ = (calibratedY - 0.5) * physicalHeight
             
-            relocalizationState = .success
-            placeFoundAnchorMarker(package: package, transformedPosition: precisePosition)
+            print("   Offset from center: X=\(offsetX)m, Z=\(offsetZ)m")
+            
+            let localOffset = simd_float3(offsetX, 0, offsetZ)
+            let rotationMatrix = simd_matrix3x3(imageRotation)
+            let worldOffset = rotationMatrix * localOffset
+            
+            print("   World-space offset: \(worldOffset)")
+            
+            let precisePosition = imagePosition + worldOffset
+            print("   Precise position (before ground projection): \(precisePosition)")
+            
+            guard let arView = arView else {
+                print("❌ No ARView available")
+                relocalizationState = .failed
+                return
+            }
+            
+            let allAnchors = arView.session.currentFrame?.anchors ?? []
+            let horizontalPlanes = allAnchors.compactMap { $0 as? ARPlaneAnchor }
+                .filter { $0.alignment == .horizontal }
+            
+            if horizontalPlanes.isEmpty {
+                print("⚠️ No ground planes available for projection")
+                print("   Using image Y coordinate: \(precisePosition.y)")
+                relocalizationState = .success
+                placeFoundAnchorMarker(package: package, transformedPosition: precisePosition)
+                return
+            }
+            
+            let closestPlane = horizontalPlanes.min(by: { plane1, plane2 in
+                let dist1 = abs(precisePosition.y - plane1.transform.columns.3.y)
+                let dist2 = abs(precisePosition.y - plane2.transform.columns.3.y)
+                return dist1 < dist2
+            })
+            
+            if let groundPlane = closestPlane {
+                let groundY = groundPlane.transform.columns.3.y
+                let groundPosition = simd_float3(precisePosition.x, groundY, precisePosition.z)
+                
+                print("   Projected to ground plane at y=\(groundY)")
+                print("   Final precise ground position: \(groundPosition)")
+                print("✅ Anchor position calculated with HIGH PRECISION (floor marker + ground plane)")
+                
+                relocalizationState = .success
+                placeFoundAnchorMarker(package: package, transformedPosition: groundPosition)
+            } else {
+                print("⚠️ Could not find suitable ground plane")
+                print("   Using calculated position: \(precisePosition)")
+                relocalizationState = .success
+                placeFoundAnchorMarker(package: package, transformedPosition: precisePosition)
+            }
         }
         
-        func isFloorMarkerImage(_ captureType: String) -> Bool {
-            return captureType == "floor_marker"
+        func isFloorMarkerImage(_ imageAnchor: ARImageAnchor) -> Bool {
+            guard let imageName = imageAnchor.referenceImage.name else {
+                return false
+            }
+            
+            return imageName.starts(with: "floor_marker_")
         }
         
         func placeFoundAnchorMarker(package: AnchorPointPackage, transformedPosition: simd_float3) {
