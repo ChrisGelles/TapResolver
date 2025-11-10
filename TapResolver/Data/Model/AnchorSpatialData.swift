@@ -28,7 +28,7 @@ struct AnchorPointPackage: Codable {
     var floorMarker: FloorMarkerCapture?
     
     // Spatial relationship between floor marker and anchor
-    var floorMarkerToAnchorOffset: simd_float3?
+    var floorMarkerToAnchorTransform: simd_float4x4?
     
     // Milestone 5: Wide-angle context (placeholder)
     var contextCaptures: [WideAngleCapture] = []
@@ -47,7 +47,7 @@ struct AnchorPointPackage: Codable {
         self.referenceImages = []
         self.visualDescription = visualDescription
         self.floorMarker = nil
-        self.floorMarkerToAnchorOffset = nil
+        self.floorMarkerToAnchorTransform = nil
         self.contextCaptures = []
         self.proximityBeacons = []
     }
@@ -127,7 +127,7 @@ extension AnchorPointPackage {
     enum CodingKeys: String, CodingKey {
         case id, mapPointID, mapCoordinates, anchorPosition, anchorSessionTransform
         case captureDate, spatialData, referenceImages, visualDescription
-        case floorMarker, floorMarkerToAnchorOffset, contextCaptures, proximityBeacons
+        case floorMarker, floorMarkerToAnchorTransform, floorMarkerToAnchorOffset, contextCaptures, proximityBeacons
     }
     
     init(from decoder: Decoder) throws {
@@ -157,11 +157,24 @@ extension AnchorPointPackage {
         referenceImages = try container.decode([AnchorReferenceImage].self, forKey: .referenceImages)
         visualDescription = try container.decodeIfPresent(String.self, forKey: .visualDescription)
         floorMarker = try container.decodeIfPresent(FloorMarkerCapture.self, forKey: .floorMarker)
-        if let offsetArray = try container.decodeIfPresent([Float].self, forKey: .floorMarkerToAnchorOffset),
-           offsetArray.count == 3 {
-            floorMarkerToAnchorOffset = simd_float3(offsetArray[0], offsetArray[1], offsetArray[2])
+        if let transformArray = try container.decodeIfPresent([Float].self, forKey: .floorMarkerToAnchorTransform),
+           transformArray.count == 16 {
+            floorMarkerToAnchorTransform = simd_float4x4(
+                simd_float4(transformArray[0], transformArray[1], transformArray[2], transformArray[3]),
+                simd_float4(transformArray[4], transformArray[5], transformArray[6], transformArray[7]),
+                simd_float4(transformArray[8], transformArray[9], transformArray[10], transformArray[11]),
+                simd_float4(transformArray[12], transformArray[13], transformArray[14], transformArray[15])
+            )
         } else {
-            floorMarkerToAnchorOffset = nil
+            if let offsetArray = try container.decodeIfPresent([Float].self, forKey: .floorMarkerToAnchorOffset),
+               offsetArray.count == 3 {
+                var transform = matrix_identity_float4x4
+                transform.columns.3 = simd_float4(offsetArray[0], offsetArray[1], offsetArray[2], 1.0)
+                floorMarkerToAnchorTransform = transform
+                print("📦 Migrated old offset to transform")
+            } else {
+                floorMarkerToAnchorTransform = nil
+            }
         }
         contextCaptures = try container.decodeIfPresent([WideAngleCapture].self, forKey: .contextCaptures) ?? []
         proximityBeacons = try container.decodeIfPresent([BeaconReference].self, forKey: .proximityBeacons) ?? []
@@ -185,8 +198,14 @@ extension AnchorPointPackage {
         try container.encode(referenceImages, forKey: .referenceImages)
         try container.encodeIfPresent(visualDescription, forKey: .visualDescription)
         try container.encodeIfPresent(floorMarker, forKey: .floorMarker)
-        if let offset = floorMarkerToAnchorOffset {
-            try container.encode([offset.x, offset.y, offset.z], forKey: .floorMarkerToAnchorOffset)
+        if let transform = floorMarkerToAnchorTransform {
+            let transformArray: [Float] = [
+                transform.columns.0.x, transform.columns.0.y, transform.columns.0.z, transform.columns.0.w,
+                transform.columns.1.x, transform.columns.1.y, transform.columns.1.z, transform.columns.1.w,
+                transform.columns.2.x, transform.columns.2.y, transform.columns.2.z, transform.columns.2.w,
+                transform.columns.3.x, transform.columns.3.y, transform.columns.3.z, transform.columns.3.w
+            ]
+            try container.encode(transformArray, forKey: .floorMarkerToAnchorTransform)
         }
         if !contextCaptures.isEmpty {
             try container.encode(contextCaptures, forKey: .contextCaptures)

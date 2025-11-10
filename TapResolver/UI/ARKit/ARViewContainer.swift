@@ -37,6 +37,23 @@ enum RelocalizationState {
         case .success: return "✓ Found! Tap where marker should be for comparison"
         case .failed: return "Unable to find anchor point"
         }
+        
+    }
+}
+
+enum DetectionPhase {
+    case idle
+    case longRange      // Wall targets only (1.2m)
+    case approaching    // Wall + floor mid (0.8m)
+    case precision      // All targets
+    
+    var displayName: String {
+        switch self {
+        case .idle: return "Idle"
+        case .longRange: return "Long-Range Detection"
+        case .approaching: return "Approaching Target"
+        case .precision: return "Precision Mode"
+        }
     }
 }
 
@@ -94,21 +111,41 @@ struct ARViewContainer: UIViewRepresentable {
         let configuration = ARWorldTrackingConfiguration()
         configuration.planeDetection = [.horizontal, .vertical]
         
-        // Enable LiDAR if available
+        // Enable LiDAR scene reconstruction for improved raycasting accuracy
         if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
             configuration.sceneReconstruction = .mesh
+            print("✅ LiDAR scene reconstruction enabled")
+            print("   Raycasts will use mesh geometry when available")
+        } else {
+            print("⚠️ Device does not support scene reconstruction")
+            print("   Raycasts will use plane detection only")
+            print("   Accuracy may be reduced on low-texture surfaces")
         }
         
-        // Load saved world map if it exists
-        if let worldMap = worldMapStore.loadWorldMap() {
+        // Use gravity alignment for stable indoor tracking
+        configuration.worldAlignment = .gravity
+        
+        // Choose best patch if available, fallback to legacy GlobalMap
+        if let activePoint = mapPointStore.activePoint,
+           let (meta, map) = worldMapStore.chooseBestPatch(for: activePoint.mapPoint) {
+            configuration.initialWorldMap = map
+            context.coordinator.isRelocalizing = true
+            context.coordinator.relocalizationStartTime = Date()
+            print("🌍 Seeding AR session with patch '\(meta.name)'")
+        } else if let worldMap = worldMapStore.loadWorldMap() {
             configuration.initialWorldMap = worldMap
             context.coordinator.isRelocalizing = true
             context.coordinator.relocalizationStartTime = Date()
-            print("🗺️ Loading saved AR World Map for marker placement")
+            print("🌍 Seeding AR session with legacy GlobalMap")
         } else {
-            print("⚠️ No saved AR World Map - starting fresh tracking")
+            print("⚠️ No patches or GlobalMap available")
             context.coordinator.isRelocalized = true  // No relocalization needed
         }
+        
+        // Disable image detection for GlobalMap validation
+        configuration.detectionImages = []
+        configuration.maximumNumberOfTrackedImages = 0
+        print("🚫 Image detection DISABLED for GlobalMap validation")
         
         // Run the session with proper initialization
         print("🎬 AR Session starting - markers will be created on-demand")
@@ -255,6 +292,13 @@ struct ARViewContainer: UIViewRepresentable {
         var pendingFloorMarker: FloorMarkerCapture?
         var pendingFloorMarkerPackageID: UUID?
         private var capturedFloorMarkerOffset: simd_float3? = nil
+        private var capturedFloorMarkerTransform: simd_float4x4? = nil
+        
+        // Diagnostic flag to log scene reconstruction status once
+        private var hasLoggedSceneReconstruction = false
+        private let imageDetectionEnabledForValidation = false
+        private var isTrackingReady: Bool = false
+        private var trackingReadyTimestamp: Date?
         
         // Relocalization mode
         var isRelocalizationMode = false
@@ -271,6 +315,274 @@ struct ARViewContainer: UIViewRepresentable {
         
         // Coordinate system transform (2D map -> 3D AR)
         var mapToARTransform: simd_float4x4? = nil
+        
+        // Config debouncing
+        private var lastConfigSig: String = ""
+        private var lastConfigRunAt: Date = .distantPast
+        
+        // Progressive detection
+        private var currentDetectionPhase: DetectionPhase = .idle
+        private var detectionPhaseStartTime: Date?
+        private var lastDetectedImagePosition: simd_float3?
+        private var detectionStabilityCheckTimer: Timer?
+        
+        // Stability tracking for phase transitions
+        private var stabilityPositions: [simd_float3] = []
+        private let maxStabilityPositions = 10  // Track last 10 positions
+        
+        /// Preserve all config settings when making changes
+        /// ARWorldTrackingConfiguration is a class (reference type), so we need proper cloning
+        private func preserveAndRun(
+            _ mutate: (ARWorldTrackingConfiguration) -> Void,
+            session: ARSession
+        ) {
+            guard let current = session.configuration as? ARWorldTrackingConfiguration else {
+                print("❌ Cannot preserve config - not ARWorldTrackingConfiguration")
+                return
+            }
+            
+            let cfg = ARWorldTrackingConfiguration()
+            cfg.worldAlignment = current.worldAlignment
+            cfg.planeDetection = current.planeDetection
+            cfg.environmentTexturing = current.environmentTexturing
+            cfg.sceneReconstruction = current.sceneReconstruction
+            cfg.maximumNumberOfTrackedImages = current.maximumNumberOfTrackedImages
+            
+            mutate(cfg)
+            
+            print("🔧 Config updated:")
+            print("   Detection images: \(cfg.detectionImages?.count ?? 0)")
+            print("   Max tracked: \(cfg.maximumNumberOfTrackedImages)")
+            
+            session.run(cfg, options: [])
+        }
+        
+        /// Calculate viewing angle relative to image plane normal
+        /// Returns angle in degrees (0° = perpendicular view, 90° = edge-on view)
+        private func calculateAngleToNormal(
+            imageAnchor: ARImageAnchor,
+            frame: ARFrame
+        ) -> Float {
+            let r = imageAnchor.transform
+            let planeNormal = simd_normalize(
+                simd_float3(r.columns.2.x, r.columns.2.y, r.columns.2.z)
+            )
+            
+            let camPos = simd_make_float3(frame.camera.transform.columns.3)
+            let imgPos = simd_make_float3(r.columns.3)
+            let camToImage = simd_normalize(imgPos - camPos)
+            
+            let dot = max(-1.0 as Float, min(1.0 as Float, simd_dot(planeNormal, camToImage)))
+            let angleRad = acos(dot)
+            let angleDeg = abs(angleRad * (180.0 as Float) / Float.pi)
+            
+            return angleDeg
+        }
+        
+        /// Extract yaw angle from 4x4 transform (in degrees)
+        /// Handles ARKit's coordinate system (Y-up, Z-forward)
+        private func yawDegrees(from transform: simd_float4x4) -> Float {
+            let r = simd_float3x3(
+                simd_make_float3(transform.columns.0),
+                simd_make_float3(transform.columns.1),
+                simd_make_float3(transform.columns.2)
+            )
+            
+            let yaw = atan2f(r.columns.2.x, r.columns.2.z)
+            return yaw * (180.0 as Float) / Float.pi
+        }
+        
+        /// Calculate yaw coverage across observations (wrap-around safe)
+        /// Returns coverage in degrees (0-360)
+        private func calculateYawCoverage(_ yaws: [Float]) -> Float {
+            guard yaws.count >= 2 else { return 0 }
+            
+            let normalized = yaws.map { fmodf(($0 + 360.0 as Float), 360.0 as Float) }.sorted()
+            
+            var maxGap: Float = 0
+            for i in 0..<normalized.count {
+                let next = (i + 1) % normalized.count
+                let gap = fmodf((normalized[next] - normalized[i] + 360.0 as Float), 360.0 as Float)
+                maxGap = max(maxGap, gap)
+            }
+            
+            return 360 - maxGap
+        }
+        
+        /// Check if an image anchor has been stable for the required duration
+        private func checkStability(
+            position: simd_float3,
+            duration: TimeInterval,
+            maxJitterCm: Float
+        ) -> Bool {
+            stabilityPositions.append(position)
+            
+            if stabilityPositions.count > maxStabilityPositions {
+                stabilityPositions.removeFirst()
+            }
+            
+            guard let startTime = detectionPhaseStartTime else {
+                detectionPhaseStartTime = Date()
+                return false
+            }
+            
+            let elapsed = Date().timeIntervalSince(startTime)
+            guard elapsed >= duration else {
+                return false
+            }
+            
+            guard stabilityPositions.count >= 3 else { return false }
+            
+            var maxJitter: Float = 0
+            for i in 0..<stabilityPositions.count - 1 {
+                let delta = simd_distance(stabilityPositions[i], stabilityPositions[i + 1])
+                maxJitter = max(maxJitter, delta)
+            }
+            
+            let isStable = (maxJitter * 100) <= maxJitterCm
+            
+            if isStable {
+                print("✅ Stability check passed: \(String(format: "%.2f", Double(maxJitter * 100)))cm jitter over \(String(format: "%.1f", Double(elapsed)))s")
+            }
+            
+            return isStable
+        }
+        
+        private func resetStabilityTracking() {
+            stabilityPositions.removeAll()
+            detectionPhaseStartTime = nil
+            lastDetectedImagePosition = nil
+        }
+        
+        /// Check if SLAM is ready for image tracking
+        private func slamIsReady(_ session: ARSession) -> Bool {
+            guard let frame = session.currentFrame else { return false }
+            guard case .normal = frame.camera.trackingState else { return false }
+            
+            let planes = frame.anchors.compactMap { $0 as? ARPlaneAnchor }
+                .filter { $0.alignment == .horizontal }
+            return planes.contains { $0.planeExtent.width * $0.planeExtent.height > 0.5 }
+        }
+        
+        /// Escalate to more images if no lock detected
+        private func escalateDetectionIfNoLock(
+            after seconds: TimeInterval,
+            categorizedImages: [String: Set<ARReferenceImage>]
+        ) {
+            guard imageDetectionEnabledForValidation else {
+                print("🚫 Image detection disabled (GlobalMap validation) - skipping escalation")
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+                guard let self = self,
+                      self.relocalizationState == .imageTracking,
+                      let arView = self.arView else { return }
+                
+                let hasAnchorMarker = arView.scene.rootNode.childNodes
+                    .contains(where: { $0.name == "AnchorMarker" })
+                guard !hasAnchorMarker else {
+                    print("✅ Anchor already placed - skipping escalation")
+                    return
+                }
+                
+                switch self.currentDetectionPhase {
+                case .precision:
+                    let all = (categorizedImages["floor_near"] ?? [])
+                        .union(categorizedImages["floor_mid"] ?? [])
+                        .union(categorizedImages["wall"] ?? [])
+                    
+                    self.preserveAndRun({ config in
+                        config.detectionImages = all
+                        config.maximumNumberOfTrackedImages = 2
+                    }, session: arView.session)
+                    
+                    print("⬆️ Escalating to ALL targets (no near-floor lock)")
+                    print("   Total images: \(all.count)")
+                    
+                case .longRange:
+                    let next = (categorizedImages["wall"] ?? [])
+                        .union(categorizedImages["floor_mid"] ?? [])
+                    
+                    self.preserveAndRun({ config in
+                        config.detectionImages = next
+                        config.maximumNumberOfTrackedImages = 2
+                    }, session: arView.session)
+                    
+                    print("⬆️ Escalating to wall + floor_mid")
+                    print("   Total images: \(next.count)")
+                    
+                default:
+                    break
+                }
+            }
+        }
+        
+        private func advanceDetectionPhase(
+            to newPhase: DetectionPhase,
+            categorizedImages: [String: Set<ARReferenceImage>]
+        ) {
+            guard imageDetectionEnabledForValidation else {
+                print("🚫 Image detection disabled (GlobalMap validation) - skipping phase advance")
+                return
+            }
+            guard let arView = arView else {
+                print("❌ Cannot advance phase - no AR session view")
+                return
+            }
+            
+            let session = arView.session
+            
+            print("🎯 Advancing detection phase: \(currentDetectionPhase.displayName) → \(newPhase.displayName)")
+            
+            var detectionImages = Set<ARReferenceImage>()
+            var maxTracked = 1
+            
+            switch newPhase {
+            case .idle:
+                break
+            case .longRange:
+                if let wallImages = categorizedImages["wall"] {
+                    detectionImages = wallImages
+                }
+                maxTracked = 1
+            case .approaching:
+                if let wallImages = categorizedImages["wall"] {
+                    detectionImages.formUnion(wallImages)
+                }
+                if let floorMid = categorizedImages["floor_mid"] {
+                    detectionImages.formUnion(floorMid)
+                }
+                maxTracked = 2
+            case .precision:
+                if let wallImages = categorizedImages["wall"] {
+                    detectionImages.formUnion(wallImages)
+                }
+                if let floorMid = categorizedImages["floor_mid"] {
+                    detectionImages.formUnion(floorMid)
+                }
+                if let floorNear = categorizedImages["floor_near"] {
+                    detectionImages.formUnion(floorNear)
+                }
+                maxTracked = 2
+            }
+            
+            preserveAndRun({ config in
+                config.detectionImages = detectionImages
+                config.maximumNumberOfTrackedImages = maxTracked
+            }, session: session)
+            
+            currentDetectionPhase = newPhase
+            resetStabilityTracking()
+            
+            print("   Images: \(detectionImages.count), Max tracked: \(maxTracked)")
+        }
+        
+        private func handlePhaseTransitionDetection(
+            _ imageAnchor: ARImageAnchor,
+            categorizedImages: [String: Set<ARReferenceImage>]
+        ) {
+            // Phase transitions now handled by escalation logic
+        }
         
         // MARK: - Crosshair Creation
         
@@ -1030,10 +1342,63 @@ struct ARViewContainer: UIViewRepresentable {
             
             if !imageAnchors.isEmpty {
                 print("📸 ARKit detected \(imageAnchors.count) image anchor(s)")
+                let categorizedImages = isRelocalizationMode ? prepareReferenceImages() : [:]
                 for imageAnchor in imageAnchors {
-                    print("   Image: \(imageAnchor.referenceImage.name ?? "unnamed")")
+                    guard let frame = session.currentFrame else { continue }
+                    
+                    let camPos = simd_make_float3(frame.camera.transform.columns.3)
+                    let imgPos = simd_make_float3(imageAnchor.transform.columns.3)
+                    let distance = simd_length(imgPos - camPos)
+                    let imageSize = imageAnchor.referenceImage.physicalSize
+                    
+                    print("   Image: \(imageAnchor.referenceImage.name ?? "unknown")")
+                    print("   Physical size: \(imageSize.width)m x \(imageSize.height)m")
+                    print("   Distance from camera: \(String(format: "%.2f", Double(distance)))m (camera-relative)")
+                    
+                    if isRelocalizationMode {
+                        handlePhaseTransitionDetection(imageAnchor, categorizedImages: categorizedImages)
+                    }
+                    
                     handleDetectedImage(imageAnchor)
                 }
+            }
+        }
+        
+        func session(_ session: ARSession, didUpdate frame: ARFrame) {
+            // Log scene reconstruction status once
+            if !hasLoggedSceneReconstruction && frame.camera.trackingState == .normal {
+                if let config = session.configuration as? ARWorldTrackingConfiguration {
+                    let meshEnabled = config.sceneReconstruction == .mesh
+                    print("\n📊 AR Session Configuration:")
+                    print("   Scene reconstruction: \(meshEnabled ? "✅ ENABLED (LiDAR mesh)" : "❌ Disabled (plane only)")")
+                    print("   Plane detection: \(config.planeDetection)")
+                    print("   World alignment: \(config.worldAlignment)")
+                    if isRelocalizationMode {
+                        print("   Detection phase: \(currentDetectionPhase.displayName)")
+                    }
+                    print("")
+                    hasLoggedSceneReconstruction = true
+                }
+            }
+            
+            let trackingState = frame.camera.trackingState
+            
+            if case .normal = trackingState {
+                if trackingReadyTimestamp == nil {
+                    trackingReadyTimestamp = Date()
+                    print("⏱️ Tracking stabilizing...")
+                } else if let timestamp = trackingReadyTimestamp,
+                          Date().timeIntervalSince(timestamp) >= 1.0,
+                          !isTrackingReady {
+                    isTrackingReady = true
+                    print("✅ Tracking ready - stable for 1+ second")
+                }
+            } else {
+                if isTrackingReady {
+                    print("⚠️ Tracking degraded - waiting to stabilize")
+                }
+                trackingReadyTimestamp = nil
+                isTrackingReady = false
             }
         }
         
@@ -1870,10 +2235,20 @@ struct ARViewContainer: UIViewRepresentable {
             if let anchorPosition = currentCapturePosition {
                 
                 let centerPoint = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
-                if let raycastQuery = arView.raycastQuery(from: centerPoint, allowing: .existingPlaneGeometry, alignment: .horizontal) {
+                
+                // Use scene mesh if available (LiDAR), fallback to plane geometry
+                let meshEnabled = (arView.session.configuration as? ARWorldTrackingConfiguration)?.sceneReconstruction == .mesh
+                
+                let raycastTarget: ARRaycastQuery.Target = meshEnabled ? .existingPlaneGeometry : .existingPlaneGeometry
+                
+                if let raycastQuery = arView.raycastQuery(from: centerPoint,
+                                                          allowing: raycastTarget,
+                                                          alignment: .horizontal) {
                     let raycastResults = arView.session.raycast(raycastQuery)
                     
                     if let result = raycastResults.first {
+                        let method = meshEnabled ? "LiDAR mesh" : "plane detection"
+                        print("   ✅ Raycast successful using \(method)")
                         let floorMarkerPosition = simd_make_float3(result.worldTransform.columns.3)
                         let offset = anchorPosition - floorMarkerPosition
                         
@@ -1882,20 +2257,26 @@ struct ARViewContainer: UIViewRepresentable {
                         print("   Calculated offset (anchor - floor): \(offset)")
                         print("   Offset magnitude: \(simd_length(offset) * 100) cm")
                         
+                        var transform = matrix_identity_float4x4
+                        transform.columns.3 = simd_float4(offset.x, offset.y, offset.z, 1.0)
                         capturedFloorMarkerOffset = offset
+                        capturedFloorMarkerTransform = transform
                     } else {
                         print("   ⚠️ Could not determine floor marker position via raycast")
                         print("   Package will be saved without spatial relationship data")
                         capturedFloorMarkerOffset = nil
+                        capturedFloorMarkerTransform = nil
                     }
                 } else {
                     print("   ⚠️ Could not build raycast query for floor marker")
                     print("   Package will be saved without spatial relationship data")
                     capturedFloorMarkerOffset = nil
+                    capturedFloorMarkerTransform = nil
                 }
             } else {
                 print("   ⚠️ Missing required data to calculate floor marker position")
                 capturedFloorMarkerOffset = nil
+                capturedFloorMarkerTransform = nil
             }
             
             print("   Ready for position calibration")
@@ -1928,34 +2309,40 @@ struct ARViewContainer: UIViewRepresentable {
             guard let packageID = pendingFloorMarkerPackageID else {
                 print("⚠️ Floor marker captured but no pending package to attach")
                 capturedFloorMarkerOffset = nil
+                capturedFloorMarkerTransform = nil
                 return
             }
             
             guard let mapPointStore = mapPointStore else {
                 print("❌ No MapPointStore available to store floor marker")
                 capturedFloorMarkerOffset = nil
+                capturedFloorMarkerTransform = nil
                 return
             }
             
             if let index = mapPointStore.anchorPackages.firstIndex(where: { $0.id == packageID }) {
                 mapPointStore.anchorPackages[index].floorMarker = floorMarker
-                mapPointStore.anchorPackages[index].floorMarkerToAnchorOffset = capturedFloorMarkerOffset
+                mapPointStore.anchorPackages[index].floorMarkerToAnchorTransform = capturedFloorMarkerTransform
                 mapPointStore.saveAnchorPackages()
                 print("📐 Floor marker included in anchor package")
                 print("   Package ID: \(packageID)")
                 print("   Marker coordinates: \(coordinates)")
-                if let offset = capturedFloorMarkerOffset {
-                    print("   ✅ Stored floor marker offset: \(offset)")
-                    print("      Offset magnitude: \(simd_length(offset) * 100) cm")
+                if let transform = capturedFloorMarkerTransform {
+                    let offset = simd_make_float3(transform.columns.3)
+                    print("   ✅ Stored floor marker transform")
+                    print("      Translation: \(offset)")
+                    print("      Magnitude: \(simd_length(offset) * 100) cm")
                 } else {
-                    print("   ⚠️ No spatial offset stored - precision will be limited")
+                    print("   ⚠️ No spatial transform stored - precision will be limited")
                 }
                 pendingFloorMarkerPackageID = nil
                 pendingFloorMarker = nil
                 capturedFloorMarkerOffset = nil
+                capturedFloorMarkerTransform = nil
             } else {
                 print("⚠️ Could not find anchor package \(packageID) to attach floor marker")
                 capturedFloorMarkerOffset = nil
+                capturedFloorMarkerTransform = nil
             }
         }
         
@@ -1964,10 +2351,15 @@ struct ARViewContainer: UIViewRepresentable {
             isCapturingFloorMarker = false
             showFloorMarkerPositioning = false
             capturedFloorMarkerOffset = nil
+            capturedFloorMarkerTransform = nil
             print("⚠️ Floor marker capture canceled")
         }
         
         func startRelocalization() {
+            guard imageDetectionEnabledForValidation else {
+                print("🚫 Image detection disabled (GlobalMap validation) - skipping image-based relocalization")
+                return
+            }
             guard let mapPointStore = mapPointStore else {
                 print("❌ No MapPointStore available")
                 return
@@ -1990,8 +2382,7 @@ struct ARViewContainer: UIViewRepresentable {
             isRelocalizationMode = true
             relocalizationState = .searching
             
-            // Prepare reference images for ARKit tracking
-            prepareReferenceImages()
+            let categorizedImages = prepareReferenceImages()
             
             var groundPlaneReady = false
             if let arView = arView {
@@ -2010,12 +2401,50 @@ struct ARViewContainer: UIViewRepresentable {
                 }
             }
             
-            if groundPlaneReady {
-                print("🎯 Ground ready - starting image detection immediately")
-                relocalizationState = .imageTracking
-            } else {
-                print("⏳ Waiting for ground plane detection")
-                relocalizationState = .searching
+            if let arView = arView {
+                if slamIsReady(arView.session) {
+                    if groundPlaneReady {
+                        let floorSet = (categorizedImages["floor_near"] ?? [])
+                            .union(categorizedImages["floor_mid"] ?? [])
+                        
+                        preserveAndRun({ config in
+                            config.detectionImages = floorSet
+                            config.maximumNumberOfTrackedImages = 2
+                        }, session: arView.session)
+                        
+                        currentDetectionPhase = .precision
+                        print("🎯 SLAM + Ground ready - starting FLOOR targets (precision-first)")
+                        print("   Floor images: \(floorSet.count), Max tracked: 2")
+                        
+                        escalateDetectionIfNoLock(after: 2.0, categorizedImages: categorizedImages)
+                        
+                        relocalizationState = .imageTracking
+                    } else {
+                        let wallSet = categorizedImages["wall"] ?? []
+                        
+                        preserveAndRun({ config in
+                            config.detectionImages = wallSet
+                            config.maximumNumberOfTrackedImages = 1
+                        }, session: arView.session)
+                        
+                        currentDetectionPhase = .longRange
+                        print("🎯 SLAM ready, Ground not ready - starting WALL targets")
+                        print("   Wall images: \(wallSet.count), Max tracked: 1")
+                        
+                        escalateDetectionIfNoLock(after: 2.0, categorizedImages: categorizedImages)
+                        
+                        relocalizationState = .imageTracking
+                    }
+                } else {
+                    print("⏳ Waiting for SLAM readiness before image tracking")
+                    relocalizationState = .searching
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        guard let self = self, self.relocalizationState == .searching else { return }
+                        print("🔄 Retrying detection start...")
+                        self.startRelocalization()
+                    }
+                }
             }
             
             print("✅ Relocalization mode active")
@@ -2028,11 +2457,13 @@ struct ARViewContainer: UIViewRepresentable {
                 print("      Image size: \(Int(floorMarker.imageSize.width)) x \(Int(floorMarker.imageSize.height)) pixels")
                 print("      Image data: \(floorMarker.imageData.count) bytes")
                 print("      Calibrated coords: (\(floorMarker.markerCoordinates.x), \(floorMarker.markerCoordinates.y))")
-                if let offset = package.floorMarkerToAnchorOffset {
-                    print("      ✅ Spatial offset stored: \(offset)")
-                    print("         Offset magnitude: \(simd_length(offset) * 100) cm")
+                if let transform = package.floorMarkerToAnchorTransform {
+                    let offset = simd_make_float3(transform.columns.3)
+                    print("      ✅ Spatial transform stored")
+                    print("         Translation: \(offset)")
+                    print("         Magnitude: \(simd_length(offset) * 100) cm")
                 } else {
-                    print("      ❌ NO spatial offset - precision limited")
+                    print("      ❌ NO spatial transform - precision limited")
                 }
             } else {
                 print("   ❌ NO FLOOR MARKER - package was created before floor marker feature")
@@ -2073,6 +2504,11 @@ struct ARViewContainer: UIViewRepresentable {
                 print("⚠️ Relocalization already idle")
                 return
             }
+            currentDetectionPhase = .idle
+            resetStabilityTracking()
+            detectionStabilityCheckTimer?.invalidate()
+            detectionStabilityCheckTimer = nil
+            
             print("🛑 Stopping relocalization mode")
             isRelocalizationMode = false
             relocalizationState = .idle
@@ -2094,77 +2530,115 @@ struct ARViewContainer: UIViewRepresentable {
             activeRelocalizationPackages.removeAll()
         }
         
-        func prepareReferenceImages() {
-            guard let arView = arView else { return }
+        private func createReferenceImage(from imageData: Data,
+                                          named name: String,
+                                          imageType: String) -> ARReferenceImage? {
+            guard let uiImage = UIImage(data: imageData),
+                  let cgImage = uiImage.cgImage else {
+                print("⚠️ Failed to convert image '\(name)' for ARReferenceImage creation")
+                return nil
+            }
+            
+            // Physical width based on image type for optimal detection range
+            let physicalWidth: CGFloat
+            switch imageType {
+            case "wall_north", "wall_south", "wall_east", "wall_west":
+                physicalWidth = 1.2  // 1.2m - detectable from 3-5 meters
+                print("   Creating wall image '\(name)' with physical width: \(physicalWidth)m (long-range)")
+            case "floor_far":
+                physicalWidth = 0.8  // 0.8m - detectable from 2-3 meters
+                print("   Creating floor_far image '\(name)' with physical width: \(physicalWidth)m (mid-range)")
+            case "floor_close":
+                physicalWidth = 0.6  // 0.6m - detectable from 1-2 meters
+                print("   Creating floor_close image '\(name)' with physical width: \(physicalWidth)m (approach)")
+            case "floor_marker":
+                physicalWidth = 0.4  // 0.4m - precision placement
+                print("   Creating floor_marker image '\(name)' with physical width: \(physicalWidth)m (precision)")
+            default:
+                physicalWidth = 0.4  // fallback
+                print("   Creating image '\(name)' with default physical width: \(physicalWidth)m")
+            }
+            
+            let referenceImage = ARReferenceImage(cgImage,
+                                                  orientation: .up,
+                                                  physicalWidth: physicalWidth)
+            referenceImage.name = name
+            return referenceImage
+        }
+        
+        func prepareReferenceImages() -> [String: Set<ARReferenceImage>] {
+            guard arView != nil else { return [:] }
             
             print("🖼️ Preparing reference images for ARKit tracking...")
             
-            var referenceImages = Set<ARReferenceImage>()
-            var preparedImages: [ARReferenceImage] = []
+            var categorized: [String: Set<ARReferenceImage>] = [
+                "wall": Set(),
+                "floor_mid": Set(),
+                "floor_near": Set()
+            ]
+            
+            let maxImages = 6
+            var totalImageCount = 0
+            var imageCapReached = false
             
             for package in activeRelocalizationPackages {
-                for refImage in package.referenceImages {
-                    // Convert image data to UIImage
-                    guard let uiImage = UIImage(data: refImage.imageData),
-                          let cgImage = uiImage.cgImage else {
-                        print("⚠️ Failed to convert image for package \(package.id)")
-                        continue
-                    }
-                    
-                    // Create ARReferenceImage
-                    // Physical width estimate: assume image represents ~2m width in real world
-                    let arRefImage = ARReferenceImage(cgImage, orientation: .up, physicalWidth: 2.0)
-                    arRefImage.name = "\(package.id.uuidString)-\(refImage.captureType.rawValue)"
-                    
-                    referenceImages.insert(arRefImage)
-                    preparedImages.append(arRefImage)
-                }
+                if imageCapReached { break }
                 
                 if let floorMarker = package.floorMarker,
-                   let uiImage = UIImage(data: floorMarker.imageData),
-                   let cgImage = uiImage.cgImage {
-                    let floorReference = ARReferenceImage(cgImage, orientation: .up, physicalWidth: 0.4)
-                    floorReference.name = "floor_marker_\(package.id.uuidString)"
-                    referenceImages.insert(floorReference)
-                    preparedImages.append(floorReference)
-                    print("   ✓ Added floor marker image for package \(package.id.uuidString.prefix(8))")
+                   let markerImage = createReferenceImage(
+                    from: floorMarker.imageData,
+                    named: "floor_marker_\(package.id.uuidString)",
+                    imageType: "floor_marker"
+                   ) {
+                    categorized["floor_near"]?.insert(markerImage)
+                    totalImageCount += 1
+                    print("   ✓ Floor marker: physical width \(markerImage.physicalSize.width)m (\(totalImageCount)/\(maxImages))")
+                    
+                    if totalImageCount >= maxImages {
+                        print("   ⚠️ Hit image cap (\(maxImages)) - skipping remaining images")
+                        imageCapReached = true
+                        break
+                    }
+                }
+                
+                for refImage in package.referenceImages {
+                    if totalImageCount >= maxImages {
+                        print("   ⚠️ Hit image cap (\(maxImages)) - skipping remaining images")
+                        imageCapReached = true
+                        break
+                    }
+                    
+                    let imageType = refImage.captureType.rawValue
+                    let imageName = "\(package.id.uuidString)-\(imageType)"
+                    
+                    if let referenceImage = createReferenceImage(
+                        from: refImage.imageData,
+                        named: imageName,
+                        imageType: imageType
+                    ) {
+                        switch imageType {
+                        case "wall_north", "wall_south", "wall_east", "wall_west":
+                            categorized["wall"]?.insert(referenceImage)
+                        case "floor_far":
+                            categorized["floor_mid"]?.insert(referenceImage)
+                        case "floor_close":
+                            categorized["floor_near"]?.insert(referenceImage)
+                        default:
+                            break
+                        }
+                        
+                        totalImageCount += 1
+                        print("   ✓ \(imageType): physical width \(referenceImage.physicalSize.width)m (\(totalImageCount)/\(maxImages))")
+                    }
                 }
             }
             
-            print("✅ Prepared \(preparedImages.count) reference images for tracking")
-            let imageNames = preparedImages.map { $0.name ?? "unnamed" }.joined(separator: ", ")
-            print("   Image types: \(imageNames)")
+            print("✅ Prepared \(totalImageCount) reference images")
+            print("   Wall images: \(categorized["wall"]?.count ?? 0)")
+            print("   Floor mid images: \(categorized["floor_mid"]?.count ?? 0)")
+            print("   Floor near images: \(categorized["floor_near"]?.count ?? 0)")
             
-            // Show current AR session state
-            print("📊 AR Session state at relocalization start:")
-            if let frame = arView.session.currentFrame {
-                print("   Tracking: \(frame.camera.trackingState)")
-                print("   Feature points: \(frame.rawFeaturePoints?.points.count ?? 0)")
-                print("   Total anchors: \(frame.anchors.count)")
-            }
-            
-            // Update AR configuration with reference images
-            let configuration = ARWorldTrackingConfiguration()
-            configuration.planeDetection = [.horizontal, .vertical]
-            
-            // Collect all reference images from active packages
-            let allImages = preparedImages
-            
-            // Set detection images for ARKit tracking
-            configuration.detectionImages = Set(allImages)
-            configuration.maximumNumberOfTrackedImages = 2  // Track up to 2 images simultaneously
-            
-            print("🔍 Configuring AR session for image tracking")
-            print("   Detection images: \(allImages.count)")
-            print("   Max tracked: 2")
-            
-            // Run configuration WITHOUT resetting tracking or removing anchors
-            // This preserves ground planes and existing AR session data
-            arView.session.run(configuration, options: [])
-            
-            print("✅ AR session updated with image tracking enabled")
-            
-            relocalizationState = .imageTracking
+            return categorized
         }
         
         func handleDetectedImage(_ imageAnchor: ARImageAnchor) {
@@ -2442,12 +2916,22 @@ struct ARViewContainer: UIViewRepresentable {
             
             print("   Precise position (before ground projection): \(precisePositionBeforeGroundProjection)")
             
-            if let offset = package.floorMarkerToAnchorOffset {
+            if let transform = package.floorMarkerToAnchorTransform {
+                let offset = simd_make_float3(transform.columns.3)
                 print("\n✅ USING STORED SPATIAL RELATIONSHIP:")
-                print("   Stored offset (anchor - floor): \(offset)")
+                print("   Stored transform translation: \(offset)")
                 print("   Floor marker now at: \(precisePositionBeforeGroundProjection)")
                 
-                let calculatedAnchorPosition = precisePositionBeforeGroundProjection + offset
+                var floorMarkerWorld = floorTransform
+                floorMarkerWorld.columns.3 = simd_float4(
+                    precisePositionBeforeGroundProjection.x,
+                    precisePositionBeforeGroundProjection.y,
+                    precisePositionBeforeGroundProjection.z,
+                    1.0
+                )
+                
+                let anchorTransform = floorMarkerWorld * transform
+                let calculatedAnchorPosition = simd_make_float3(anchorTransform.columns.3)
                 print("   Calculated anchor position: \(calculatedAnchorPosition)")
                 print("   Offset magnitude: \(simd_length(offset) * 100) cm")
                 
@@ -2484,7 +2968,7 @@ struct ARViewContainer: UIViewRepresentable {
                 }
             } else {
                 print("\n⚠️ NO SPATIAL RELATIONSHIP DATA:")
-                print("   Package was created before spatial offset feature")
+                print("   Package was created before spatial transform feature")
                 print("   OR floor marker position couldn't be determined at capture")
                 print("   Using floor marker position directly (will be inaccurate)")
                 print("   Need to recapture package to get precision")
@@ -2708,4 +3192,5 @@ struct ARViewContainer: UIViewRepresentable {
         print("🧹 Cleared session markers")
     }
 }
+
 

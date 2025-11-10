@@ -257,12 +257,13 @@ struct LocationMenuView: View {
                     )
                     locationSummaries = LocationImportUtils.listLocationSummaries()
                     }
-                    .navigationDestination(isPresented: Binding(
+                    .sheet(isPresented: Binding(
                         get: { selectedLocationForAR != nil },
                         set: { if !$0 { selectedLocationForAR = nil } }
                     )) {
                         if let locationID = selectedLocationForAR {
-                            ARSurveyPlaceholderView(locationID: locationID)
+                            ARLocationToolsSheet(locationID: locationID)
+                                .environmentObject(arWorldMapStore)
                         }
                     }
                     
@@ -280,21 +281,23 @@ struct LocationMenuView: View {
                 }
             }
             .onAppear {
-                // Seed both hard-coded locations idempotently.
-                seedIfNeeded(id: homeID,
-                             title: homeTitle,
-                             mapAsset: defaultMapAsset,
-                             thumbAsset: defaultThumbAsset)
-                seedIfNeeded(id: museumID,
-                             title: museumTitle,
-                             mapAsset: museumMapAsset,
-                             thumbAsset: museumThumbAsset)
-                
-                // Ensure correct names are set
-                try? LocationImportUtils.renameLocation(id: homeID, newName: homeTitle)
-                try? LocationImportUtils.renameLocation(id: museumID, newName: museumTitle)
-
-                loadLocationSummaries()
+                DispatchQueue.main.async {
+                    // Seed both hard-coded locations idempotently.
+                    seedIfNeeded(id: homeID,
+                                 title: homeTitle,
+                                 mapAsset: defaultMapAsset,
+                                 thumbAsset: defaultThumbAsset)
+                    seedIfNeeded(id: museumID,
+                                 title: museumTitle,
+                                 mapAsset: museumMapAsset,
+                                 thumbAsset: museumThumbAsset)
+                    
+                    // Ensure correct names are set
+                    try? LocationImportUtils.renameLocation(id: homeID, newName: homeTitle)
+                    try? LocationImportUtils.renameLocation(id: museumID, newName: museumTitle)
+                    
+                    loadLocationSummaries()
+                }
             }
             .sheet(isPresented: $showingImportSheet) {
                 ImportSourceSheet(
@@ -2044,24 +2047,31 @@ struct ResultRowView: View {
     }
 }
 
-private struct ARSurveyPlaceholderView: View {
+private struct ARLocationToolsSheet: View {
     let locationID: String
-
+    
+    @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
+    @Environment(\.dismiss) private var dismiss
+    
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "arkit")
-                .font(.system(size: 48))
-                .foregroundStyle(.blue)
-
-            Text("AR survey tools coming soon")
-                .font(.title3)
-                .fontWeight(.semibold)
-
-            Text("Location ID: \(locationID)")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+        NavigationStack {
+            List {
+                Section("Survey") {
+                    NavigationLink(destination: ARSurveyView(arWorldMapStore: arWorldMapStore)) {
+                        Label("Survey Space", systemImage: "camera.metering.matrix")
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("AR Tools")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
         }
-        .padding()
     }
 }
 

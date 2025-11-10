@@ -32,7 +32,8 @@ public final class MapPointStore: ObservableObject {
         public var mapPoint: CGPoint    // map-local (untransformed) coords
         public let createdDate: Date
         public var sessions: [ScanSession] = []  // Full scan session data stored in UserDefaults
-        var linkedARMarkerID: UUID?  // Optional - links to ARMarker if one exists
+        var linkedARMarkerID: UUID?  // Optional - links to legacy ARMarker if one exists
+        public var arMarkerID: String?  // Links to ARWorldMapStore marker
         
         // Initializer that accepts existing ID or generates new one
         init(id: UUID? = nil, mapPoint: CGPoint, createdDate: Date? = nil, sessions: [ScanSession] = []) {
@@ -41,6 +42,7 @@ public final class MapPointStore: ObservableObject {
             self.createdDate = createdDate ?? Date()
             self.sessions = sessions
             self.linkedARMarkerID = nil
+            self.arMarkerID = nil
         }
     }
     
@@ -302,6 +304,7 @@ public final class MapPointStore: ObservableObject {
         let createdDate: Date
         let sessions: [ScanSession]
         let linkedARMarkerID: UUID?
+        let arMarkerID: String?
     }
 
     internal func save() {
@@ -328,7 +331,8 @@ public final class MapPointStore: ObservableObject {
             y: $0.mapPoint.y,
             createdDate: $0.createdDate,
             sessions: $0.sessions,
-            linkedARMarkerID: $0.linkedARMarkerID
+            linkedARMarkerID: $0.linkedARMarkerID,
+            arMarkerID: $0.arMarkerID
         )}
         ctx.write(pointsKey, value: dto)
         if let activeID = activePointID {
@@ -359,6 +363,7 @@ public final class MapPointStore: ObservableObject {
                     sessions: dtoItem.sessions
                 )
                 point.linkedARMarkerID = dtoItem.linkedARMarkerID
+                point.arMarkerID = dtoItem.arMarkerID
                 return point
             }
             // Only log if there are points loaded

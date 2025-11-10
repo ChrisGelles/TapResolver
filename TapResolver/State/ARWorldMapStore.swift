@@ -10,6 +10,7 @@ import ARKit
 import Combine
 import simd
 import UIKit
+import CoreGraphics
 
 public final class ARWorldMapStore: ObservableObject {
     private let ctx = PersistenceContext.shared
@@ -119,6 +120,20 @@ public final class ARWorldMapStore: ObservableObject {
     private func markerObservationsURL(markerID: String) -> URL {
         markerDirectory(markerID: markerID).appendingPathComponent("observations.json")
     }
+
+    private func patchesDirectory() -> URL {
+        let dir = baseDirectory().appendingPathComponent("Patches", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func patchURL(for id: UUID) -> URL {
+        patchesDirectory().appendingPathComponent("\(id.uuidString).armap")
+    }
+
+    private func patchIndexURL() -> URL {
+        patchesDirectory().appendingPathComponent("patch_index.json")
+    }
     
     // MARK: - Lifecycle
     
@@ -203,6 +218,107 @@ public final class ARWorldMapStore: ObservableObject {
             print("❌ Failed to load GlobalMap: \(error)")
             return nil
         }
+    }
+
+    // MARK: - Multi-Patch Support
+
+    /// Save a patch with metadata
+    public func savePatch(_ map: ARWorldMap, meta: WorldMapPatchMeta) throws {
+        let data = try NSKeyedArchiver.archivedData(withRootObject: map, requiringSecureCoding: true)
+        let patchFile = patchURL(for: meta.id)
+        try data.write(to: patchFile, options: .atomic)
+        
+        let finalMeta = WorldMapPatchMeta(
+            id: meta.id,
+            name: meta.name,
+            captureDate: meta.captureDate,
+            featureCount: meta.featureCount,
+            byteSize: data.count,
+            center2D: meta.center2D,
+            radiusM: meta.radiusM,
+            version: meta.version
+        )
+        
+        var index = loadPatchIndex() ?? WorldMapPatchIndex(locationID: ctx.locationID)
+        index.patches.removeAll { $0.id == meta.id }
+        index.patches.append(finalMeta)
+        index.updated = Date()
+        try savePatchIndex(index)
+        
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB]
+        formatter.countStyle = .file
+        let sizeString = formatter.string(fromByteCount: Int64(finalMeta.byteSize))
+        
+        print("📦 Saved patch '\(finalMeta.name)'")
+        print("   Features: \(finalMeta.featureCount)")
+        print("   Size: \(sizeString)")
+        print("   Center: (\(Int(finalMeta.center2D.x)), \(Int(finalMeta.center2D.y)))")
+        print("   Total patches for location: \(index.patches.count)")
+    }
+
+    /// Load a specific patch by ID
+    public func loadPatch(id: UUID) -> ARWorldMap? {
+        let patchFile = patchURL(for: id)
+        guard FileManager.default.fileExists(atPath: patchFile.path) else {
+            print("⚠️ No patch found with ID: \(id)")
+            return nil
+        }
+        
+        do {
+            let data = try Data(contentsOf: patchFile)
+            let map = try NSKeyedUnarchiver.unarchivedObject(ofClass: ARWorldMap.self, from: data)
+            print("📂 Loaded patch: \(id)")
+            return map
+        } catch {
+            print("❌ Failed to decode patch: \(error)")
+            return nil
+        }
+    }
+
+    /// Load patch index
+    public func loadPatchIndex() -> WorldMapPatchIndex? {
+        let indexFile = patchIndexURL()
+        guard FileManager.default.fileExists(atPath: indexFile.path) else { return nil }
+        
+        do {
+            let data = try Data(contentsOf: indexFile)
+            let index = try JSONDecoder().decode(WorldMapPatchIndex.self, from: data)
+            return index
+        } catch {
+            print("❌ Failed to decode patch index: \(error)")
+            return nil
+        }
+    }
+
+    /// Save patch index
+    private func savePatchIndex(_ index: WorldMapPatchIndex) throws {
+        let indexFile = patchIndexURL()
+        let data = try JSONEncoder().encode(index)
+        try data.write(to: indexFile, options: .atomic)
+    }
+
+    /// Choose best patch for a map point
+    public func chooseBestPatch(for mapPoint: CGPoint) -> (meta: WorldMapPatchMeta, map: ARWorldMap)? {
+        guard let index = loadPatchIndex(), let nearest = index.nearestPatch(to: mapPoint) else {
+            print("⚠️ No patches available")
+            return nil
+        }
+        
+        guard let map = loadPatch(id: nearest.id) else {
+            print("⚠️ Failed to load nearest patch")
+            return nil
+        }
+        
+        let dx = nearest.center2D.x - mapPoint.x
+        let dy = nearest.center2D.y - mapPoint.y
+        let distance = sqrt(dx * dx + dy * dy)
+        
+        print("🎯 Selected patch '\(nearest.name)'")
+        print("   Distance: \(String(format: "%.1f", distance)) map units")
+        print("   Features: \(nearest.featureCount)")
+        
+        return (nearest, map)
     }
     
     private func loadGlobalMapMetadata() {

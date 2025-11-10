@@ -2,6 +2,14 @@
 //  ARSurveyView.swift
 //  TapResolver
 //
+//  Created by Chris Gelles on 11/9/25.
+//
+
+
+//
+//  ARSurveyView.swift
+//  TapResolver
+//
 //  UI for surveying a space and capturing GlobalMap
 //
 
@@ -9,12 +17,12 @@ import SwiftUI
 import ARKit
 
 struct ARSurveyView: View {
-    @EnvironmentObject var arWorldMapStore: ARWorldMapStore
     @StateObject private var coordinator: ARSurveyCoordinator
     @Environment(\.dismiss) var dismiss
     
     @State private var isSaving = false
     @State private var showSuccess = false
+    @State private var captureCenter: CGPoint?
     
     init(arWorldMapStore: ARWorldMapStore) {
         _coordinator = StateObject(wrappedValue: ARSurveyCoordinator(arWorldMapStore: arWorldMapStore))
@@ -23,7 +31,7 @@ struct ARSurveyView: View {
     var body: some View {
         ZStack {
             // AR camera view
-            ARViewContainer(coordinator: coordinator)
+            ARSurveySceneView(coordinator: coordinator)
                 .edgesIgnoringSafeArea(.all)
             
             VStack {
@@ -126,7 +134,9 @@ struct ARSurveyView: View {
             
             Button {
                 isSaving = true
-                coordinator.captureMap { result in
+                let center = captureCenter ?? CGPoint(x: 4000, y: 4000)
+                let patchName = "Survey \(Date().formatted(date: .numeric, time: .omitted))"
+                coordinator.captureMap(center2D: center, patchName: patchName) { result in
                     isSaving = false
                     switch result {
                     case .success:
@@ -154,26 +164,25 @@ struct ARSurveyView: View {
 
 // MARK: - ARView Container
 
-private struct ARViewContainer: UIViewRepresentable {
+private struct ARSurveySceneView: UIViewRepresentable {
     let coordinator: ARSurveyCoordinator
     
     func makeUIView(context: Context) -> ARSCNView {
         let arView = ARSCNView()
         arView.session = coordinator.session
+        arView.delegate = coordinator  // ✅ Set ARSCNView's delegate
+        
+        // ✅ Show feature points for visual feedback
+        arView.debugOptions = [.showFeaturePoints]
+        
         arView.automaticallyUpdatesLighting = true
+        arView.autoenablesDefaultLighting = true
+        
+        print("📱 ARSCNView created - delegate set, feature points enabled")
         return arView
     }
     
-    func updateUIView(_ uiView: ARSCNView, context: Context) {}
-}
-
-extension ARSurveyCoordinator {
-    var session: ARSession {
-        ARSession.shared // Use shared session
+    func updateUIView(_ uiView: ARSCNView, context: Context) {
+        // Nothing to update
     }
-}
-
-// Fix: ARSession doesn't have shared by default
-extension ARSession {
-    static let shared = ARSession()
 }
