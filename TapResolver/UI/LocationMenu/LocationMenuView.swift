@@ -166,7 +166,6 @@ struct LocationMenuView: View {
                                 onGearTap: {
                                     // Set location context and show AR settings
                                     PersistenceContext.shared.locationID = homeID
-                                    arWorldMapStore.loadMetadata()
                                     selectedLocationForAR = homeID
                                 }
                         )
@@ -193,7 +192,6 @@ struct LocationMenuView: View {
                                 onGearTap: {
                                     // Set location context and show AR settings
                                     PersistenceContext.shared.locationID = museumID
-                                    arWorldMapStore.loadMetadata()
                                     selectedLocationForAR = museumID
                                 }
                         )
@@ -215,7 +213,6 @@ struct LocationMenuView: View {
                                     onGearTap: {
                                         // Set location context and show AR settings
                                         PersistenceContext.shared.locationID = summary.id
-                                        arWorldMapStore.loadMetadata()
                                         selectedLocationForAR = summary.id
                                     }
                                 )
@@ -264,10 +261,8 @@ struct LocationMenuView: View {
                         get: { selectedLocationForAR != nil },
                         set: { if !$0 { selectedLocationForAR = nil } }
                     )) {
-                        if let _ = selectedLocationForAR {
-                            ARWorldMapManagementView()
-                                .environmentObject(arWorldMapStore)
-                                .environmentObject(mapPointStore)
+                        if let locationID = selectedLocationForAR {
+                            ARSurveyPlaceholderView(locationID: locationID)
                         }
                     }
                     
@@ -437,11 +432,6 @@ struct LocationMenuView: View {
                     }
                     locationToRename = nil
                     renameText = ""
-                }
-            } message: {
-                if let locationID = locationToRename,
-                   let location = locationSummaries.first(where: { $0.id == locationID }) {
-                    Text("Enter a new name for '\(location.name)'")
                 }
             }
         }
@@ -2051,6 +2041,27 @@ struct ResultRowView: View {
         case .importAsNew: return "Imported as new"
         case .replace: return "Replaced existing"
         }
+    }
+}
+
+private struct ARSurveyPlaceholderView: View {
+    let locationID: String
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "arkit")
+                .font(.system(size: 48))
+                .foregroundStyle(.blue)
+
+            Text("AR survey tools coming soon")
+                .font(.title3)
+                .fontWeight(.semibold)
+
+            Text("Location ID: \(locationID)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
     }
 }
 
