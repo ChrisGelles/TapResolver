@@ -665,9 +665,10 @@ public final class MapPointStore: ObservableObject {
         }
     }
     
-    func createAnchorPackage(mapPointID: UUID, mapCoordinates: CGPoint, anchorPosition: simd_float3, anchorSessionTransform: simd_float4x4, spatialData: AnchorSpatialData) {
+    func createAnchorPackage(mapPointID: UUID, patchID: UUID?, mapCoordinates: CGPoint, anchorPosition: simd_float3, anchorSessionTransform: simd_float4x4, spatialData: AnchorSpatialData) {
         var package = AnchorPointPackage(
             mapPointID: mapPointID,
+            patchID: patchID,
             mapCoordinates: mapCoordinates,
             anchorPosition: anchorPosition,
             anchorSessionTransform: anchorSessionTransform,
@@ -681,6 +682,11 @@ public final class MapPointStore: ObservableObject {
         saveAnchorPackages()
         
         print("✅ Created Anchor Package \(package.id) for MapPoint \(mapPointID)")
+        if let patchID {
+            print("   Linked Patch ID: \(patchID)")
+        } else {
+            print("   Linked Patch ID: none (legacy)")
+        }
         print("   Feature points: \(spatialData.featureCloud.pointCount)")
         print("   Planes: \(spatialData.planes.count)")
         print("   Data size: \(spatialData.totalDataSize) bytes")
@@ -708,6 +714,12 @@ public final class MapPointStore: ObservableObject {
         
         let deletedCount = beforeCount - anchorPackages.count
         print("🗑️ Deleted \(deletedCount) Anchor Package(s) for MapPoint \(mapPointID)")
+    }
+    
+    func anchorPackages(forPatchID patchID: UUID) -> [AnchorPointPackage] {
+        let filtered = anchorPackages.filter { $0.patchID == patchID }
+        print("📍 Filtered \(filtered.count) Anchor Package(s) for patch \(patchID)")
+        return filtered
     }
     
     // MARK: - AR Marker Management

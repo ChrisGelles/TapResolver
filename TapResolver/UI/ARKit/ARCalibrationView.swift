@@ -67,6 +67,16 @@ struct ARCalibrationView: View {
     @State private var isCalibrationMode: Bool = false
     @State private var calibrationMarkers: [CalibrationMarker] = []
     
+    private let surveyReadyThreshold = 70
+    
+    private var mapPointForSurvey: MapPointStore.MapPoint? {
+        if let id = currentTargetPointID ?? mapPointID,
+           let point = mapPointStore.points.first(where: { $0.id == id }) {
+            return point
+        }
+        return mapPointStore.activePoint
+    }
+    
     // AR Coordinator (for accessing quality monitoring state)
     @State private var arCoordinatorWrapper: CoordinatorWrapper = CoordinatorWrapper()
     @State private var showFloorMarkerPositioning: Bool = false
@@ -354,6 +364,40 @@ struct ARCalibrationView: View {
                         Spacer()
                     }
                     .zIndex(10003)
+                }
+                
+                if !isInterpolationMode,
+                   markerPlaced,
+                   let mapPoint = mapPointForSurvey,
+                   let coordinator = arCoordinatorWrapper.coordinator,
+                   !coordinator.isSurveying {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Button {
+                                startSurvey(for: mapPoint)
+                            } label: {
+                                Label("Survey Patch", systemImage: "viewfinder.circle")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 12)
+                                    .background(Color.orange.opacity(0.9))
+                                    .foregroundColor(.white)
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, 24)
+                            .padding(.bottom, 150)
+                        }
+                    }
+                    .zIndex(10004)
+                }
+                
+                if let coordinator = arCoordinatorWrapper.coordinator,
+                   coordinator.isSurveying {
+                    surveyOverlay(for: coordinator)
+                        .zIndex(10005)
                 }
             }
             
@@ -1147,6 +1191,104 @@ struct ARCalibrationView: View {
         return mapPointStore.arMarkers.contains { marker in
             marker.linkedMapPointID == selectedID && marker.isAnchor
         }
+    }
+    
+    private func startSurvey(for mapPoint: MapPointStore.MapPoint) {
+        guard let coordinator = arCoordinatorWrapper.coordinator else {
+            print("⚠️ Cannot start survey - coordinator unavailable")
+            return
+        }
+        coordinator.beginSurvey(center: mapPoint.mapPoint)
+    }
+    
+    private func stopSurvey() {
+        guard let coordinator = arCoordinatorWrapper.coordinator else { return }
+        coordinator.endSurvey()
+    }
+    
+    private func saveSurvey() {
+        guard let coordinator = arCoordinatorWrapper.coordinator else { return }
+        let patchName = "Survey \(Date().formatted(date: .numeric, time: .omitted))"
+        coordinator.saveSurvey(patchName: patchName) { result in
+            switch result {
+            case .success:
+                print("✅ Survey patch saved: \(patchName)")
+            case .failure(let error):
+                print("❌ Failed to save survey patch: \(error)")
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func surveyOverlay(for coordinator: ARViewContainer.Coordinator) -> some View {
+        VStack {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Survey Mode")
+                    .font(.headline)
+                
+                HStack(spacing: 20) {
+                    VStack(alignment: .leading) {
+                        Text("\(coordinator.surveyFeatures)")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                        Text("Features")
+                            .font(.caption)
+                    }
+                    
+                    VStack(alignment: .leading) {
+                        Text("\(coordinator.surveyPlanes)")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                        Text("Planes")
+                            .font(.caption)
+                    }
+                    
+                    VStack(alignment: .leading) {
+                        Text("\(coordinator.surveyQuality)%")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                        Text("Quality")
+                            .font(.caption)
+                    }
+                }
+                
+                if coordinator.surveyQuality >= surveyReadyThreshold {
+                    Label("Ready to save", systemImage: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.caption)
+                } else {
+                    Label("Walk around to improve coverage", systemImage: "figure.walk")
+                        .foregroundColor(.orange)
+                        .font(.caption)
+                }
+            }
+            .padding()
+            .background(.ultraThinMaterial)
+            .cornerRadius(12)
+            .padding(.horizontal)
+            .padding(.top, 60)
+            
+            Spacer()
+            
+            HStack(spacing: 16) {
+                Button("Cancel") {
+                    stopSurvey()
+                }
+                .buttonStyle(.bordered)
+                
+                Button("Save Patch") {
+                    saveSurvey()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(coordinator.surveyQuality < surveyReadyThreshold)
+            }
+            .padding()
+            .background(.ultraThinMaterial)
+            .cornerRadius(12)
+            .padding(.horizontal)
+            .padding(.bottom, 40)
+        }
+        .transition(.opacity)
     }
 }
 

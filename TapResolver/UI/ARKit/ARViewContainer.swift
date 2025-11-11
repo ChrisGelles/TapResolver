@@ -131,21 +131,26 @@ struct ARViewContainer: UIViewRepresentable {
             configuration.initialWorldMap = map
             context.coordinator.isRelocalizing = true
             context.coordinator.relocalizationStartTime = Date()
+            context.coordinator.activePatch = meta
+            context.coordinator.didEnableImageDetection = false
             print("🌍 Seeding AR session with patch '\(meta.name)'")
         } else if let worldMap = worldMapStore.loadWorldMap() {
             configuration.initialWorldMap = worldMap
             context.coordinator.isRelocalizing = true
             context.coordinator.relocalizationStartTime = Date()
+            context.coordinator.activePatch = nil
+            context.coordinator.didEnableImageDetection = false
             print("🌍 Seeding AR session with legacy GlobalMap")
         } else {
             print("⚠️ No patches or GlobalMap available")
             context.coordinator.isRelocalized = true  // No relocalization needed
+            context.coordinator.activePatch = nil
         }
         
-        // Disable image detection for GlobalMap validation
+        // Defer image detection until relocalization succeeds
         configuration.detectionImages = []
         configuration.maximumNumberOfTrackedImages = 0
-        print("🚫 Image detection DISABLED for GlobalMap validation")
+        print("⏳ Image detection paused until relocalization completes")
         
         // Run the session with proper initialization
         print("🎬 AR Session starting - markers will be created on-demand")
@@ -172,6 +177,7 @@ struct ARViewContainer: UIViewRepresentable {
         context.coordinator.mapPointStore = mapPointStore
         context.coordinator.mapPointID = mapPointID
         context.coordinator.isAnchorMode = isAnchorMode
+        context.coordinator.worldMapStore = worldMapStore
         
         // Listen for delete notifications
         context.coordinator.deleteNotificationObserver = NotificationCenter.default.addObserver(
@@ -245,6 +251,8 @@ struct ARViewContainer: UIViewRepresentable {
         
         // MapPointStore reference
         var mapPointStore: MapPointStore?
+        var worldMapStore: ARWorldMapStore?
+        var activePatch: WorldMapPatchMeta?
         var mapPointID: UUID = UUID()
         var selectedMarkerID: UUID?
         var selectionRingNode: SCNNode?
@@ -296,7 +304,6 @@ struct ARViewContainer: UIViewRepresentable {
         
         // Diagnostic flag to log scene reconstruction status once
         private var hasLoggedSceneReconstruction = false
-        private let imageDetectionEnabledForValidation = false
         private var isTrackingReady: Bool = false
         private var trackingReadyTimestamp: Date?
         
@@ -325,6 +332,14 @@ struct ARViewContainer: UIViewRepresentable {
         private var detectionPhaseStartTime: Date?
         private var lastDetectedImagePosition: simd_float3?
         private var detectionStabilityCheckTimer: Timer?
+        var didEnableImageDetection = false
+        
+        // Survey state
+        var isSurveying: Bool = false
+        var surveyFeatures: Int = 0
+        var surveyPlanes: Int = 0
+        var surveyQuality: Int = 0
+        private var surveyCenter: CGPoint?
         
         // Stability tracking for phase transitions
         private var stabilityPositions: [simd_float3] = []
@@ -469,10 +484,6 @@ struct ARViewContainer: UIViewRepresentable {
             after seconds: TimeInterval,
             categorizedImages: [String: Set<ARReferenceImage>]
         ) {
-            guard imageDetectionEnabledForValidation else {
-                print("🚫 Image detection disabled (GlobalMap validation) - skipping escalation")
-                return
-            }
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
                 guard let self = self,
                       self.relocalizationState == .imageTracking,
@@ -521,10 +532,6 @@ struct ARViewContainer: UIViewRepresentable {
             to newPhase: DetectionPhase,
             categorizedImages: [String: Set<ARReferenceImage>]
         ) {
-            guard imageDetectionEnabledForValidation else {
-                print("🚫 Image detection disabled (GlobalMap validation) - skipping phase advance")
-                return
-            }
             guard let arView = arView else {
                 print("❌ Cannot advance phase - no AR session view")
                 return
@@ -1297,6 +1304,7 @@ struct ARViewContainer: UIViewRepresentable {
                     // Mark as relocalized and load markers
                     isRelocalized = true
                     loadAllARMarkers()
+                    enableImageDetectionIfPossible()
                     
                     // Stop showing relocalization status after 2 seconds
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
@@ -1378,6 +1386,21 @@ struct ARViewContainer: UIViewRepresentable {
                     }
                     print("")
                     hasLoggedSceneReconstruction = true
+                }
+            }
+            
+            let points = frame.rawFeaturePoints?.points.count ?? 0
+            let planes = frame.anchors.compactMap { $0 as? ARPlaneAnchor }.count
+            
+            if isSurveying {
+                let featureScore = min(points / 50, 100)
+                let planeScore = min(planes * 20, 100)
+                let quality = max(min((featureScore + planeScore) / 2, 100), 0)
+                
+                DispatchQueue.main.async {
+                    self.surveyFeatures = points
+                    self.surveyPlanes = planes
+                    self.surveyQuality = quality
                 }
             }
             
@@ -1497,6 +1520,29 @@ struct ARViewContainer: UIViewRepresentable {
             print("📍 Loaded \(allMarkers.count) AR Marker(s)")
         }
         
+        private func enableImageDetectionIfPossible() {
+            guard !didEnableImageDetection else { return }
+            guard let arView = arView else { return }
+            
+            let categorizedImages = prepareReferenceImages()
+            let allImages = categorizedImages.values.reduce(into: Set<ARReferenceImage>()) { partialResult, set in
+                partialResult.formUnion(set)
+            }
+            
+            guard !allImages.isEmpty else {
+                print("⚠️ No reference images available to enable image detection")
+                return
+            }
+            
+            preserveAndRun({ config in
+                config.detectionImages = allImages
+                config.maximumNumberOfTrackedImages = min(2, allImages.count)
+            }, session: arView.session)
+            
+            didEnableImageDetection = true
+            print("🔍 Image detection ENABLED - \(allImages.count) reference image(s)")
+        }
+        
         private func createMarkerNode(at position: simd_float3, isActive: Bool) -> SCNNode {
             let markerNode = SCNNode()
             markerNode.simdPosition = position
@@ -1527,6 +1573,85 @@ struct ARViewContainer: UIViewRepresentable {
             print("🔨 Created marker node - will be named by caller")
             
             return markerNode
+        }
+        
+        func beginSurvey(center: CGPoint) {
+            guard !isSurveying else { return }
+            DispatchQueue.main.async {
+                self.surveyCenter = center
+                self.isSurveying = true
+                self.surveyFeatures = 0
+                self.surveyPlanes = 0
+                self.surveyQuality = 0
+            }
+            print("🔍 Starting survey mode for patch centered at (\(Int(center.x)), \(Int(center.y)))")
+        }
+        
+        func endSurvey() {
+            DispatchQueue.main.async {
+                self.isSurveying = false
+                self.surveyCenter = nil
+                self.surveyFeatures = 0
+                self.surveyPlanes = 0
+                self.surveyQuality = 0
+            }
+            print("⏹️ Survey mode ended")
+        }
+        
+        func saveSurvey(patchName: String, completion: @escaping (Result<Void, Error>) -> Void) {
+            guard let arView = arView,
+                  let center = surveyCenter,
+                  let worldMapStore = worldMapStore else {
+                let error = NSError(domain: "ARSurvey", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing survey context"])
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+                return
+            }
+            
+            arView.session.getCurrentWorldMap { [weak self] map, error in
+                guard let self = self else { return }
+                
+                if let error = error {
+                    print("❌ Failed to capture map: \(error)")
+                    DispatchQueue.main.async {
+                        completion(.failure(error))
+                    }
+                    return
+                }
+                
+                guard let map = map else {
+                    let err = NSError(domain: "ARSurvey", code: -2, userInfo: [NSLocalizedDescriptionKey: "No map returned"])
+                    DispatchQueue.main.async {
+                        completion(.failure(err))
+                    }
+                    return
+                }
+                
+                do {
+                    let data = try NSKeyedArchiver.archivedData(withRootObject: map, requiringSecureCoding: true)
+                    let featureCount = map.rawFeaturePoints.points.count
+                    let meta = WorldMapPatchMeta(
+                        name: patchName,
+                        featureCount: featureCount,
+                        byteSize: data.count,
+                        center2D: center,
+                        radiusM: 15.0
+                    )
+                    try worldMapStore.savePatch(map, meta: meta)
+                    DispatchQueue.main.async {
+                        self.isSurveying = false
+                        self.surveyCenter = nil
+                        completion(.success(()))
+                    }
+                    print("📦 Saved patch '\(patchName)' centered at (\(Int(center.x)), \(Int(center.y)))")
+                } catch {
+                    print("❌ Failed to save patch: \(error)")
+                    DispatchQueue.main.async {
+                        completion(.failure(error))
+                    }
+                }
+            }
         }
         
         // MARK: - User Feedback
@@ -2063,6 +2188,7 @@ struct ARViewContainer: UIViewRepresentable {
                 
                 mapPointStore.createAnchorPackage(
                     mapPointID: mapPointID,
+                    patchID: activePatch?.id,
                     mapCoordinates: mapPoint.mapPoint,
                     anchorPosition: position,
                     anchorSessionTransform: currentFrame.camera.transform,
@@ -2356,21 +2482,28 @@ struct ARViewContainer: UIViewRepresentable {
         }
         
         func startRelocalization() {
-            guard imageDetectionEnabledForValidation else {
-                print("🚫 Image detection disabled (GlobalMap validation) - skipping image-based relocalization")
-                return
-            }
             guard let mapPointStore = mapPointStore else {
                 print("❌ No MapPointStore available")
                 return
             }
             
             print("🔍 Starting relocalization mode")
-            print("   Available anchor packages: \(mapPointStore.anchorPackages.count)")
-            
-            // Load all anchor packages for this location
-            activeRelocalizationPackages = mapPointStore.anchorPackages
+            didEnableImageDetection = false
             placedAnchorMarkers.removeAll()
+            
+            let availablePackages: [AnchorPointPackage]
+            if let patch = activePatch {
+                availablePackages = mapPointStore.anchorPackages(forPatchID: patch.id)
+                print("   Filtering anchor packages for patch \(patch.id)")
+            } else {
+                availablePackages = mapPointStore.anchorPackages
+                print("   Using all anchor packages (legacy/global map)")
+            }
+            
+            print("   Anchor packages available: \(availablePackages.count)")
+            
+            // Load anchor packages for this session
+            activeRelocalizationPackages = availablePackages
             
             if activeRelocalizationPackages.isEmpty {
                 print("⚠️ No anchor packages available for relocalization")
@@ -2383,6 +2516,10 @@ struct ARViewContainer: UIViewRepresentable {
             relocalizationState = .searching
             
             let categorizedImages = prepareReferenceImages()
+            let totalImageCount = categorizedImages.values.reduce(0) { $0 + $1.count }
+            if totalImageCount == 0 {
+                print("⚠️ No reference images available for image detection - will rely on spatial relocalization only")
+            }
             
             var groundPlaneReady = false
             if let arView = arView {
@@ -2407,31 +2544,39 @@ struct ARViewContainer: UIViewRepresentable {
                         let floorSet = (categorizedImages["floor_near"] ?? [])
                             .union(categorizedImages["floor_mid"] ?? [])
                         
-                        preserveAndRun({ config in
-                            config.detectionImages = floorSet
-                            config.maximumNumberOfTrackedImages = 2
-                        }, session: arView.session)
+                        if !floorSet.isEmpty {
+                            preserveAndRun({ config in
+                                config.detectionImages = floorSet
+                                config.maximumNumberOfTrackedImages = 2
+                            }, session: arView.session)
+                        }
                         
                         currentDetectionPhase = .precision
                         print("🎯 SLAM + Ground ready - starting FLOOR targets (precision-first)")
                         print("   Floor images: \(floorSet.count), Max tracked: 2")
                         
-                        escalateDetectionIfNoLock(after: 2.0, categorizedImages: categorizedImages)
+                        if totalImageCount > 0 {
+                            escalateDetectionIfNoLock(after: 2.0, categorizedImages: categorizedImages)
+                        }
                         
                         relocalizationState = .imageTracking
                     } else {
                         let wallSet = categorizedImages["wall"] ?? []
                         
-                        preserveAndRun({ config in
-                            config.detectionImages = wallSet
-                            config.maximumNumberOfTrackedImages = 1
-                        }, session: arView.session)
+                        if !wallSet.isEmpty {
+                            preserveAndRun({ config in
+                                config.detectionImages = wallSet
+                                config.maximumNumberOfTrackedImages = min(1, wallSet.count)
+                            }, session: arView.session)
+                        }
                         
                         currentDetectionPhase = .longRange
                         print("🎯 SLAM ready, Ground not ready - starting WALL targets")
                         print("   Wall images: \(wallSet.count), Max tracked: 1")
                         
-                        escalateDetectionIfNoLock(after: 2.0, categorizedImages: categorizedImages)
+                        if totalImageCount > 0 {
+                            escalateDetectionIfNoLock(after: 2.0, categorizedImages: categorizedImages)
+                        }
                         
                         relocalizationState = .imageTracking
                     }

@@ -264,6 +264,7 @@ struct LocationMenuView: View {
                         if let locationID = selectedLocationForAR {
                             ARLocationToolsSheet(locationID: locationID)
                                 .environmentObject(arWorldMapStore)
+                                .environmentObject(mapPointStore)
                         }
                     }
                     
@@ -2051,15 +2052,16 @@ private struct ARLocationToolsSheet: View {
     let locationID: String
     
     @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
+    @EnvironmentObject private var mapPointStore: MapPointStore
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
         NavigationStack {
             List {
-                Section("Survey") {
-                    NavigationLink(destination: ARSurveyView(arWorldMapStore: arWorldMapStore)) {
-                        Label("Survey Space", systemImage: "camera.metering.matrix")
-                    }
+                Section {
+                    Text("Survey tools are available within AR view after selecting a MapPoint.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
             .listStyle(.insetGrouped)

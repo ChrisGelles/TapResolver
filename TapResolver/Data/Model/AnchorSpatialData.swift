@@ -16,6 +16,7 @@ import simd
 struct AnchorPointPackage: Codable {
     let id: UUID
     let mapPointID: UUID
+    var patchID: UUID?
     let mapCoordinates: CGPoint
     let anchorPosition: simd_float3
     let anchorSessionTransform: simd_float4x4
@@ -36,9 +37,10 @@ struct AnchorPointPackage: Codable {
     // Milestone 7: Beacon proximity (placeholder)
     var proximityBeacons: [BeaconReference] = []
     
-    init(mapPointID: UUID, mapCoordinates: CGPoint, anchorPosition: simd_float3, anchorSessionTransform: simd_float4x4, visualDescription: String? = nil) {
+    init(mapPointID: UUID, patchID: UUID? = nil, mapCoordinates: CGPoint, anchorPosition: simd_float3, anchorSessionTransform: simd_float4x4, visualDescription: String? = nil) {
         self.id = UUID()
         self.mapPointID = mapPointID
+        self.patchID = patchID
         self.mapCoordinates = mapCoordinates
         self.anchorPosition = anchorPosition
         self.anchorSessionTransform = anchorSessionTransform
@@ -125,7 +127,7 @@ struct AnchorPlaneData: Codable {
 
 extension AnchorPointPackage {
     enum CodingKeys: String, CodingKey {
-        case id, mapPointID, mapCoordinates, anchorPosition, anchorSessionTransform
+        case id, mapPointID, patchID, mapCoordinates, anchorPosition, anchorSessionTransform
         case captureDate, spatialData, referenceImages, visualDescription
         case floorMarker, floorMarkerToAnchorTransform, floorMarkerToAnchorOffset, contextCaptures, proximityBeacons
     }
@@ -134,6 +136,7 @@ extension AnchorPointPackage {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         mapPointID = try container.decode(UUID.self, forKey: .mapPointID)
+        patchID = try container.decodeIfPresent(UUID.self, forKey: .patchID)
         
         let coordArray = try container.decode([CGFloat].self, forKey: .mapCoordinates)
         mapCoordinates = CGPoint(x: coordArray[0], y: coordArray[1])
@@ -184,6 +187,7 @@ extension AnchorPointPackage {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(mapPointID, forKey: .mapPointID)
+        try container.encodeIfPresent(patchID, forKey: .patchID)
         try container.encode([mapCoordinates.x, mapCoordinates.y], forKey: .mapCoordinates)
         try container.encode([anchorPosition.x, anchorPosition.y, anchorPosition.z], forKey: .anchorPosition)
         let transformArray: [Float] = [

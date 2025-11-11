@@ -22,9 +22,11 @@ struct ARSurveyView: View {
     
     @State private var isSaving = false
     @State private var showSuccess = false
-    @State private var captureCenter: CGPoint?
     
-    init(arWorldMapStore: ARWorldMapStore) {
+    private let surveyCenter: CGPoint
+    
+    init(arWorldMapStore: ARWorldMapStore, surveyCenter: CGPoint) {
+        self.surveyCenter = surveyCenter
         _coordinator = StateObject(wrappedValue: ARSurveyCoordinator(arWorldMapStore: arWorldMapStore))
     }
     
@@ -134,9 +136,8 @@ struct ARSurveyView: View {
             
             Button {
                 isSaving = true
-                let center = captureCenter ?? CGPoint(x: 4000, y: 4000)
                 let patchName = "Survey \(Date().formatted(date: .numeric, time: .omitted))"
-                coordinator.captureMap(center2D: center, patchName: patchName) { result in
+                coordinator.captureMap(center2D: surveyCenter, patchName: patchName) { result in
                     isSaving = false
                     switch result {
                     case .success:
