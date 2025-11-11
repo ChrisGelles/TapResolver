@@ -64,6 +64,7 @@ struct HUDContainer: View {
                 }
             }
             .overlay(alignment: .topLeading) { topLeftButtons }
+            .overlay(alignment: .topLeading) { rolePanelOverlay }
             .overlay { txPowerOverlay }
             .overlay { keypadOverlay }
             .overlay { arViewOverlay }
@@ -287,6 +288,21 @@ struct HUDContainer: View {
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        }
+    }
+
+    @ViewBuilder
+    private var rolePanelOverlay: some View {
+        if let selectedID = mapPointStore.selectedPointID {
+            VStack {
+                MapPointRolePanel(pointID: selectedID)
+                    .environmentObject(mapPointStore)
+                    .padding(.leading, 16)
+                    .padding(.top, 150)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                Spacer()
+            }
+            .animation(.easeInOut(duration: 0.3), value: mapPointStore.selectedPointID)
         }
     }
 

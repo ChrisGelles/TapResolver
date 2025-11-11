@@ -10,6 +10,42 @@ import CoreGraphics
 import Combine
 import simd
 
+public enum MapPointRole: String, Codable, CaseIterable, Identifiable {
+    case triangleEdge = "triangle_edge"
+    case featureMarker = "feature_marker"
+    case directionalNorth = "directional_north"
+    case directionalSouth = "directional_south"
+    
+    public var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .triangleEdge: return "Triangle Edge"
+        case .featureMarker: return "Feature Marker"
+        case .directionalNorth: return "North Calibration"
+        case .directionalSouth: return "South Calibration"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .triangleEdge: return "triangle"
+        case .featureMarker: return "mappin.circle"
+        case .directionalNorth: return "location.north.fill"
+        case .directionalSouth: return "location.south.fill"
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .triangleEdge: return .blue
+        case .featureMarker: return .green
+        case .directionalNorth: return .red
+        case .directionalSouth: return .orange
+        }
+    }
+}
+
 // Notification for when map points reload
 extension Notification.Name {
     static let mapPointsDidReload = Notification.Name("mapPointsDidReload")
@@ -27,22 +63,44 @@ public final class MapPointStore: ObservableObject {
     // DIAGNOSTIC: Track which instance this is
     internal let instanceID = UUID().uuidString
     
-    public struct MapPoint: Identifiable {
+    public struct MapPoint: Codable, Identifiable {
         public let id: UUID
-        public var mapPoint: CGPoint    // map-local (untransformed) coords
+        public var position: CGPoint    // map-local (untransformed) coords
+        public var name: String?
         public let createdDate: Date
         public var sessions: [ScanSession] = []  // Full scan session data stored in UserDefaults
         var linkedARMarkerID: UUID?  // Optional - links to legacy ARMarker if one exists
         public var arMarkerID: String?  // Links to ARWorldMapStore marker
+        public var roles: Set<MapPointRole> = []
+        public var locationPhotoData: Data? = nil
+        public var triangleMemberships: [UUID] = []
+        
+        public var mapPoint: CGPoint {
+            get { position }
+            set { position = newValue }
+        }
         
         // Initializer that accepts existing ID or generates new one
-        init(id: UUID? = nil, mapPoint: CGPoint, createdDate: Date? = nil, sessions: [ScanSession] = []) {
+        init(
+            id: UUID? = nil,
+            mapPoint: CGPoint,
+            name: String? = nil,
+            createdDate: Date? = nil,
+            sessions: [ScanSession] = [],
+            roles: Set<MapPointRole> = [],
+            locationPhotoData: Data? = nil,
+            triangleMemberships: [UUID] = []
+        ) {
             self.id = id ?? UUID()
-            self.mapPoint = mapPoint
+            self.position = mapPoint
+            self.name = name
             self.createdDate = createdDate ?? Date()
             self.sessions = sessions
             self.linkedARMarkerID = nil
             self.arMarkerID = nil
+            self.roles = roles
+            self.locationPhotoData = locationPhotoData
+            self.triangleMemberships = triangleMemberships
         }
     }
     
@@ -109,11 +167,17 @@ public final class MapPointStore: ObservableObject {
     @Published var isCalibrated: Bool = false
     
     @Published public private(set) var activePointID: UUID? = nil
+    @Published var selectedPointID: UUID? = nil
     
     // Interpolation mode state
     @Published var isInterpolationMode: Bool = false
     @Published var interpolationFirstPointID: UUID? = nil
     @Published var interpolationSecondPointID: UUID? = nil
+    
+    var mapPoints: [MapPoint] {
+        get { points }
+        set { points = newValue }
+    }
     
     /// Get the currently active map point
     public var activePoint: MapPoint? {
@@ -135,6 +199,7 @@ public final class MapPointStore: ObservableObject {
         // Clear in-memory data
         points.removeAll()
         activePointID = nil
+        selectedPointID = nil
         
         // Load fresh data for current location
         load()
@@ -158,6 +223,7 @@ public final class MapPointStore: ObservableObject {
         
         points.removeAll()
         activePointID = nil
+        selectedPointID = nil
         
         // Temporarily allow empty save for explicit clear
         let wasReloading = isReloading
@@ -171,6 +237,7 @@ public final class MapPointStore: ObservableObject {
     func flush() {
         points.removeAll()
         activePointID = nil
+        selectedPointID = nil
         objectWillChange.send()
     }
 
@@ -266,9 +333,13 @@ public final class MapPointStore: ObservableObject {
         if activePointID == id {
             // Deactivate if currently active
             activePointID = nil
+            if selectedPointID == id {
+                selectedPointID = nil
+            }
         } else {
             // Activate this point (deactivating any other active point)
             activePointID = id
+            selectedPointID = id
         }
         save()
     }
@@ -276,12 +347,14 @@ public final class MapPointStore: ObservableObject {
     /// Deactivate all map points (called when drawer closes)
     public func deactivateAll() {
         activePointID = nil
+        selectedPointID = nil
         save()
     }
 
     /// Select a point by ID (used when tapping on map dots)
     public func selectPoint(id: UUID) {
         activePointID = id
+        selectedPointID = id
         save()
     }
 
@@ -301,10 +374,14 @@ public final class MapPointStore: ObservableObject {
         let id: UUID
         let x: CGFloat
         let y: CGFloat
+        let name: String?
         let createdDate: Date
         let sessions: [ScanSession]
         let linkedARMarkerID: UUID?
         let arMarkerID: String?
+        let roles: [MapPointRole]?
+        let locationPhotoData: Data?
+        let triangleMemberships: [UUID]?
     }
 
     internal func save() {
@@ -329,10 +406,14 @@ public final class MapPointStore: ObservableObject {
             id: $0.id,
             x: $0.mapPoint.x,
             y: $0.mapPoint.y,
+            name: $0.name,
             createdDate: $0.createdDate,
             sessions: $0.sessions,
             linkedARMarkerID: $0.linkedARMarkerID,
-            arMarkerID: $0.arMarkerID
+            arMarkerID: $0.arMarkerID,
+            roles: Array($0.roles),
+            locationPhotoData: $0.locationPhotoData,
+            triangleMemberships: $0.triangleMemberships
         )}
         ctx.write(pointsKey, value: dto)
         if let activeID = activePointID {
@@ -355,13 +436,21 @@ public final class MapPointStore: ObservableObject {
             // DIAGNOSTIC: Print raw museum data if this is museum location
             // Museum diagnostic removed - use external tools for detailed inspection
             
+            var needsSave = false
             self.points = dto.map { dtoItem in
                 var point = MapPoint(
                     id: dtoItem.id,
                     mapPoint: CGPoint(x: dtoItem.x, y: dtoItem.y),
+                    name: dtoItem.name,
                     createdDate: dtoItem.createdDate,
-                    sessions: dtoItem.sessions
+                    sessions: dtoItem.sessions,
+                    roles: Set(dtoItem.roles ?? []),
+                    locationPhotoData: dtoItem.locationPhotoData,
+                    triangleMemberships: dtoItem.triangleMemberships ?? []
                 )
+                if dtoItem.roles == nil || dtoItem.triangleMemberships == nil {
+                    needsSave = true
+                }
                 point.linkedARMarkerID = dtoItem.linkedARMarkerID
                 point.arMarkerID = dtoItem.arMarkerID
                 return point
@@ -370,9 +459,15 @@ public final class MapPointStore: ObservableObject {
             if !points.isEmpty {
                 print("ðŸ“‚ Loaded \(points.count) Map Point(s) with \(points.reduce(0) { $0 + $1.sessions.count }) sessions")
             }
+            if needsSave {
+                print("📦 Migrated \(points.count) MapPoint(s) to include role metadata")
+                save()
+            }
         } else {
             self.points = []
         }
+        
+        selectedPointID = nil
         
         // Load AR Markers
         loadARMarkers()
@@ -438,6 +533,44 @@ public final class MapPointStore: ObservableObject {
     /// Get total session count across all points
     public func totalSessionCount() -> Int {
         return points.reduce(0) { $0 + $1.sessions.count }
+    }
+    
+    /// Validates and assigns role to a MapPoint. Returns error message if validation fails.
+    func assignRole(_ role: MapPointRole, to pointID: UUID) -> String? {
+        if role == .directionalNorth {
+            if let existingNorth = points.first(where: { $0.roles.contains(.directionalNorth) && $0.id != pointID }) {
+                print("⚠️ North calibration already assigned to \(existingNorth.id)")
+                return "Another point is already designated as North"
+            }
+        }
+        
+        if role == .directionalSouth {
+            if let existingSouth = points.first(where: { $0.roles.contains(.directionalSouth) && $0.id != pointID }) {
+                print("⚠️ South calibration already assigned to \(existingSouth.id)")
+                return "Another point is already designated as South"
+            }
+        }
+        
+        guard let index = points.firstIndex(where: { $0.id == pointID }) else {
+            return "Map point not found"
+        }
+        
+        if !points[index].roles.contains(role) {
+            points[index].roles.insert(role)
+            objectWillChange.send()
+            save()
+        }
+        
+        return nil
+    }
+    
+    /// Removes a role from a MapPoint.
+    func removeRole(_ role: MapPointRole, from pointID: UUID) {
+        guard let index = points.firstIndex(where: { $0.id == pointID }) else { return }
+        if points[index].roles.remove(role) != nil {
+            objectWillChange.send()
+            save()
+        }
     }
     
     // MARK: - Diagnostics

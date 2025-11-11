@@ -35,6 +35,38 @@ public final class MapTransformStore: ObservableObject {
     internal func _setScreenCenter(_ point: CGPoint) {
         screenCenter = point
     }
+    
+    /// Centers the map on a specific point with animation.
+    @MainActor
+    public func centerOnPoint(_ mapPoint: CGPoint, animated: Bool = true) {
+        let Cmap = CGPoint(x: mapSize.width / 2, y: mapSize.height / 2)
+        let v = CGPoint(x: mapPoint.x - Cmap.x, y: mapPoint.y - Cmap.y)
+        
+        let vScaled = CGPoint(x: v.x * totalScale, y: v.y * totalScale)
+        
+        let theta = totalRotationRadians
+        let c = cos(theta), ss = sin(theta)
+        let vRot = CGPoint(
+            x: c * vScaled.x - ss * vScaled.y,
+            y: ss * vScaled.x + c * vScaled.y
+        )
+        
+        let newOffset = CGSize(width: -vRot.x, height: -vRot.y)
+        
+        if animated {
+            withAnimation(.easeInOut(duration: 0.5)) {
+                _setTotals(scale: totalScale,
+                           rotationRadians: Double(totalRotationRadians),
+                           offset: newOffset)
+            }
+        } else {
+            _setTotals(scale: totalScale,
+                       rotationRadians: Double(totalRotationRadians),
+                       offset: newOffset)
+        }
+        
+        print("🎯 Centered map on point: (\(Int(mapPoint.x)), \(Int(mapPoint.y))) → offset: (\(Int(newOffset.width)), \(Int(newOffset.height)))")
+    }
 
     /// Convert GLOBAL (screen) point to MAP-LOCAL point
     public func screenToMap(_ G: CGPoint) -> CGPoint {

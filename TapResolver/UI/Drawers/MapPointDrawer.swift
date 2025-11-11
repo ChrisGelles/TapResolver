@@ -26,27 +26,37 @@ struct MapPointDrawer: View {
 
             // List
             ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(mapPointStore.points.sorted(by: { $0.createdDate > $1.createdDate }), id: \.id) { point in
-                        MapPointListItem(
-                            point: point,
-                            coordinateText: mapPointStore.coordinateString(for: point),
-                            isActive: mapPointStore.isActive(point.id),
-                            onSelect: {
-                                print("📍 Map Point selected with ID: \(point.id.uuidString)")
-                                mapPointStore.toggleActive(id: point.id)
-                            },
-                            onDelete: {
-                                mapPointStore.removePoint(id: point.id)
-                            }
-                        )
-                        .frame(height: 44)
-                        .padding(.leading, 4)
+                ScrollViewReader { proxy in
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(mapPointStore.points.sorted(by: { $0.createdDate > $1.createdDate }), id: \.id) { point in
+                            MapPointListItem(
+                                point: point,
+                                coordinateText: mapPointStore.coordinateString(for: point),
+                                isActive: mapPointStore.isActive(point.id),
+                                onSelect: {
+                                    print("📍 Map Point selected with ID: \(point.id.uuidString)")
+                                    mapPointStore.selectPoint(id: point.id)
+                                    mapTransform.centerOnPoint(point.mapPoint, animated: true)
+                                },
+                                onDelete: {
+                                    mapPointStore.removePoint(id: point.id)
+                                }
+                            )
+                            .frame(height: 44)
+                            .padding(.leading, 4)
+                            .id(point.id)
+                        }
+                    }
+                    .padding(.top, topBarHeight + 6)
+                    .padding(.bottom, 8)
+                    .padding(.trailing, 6)
+                    .onChange(of: mapPointStore.selectedPointID) { newSelection in
+                        guard let selectedID = newSelection else { return }
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            proxy.scrollTo(selectedID, anchor: .top)
+                        }
                     }
                 }
-                .padding(.top, topBarHeight + 6)
-                .padding(.bottom, 8)
-                .padding(.trailing, 6)
             }
             .scrollIndicators(.hidden)
             .opacity(hud.isMapPointOpen ? 1 : 0)          // hide visuals when closed
