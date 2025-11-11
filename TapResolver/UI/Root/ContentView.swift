@@ -19,6 +19,7 @@ struct ContentView: View {
     @StateObject private var locationManager = LocationManager()
     @StateObject private var mapPointStore = MapPointStore()
     @StateObject private var transformProcessor = TransformProcessor()
+    @StateObject private var trianglePatchStore = TrianglePatchStore()
 
     var body: some View {
         Group {
@@ -38,6 +39,7 @@ struct ContentView: View {
         .environmentObject(locationManager)
         .environmentObject(mapPointStore)
         .environmentObject(transformProcessor)
+        .environmentObject(trianglePatchStore)
     }
 }
 

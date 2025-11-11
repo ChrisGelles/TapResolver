@@ -73,6 +73,11 @@ private struct MapCanvas: View {
                 .frame(width: mapSize.width, height: mapSize.height)
                 .zIndex(28)
             
+            // Triangle overlay (z = 27)
+            TriangleOverlay()
+                .frame(width: mapSize.width, height: mapSize.height)
+                .zIndex(27)
+            
             // Map Point overlay (z = 29)
             MapPointOverlay()
                 .frame(width: mapSize.width, height: mapSize.height)

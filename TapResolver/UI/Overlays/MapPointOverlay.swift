@@ -13,6 +13,7 @@ struct MapPointOverlay: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var hud: HUDPanelsState
+    @EnvironmentObject private var triangleStore: TrianglePatchStore
 
     var body: some View {
         ZStack {
@@ -61,6 +62,16 @@ struct MapPointOverlay: View {
             .onTapGesture {
                 print("MapPoint tapped: \(point.id)")
                 
+                // Triangle creation handling
+                if triangleStore.isCreatingTriangle {
+                    if let error = triangleStore.addCreationVertex(point.id, mapPointStore: mapPointStore) {
+                        print("❌ Cannot add vertex: \(error)")
+                        // TODO: Show error toast to user
+                    }
+                    return
+                }
+                
+                // Existing tap handling
                 if mapPointStore.isInterpolationMode && mapPointStore.interpolationSecondPointID == nil {
                     mapPointStore.selectSecondPoint(secondPointID: point.id)
                 } else {

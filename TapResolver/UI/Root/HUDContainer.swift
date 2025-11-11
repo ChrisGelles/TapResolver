@@ -38,6 +38,7 @@ struct HUDContainer: View {
     @EnvironmentObject private var scanUtility: MapPointScanUtility
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var beaconState: BeaconStateManager
+    @EnvironmentObject private var triangleStore: TrianglePatchStore
     @StateObject private var beaconLogger = SimpleBeaconLogger()
 
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
@@ -69,6 +70,7 @@ struct HUDContainer: View {
             .overlay { keypadOverlay }
             .overlay { arViewOverlay }
             .overlay(alignment: .top) { interpolationModeBanner }
+            .overlay { triangleCreationInstructions }
         }
     
     // MARK: - View Composition Helpers
@@ -215,30 +217,61 @@ struct HUDContainer: View {
             .transition(.move(edge: .leading).combined(with: .opacity))
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
             
-            // Interpolation mode button (appears when one point selected)
-            if let selectedID = mapPointStore.activePointID,
-               !mapPointStore.isInterpolationMode,
-               mapPointStore.interpolationFirstPointID == nil {
-                
-                Button(action: {
-                    mapPointStore.startInterpolationMode(firstPointID: selectedID)
-                }) {
-                    VStack(spacing: 4) {
-                        Image(systemName: "line.3.horizontal.circle")
-                            .font(.system(size: 24))
-                            .foregroundColor(.orange)
-                        
-                        Text("Connect")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.orange)
-                    }
-                    .frame(width: 60, height: 60)
-                    .background(Color.white)
-                    .cornerRadius(12)
-                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+            // Triangle creation button
+            if !triangleStore.isCreatingTriangle {
+                Button {
+                    triangleStore.startCreatingTriangle()
+                } label: {
+                    Image(systemName: "triangle")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 48, height: 48)
+                        .background(Color.blue.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .transition(.move(edge: .leading).combined(with: .opacity))
-                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
+                .padding(.top, 80)
+            } else {
+                // Cancel button during creation
+                Button {
+                    triangleStore.cancelCreatingTriangle()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 48, height: 48)
+                        .background(Color.red.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .padding(.top, 80)
+            }
+            
+            // MARK: - Connection Button (Hidden - preserving for future use)
+            if false {  // ✅ Set to true to re-enable
+                // Interpolation mode button (appears when one point selected)
+                if let selectedID = mapPointStore.activePointID,
+                   !mapPointStore.isInterpolationMode,
+                   mapPointStore.interpolationFirstPointID == nil {
+                    
+                    Button(action: {
+                        mapPointStore.startInterpolationMode(firstPointID: selectedID)
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "line.3.horizontal.circle")
+                                .font(.system(size: 24))
+                                .foregroundColor(.orange)
+                            
+                            Text("Connect")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.orange)
+                        }
+                        .frame(width: 60, height: 60)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                    }
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
+                }
             }
             
             // AR Calibration button for Metric Square (only when square active)
@@ -368,6 +401,30 @@ struct HUDContainer: View {
                 squareID: activeID
             )
             .allowsHitTesting(true)
+        }
+    }
+    
+    @ViewBuilder
+    private var triangleCreationInstructions: some View {
+        Group {
+            if triangleStore.isCreatingTriangle {
+                VStack {
+                    HStack {
+                        Text("Tap \(3 - triangleStore.creationVertices.count) Triangle Edge point(s)")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding(12)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(8)
+                        
+                        Spacer()
+                    }
+                    .padding(.leading, 80)
+                    .padding(.top, 120)
+                    
+                    Spacer()
+                }
+            }
         }
     }
     

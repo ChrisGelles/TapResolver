@@ -16,6 +16,7 @@ struct MapNavigationView: View {
     @EnvironmentObject private var transformProcessor: TransformProcessor
     @EnvironmentObject private var orientationManager: CompassOrientationManager
     @EnvironmentObject private var beaconState: BeaconStateManager  // Added for consolidated beacon state
+    @EnvironmentObject private var trianglePatchStore: TrianglePatchStore
     
     @State private var mapUIImage: UIImage?
     @State private var overlaysReady = false
@@ -108,6 +109,7 @@ struct MapNavigationView: View {
         beaconLists.reconcileWithLockedDots(beaconDotStore.lockedBeaconIDs())
         metricSquares.reloadForActiveLocation()
         mapPointStore.reloadForActiveLocation()
+        trianglePatchStore.load()  // Reload triangles for new location
 
         // 5) Overlays can render now
         overlaysReady = true
