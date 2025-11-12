@@ -292,8 +292,9 @@ public final class MapPointStore: ObservableObject {
         
         let newPoint = MapPoint(mapPoint: mapPoint)
         points.append(newPoint)
-        // Set the new point as active (deactivating any previous active point)
+        // Set the new point as active and selected
         activePointID = newPoint.id
+        selectedPointID = newPoint.id
         print("âœ¨ Map Point Created:")
         print("   ID: \(newPoint.id.uuidString)")
         print("   Position: (\(Int(mapPoint.x)), \(Int(mapPoint.y)))")
