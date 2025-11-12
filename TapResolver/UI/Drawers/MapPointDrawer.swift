@@ -32,15 +32,14 @@ struct MapPointDrawer: View {
                             MapPointListItem(
                                 point: point,
                                 coordinateText: mapPointStore.coordinateString(for: point),
-                                isActive: mapPointStore.isActive(point.id),
+                                isActive: mapPointStore.selectedPointID == point.id,
                                 onSelect: {
                                     // ✅ TOGGLE: If already selected, deselect
                                     if mapPointStore.selectedPointID == point.id {
                                         mapPointStore.selectedPointID = nil
                                         print("🔘 Deselected MapPoint from drawer: \(point.id)")
                                     } else {
-                                        print("📍 Map Point selected with ID: \(point.id.uuidString)")
-                                        mapPointStore.selectPoint(id: point.id)
+                                        print("📍 Map Point selected from drawer: \(point.id.uuidString)")
                                         mapPointStore.selectedPointID = point.id
                                         mapTransform.centerOnPoint(point.mapPoint, animated: true)
                                     }
@@ -60,7 +59,7 @@ struct MapPointDrawer: View {
                     .onChange(of: mapPointStore.selectedPointID) { newSelection in
                         guard let selectedID = newSelection else { return }
                         withAnimation(.easeInOut(duration: 0.3)) {
-                            proxy.scrollTo(selectedID, anchor: .top)
+                            proxy.scrollTo(selectedID, anchor: UnitPoint(x: 0.5, y: 0.2))
                         }
                     }
                 }
@@ -242,7 +241,6 @@ struct MapPointListItem: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.white.opacity(0.08))
         )
-        .contentShape(Rectangle())
         .frame(height: 44)                                          // ← row height (matches drawer)
     }
 }

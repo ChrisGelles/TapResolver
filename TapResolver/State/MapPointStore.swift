@@ -351,12 +351,8 @@ public final class MapPointStore: ObservableObject {
         save()
     }
 
-    /// Select a point by ID (used when tapping on map dots)
-    public func selectPoint(id: UUID) {
-        activePointID = id
-        selectedPointID = id
-        save()
-    }
+    // DEPRECATED: selectPoint() removed - use selectedPointID directly for UI selection
+    // activePointID is only for scan operations, set it explicitly when needed
 
     /// Check if a point is currently active
     public func isActive(_ id: UUID) -> Bool {

@@ -21,13 +21,7 @@ struct MapPointOverlay: View {
             if hud.isMapPointOpen {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                    .allowsHitTesting(mapPointStore.selectedPointID != nil)
-                    .gesture(
-                        TapGesture().onEnded {
-                            mapPointStore.selectedPointID = nil
-                        }
-                    )
+                    .allowsHitTesting(false)  // ✅ Never intercept taps - let points handle everything
                 
                 ForEach(mapPointStore.points) { point in
                     let isActive = mapPointStore.isActive(point.id)
@@ -80,7 +74,6 @@ struct MapPointOverlay: View {
                         mapPointStore.selectedPointID = nil
                         print("🔘 Deselected MapPoint: \(point.id)")
                     } else {
-                        mapPointStore.selectPoint(id: point.id)
                         mapPointStore.selectedPointID = point.id
                         print("🔘 Selected MapPoint: \(point.id)")
                     }
