@@ -69,6 +69,8 @@ class TrianglePatchStore: ObservableObject {
             return "Need exactly 3 vertices"
         }
         
+        print("🔍 Attempting to create triangle with vertices: \(creationVertices.map { String($0.uuidString.prefix(8)) })")
+        
         // Get vertex positions
         guard let positions = getVertexPositions(creationVertices, mapPointStore: mapPointStore) else {
             return "Cannot find vertex positions"
@@ -90,6 +92,8 @@ class TrianglePatchStore: ObservableObject {
         let triangle = TrianglePatch(vertexIDs: creationVertices)
         triangles.append(triangle)
         
+        print("✅ Created triangle \(String(triangle.id.uuidString.prefix(8))) with vertices: \(triangle.vertexIDs.map { String($0.uuidString.prefix(8)) })")
+        
         // Update MapPoint memberships
         for vertexID in creationVertices {
             if let index = mapPointStore.points.firstIndex(where: { $0.id == vertexID }) {
@@ -101,7 +105,6 @@ class TrianglePatchStore: ObservableObject {
         save()
         
         cancelCreatingTriangle()
-        print("✅ Created triangle \(triangle.id) with vertices: \(creationVertices.map { String($0.uuidString.prefix(8)) })")
         
         return nil
     }
@@ -153,51 +156,74 @@ class TrianglePatchStore: ObservableObject {
     private func hasInteriorOverlap(with newVertices: [UUID], mapPointStore: MapPointStore) -> Bool {
         guard let newPositions = getVertexPositions(newVertices, mapPointStore: mapPointStore),
               newPositions.count == 3 else {
+            print("❌ Cannot get positions for new vertices")
             return false
         }
+        
+        print("🔍 Checking new triangle with vertices: \(newVertices.map { String($0.uuidString.prefix(8)) })")
         
         for triangle in triangles {
             guard let existingPositions = getVertexPositions(triangle.vertexIDs, mapPointStore: mapPointStore),
                   existingPositions.count == 3 else {
+                print("⚠️ Cannot get positions for existing triangle \(String(triangle.id.uuidString.prefix(8)))")
                 continue
             }
             
             // Count shared vertices
-            let sharedCount = Set(triangle.vertexIDs).intersection(Set(newVertices)).count
+            let sharedVertices = Set(triangle.vertexIDs).intersection(Set(newVertices))
+            let sharedCount = sharedVertices.count
+            
+            print("   vs existing triangle \(String(triangle.id.uuidString.prefix(8)))")
+            print("      Existing vertices: \(triangle.vertexIDs.map { String($0.uuidString.prefix(8)) })")
+            print("      Shared vertices: \(sharedCount) - \(sharedVertices.map { String($0.uuidString.prefix(8)) })")
             
             // Duplicate triangle (all 3 vertices shared)
             if sharedCount == 3 {
+                print("      ❌ REJECT: Duplicate triangle")
                 return true
             }
             
             // Edge sharing (2 vertices shared) is OK - proper tessellation
             if sharedCount == 2 {
+                print("      ✅ ALLOW: Edge sharing (2 vertices)")
                 continue
             }
             
             // 0 or 1 shared vertices - check for geometric intersection
-            if trianglesIntersect(newPositions, existingPositions) {
+            print("      🔍 Checking geometric intersection (\(sharedCount) shared)")
+            // ✅ Build set of shared vertex positions
+            var sharedPositions = Set<CGPoint>()
+            for sharedID in sharedVertices {
+                if let pos = getVertexPositions([sharedID], mapPointStore: mapPointStore)?.first {
+                    sharedPositions.insert(pos)
+                }
+            }
+            if trianglesIntersect(newPositions, existingPositions, sharedVertexPositions: sharedPositions) {
+                print("      ❌ REJECT: Geometric overlap detected")
                 return true
             }
+            
+            print("      ✅ No overlap")
         }
         
+        print("✅ No overlap with any existing triangles")
         return false
     }
     
     /// Check if two triangles have overlapping interiors
-    private func trianglesIntersect(_ tri1: [CGPoint], _ tri2: [CGPoint]) -> Bool {
+    private func trianglesIntersect(_ tri1: [CGPoint], _ tri2: [CGPoint], sharedVertexPositions: Set<CGPoint> = []) -> Bool {
         guard tri1.count == 3, tri2.count == 3 else { return false }
         
-        // Check if any vertex of tri1 is inside tri2
+        // Check if any vertex of tri1 (excluding shared vertices) is inside tri2
         for point in tri1 {
-            if pointInTriangle(point, tri2) {
+            if !sharedVertexPositions.contains(point) && pointInTriangle(point, tri2) {
                 return true
             }
         }
         
-        // Check if any vertex of tri2 is inside tri1
+        // Check if any vertex of tri2 (excluding shared vertices) is inside tri1
         for point in tri2 {
-            if pointInTriangle(point, tri1) {
+            if !sharedVertexPositions.contains(point) && pointInTriangle(point, tri1) {
                 return true
             }
         }

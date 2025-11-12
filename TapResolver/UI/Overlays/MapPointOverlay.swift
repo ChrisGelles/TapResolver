@@ -75,9 +75,16 @@ struct MapPointOverlay: View {
                 if mapPointStore.isInterpolationMode && mapPointStore.interpolationSecondPointID == nil {
                     mapPointStore.selectSecondPoint(secondPointID: point.id)
                 } else {
-                    mapPointStore.selectPoint(id: point.id)
+                    // ✅ TOGGLE: If already selected, deselect
+                    if mapPointStore.selectedPointID == point.id {
+                        mapPointStore.selectedPointID = nil
+                        print("🔘 Deselected MapPoint: \(point.id)")
+                    } else {
+                        mapPointStore.selectPoint(id: point.id)
+                        mapPointStore.selectedPointID = point.id
+                        print("🔘 Selected MapPoint: \(point.id)")
+                    }
                 }
-                mapPointStore.selectedPointID = point.id
             }
     }
     

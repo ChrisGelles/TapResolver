@@ -28,8 +28,14 @@ struct TriangleOverlay: View {
                         )
                         .contentShape(TriangleShape(vertices: positions))
                         .onTapGesture {
-                            triangleStore.selectedTriangleID = triangle.id
-                            print("📐 Selected triangle: \(triangle.id)")
+                            // ✅ TOGGLE: If already selected, deselect
+                            if triangleStore.selectedTriangleID == triangle.id {
+                                triangleStore.selectedTriangleID = nil
+                                print("📐 Deselected triangle: \(triangle.id)")
+                            } else {
+                                triangleStore.selectedTriangleID = triangle.id
+                                print("📐 Selected triangle: \(triangle.id)")
+                            }
                         }
                 }
             }

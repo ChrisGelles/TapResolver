@@ -12,19 +12,55 @@ struct MapPointRolePanel: View {
     
     @EnvironmentObject private var mapPointStore: MapPointStore
     @State private var errorMessage: String?
+    @State private var isExpanded: Bool = false
     
     private var point: MapPointStore.MapPoint? {
         mapPointStore.points.first { $0.id == pointID }
     }
     
     var body: some View {
+        if isExpanded {
+            expandedPanel
+        } else {
+            collapsedTab
+        }
+    }
+    
+    // MARK: - Collapsed Tab Button
+    
+    private var collapsedTab: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isExpanded = true
+            }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: "tag.fill")
+                    .font(.system(size: 16))
+                Text("Roles")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundColor(.white)
+            .frame(width: 48, height: 56)
+            .background(Color.blue.opacity(0.9))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .shadow(radius: 4)
+    }
+    
+    // MARK: - Expanded Panel
+    
+    private var expandedPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Point Roles")
                     .font(.headline)
                 Spacer()
                 Button {
-                    mapPointStore.selectedPointID = nil
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded = false
+                    }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundColor(.gray)

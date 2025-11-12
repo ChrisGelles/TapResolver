@@ -34,9 +34,16 @@ struct MapPointDrawer: View {
                                 coordinateText: mapPointStore.coordinateString(for: point),
                                 isActive: mapPointStore.isActive(point.id),
                                 onSelect: {
-                                    print("📍 Map Point selected with ID: \(point.id.uuidString)")
-                                    mapPointStore.selectPoint(id: point.id)
-                                    mapTransform.centerOnPoint(point.mapPoint, animated: true)
+                                    // ✅ TOGGLE: If already selected, deselect
+                                    if mapPointStore.selectedPointID == point.id {
+                                        mapPointStore.selectedPointID = nil
+                                        print("🔘 Deselected MapPoint from drawer: \(point.id)")
+                                    } else {
+                                        print("📍 Map Point selected with ID: \(point.id.uuidString)")
+                                        mapPointStore.selectPoint(id: point.id)
+                                        mapPointStore.selectedPointID = point.id
+                                        mapTransform.centerOnPoint(point.mapPoint, animated: true)
+                                    }
                                 },
                                 onDelete: {
                                     mapPointStore.removePoint(id: point.id)
