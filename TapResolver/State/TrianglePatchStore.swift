@@ -384,6 +384,9 @@ class TrianglePatchStore: ObservableObject {
                 calibrationPairs: calibrationPairs
             )
             
+            // Check if this map point is a triangle edge
+            let isTriangleEdge = mapPoint.roles.contains(.triangleEdge)
+            
             // Create AR marker with RED sphere
             let virtualMarkerID = UUID()
             let virtualNode = arCoordinator.createARMarkerNode(
@@ -391,7 +394,8 @@ class TrianglePatchStore: ObservableObject {
                 sphereColor: .systemRed,  // Red for all projected markers
                 markerID: virtualMarkerID,
                 userHeight: arCoordinator.userHeight,
-                badgeColor: nil
+                badgeColor: nil,
+                isTriangleEdgePoint: isTriangleEdge
             )
             
             virtualNode.opacity = 1.0  // Full opacity
@@ -406,6 +410,20 @@ class TrianglePatchStore: ObservableObject {
         }
         
         print("✅ Created \(createdCount) AR markers (red spheres) for all map points")
+        
+        // Create yellow ground plane for the calibrated triangle
+        let v1 = calibrationPairs[0].arPosition
+        let v2 = calibrationPairs[1].arPosition
+        let v3 = calibrationPairs[2].arPosition
+        let groundPlane = arCoordinator.createTriangleGroundPlane(
+            vertex1: v1,
+            vertex2: v2,
+            vertex3: v3,
+            color: .systemYellow,
+            opacity: 0.2
+        )
+        arCoordinator.arView?.scene.rootNode.addChildNode(groundPlane)
+        print("🟨 Added yellow ground plane for calibrated triangle")
     }
     
     /// Project a 2D map point into 3D AR space using barycentric interpolation

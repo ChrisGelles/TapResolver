@@ -974,8 +974,10 @@ struct ARViewContainer: UIViewRepresentable {
         ///   - sphereColor: Color for the topping sphere
         ///   - markerID: UUID for node naming
         ///   - userHeight: Height of the vertical line (meters)
+        ///   - badgeColor: Optional badge color
+        ///   - isTriangleEdgePoint: Whether this marker represents a triangle edge point
         /// - Returns: Configured SCNNode ready to add to scene
-        func createARMarkerNode(at position: simd_float3, sphereColor: UIColor, markerID: UUID, userHeight: Float, badgeColor: UIColor? = nil) -> SCNNode {
+        func createARMarkerNode(at position: simd_float3, sphereColor: UIColor, markerID: UUID, userHeight: Float, badgeColor: UIColor? = nil, isTriangleEdgePoint: Bool = false) -> SCNNode {
             let markerNode = SCNNode()
             markerNode.simdPosition = position
             markerNode.name = "arMarker_\(markerID.uuidString)"
@@ -1006,17 +1008,100 @@ struct ARViewContainer: UIViewRepresentable {
             sphereNode.name = "arMarkerSphere_\(markerID.uuidString)"
             markerNode.addChildNode(sphereNode)
             
+            // Badge (if provided) or triangle badge for edge points
             if let badgeColor = badgeColor {
-                let badge = SCNNode()
-                let badgeGeometry = SCNSphere(radius: 0.05)
-                badgeGeometry.firstMaterial?.diffuse.contents = badgeColor
-                badge.geometry = badgeGeometry
-                badge.position = SCNVector3(0, 0.5, 0)
-                badge.name = "badge_\(markerID.uuidString)"
-                sphereNode.addChildNode(badge)
+                let badge = SCNSphere(radius: 0.025)
+                let badgeMaterial = SCNMaterial()
+                badgeMaterial.diffuse.contents = badgeColor
+                badge.materials = [badgeMaterial]
+                
+                let badgeNode = SCNNode(geometry: badge)
+                badgeNode.position = SCNVector3(0, userHeight + 0.08, 0)
+                markerNode.addChildNode(badgeNode)
+            } else if isTriangleEdgePoint {
+                // Create triangle badge for triangle edge points
+                let triangleBadge = createTriangleBadge()
+                triangleBadge.position = SCNVector3(0, userHeight + 0.08, 0)
+                markerNode.addChildNode(triangleBadge)
             }
             
             return markerNode
+        }
+        
+        /// Create a triangle-shaped badge to float above triangle edge AR markers
+        private func createTriangleBadge() -> SCNNode {
+            // Create triangle geometry using SCNShape
+            let trianglePath = UIBezierPath()
+            trianglePath.move(to: CGPoint(x: 0, y: 0.03))        // Top vertex
+            trianglePath.addLine(to: CGPoint(x: -0.026, y: -0.015)) // Bottom left
+            trianglePath.addLine(to: CGPoint(x: 0.026, y: -0.015))  // Bottom right
+            trianglePath.close()
+            
+            let triangleShape = SCNShape(path: trianglePath, extrusionDepth: 0.002)
+            
+            let triangleMaterial = SCNMaterial()
+            triangleMaterial.diffuse.contents = UIColor.systemOrange
+            triangleMaterial.emission.contents = UIColor.systemOrange.withAlphaComponent(0.3)
+            triangleShape.materials = [triangleMaterial]
+            
+            let triangleNode = SCNNode(geometry: triangleShape)
+            
+            // Rotate to face camera (lie flat, facing up)
+            triangleNode.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
+            
+            // Make it always face the camera
+            let billboardConstraint = SCNBillboardConstraint()
+            billboardConstraint.freeAxes = [.Y]  // Only rotate around Y axis
+            triangleNode.constraints = [billboardConstraint]
+            
+            return triangleNode
+        }
+        
+        /// Create a triangular ground plane fill
+        func createTriangleGroundPlane(vertex1: simd_float3, 
+                                       vertex2: simd_float3, 
+                                       vertex3: simd_float3,
+                                       color: UIColor = .systemYellow,
+                                       opacity: CGFloat = 0.2) -> SCNNode {
+            // Create vertices array for the triangle
+            let vertices: [SCNVector3] = [
+                SCNVector3(vertex1.x, vertex1.y, vertex1.z),
+                SCNVector3(vertex2.x, vertex2.y, vertex2.z),
+                SCNVector3(vertex3.x, vertex3.y, vertex3.z)
+            ]
+            
+            // Create geometry source from vertices
+            let vertexSource = SCNGeometrySource(vertices: vertices)
+            
+            // Create triangle indices (single triangle: 0-1-2)
+            let indices: [Int32] = [0, 1, 2]
+            let indexData = Data(bytes: indices, count: indices.count * MemoryLayout<Int32>.size)
+            
+            let geometryElement = SCNGeometryElement(
+                data: indexData,
+                primitiveType: .triangles,
+                primitiveCount: 1,
+                bytesPerIndex: MemoryLayout<Int32>.size
+            )
+            
+            // Create the geometry
+            let geometry = SCNGeometry(sources: [vertexSource], elements: [geometryElement])
+            
+            // Create material
+            let material = SCNMaterial()
+            material.diffuse.contents = color.withAlphaComponent(opacity)
+            material.isDoubleSided = true  // Visible from both sides
+            material.transparency = opacity
+            material.blendMode = .alpha
+            geometry.materials = [material]
+            
+            let trianglePlaneNode = SCNNode(geometry: geometry)
+            trianglePlaneNode.name = "triangleGroundPlane"
+            
+            // Slightly elevate above ground to prevent z-fighting
+            trianglePlaneNode.position = SCNVector3(0, 0.001, 0)
+            
+            return trianglePlaneNode
         }
         
         // MARK: - Marker Placement
