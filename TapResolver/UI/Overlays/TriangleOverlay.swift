@@ -14,33 +14,44 @@ struct TriangleOverlay: View {
     
     var body: some View {
         ZStack {
-            // Completed triangles
+            // Unselected triangles (rendered first, below)
             ForEach(triangleStore.triangles) { triangle in
-                if let positions = getVertexPositions(triangle.vertexIDs) {
+                // Skip if this triangle is selected (render it separately on top)
+                if triangleStore.selectedTriangleID != triangle.id,
+                   let positions = getVertexPositions(triangle.vertexIDs) {
                     TriangleShape(vertices: positions)
                         .fill(triangle.statusColor.opacity(0.15))
                         .overlay(
                             TriangleShape(vertices: positions)
-                                .stroke(
-                                    triangleStore.selectedTriangleID == triangle.id ? Color.white : triangle.statusColor,
-                                    lineWidth: triangleStore.selectedTriangleID == triangle.id ? 3 : 1.5
-                                )
+                                .stroke(triangle.statusColor, lineWidth: 1.5)
                         )
                         .contentShape(TriangleShape(vertices: positions))
                         .onTapGesture {
-                            // ✅ TOGGLE: If already selected, deselect
-                            if triangleStore.selectedTriangleID == triangle.id {
-                                triangleStore.selectedTriangleID = nil
-                                print("📐 Deselected triangle: \(triangle.id)")
-                            } else {
-                                triangleStore.selectedTriangleID = triangle.id
-                                print("📐 Selected triangle: \(triangle.id)")
-                            }
+                            triangleStore.selectedTriangleID = triangle.id
+                            print("📐 Selected triangle: \(triangle.id)")
                         }
                 }
             }
             
-            // Triangle being created (preview)
+            // Selected triangle (rendered on top with higher zIndex)
+            if let selectedID = triangleStore.selectedTriangleID,
+               let selectedTriangle = triangleStore.triangles.first(where: { $0.id == selectedID }),
+               let positions = getVertexPositions(selectedTriangle.vertexIDs) {
+                TriangleShape(vertices: positions)
+                    .fill(selectedTriangle.statusColor.opacity(0.15))
+                    .overlay(
+                        TriangleShape(vertices: positions)
+                            .stroke(Color(red: 0.29, green: 0.8, blue: 0.97), lineWidth: 3)
+                    )
+                    .contentShape(TriangleShape(vertices: positions))
+                    .onTapGesture {
+                        triangleStore.selectedTriangleID = nil
+                        print("📐 Deselected triangle: \(selectedID)")
+                    }
+                    .zIndex(100)  // ✅ Render on top of all other triangles
+            }
+            
+            // Triangle being created (preview) - always on top
             if triangleStore.isCreatingTriangle,
                let positions = getVertexPositions(triangleStore.creationVertices) {
                 
@@ -51,6 +62,7 @@ struct TriangleOverlay: View {
                         path.addLine(to: positions[1])
                     }
                     .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, dash: [8, 4]))
+                    .zIndex(200)
                     
                 } else if positions.count == 3 {
                     // Draw dashed triangle
@@ -60,6 +72,7 @@ struct TriangleOverlay: View {
                             TriangleShape(vertices: positions)
                                 .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, dash: [8, 4]))
                         )
+                        .zIndex(200)
                 }
             }
         }
