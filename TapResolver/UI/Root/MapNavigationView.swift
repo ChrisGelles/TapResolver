@@ -98,9 +98,22 @@ struct MapNavigationView: View {
                     return
                 }
                 
+                // Collect AR positions from the markers
+                var positions: [[Float]] = []
+                if let coordinator = ARViewContainer.Coordinator.current {
+                    for markerID in markerIDs {
+                        if let markerUUID = UUID(uuidString: markerID),
+                           let markerNode = coordinator.calibrationMarkerNodes[markerUUID] {
+                            let pos = markerNode.simdPosition
+                            positions.append([pos.x, pos.y, pos.z])
+                        }
+                    }
+                }
+                
                 // Update triangle with calibration data
                 trianglePatchStore.triangles[triangleIndex].isCalibrated = true
                 trianglePatchStore.triangles[triangleIndex].arMarkerIDs = markerIDs
+                trianglePatchStore.triangles[triangleIndex].calibrationPositions = positions
                 trianglePatchStore.triangles[triangleIndex].lastCalibratedAt = Date()
                 trianglePatchStore.triangles[triangleIndex].calibrationQuality = 1.0  // Full quality for now
                 
@@ -108,6 +121,7 @@ struct MapNavigationView: View {
                 
                 print("✅ Marked triangle \(String(triangleID.uuidString.prefix(8))) as calibrated")
                 print("   AR Marker IDs: \(markerIDs.map { String($0.prefix(8)) })")
+                print("   Saved positions: \(positions)")
             }
             .sheet(isPresented: $showARCalibration) {
                 ARCalibrationView(

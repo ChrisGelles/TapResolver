@@ -88,6 +88,7 @@ struct ARViewContainer: UIViewRepresentable {
     @Binding var relocalizationStatus: String
     let mapPointStore: MapPointStore
     @Binding var selectedMarkerID: UUID?
+    let trianglePatchStore: TrianglePatchStore?
     
     // Interpolation mode (optional - defaults to false/nil for backward compatibility)
     var isInterpolationMode: Bool = false
@@ -214,6 +215,7 @@ struct ARViewContainer: UIViewRepresentable {
         coordinator.isInterpolationMode = isInterpolationMode
         coordinator.interpolationFirstPointID = interpolationFirstPointID
         coordinator.interpolationSecondPointID = interpolationSecondPointID
+        coordinator.trianglePatchStore = trianglePatchStore
         
         // Set static reference for button access
         Coordinator.current = coordinator
@@ -252,6 +254,7 @@ struct ARViewContainer: UIViewRepresentable {
         // MapPointStore reference
         var mapPointStore: MapPointStore?
         var worldMapStore: ARWorldMapStore?
+        var trianglePatchStore: TrianglePatchStore?
         var activePatch: WorldMapPatchMeta?
         var mapPointID: UUID = UUID()
         var selectedMarkerID: UUID?
@@ -1104,6 +1107,61 @@ struct ARViewContainer: UIViewRepresentable {
             return trianglePlaneNode
         }
         
+        /// Restore calibration markers from saved triangle positions
+        func restoreCalibrationMarkers(triangle: TrianglePatch, mapPointStore: MapPointStore) {
+            guard triangle.isCalibrated,
+                  triangle.arMarkerIDs.count == 3,
+                  let savedPositions = triangle.calibrationPositions,
+                  savedPositions.count == 3 else {
+                print("⚠️ Cannot restore calibration markers - incomplete data")
+                return
+            }
+            
+            print("🔄 Restoring calibration markers for triangle \(String(triangle.id.uuidString.prefix(8)))")
+            
+            // Clear existing calibration markers
+            for (_, node) in calibrationMarkerNodes {
+                node.removeFromParentNode()
+            }
+            calibrationMarkerNodes.removeAll()
+            
+            // Recreate the 3 calibration markers
+            for (index, vertexID) in triangle.vertexIDs.enumerated() {
+                guard let posArray = savedPositions[safe: index],
+                      posArray.count == 3 else {
+                    print("⚠️ Invalid position data for vertex \(index)")
+                    continue
+                }
+                
+                let position = simd_float3(posArray[0], posArray[1], posArray[2])
+                let markerIDString = triangle.arMarkerIDs[safe: index] ?? UUID().uuidString
+                guard let markerID = UUID(uuidString: markerIDString) else {
+                    print("⚠️ Invalid marker ID: \(markerIDString)")
+                    continue
+                }
+                
+                // Create orange calibration marker node
+                let markerNode = createARMarkerNode(
+                    at: position,
+                    sphereColor: .systemOrange,
+                    markerID: markerID,
+                    userHeight: userHeight,
+                    badgeColor: nil,
+                    isTriangleEdgePoint: false
+                )
+                
+                // Add to scene
+                arView?.scene.rootNode.addChildNode(markerNode)
+                
+                // Store in calibration markers dictionary
+                calibrationMarkerNodes[markerID] = markerNode
+                
+                print("   ✅ Restored marker \(index+1)/3 at position \(position)")
+            }
+            
+            print("✅ Restored 3 calibration markers from saved positions")
+        }
+        
         // MARK: - Marker Placement
         
         func placeMarker(at position: simd_float3) {
@@ -1516,6 +1574,32 @@ struct ARViewContainer: UIViewRepresentable {
                           !isTrackingReady {
                     isTrackingReady = true
                     print("✅ Tracking ready - stable for 1+ second")
+                    
+                    // Check if there's a calibrated triangle to restore
+                    if let triangleStore = trianglePatchStore,
+                       let selectedTriangleID = triangleStore.selectedTriangleID,
+                       let selectedTriangle = triangleStore.triangles.first(where: { $0.id == selectedTriangleID }),
+                       selectedTriangle.isCalibrated {
+                        
+                        print("🔄 Found calibrated triangle - restoring markers and populating space")
+                        
+                        // Restore the 3 calibration markers
+                        guard let mapStore = self.mapPointStore else {
+                            print("⚠️ Cannot restore - mapPointStore not available")
+                            return
+                        }
+                        
+                        self.restoreCalibrationMarkers(triangle: selectedTriangle, mapPointStore: mapStore)
+                        
+                        // Wait a moment for markers to settle, then populate all markers
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            triangleStore.populateAllMapPointMarkers(
+                                calibratedTriangle: selectedTriangle,
+                                mapPointStore: mapStore,
+                                arCoordinator: self
+                            )
+                        }
+                    }
                 }
             } else {
                 if isTrackingReady {

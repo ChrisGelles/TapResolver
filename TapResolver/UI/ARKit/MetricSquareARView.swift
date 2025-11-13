@@ -32,7 +32,8 @@ struct MetricSquareARView: View {
                     worldMapStore: worldMapStore,
                     relocalizationStatus: $relocalizationStatus,
                     mapPointStore: mapPointStore,
-                    selectedMarkerID: $selectedMarkerID
+                    selectedMarkerID: $selectedMarkerID,
+                    trianglePatchStore: nil
                 )
                 .ignoresSafeArea()
             }

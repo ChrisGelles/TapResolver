@@ -20,6 +20,7 @@ struct TrianglePatch: Codable, Identifiable {
     var lastCalibratedAt: Date?
     var arMarkerIDs: [String] = []  // AR marker IDs for the 3 vertices (matches order of vertexIDs)
     var userPositionWhenCalibrated: simd_float3?  // User's AR position when final marker placed
+    var calibrationPositions: [[Float]]?  // 3D AR world positions [x,y,z] for each vertex
     
     init(vertexIDs: [UUID]) {
         self.id = UUID()

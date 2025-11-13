@@ -102,6 +102,7 @@ struct ARCalibrationView: View {
                 relocalizationStatus: $relocalizationStatus,
                 mapPointStore: mapPointStore,
                 selectedMarkerID: $selectedMarkerID,
+                trianglePatchStore: trianglePatchStore,
                 isInterpolationMode: isInterpolationMode,
                 interpolationFirstPointID: interpolationFirstPointID,
                 interpolationSecondPointID: interpolationSecondPointID,
