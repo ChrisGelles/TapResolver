@@ -39,6 +39,7 @@ struct TapResolverApp: App {
     // Consolidates polling logic previously duplicated in RSSILabelsOverlay and ScanQualityViewModel
     @StateObject private var beaconState = BeaconStateManager()
     @StateObject private var arWorldMapStore = ARWorldMapStore()
+    @StateObject private var arCalibrationCoordinator = ARCalibrationCoordinator()
     
     @State private var showAuthorNamePrompt = AppSettings.needsAuthorName
 
@@ -58,6 +59,7 @@ struct TapResolverApp: App {
                 .environmentObject(scanUtility)
                 .environmentObject(beaconState)  // Inject BeaconStateManager into view hierarchy
                 .environmentObject(arWorldMapStore)
+                .environmentObject(arCalibrationCoordinator)
                 .onAppear {
                     LocationMigration.runIfNeeded()
                     squareMetrics.setMetricSquareStore(metricSquares)

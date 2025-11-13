@@ -323,6 +323,11 @@ struct ARViewContainer: UIViewRepresentable {
         // Coordinate system transform (2D map -> 3D AR)
         var mapToARTransform: simd_float4x4? = nil
         
+        // Calibration mode state
+        var isCalibrationMode: Bool = false
+        var calibrationTargetPointID: UUID?
+        var currentGroundPlanePosition: simd_float3? = nil
+        
         // Config debouncing
         private var lastConfigSig: String = ""
         private var lastConfigRunAt: Date = .distantPast
@@ -344,6 +349,12 @@ struct ARViewContainer: UIViewRepresentable {
         // Stability tracking for phase transitions
         private var stabilityPositions: [simd_float3] = []
         private let maxStabilityPositions = 10  // Track last 10 positions
+        
+        // Calibration marker storage (persistent across placements)
+        var calibrationMarkerNodes: [UUID: SCNNode] = [:]  // markerID -> node
+        
+        // Ghost marker storage (separate from real markers)
+        var ghostMarkerNodes: [UUID: SCNNode] = [:]  // markerID -> node
         
         /// Preserve all config settings when making changes
         /// ARWorldTrackingConfiguration is a class (reference type), so we need proper cloning
@@ -964,7 +975,7 @@ struct ARViewContainer: UIViewRepresentable {
         ///   - markerID: UUID for node naming
         ///   - userHeight: Height of the vertical line (meters)
         /// - Returns: Configured SCNNode ready to add to scene
-        private func createARMarkerNode(at position: simd_float3, sphereColor: UIColor, markerID: UUID, userHeight: Float, badgeColor: UIColor? = nil) -> SCNNode {
+        func createARMarkerNode(at position: simd_float3, sphereColor: UIColor, markerID: UUID, userHeight: Float, badgeColor: UIColor? = nil) -> SCNNode {
             let markerNode = SCNNode()
             markerNode.simdPosition = position
             markerNode.name = "arMarker_\(markerID.uuidString)"
@@ -1373,6 +1384,11 @@ struct ARViewContainer: UIViewRepresentable {
         }
         
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
+            // Update ground plane position if in calibration mode
+            if isCalibrationMode {
+                updateGroundPlanePosition(frame: frame)
+            }
+            
             // Log scene reconstruction status once
             if !hasLoggedSceneReconstruction && frame.camera.trackingState == .normal {
                 if let config = session.configuration as? ARWorldTrackingConfiguration {
@@ -2628,19 +2644,27 @@ struct ARViewContainer: UIViewRepresentable {
         /// Clean up all AR markers from the scene
         func cleanupAllARMarkers() {
             guard let arView = arView else { return }
-            let markerNodes = arView.scene.rootNode.childNodes.filter { node in
-                node.name?.starts(with: "arMarker_") == true
+            
+            // Remove all markers EXCEPT calibration markers
+            let allMarkers = arView.scene.rootNode.childNodes.filter { $0.name?.starts(with: "arMarker_") ?? false }
+            let calibrationMarkerIDs = Set(calibrationMarkerNodes.keys.map { $0.uuidString })
+            var removedCount = 0
+            
+            for marker in allMarkers {
+                // Extract marker ID from node name
+                if let nodeName = marker.name,
+                   nodeName.starts(with: "arMarker_") {
+                    let markerIDString = nodeName.replacingOccurrences(of: "arMarker_", with: "")
+                    
+                    // Only remove if NOT a calibration marker
+                    if !calibrationMarkerIDs.contains(markerIDString) {
+                        marker.removeFromParentNode()
+                        removedCount += 1
+                    }
+                }
             }
-            let count = markerNodes.count
-            if count > 0 {
-                print("🧹 Cleaning up AR marker nodes from scene")
-            }
-            for node in markerNodes {
-                node.removeFromParentNode()
-            }
-            if count > 0 {
-                print("   Removed \(count) AR marker node(s)")
-            }
+            
+            print("🧹 Cleaned up \(removedCount) temporary AR marker(s), preserved \(calibrationMarkerNodes.count) calibration marker(s)")
         }
 
         func stopRelocalization() {
@@ -3315,6 +3339,150 @@ struct ARViewContainer: UIViewRepresentable {
             
             // Exit anchor mode
             isAnchorMode = false
+        }
+        
+        // MARK: - Ground Plane Raycasting
+        
+        /// Continuously update ground plane position at screen center
+        func updateGroundPlanePosition(frame: ARFrame) {
+            guard let arView = arView else { return }
+            
+            // Get screen center point
+            let screenCenter = CGPoint(
+                x: arView.bounds.midX,
+                y: arView.bounds.midY
+            )
+            
+            // Perform raycast to find ground plane
+            let query = arView.raycastQuery(
+                from: screenCenter,
+                allowing: .existingPlaneGeometry,
+                alignment: .horizontal
+            )
+            
+            guard let query = query else { return }
+            
+            let results = arView.session.raycast(query)
+            
+            if let firstResult = results.first {
+                // Extract position from transform
+                let position = simd_make_float3(firstResult.worldTransform.columns.3)
+                currentGroundPlanePosition = position
+            } else {
+                // No plane detected - use camera forward projection at user height
+                let cameraTransform = frame.camera.transform
+                let cameraPosition = simd_make_float3(cameraTransform.columns.3)
+                let cameraForward = -simd_make_float3(cameraTransform.columns.2)
+                
+                // Project 1.5 meters forward at ground level (y = 0)
+                let targetY: Float = 0.0
+                let distanceToGround = (cameraPosition.y - targetY) / max(abs(cameraForward.y), 0.01)
+                let groundPosition = cameraPosition + cameraForward * distanceToGround
+                
+                currentGroundPlanePosition = simd_float3(groundPosition.x, targetY, groundPosition.z)
+            }
+        }
+        
+        // MARK: - Marker Placement
+        
+        /// Place an AR marker at the current ground plane position
+        func placeMarkerAt(mapPointID: UUID, mapPoint: MapPointStore.MapPoint, color: UIColor, isGhost: Bool = false) {
+            guard let position = currentGroundPlanePosition else {
+                print("❌ No ground plane position available")
+                return
+            }
+            
+            guard let arView = arView else { return }
+            
+            print("📍 Placing \(isGhost ? "ghost " : "")marker at position: \(position)")
+            
+            let markerID = UUID()
+            
+            // Use the existing createARMarkerNode function (DRY principle!)
+            let markerNode = createARMarkerNode(
+                at: position,
+                sphereColor: color,
+                markerID: markerID,
+                userHeight: userHeight,
+                badgeColor: nil
+            )
+            
+            // Set transparency for ghost markers
+            if isGhost {
+                markerNode.opacity = 0.8  // 20% less opacity for ghosts
+            }
+            
+            // Add to scene
+            arView.scene.rootNode.addChildNode(markerNode)
+            
+            // Store marker node so it persists
+            calibrationMarkerNodes[markerID] = markerNode
+            
+            // Create transform for storage
+            let transform = simd_float4x4(
+                SIMD4<Float>(1, 0, 0, 0),
+                SIMD4<Float>(0, 1, 0, 0),
+                SIMD4<Float>(0, 0, 1, 0),
+                SIMD4<Float>(position.x, position.y, position.z, 1)
+            )
+            
+            // Create ARMarker and save to store
+            if let worldMapStore = worldMapStore {
+                let arMarker = ARWorldMapStore.ARMarker(
+                    id: markerID.uuidString,
+                    mapPointID: mapPointID.uuidString,
+                    worldTransform: ARWorldMapStore.CodableTransform(from: transform),
+                    createdAt: Date(),
+                    observations: nil
+                )
+                
+                try? worldMapStore.saveMarker(arMarker, patch: nil)
+            }
+            
+            // Update MapPoint with AR marker reference
+            if let mapPointStore = mapPointStore,
+               let index = mapPointStore.points.firstIndex(where: { $0.id == mapPointID }) {
+                mapPointStore.points[index].arMarkerID = markerID.uuidString
+                mapPointStore.save()
+            }
+            
+            lastPlacedPosition = position
+            
+            // Post notification that marker was placed (only for real markers, not ghosts)
+            if !isGhost {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("ARMarkerPlaced"),
+                    object: nil,
+                    userInfo: ["markerID": markerID.uuidString, "mapPointID": mapPointID]
+                )
+            }
+            
+            print("✅ \(isGhost ? "Ghost " : "")Marker placed with ID: \(markerID)")
+        }
+        
+        // MARK: - Photo Capture
+        
+        /// Capture current AR frame as reference photo
+        func captureReferencePhoto() -> Data? {
+            guard let arView = arView,
+                  let frame = arView.session.currentFrame else {
+                print("❌ No AR frame available for photo capture")
+                return nil
+            }
+            
+            let pixelBuffer = frame.capturedImage
+            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+            let context = CIContext()
+            
+            guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
+                print("❌ Failed to convert CVPixelBuffer to CGImage")
+                return nil
+            }
+            
+            let uiImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
+            
+            // Compress to JPEG at 80% quality
+            return uiImage.jpegData(compressionQuality: 0.8)
         }
         
         deinit {

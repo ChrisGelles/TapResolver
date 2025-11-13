@@ -30,6 +30,19 @@ struct TriangleOverlay: View {
                             triangleStore.selectedTriangleID = triangle.id
                             print("📐 Selected triangle: \(triangle.id)")
                         }
+                        .onLongPressGesture(minimumDuration: 0.5) {
+                            // Select the triangle first
+                            triangleStore.selectedTriangleID = triangle.id
+                            print("🔵 Selected triangle via long-press: \(triangle.id)")
+                            
+                            // Post notification to trigger AR calibration workflow
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("StartTriangleCalibration"),
+                                object: nil,
+                                userInfo: ["triangleID": triangle.id]
+                            )
+                            print("🎯 Long-press detected - starting calibration for triangle: \(triangle.id)")
+                        }
                 }
             }
             
@@ -46,7 +59,16 @@ struct TriangleOverlay: View {
                     .contentShape(TriangleShape(vertices: positions))
                     .onTapGesture {
                         triangleStore.selectedTriangleID = nil
-                        print("📐 Deselected triangle: \(selectedID)")
+                        print("🔵 Deselected triangle: \(selectedID)")
+                    }
+                    .onLongPressGesture(minimumDuration: 0.5) {
+                        // Long-press on selected triangle also triggers calibration
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("StartTriangleCalibration"),
+                            object: nil,
+                            userInfo: ["triangleID": selectedTriangle.id]
+                        )
+                        print("🎯 Long-press on selected triangle - starting calibration for: \(selectedTriangle.id)")
                     }
                     .zIndex(100)  // ✅ Render on top of all other triangles
             }

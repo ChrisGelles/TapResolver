@@ -8,6 +8,7 @@
 import SwiftUI
 import Combine
 import CoreGraphics
+import simd
 
 class TrianglePatchStore: ObservableObject {
     @Published var triangles: [TrianglePatch] = []
@@ -291,6 +292,154 @@ class TrianglePatchStore: ObservableObject {
         }
         
         return false
+    }
+    
+    // MARK: - Adjacent Triangle Discovery
+    
+    /// Find triangles that share an edge (2 vertices) with the given triangle
+    func findAdjacentTriangles(_ triangleID: UUID) -> [TrianglePatch] {
+        guard let sourceTriangle = triangles.first(where: { $0.id == triangleID }) else {
+            return []
+        }
+        
+        let sourceVertexSet = Set(sourceTriangle.vertexIDs)
+        
+        return triangles.filter { candidate in
+            guard candidate.id != triangleID else { return false }
+            
+            let candidateVertexSet = Set(candidate.vertexIDs)
+            let sharedCount = sourceVertexSet.intersection(candidateVertexSet).count
+            
+            // Adjacent triangles share exactly 2 vertices (an edge)
+            return sharedCount == 2
+        }
+    }
+    
+    /// Get the "far vertex" of an adjacent triangle (the vertex not shared with source triangle)
+    func getFarVertex(adjacentTriangle: TrianglePatch, sourceTriangle: TrianglePatch) -> UUID? {
+        let sourceVertexSet = Set(sourceTriangle.vertexIDs)
+        let uniqueVertices = adjacentTriangle.vertexIDs.filter { !sourceVertexSet.contains($0) }
+        return uniqueVertices.first
+    }
+    
+    // MARK: - Map Point Population
+    
+    /// Project ALL map points into AR space using calibrated triangle
+    func populateAllMapPointMarkers(
+        calibratedTriangle: TrianglePatch,
+        mapPointStore: MapPointStore,
+        arCoordinator: ARViewContainer.Coordinator
+    ) {
+        guard calibratedTriangle.isCalibrated else {
+            print("⚠️ Triangle not calibrated")
+            return
+        }
+        
+        guard calibratedTriangle.arMarkerIDs.count == 3 else {
+            print("⚠️ Need 3 AR marker IDs")
+            return
+        }
+        
+        print("🔴 Populating AR markers for ALL map points...")
+        
+        // Get the 3 calibration point positions (2D map + 3D AR)
+        var calibrationPairs: [(mapPoint: CGPoint, arPosition: simd_float3)] = []
+        
+        for (index, vertexID) in calibratedTriangle.vertexIDs.enumerated() {
+            guard let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }),
+                  let markerIDString = calibratedTriangle.arMarkerIDs[safe: index],
+                  let markerUUID = UUID(uuidString: markerIDString),
+                  let markerNode = arCoordinator.calibrationMarkerNodes[markerUUID] else {
+                print("⚠️ Cannot get calibration data for vertex \(index)")
+                return
+            }
+            
+            let arPosition = markerNode.simdPosition
+            calibrationPairs.append((mapPoint: mapPoint.mapPoint, arPosition: arPosition))
+        }
+        
+        guard calibrationPairs.count == 3 else {
+            print("⚠️ Need 3 calibration pairs")
+            return
+        }
+        
+        print("✅ Got 3 calibration pairs")
+        print("   Pair 1: Map(\(Int(calibrationPairs[0].mapPoint.x)),\(Int(calibrationPairs[0].mapPoint.y))) → AR\(calibrationPairs[0].arPosition)")
+        print("   Pair 2: Map(\(Int(calibrationPairs[1].mapPoint.x)),\(Int(calibrationPairs[1].mapPoint.y))) → AR\(calibrationPairs[1].arPosition)")
+        print("   Pair 3: Map(\(Int(calibrationPairs[2].mapPoint.x)),\(Int(calibrationPairs[2].mapPoint.y))) → AR\(calibrationPairs[2].arPosition)")
+        
+        // Project ALL map points
+        var createdCount = 0
+        let calibratedVertexIDs = Set(calibratedTriangle.vertexIDs)
+        
+        for mapPoint in mapPointStore.points {
+            // Skip calibration markers (they're already orange)
+            if calibratedVertexIDs.contains(mapPoint.id) {
+                continue
+            }
+            
+            // Project this map point into AR space using barycentric coordinates
+            let projectedPosition = projectMapPointToAR(
+                mapPoint: mapPoint.mapPoint,
+                calibrationPairs: calibrationPairs
+            )
+            
+            // Create AR marker with RED sphere
+            let virtualMarkerID = UUID()
+            let virtualNode = arCoordinator.createARMarkerNode(
+                at: projectedPosition,
+                sphereColor: .systemRed,  // Red for all projected markers
+                markerID: virtualMarkerID,
+                userHeight: arCoordinator.userHeight,
+                badgeColor: nil
+            )
+            
+            virtualNode.opacity = 1.0  // Full opacity
+            
+            // Add to scene
+            arCoordinator.arView?.scene.rootNode.addChildNode(virtualNode)
+            
+            // Store in ghost markers (session-temporary)
+            arCoordinator.ghostMarkerNodes[virtualMarkerID] = virtualNode
+            
+            createdCount += 1
+        }
+        
+        print("✅ Created \(createdCount) AR markers (red spheres) for all map points")
+    }
+    
+    /// Project a 2D map point into 3D AR space using barycentric interpolation
+    private func projectMapPointToAR(
+        mapPoint: CGPoint,
+        calibrationPairs: [(mapPoint: CGPoint, arPosition: simd_float3)]
+    ) -> simd_float3 {
+        let p0 = calibrationPairs[0].mapPoint
+        let p1 = calibrationPairs[1].mapPoint
+        let p2 = calibrationPairs[2].mapPoint
+        
+        // Calculate barycentric coordinates
+        let denom = (p1.y - p2.y) * (p0.x - p2.x) + (p2.x - p1.x) * (p0.y - p2.y)
+        
+        guard abs(denom) > 0.0001 else {
+            // Degenerate triangle - return average
+            let avg = (calibrationPairs[0].arPosition + 
+                       calibrationPairs[1].arPosition + 
+                       calibrationPairs[2].arPosition) / 3
+            return avg
+        }
+        
+        let w0 = ((p1.y - p2.y) * (mapPoint.x - p2.x) + (p2.x - p1.x) * (mapPoint.y - p2.y)) / denom
+        let w1 = ((p2.y - p0.y) * (mapPoint.x - p2.x) + (p0.x - p2.x) * (mapPoint.y - p2.y)) / denom
+        let w2 = 1 - w0 - w1
+        
+        // Apply same weights to AR positions
+        let ar0 = calibrationPairs[0].arPosition
+        let ar1 = calibrationPairs[1].arPosition
+        let ar2 = calibrationPairs[2].arPosition
+        
+        let projected = Float(w0) * ar0 + Float(w1) * ar1 + Float(w2) * ar2
+        
+        return projected
     }
     
     // MARK: - Persistence

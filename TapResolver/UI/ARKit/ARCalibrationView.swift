@@ -37,6 +37,8 @@ struct ARCalibrationView: View {
     @EnvironmentObject private var worldMapStore: ARWorldMapStore
     @EnvironmentObject private var metricSquares: MetricSquareStore
     @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
+    @EnvironmentObject private var trianglePatchStore: TrianglePatchStore
     @State private var markerPlaced = false
     @State private var relocalizationStatus: String = ""
     @State private var selectedMarkerID: UUID?
@@ -109,6 +111,28 @@ struct ARCalibrationView: View {
             .onAppear {
                 // Capture coordinator reference for UI updates
                 arCoordinatorWrapper.coordinator = ARViewContainer.Coordinator.current
+                
+                // Set calibration mode if coordinator is active
+                if arCalibrationCoordinator.isActive,
+                   let coordinator = ARViewContainer.Coordinator.current,
+                   let currentVertexID = arCalibrationCoordinator.getCurrentVertexID() {
+                    coordinator.isCalibrationMode = true
+                    coordinator.calibrationTargetPointID = currentVertexID
+                    print("🎯 Calibration mode enabled for vertex: \(currentVertexID)")
+                }
+            }
+            .onChange(of: arCalibrationCoordinator.currentVertexIndex) { _ in
+                // Update target point when vertex index changes
+                if arCalibrationCoordinator.isActive,
+                   let coordinator = ARViewContainer.Coordinator.current,
+                   let currentVertexID = arCalibrationCoordinator.getCurrentVertexID() {
+                    coordinator.calibrationTargetPointID = currentVertexID
+                    
+                    // Update reference photo for new vertex
+                    if let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }) {
+                        arCalibrationCoordinator.setReferencePhoto(mapPoint.locationPhotoData)
+                    }
+                }
             }
             .onChange(of: arCoordinatorWrapper.coordinator?.showFloorMarkerPositioning ?? false) { shouldShow in
                 if shouldShow,
@@ -120,6 +144,19 @@ struct ARCalibrationView: View {
                     showFloorMarkerPositioning = false
                     capturedFloorImage = nil
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GenerateGhostMarkers"))) { notification in
+                guard let triangleID = notification.userInfo?["triangleID"] as? UUID else { return }
+                guard let coordinator = ARViewContainer.Coordinator.current else { return }
+                guard let triangle = trianglePatchStore.triangles.first(where: { $0.id == triangleID }) else { return }
+                
+                print("🔴 Populating ALL map points as AR markers...")
+                
+                trianglePatchStore.populateAllMapPointMarkers(
+                    calibratedTriangle: triangle,
+                    mapPointStore: mapPointStore,
+                    arCoordinator: coordinator
+                )
             }
             
             // New Interpolation UI (only in interpolation mode)
@@ -141,25 +178,46 @@ struct ARCalibrationView: View {
             } else {
                 // Normal mode - PiP + Drawer + Close button
                 
-                // Top row: [controls grid] ---spacer--- [PiP map]
+                // Top row: [reference photo OR controls] ---spacer--- [PiP map]
                 VStack {
                     GeometryReader { geo in
                         HStack(alignment: .top, spacing: 0) {
-                            // --- Controls grid pinned to LEFT edge ---
-                        ControlsGrid(
-                            isPresented: $isPresented,
-                            isCalibrationMode: $isCalibrationMode,
-                            isAnchorMode: $isAnchorMode,
-                            calibrationMarkers: $calibrationMarkers,
-                            showAnchorManagementSheet: $showAnchorManagementSheet
-                        )
-                            .padding(.leading, ARInterpolationLayout.controlsLeftMargin)
+                            // --- Reference Photo (only in calibration mode) OR Controls grid ---
+                            if arCalibrationCoordinator.isActive, let photoData = arCalibrationCoordinator.referencePhotoData {
+                                // Show reference photo instead of controls
+                                if let uiImage = UIImage(data: photoData) {
+                                    Image(uiImage: uiImage)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(
+                                            width: ARInterpolationLayout.pipMapWidth,
+                                            height: ARInterpolationLayout.pipMapHeight
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: ARInterpolationLayout.pipMapCornerRadius)
+                                                .stroke(Color.orange.opacity(0.8), lineWidth: 3)
+                                        )
+                                        .padding(.leading, ARInterpolationLayout.controlsLeftMargin)
+                                        .padding(.top, 40)
+                                }
+                            } else if !arCalibrationCoordinator.isActive {
+                                // Show controls grid only when NOT in calibration mode
+                                ControlsGrid(
+                                    isPresented: $isPresented,
+                                    isCalibrationMode: $isCalibrationMode,
+                                    isAnchorMode: $isAnchorMode,
+                                    calibrationMarkers: $calibrationMarkers,
+                                    showAnchorManagementSheet: $showAnchorManagementSheet
+                                )
+                                .padding(.leading, ARInterpolationLayout.controlsLeftMargin)
+                            }
                             
                             Spacer() // fills remaining space
                             
                             // --- PiP Map pinned to RIGHT edge ---
                             PiPMapView(
-                                firstPointID: mapPointStore.activePointID,
+                                firstPointID: arCalibrationCoordinator.isActive ? arCalibrationCoordinator.getCurrentVertexID() : mapPointStore.activePointID,
                                 secondPointID: nil,
                                 markedPointIDs: markedPointIDs
                             )
@@ -263,6 +321,29 @@ struct ARCalibrationView: View {
                         .padding(.bottom, 50)
                     }
                     .zIndex(10002)
+                }
+                
+                // Place Marker Button (bottom center, only in triangle calibration mode)
+                if arCalibrationCoordinator.isActive {
+                    VStack {
+                        Spacer()
+                        
+                        Button(action: {
+                            placeCurrentMarker()
+                        }) {
+                            Text("Place Marker \(arCalibrationCoordinator.completedMarkerCount + 1)/3")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 40)
+                                .padding(.vertical, 16)
+                                .background(Color.orange)
+                                .cornerRadius(12)
+                                .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.bottom, 60)
+                    }
+                    .zIndex(5002)
                 }
                 
                 // Signature image button (during anchor capture)
@@ -998,6 +1079,42 @@ struct ARCalibrationView: View {
         }
     }
     
+    private func placeCurrentMarker() {
+        guard let coordinator = ARViewContainer.Coordinator.current,
+              let mapPointID = coordinator.calibrationTargetPointID else {
+            print("❌ No coordinator or target point ID")
+            return
+        }
+        
+        guard let mapPoint = mapPointStore.points.first(where: { $0.id == mapPointID }) else {
+            print("❌ Cannot find map point")
+            return
+        }
+        
+        // All user-planted markers are orange
+        let markerColor = UIColor.orange
+        
+        // Place the marker
+        coordinator.placeMarkerAt(
+            mapPointID: mapPointID,
+            mapPoint: mapPoint,
+            color: markerColor,
+            isGhost: false
+        )
+        
+        // Capture reference photo if not already captured
+        if mapPoint.locationPhotoData == nil {
+            if let photoData = coordinator.captureReferencePhoto() {
+                if let index = mapPointStore.points.firstIndex(where: { $0.id == mapPointID }) {
+                    mapPointStore.points[index].locationPhotoData = photoData
+                    mapPointStore.save()
+                    arCalibrationCoordinator.setReferencePhoto(photoData)
+                    print("📸 Reference photo captured and saved")
+                }
+            }
+        }
+    }
+    
     private func placeCalibrationMarker() {
         guard let selectedPointID = mapPointStore.activePointID,
               let selectedPoint = mapPointStore.points.first(where: { $0.id == selectedPointID }),
@@ -1506,7 +1623,7 @@ struct PiPMapView: View {
            secondPointID == nil,
            let point = mapPointStore.points.first(where: { $0.id == pointID }) {
             // Single point mode - create fake corners around point
-            let regionSize: CGFloat = 400
+            let regionSize: CGFloat = 250  // Smaller region = more zoom
             let cornerA = CGPoint(x: point.mapPoint.x - regionSize/2, y: point.mapPoint.y - regionSize/2)
             let cornerB = CGPoint(x: point.mapPoint.x + regionSize/2, y: point.mapPoint.y + regionSize/2)
             
