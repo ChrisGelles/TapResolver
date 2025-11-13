@@ -74,6 +74,7 @@ public final class MapPointStore: ObservableObject {
         public var roles: Set<MapPointRole> = []
         public var locationPhotoData: Data? = nil
         public var triangleMemberships: [UUID] = []
+        public var isLocked: Bool = true  // ✅ New points default to locked
         
         public var mapPoint: CGPoint {
             get { position }
@@ -89,7 +90,8 @@ public final class MapPointStore: ObservableObject {
             sessions: [ScanSession] = [],
             roles: Set<MapPointRole> = [],
             locationPhotoData: Data? = nil,
-            triangleMemberships: [UUID] = []
+            triangleMemberships: [UUID] = [],
+            isLocked: Bool = true  // ✅ ADD THIS PARAMETER
         ) {
             self.id = id ?? UUID()
             self.position = mapPoint
@@ -101,6 +103,7 @@ public final class MapPointStore: ObservableObject {
             self.roles = roles
             self.locationPhotoData = locationPhotoData
             self.triangleMemberships = triangleMemberships
+            self.isLocked = isLocked  // ✅ ADD THIS ASSIGNMENT
         }
     }
     
@@ -316,11 +319,11 @@ public final class MapPointStore: ObservableObject {
     }
 
     /// Update a map point's position (used while dragging)
-    public func updatePoint(id: UUID, to newPoint: CGPoint) {
-        if let idx = points.firstIndex(where: { $0.id == id }) {
-            points[idx].mapPoint = newPoint
-            save()
-        }
+    public func updatePoint(id: UUID, to newPosition: CGPoint) {
+        guard let index = points.firstIndex(where: { $0.id == id }) else { return }
+        points[index].position = newPosition
+        // Note: We don't save() here to avoid excessive I/O during drag
+        // The position will be saved when drag ends via the existing save mechanism
     }
 
     public func clear() {
@@ -360,6 +363,19 @@ public final class MapPointStore: ObservableObject {
         return activePointID == id
     }
 
+    /// Toggle the lock state of a map point
+    public func toggleLock(id: UUID) {
+        guard let index = points.firstIndex(where: { $0.id == id }) else { return }
+        points[index].isLocked.toggle()
+        print("🔒 Map Point \(points[index].isLocked ? "locked" : "unlocked"): \(id)")
+        save()
+    }
+    
+    /// Check if a point is locked
+    public func isLocked(_ id: UUID) -> Bool {
+        return points.first(where: { $0.id == id })?.isLocked ?? true
+    }
+
     /// Get coordinate string for display in drawer
     public func coordinateString(for point: MapPoint) -> String {
         return "(\(Int(point.mapPoint.x)),\(Int(point.mapPoint.y)))"
@@ -379,6 +395,7 @@ public final class MapPointStore: ObservableObject {
         let roles: [MapPointRole]?
         let locationPhotoData: Data?
         let triangleMemberships: [UUID]?
+        let isLocked: Bool?  // ✅ Optional for backward compatibility
     }
 
     internal func save() {
@@ -410,7 +427,8 @@ public final class MapPointStore: ObservableObject {
             arMarkerID: $0.arMarkerID,
             roles: Array($0.roles),
             locationPhotoData: $0.locationPhotoData,
-            triangleMemberships: $0.triangleMemberships
+            triangleMemberships: $0.triangleMemberships,
+            isLocked: $0.isLocked
         )}
         ctx.write(pointsKey, value: dto)
         if let activeID = activePointID {
@@ -443,9 +461,10 @@ public final class MapPointStore: ObservableObject {
                     sessions: dtoItem.sessions,
                     roles: Set(dtoItem.roles ?? []),
                     locationPhotoData: dtoItem.locationPhotoData,
-                    triangleMemberships: dtoItem.triangleMemberships ?? []
+                    triangleMemberships: dtoItem.triangleMemberships ?? [],
+                    isLocked: dtoItem.isLocked ?? true  // Default to locked for backward compatibility
                 )
-                if dtoItem.roles == nil || dtoItem.triangleMemberships == nil {
+                if dtoItem.roles == nil || dtoItem.triangleMemberships == nil || dtoItem.isLocked == nil {
                     needsSave = true
                 }
                 point.linkedARMarkerID = dtoItem.linkedARMarkerID

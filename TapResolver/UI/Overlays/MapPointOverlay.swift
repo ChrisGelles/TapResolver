@@ -21,101 +21,133 @@ struct MapPointOverlay: View {
             if hud.isMapPointOpen {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .allowsHitTesting(false)  // ✅ Never intercept taps - let points handle everything
+                    .allowsHitTesting(false)  // Never intercept taps - let points handle everything
                 
                 ForEach(mapPointStore.points) { point in
-                    let isActive = mapPointStore.isActive(point.id)
-                    
-                    mapPointDot(for: point, isActive: isActive)
+                    DraggableMapPoint(point: point)
                 }
             }
         }
         .animation(.easeInOut(duration: 0.25), value: hud.isMapPointOpen)
     }
     
-    @ViewBuilder
-    private func mapPointDot(for point: MapPointStore.MapPoint, isActive: Bool) -> some View {
-        let isSelected = mapPointStore.selectedPointID == point.id
-        let color = displayColor(for: point, isActive: isActive)
+    // MARK: - Single draggable map point subview
+    private struct DraggableMapPoint: View {
+        let point: MapPointStore.MapPoint
+        @EnvironmentObject private var mapPointStore: MapPointStore
+        @EnvironmentObject private var mapTransform: MapTransformStore
+        @EnvironmentObject private var triangleStore: TrianglePatchStore
         
-        Circle()
-            .fill(color.opacity(0.9))
-            .overlay(
+        private let dotSize: CGFloat = 12
+        private let hitPadding: CGFloat = 8
+        
+        @State private var startPoint: CGPoint? = nil
+        
+        var body: some View {
+            let isActive = mapPointStore.isActive(point.id)
+            let isSelected = mapPointStore.selectedPointID == point.id
+            let isLocked = point.isLocked
+            let color = displayColor(for: point, isActive: isActive)
+            
+            ZStack {
                 Circle()
-                    .stroke(isSelected ? Color.white : Color.black.opacity(isActive ? 1 : 0), lineWidth: isSelected ? 3 : (isActive ? 2 : 0))
-            )
-            .overlay(alignment: .topTrailing) {
-                if !point.roles.isEmpty {
-                    roleBadges(for: point)
-                        .offset(x: 14, y: -14)
-                }
+                    .fill(color.opacity(0.9))
+                    .overlay(
+                        Circle()
+                            .stroke(isSelected ? Color.white : Color.black.opacity(isActive ? 1 : 0), lineWidth: isSelected ? 3 : (isActive ? 2 : 0))
+                    )
+                    .overlay(alignment: .topTrailing) {
+                        if !point.roles.isEmpty {
+                            roleBadges(for: point)
+                                .offset(x: 14, y: -14)
+                        }
+                    }
+                    .frame(width: dotSize, height: dotSize)
             }
-            .frame(width: 12, height: 12)
+            .frame(width: dotSize + 2 * hitPadding,
+                   height: dotSize + 2 * hitPadding,
+                   alignment: .center)
+            .contentShape(Circle())
             .position(point.mapPoint)
-            .allowsHitTesting(true)
-            .onTapGesture {
-                print("MapPoint tapped: \(point.id)")
-                
-                // Triangle creation handling
-                if triangleStore.isCreatingTriangle {
-                    if let error = triangleStore.addCreationVertex(point.id, mapPointStore: mapPointStore) {
-                        print("❌ Cannot add vertex: \(error)")
-                        // TODO: Show error toast to user
+                .gesture(
+                    DragGesture(minimumDistance: 6)
+                        .onChanged { value in
+                            guard !isLocked else { return }
+                            if startPoint == nil { startPoint = point.mapPoint }
+                            let dMap = mapTransform.screenTranslationToMap(value.translation)
+                            let base = startPoint ?? point.mapPoint
+                            let newPoint = CGPoint(x: base.x + dMap.x, y: base.y + dMap.y)
+                            mapPointStore.updatePoint(id: point.id, to: newPoint)
+                        }
+                        .onEnded { _ in
+                            startPoint = nil
+                            // Save position after drag completes
+                            mapPointStore.save()
+                        }
+                )
+                .onTapGesture {
+                    print("MapPoint tapped: \(point.id)")
+                    
+                    // Triangle creation handling
+                    if triangleStore.isCreatingTriangle {
+                        if let error = triangleStore.addCreationVertex(point.id, mapPointStore: mapPointStore) {
+                            print("❌ Cannot add vertex: \(error)")
+                        }
+                        return
                     }
-                    return
-                }
-                
-                // Existing tap handling
-                if mapPointStore.isInterpolationMode && mapPointStore.interpolationSecondPointID == nil {
-                    mapPointStore.selectSecondPoint(secondPointID: point.id)
-                } else {
-                    // ✅ TOGGLE: If already selected, deselect
-                    if mapPointStore.selectedPointID == point.id {
-                        mapPointStore.selectedPointID = nil
-                        print("🔘 Deselected MapPoint: \(point.id)")
+                    
+                    // Existing tap handling
+                    if mapPointStore.isInterpolationMode && mapPointStore.interpolationSecondPointID == nil {
+                        mapPointStore.selectSecondPoint(secondPointID: point.id)
                     } else {
-                        mapPointStore.selectedPointID = point.id
-                        print("🔘 Selected MapPoint: \(point.id)")
+                        // ✅ TOGGLE: If already selected, deselect
+                        if mapPointStore.selectedPointID == point.id {
+                            mapPointStore.selectedPointID = nil
+                            print("🔘 Deselected MapPoint: \(point.id)")
+                        } else {
+                            mapPointStore.selectedPointID = point.id
+                            print("🔘 Selected MapPoint: \(point.id)")
+                        }
                     }
                 }
+        }
+        
+        private func displayColor(for point: MapPointStore.MapPoint, isActive: Bool) -> Color {
+            if mapPointStore.interpolationFirstPointID == point.id {
+                return .orange
             }
-    }
-    
-    private func displayColor(for point: MapPointStore.MapPoint, isActive: Bool) -> Color {
-        if mapPointStore.interpolationFirstPointID == point.id {
-            return .orange
+            if mapPointStore.interpolationSecondPointID == point.id {
+                return .green
+            }
+            if point.roles.contains(.directionalNorth) {
+                return MapPointRole.directionalNorth.color
+            }
+            if point.roles.contains(.directionalSouth) {
+                return MapPointRole.directionalSouth.color
+            }
+            if point.roles.contains(.triangleEdge) {
+                return MapPointRole.triangleEdge.color
+            }
+            if point.roles.contains(.featureMarker) {
+                return MapPointRole.featureMarker.color
+            }
+            if isActive {
+                return Color(hex: 0x10fff1)
+            }
+            return .blue
         }
-        if mapPointStore.interpolationSecondPointID == point.id {
-            return .green
-        }
-        if point.roles.contains(.directionalNorth) {
-            return MapPointRole.directionalNorth.color
-        }
-        if point.roles.contains(.directionalSouth) {
-            return MapPointRole.directionalSouth.color
-        }
-        if point.roles.contains(.triangleEdge) {
-            return MapPointRole.triangleEdge.color
-        }
-        if point.roles.contains(.featureMarker) {
-            return MapPointRole.featureMarker.color
-        }
-        if isActive {
-            return Color(hex: 0x10fff1)
-        }
-        return .blue
-    }
-    
-    @ViewBuilder
-    private func roleBadges(for point: MapPointStore.MapPoint) -> some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            ForEach(Array(point.roles).sorted { $0.rawValue < $1.rawValue }, id: \.self) { role in
-                Image(systemName: role.icon)
-                    .font(.system(size: 8))
-                    .foregroundColor(.white)
-                    .padding(4)
-                    .background(role.color)
-                    .clipShape(Circle())
+        
+        @ViewBuilder
+        private func roleBadges(for point: MapPointStore.MapPoint) -> some View {
+            VStack(alignment: .trailing, spacing: 2) {
+                ForEach(Array(point.roles).sorted { $0.rawValue < $1.rawValue }, id: \.self) { role in
+                    Image(systemName: role.icon)
+                        .font(.system(size: 8))
+                        .foregroundColor(.white)
+                        .padding(4)
+                        .background(role.color)
+                        .clipShape(Circle())
+                }
             }
         }
     }

@@ -224,6 +224,19 @@ struct MapPointListItem: View {
             
             Spacer(minLength: 0)
 
+            // 🔒 Lock toggle (ADD THIS ENTIRE BLOCK)
+            Button(action: {
+                mapPointStore.toggleLock(id: point.id)
+            }) {
+                Image(systemName: point.isLocked ? "lock.fill" : "lock.open")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(point.isLocked ? .yellow : .primary)
+                    .frame(width: 24, height: 24)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(point.isLocked ? "Unlock map point" : "Lock map point")
+            
             // Delete button (red X)
             Button(action: { onDelete?() }) {
                 Image(systemName: "xmark")
