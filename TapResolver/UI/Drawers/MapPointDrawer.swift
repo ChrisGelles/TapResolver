@@ -237,16 +237,21 @@ struct MapPointListItem: View {
             .buttonStyle(.plain)
             .accessibilityLabel(point.isLocked ? "Unlock map point" : "Lock map point")
             
-            // Delete button (red X)
-            Button(action: { onDelete?() }) {
+            // Delete button (red X) - only enabled when unlocked
+            Button(action: { 
+                guard !point.isLocked else { return }
+                onDelete?() 
+            }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.red)
+                    .foregroundColor(point.isLocked ? .gray : .red)
                     .frame(width: 24, height: 24)
                     .background(.ultraThinMaterial, in: Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Delete map point")
+            .disabled(point.isLocked)
+            .opacity(point.isLocked ? 0.5 : 1.0)
+            .accessibilityLabel(point.isLocked ? "Unlock to delete" : "Delete map point")
         }
         .padding(.horizontal, 0)                                    // ← row side padding
         .padding(.vertical, 6)                                      // ← row vertical padding
