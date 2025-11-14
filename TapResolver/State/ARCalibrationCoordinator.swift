@@ -111,9 +111,10 @@ class ARCalibrationCoordinator: ObservableObject {
         completedMarkerCount = 0
         
         // Reset coordinator calibration mode
-        if let coordinator = ARViewContainer.Coordinator.current {
-            coordinator.isCalibrationMode = false
-            coordinator.calibrationTargetPointID = nil
-        }
+        // TODO: Re-enable after Phase 4 coordinator integration
+        // if let coordinator = ARViewContainer.Coordinator.current {
+        //     coordinator.isCalibrationMode = false
+        //     coordinator.calibrationTargetPointID = nil
+        // }
     }
 }

@@ -21,21 +21,14 @@ struct MetricSquareARView: View {
     var body: some View {
         ZStack {
             // AR Camera feed with square placement
+            // DISABLED: MetricSquare AR not used
+            /*
             if let square = metricSquares.squares.first(where: { $0.id == squareID }) {
-                ARViewContainer(
-                    mapPointID: UUID(),
-                    userHeight: 0,
-                    markerPlaced: .constant(false),
-                    metricSquareID: square.id,
-                    squareColor: UIColor(square.color),
-                    squareSideMeters: square.meters,
-                    worldMapStore: worldMapStore,
-                    relocalizationStatus: $relocalizationStatus,
-                    mapPointStore: mapPointStore,
-                    selectedMarkerID: $selectedMarkerID
-                )
-                .ignoresSafeArea()
+                // TODO: Update to use proper mode after Phase 4 coordinator integration
+                ARViewContainer(mode: .metricSquare(squareID: square.id, sideLength: square.meters))
+                    .ignoresSafeArea()
             }
+            */
             
             // Close button (upper-left)
             VStack {

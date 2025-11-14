@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>colors</key>
+	<array/>
+	<key>images</key>
+	<array>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameMuseumMap8K</string>
+			<key>relativePath</key>
+			<string>./MuseumMap-8k.imageset</string>
+			<key>swiftSymbol</key>
+			<string>museumMap8K</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameMuseumMapThumbnail</string>
+			<key>relativePath</key>
+			<string>./MuseumMap-thumbnail.imageset</string>
+			<key>swiftSymbol</key>
+			<string>museumMapThumbnail</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameFacingGlyph</string>
+			<key>relativePath</key>
+			<string>./facing-glyph.imageset</string>
+			<key>swiftSymbol</key>
+			<string>facingGlyph</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameMyFirstFloorV03Metric</string>
+			<key>relativePath</key>
+			<string>./myFirstFloor_v03-metric.imageset</string>
+			<key>swiftSymbol</key>
+			<string>myFirstFloorV03Metric</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameMyFirstFloorV03MetricThumb</string>
+			<key>relativePath</key>
+			<string>./myFirstFloor_v03-metric-thumb.imageset</string>
+			<key>swiftSymbol</key>
+			<string>myFirstFloorV03MetricThumb</string>
+		</dict>
+	</array>
+	<key>symbols</key>
+	<array/>
+</dict>
+</plist>

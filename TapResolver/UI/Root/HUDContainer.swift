@@ -396,13 +396,8 @@ struct HUDContainer: View {
     @ViewBuilder
     private var arViewOverlay: some View {
         if showARCalibration {
-            ARCalibrationView(
-                isPresented: $showARCalibration,
-                mapPointID: mapPointStore.isInterpolationMode ? nil : mapPointStore.activePointID,
-                interpolationFirstPointID: mapPointStore.isInterpolationMode ? mapPointStore.interpolationFirstPointID : nil,
-                interpolationSecondPointID: mapPointStore.isInterpolationMode ? mapPointStore.interpolationSecondPointID : nil
-            )
-            .allowsHitTesting(true)
+            ARCalibrationView(isPresented: $showARCalibration)
+                .allowsHitTesting(true)
         }
         
         if showMetricSquareAR, let activeID = metricSquares.activeSquareID {

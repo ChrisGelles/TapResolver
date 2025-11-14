@@ -170,7 +170,8 @@ public final class MapPointStore: ObservableObject {
     @Published var anchorPackages: [AnchorPointPackage] = []
     
     // Calibration state (session-only, never persisted)
-    @Published var calibrationPoints: [CalibrationMarker] = []
+    // TODO: Re-enable after Phase 4 coordinator integration
+    // @Published var calibrationPoints: [CalibrationMarker] = []
     @Published var isCalibrated: Bool = false
     
     @Published public private(set) var activePointID: UUID? = nil

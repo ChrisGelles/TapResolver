@@ -82,9 +82,11 @@ struct MapNavigationView: View {
                         
                         arCalibrationCoordinator.setReferencePhoto(photoData)
                         
-                        // Present AR view
+                        // Present AR view (wrap @Published mutation in async)
                         print("📱 Presenting AR view for calibration")
-                        showARCalibration = true
+                        DispatchQueue.main.async {
+                            showARCalibration = true
+                        }
                     }
                 }
             }
@@ -109,29 +111,28 @@ struct MapNavigationView: View {
                     return
                 }
                 
-                // Update triangle with calibration data
-                trianglePatchStore.triangles[triangleIndex].isCalibrated = true
-                trianglePatchStore.triangles[triangleIndex].arMarkerIDs = markerIDs
-                trianglePatchStore.triangles[triangleIndex].lastCalibratedAt = Date()
-                trianglePatchStore.triangles[triangleIndex].calibrationQuality = 1.0  // Full quality for now
-                
-                trianglePatchStore.save()
+                // Update triangle with calibration data (wrap @Published mutations in async)
+                DispatchQueue.main.async {
+                    trianglePatchStore.triangles[triangleIndex].isCalibrated = true
+                    trianglePatchStore.triangles[triangleIndex].arMarkerIDs = markerIDs
+                    trianglePatchStore.triangles[triangleIndex].lastCalibratedAt = Date()
+                    trianglePatchStore.triangles[triangleIndex].calibrationQuality = 1.0  // Full quality for now
+                    
+                    trianglePatchStore.save()
+                }
                 
                 print("✅ Marked triangle \(String(triangleID.uuidString.prefix(8))) as calibrated")
                 print("   AR Marker IDs: \(markerIDs.map { String($0.prefix(8)) })")
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("LaunchPhotoManager"))) { notification in
                 guard let locationID = notification.userInfo?["locationID"] as? String else { return }
-                photoManagerLocationID = locationID
-                showPhotoManager = true
+                DispatchQueue.main.async {
+                    photoManagerLocationID = locationID
+                    showPhotoManager = true
+                }
             }
             .sheet(isPresented: $showARCalibration) {
-                ARCalibrationView(
-                    isPresented: $showARCalibration,
-                    mapPointID: arCalibrationCoordinator.getCurrentVertexID(),
-                    interpolationFirstPointID: nil,
-                    interpolationSecondPointID: nil
-                )
+                ARCalibrationView(isPresented: $showARCalibration)
             }
             .sheet(isPresented: $showPhotoManager) {
                 PhotoManagementView(

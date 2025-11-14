@@ -325,11 +325,17 @@ class TrianglePatchStore: ObservableObject {
     // MARK: - Map Point Population
     
     /// Project ALL map points into AR space using calibrated triangle
+    // TODO: Re-enable after Phase 4 coordinator integration
     func populateAllMapPointMarkers(
         calibratedTriangle: TrianglePatch,
         mapPointStore: MapPointStore,
-        arCoordinator: ARViewContainer.Coordinator
+        arCoordinator: Any // ARViewContainer.Coordinator - temporarily Any until Phase 4
     ) {
+        // TODO: Re-implement after Phase 4 coordinator is integrated
+        print("⚠️ populateAllMapPointMarkers temporarily disabled during refactor")
+        return
+        
+        /* Original implementation - will be restored in Phase 4
         guard calibratedTriangle.isCalibrated else {
             print("⚠️ Triangle not calibrated")
             return
@@ -406,6 +412,7 @@ class TrianglePatchStore: ObservableObject {
         }
         
         print("✅ Created \(createdCount) AR markers (red spheres) for all map points")
+        */
     }
     
     /// Project a 2D map point into 3D AR space using barycentric interpolation
