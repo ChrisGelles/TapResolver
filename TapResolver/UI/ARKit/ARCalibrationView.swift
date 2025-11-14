@@ -130,7 +130,15 @@ struct ARCalibrationView: View {
                     
                     // Update reference photo for new vertex
                     if let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }) {
-                        arCalibrationCoordinator.setReferencePhoto(mapPoint.locationPhotoData)
+                        // Try to load from disk first, fall back to memory if needed
+                        var photoData: Data? = nil
+                        if let diskData = mapPointStore.loadPhotoFromDisk(for: currentVertexID) {
+                            photoData = diskData
+                        } else if let memoryData = mapPoint.locationPhotoData {
+                            // Legacy: photo still in memory
+                            photoData = memoryData
+                        }
+                        arCalibrationCoordinator.setReferencePhoto(photoData)
                     }
                 }
             }
@@ -1103,13 +1111,13 @@ struct ARCalibrationView: View {
         )
         
         // Capture reference photo if not already captured
-        if mapPoint.locationPhotoData == nil {
+        if mapPoint.locationPhotoData == nil && mapPoint.photoFilename == nil {
             if let photoData = coordinator.captureReferencePhoto() {
                 if let index = mapPointStore.points.firstIndex(where: { $0.id == mapPointID }) {
-                    mapPointStore.points[index].locationPhotoData = photoData
-                    mapPointStore.save()
+                    _ = mapPointStore.savePhotoToDisk(for: mapPointID, photoData: photoData)
+                    mapPointStore.save()  // Save after updating filename
                     arCalibrationCoordinator.setReferencePhoto(photoData)
-                    print("📸 Reference photo captured and saved")
+                    print("📸 Reference photo captured and saved to disk")
                 }
             }
         }

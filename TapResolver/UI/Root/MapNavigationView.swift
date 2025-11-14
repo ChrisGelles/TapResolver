@@ -22,6 +22,8 @@ struct MapNavigationView: View {
     @State private var mapUIImage: UIImage?
     @State private var overlaysReady = false
     @State private var showARCalibration = false
+    @State private var showPhotoManager = false
+    @State private var photoManagerLocationID = ""
 
     var body: some View {
         GeometryReader { geo in
@@ -69,7 +71,16 @@ struct MapNavigationView: View {
                     if let firstVertexID = triangle.vertexIDs.first,
                        let mapPoint = mapPointStore.points.first(where: { $0.id == firstVertexID }) {
                         
-                        arCalibrationCoordinator.setReferencePhoto(mapPoint.locationPhotoData)
+                        // Try to load from disk first, fall back to memory if needed
+                        var photoData: Data? = nil
+                        if let diskData = mapPointStore.loadPhotoFromDisk(for: firstVertexID) {
+                            photoData = diskData
+                        } else if let memoryData = mapPoint.locationPhotoData {
+                            // Legacy: photo still in memory
+                            photoData = memoryData
+                        }
+                        
+                        arCalibrationCoordinator.setReferencePhoto(photoData)
                         
                         // Present AR view
                         print("📱 Presenting AR view for calibration")
@@ -109,12 +120,23 @@ struct MapNavigationView: View {
                 print("✅ Marked triangle \(String(triangleID.uuidString.prefix(8))) as calibrated")
                 print("   AR Marker IDs: \(markerIDs.map { String($0.prefix(8)) })")
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("LaunchPhotoManager"))) { notification in
+                guard let locationID = notification.userInfo?["locationID"] as? String else { return }
+                photoManagerLocationID = locationID
+                showPhotoManager = true
+            }
             .sheet(isPresented: $showARCalibration) {
                 ARCalibrationView(
                     isPresented: $showARCalibration,
                     mapPointID: arCalibrationCoordinator.getCurrentVertexID(),
                     interpolationFirstPointID: nil,
                     interpolationSecondPointID: nil
+                )
+            }
+            .sheet(isPresented: $showPhotoManager) {
+                PhotoManagementView(
+                    isPresented: $showPhotoManager,
+                    locationID: photoManagerLocationID
                 )
             }
         }

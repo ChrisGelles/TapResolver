@@ -9,6 +9,7 @@ import SwiftUI
 import CoreGraphics
 import Combine
 import simd
+import UIKit
 
 public enum MapPointRole: String, Codable, CaseIterable, Identifiable {
     case triangleEdge = "triangle_edge"
@@ -73,6 +74,7 @@ public final class MapPointStore: ObservableObject {
         public var arMarkerID: String?  // Links to ARWorldMapStore marker
         public var roles: Set<MapPointRole> = []
         public var locationPhotoData: Data? = nil
+        public var photoFilename: String? = nil  // NEW: Filename of photo on disk
         public var triangleMemberships: [UUID] = []
         public var isLocked: Bool = true  // ✅ New points default to locked
         
@@ -90,6 +92,7 @@ public final class MapPointStore: ObservableObject {
             sessions: [ScanSession] = [],
             roles: Set<MapPointRole> = [],
             locationPhotoData: Data? = nil,
+            photoFilename: String? = nil,  // NEW
             triangleMemberships: [UUID] = [],
             isLocked: Bool = true  // ✅ ADD THIS PARAMETER
         ) {
@@ -102,6 +105,7 @@ public final class MapPointStore: ObservableObject {
             self.arMarkerID = nil
             self.roles = roles
             self.locationPhotoData = locationPhotoData
+            self.photoFilename = photoFilename  // NEW
             self.triangleMemberships = triangleMemberships
             self.isLocked = isLocked  // ✅ ADD THIS ASSIGNMENT
         }
@@ -394,6 +398,7 @@ public final class MapPointStore: ObservableObject {
         let arMarkerID: String?
         let roles: [MapPointRole]?
         let locationPhotoData: Data?
+        let photoFilename: String?  // NEW
         let triangleMemberships: [UUID]?
         let isLocked: Bool?  // ✅ Optional for backward compatibility
     }
@@ -416,20 +421,33 @@ public final class MapPointStore: ObservableObject {
             }
         }
         
-        let dto = points.map { MapPointDTO(
-            id: $0.id,
-            x: $0.mapPoint.x,
-            y: $0.mapPoint.y,
-            name: $0.name,
-            createdDate: $0.createdDate,
-            sessions: $0.sessions,
-            linkedARMarkerID: $0.linkedARMarkerID,
-            arMarkerID: $0.arMarkerID,
-            roles: Array($0.roles),
-            locationPhotoData: $0.locationPhotoData,
-            triangleMemberships: $0.triangleMemberships,
-            isLocked: $0.isLocked
-        )}
+        let dto = points.map { point -> MapPointDTO in
+            // Only include locationPhotoData if there's no filename (legacy data)
+            let photoData: Data?
+            if point.photoFilename != nil {
+                // Photo is on disk, don't save to UserDefaults
+                photoData = nil
+            } else {
+                // Legacy: photo still in memory
+                photoData = point.locationPhotoData
+            }
+            
+            return MapPointDTO(
+                id: point.id,
+                x: point.mapPoint.x,
+                y: point.mapPoint.y,
+                name: point.name,
+                createdDate: point.createdDate,
+                sessions: point.sessions,
+                linkedARMarkerID: point.linkedARMarkerID,
+                arMarkerID: point.arMarkerID,
+                roles: Array(point.roles),
+                locationPhotoData: photoData,
+                photoFilename: point.photoFilename,  // NEW
+                triangleMemberships: point.triangleMemberships,
+                isLocked: point.isLocked
+            )
+        }
         ctx.write(pointsKey, value: dto)
         if let activeID = activePointID {
             ctx.write(activePointKey, value: activeID)
@@ -452,7 +470,25 @@ public final class MapPointStore: ObservableObject {
             // Museum diagnostic removed - use external tools for detailed inspection
             
             var needsSave = false
-            self.points = dto.map { dtoItem in
+            self.points = dto.map { dtoItem -> MapPoint in
+                // Load photo from disk if filename exists, otherwise use legacy data
+                var photoData: Data? = nil
+                if let filename = dtoItem.photoFilename {
+                    // Load from disk
+                    let fileManager = FileManager.default
+                    if let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
+                        let locationID = ctx.locationID
+                        let photoURL = documentsURL
+                            .appendingPathComponent("locations/\(locationID)/map-points")
+                            .appendingPathComponent(filename)
+                        
+                        photoData = try? Data(contentsOf: photoURL)
+                    }
+                } else {
+                    // Legacy: load from UserDefaults
+                    photoData = dtoItem.locationPhotoData
+                }
+                
                 var point = MapPoint(
                     id: dtoItem.id,
                     mapPoint: CGPoint(x: dtoItem.x, y: dtoItem.y),
@@ -460,7 +496,8 @@ public final class MapPointStore: ObservableObject {
                     createdDate: dtoItem.createdDate,
                     sessions: dtoItem.sessions,
                     roles: Set(dtoItem.roles ?? []),
-                    locationPhotoData: dtoItem.locationPhotoData,
+                    locationPhotoData: photoData,
+                    photoFilename: dtoItem.photoFilename,  // NEW
                     triangleMemberships: dtoItem.triangleMemberships ?? [],
                     isLocked: dtoItem.isLocked ?? true  // Default to locked for backward compatibility
                 )
@@ -975,6 +1012,67 @@ public final class MapPointStore: ObservableObject {
         return isInterpolationMode && 
                interpolationFirstPointID != nil && 
                interpolationSecondPointID != nil
+    }
+    
+    // MARK: - Photo Disk Storage Helpers
+    
+    /// Save photo to disk and update point with filename
+    func savePhotoToDisk(for pointID: UUID, photoData: Data) -> Bool {
+        guard let index = points.firstIndex(where: { $0.id == pointID }) else {
+            return false
+        }
+        
+        let fileManager = FileManager.default
+        guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return false
+        }
+        
+        let locationDir = documentsURL.appendingPathComponent("locations/\(ctx.locationID)/map-points")
+        
+        // Create directory if needed
+        try? fileManager.createDirectory(at: locationDir, withIntermediateDirectories: true)
+        
+        // Save with short UUID as filename
+        let filename = "\(String(pointID.uuidString.prefix(8))).jpg"
+        let fileURL = locationDir.appendingPathComponent(filename)
+        
+        do {
+            // Compress to JPEG
+            if let image = UIImage(data: photoData),
+               let jpegData = image.jpegData(compressionQuality: 0.8) {
+                try jpegData.write(to: fileURL)
+                
+                // Update point with filename and clear memory data
+                points[index].photoFilename = filename
+                points[index].locationPhotoData = nil  // Clear from memory
+                
+                print("📸 Saved photo to disk: \(filename) (\(jpegData.count / 1024) KB)")
+                return true
+            }
+        } catch {
+            print("❌ Failed to save photo: \(error)")
+        }
+        
+        return false
+    }
+    
+    /// Load photo from disk for a point
+    func loadPhotoFromDisk(for pointID: UUID) -> Data? {
+        guard let point = points.first(where: { $0.id == pointID }),
+              let filename = point.photoFilename else {
+            return nil
+        }
+        
+        let fileManager = FileManager.default
+        guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        
+        let fileURL = documentsURL
+            .appendingPathComponent("locations/\(ctx.locationID)/map-points")
+            .appendingPathComponent(filename)
+        
+        return try? Data(contentsOf: fileURL)
     }
     
 }

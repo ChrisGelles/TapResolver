@@ -95,6 +95,12 @@ struct HUDContainer: View {
                         BluetoothScanButton()
                         RSSIMeterButton()
                         FacingToggleButton()
+                        UserDefaultsDiagnosticButton()
+                        MapPointsInspectionButton()
+                        PhotoMigrationPlanButton()
+                        MapPointStructureButton()
+                        PhotoManagerButton()
+                        PurgePhotosButton()
                     }
                 }
                 Spacer()
@@ -933,6 +939,164 @@ private struct FacingToggleButton: View {
         .buttonStyle(.plain)
         .allowsHitTesting(true)
     }
+}
+
+// MARK: - UserDefaults Diagnostic Button
+
+private struct UserDefaultsDiagnosticButton: View {
+    @EnvironmentObject private var locationManager: LocationManager
+    
+    var body: some View {
+        Button {
+            UserDefaultsDiagnostics.printInventory()
+            _ = UserDefaultsDiagnostics.identifyHeavyData()
+        } label: {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.purple.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("UserDefaults Diagnostic")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - MapPoints Inspection Button
+
+private struct MapPointsInspectionButton: View {
+    @EnvironmentObject private var locationManager: LocationManager
+    
+    var body: some View {
+        Button {
+            let currentLoc = PersistenceContext.shared.locationID
+            UserDefaultsDiagnostics.inspectMapPointStructure(locationID: currentLoc)
+        } label: {
+            Text("🔬")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.orange.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("Inspect MapPoints")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - Photo Migration Plan Button
+
+private struct PhotoMigrationPlanButton: View {
+    var body: some View {
+        Button {
+            UserDefaultsDiagnostics.generatePhotoMigrationPlan()
+        } label: {
+            Text("📋")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.blue.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("Photo Migration Plan")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - MapPoint Structure Button
+
+private struct MapPointStructureButton: View {
+    @EnvironmentObject private var locationManager: LocationManager
+    
+    var body: some View {
+        Button {
+            let currentLoc = PersistenceContext.shared.locationID
+            UserDefaultsDiagnostics.inspectMapPointStructure(locationID: currentLoc)
+        } label: {
+            Text("🔍")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.green.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("MapPoint Structure")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - Photo Manager Button
+
+private struct PhotoManagerButton: View {
+    var body: some View {
+        Button {
+            let currentLoc = PersistenceContext.shared.locationID
+            UserDefaultsDiagnostics.launchPhotoManager(locationID: currentLoc)
+        } label: {
+            Text("📸")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.purple.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("Manage Photos")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - Purge Photos Button
+
+private struct PurgePhotosButton: View {
+    var body: some View {
+        Button {
+            // Manual purge for photos already on disk
+            let locationID = PersistenceContext.shared.locationID
+            let savedIDs = ["E49BCB0F", "86EB7B89", "CD8E90BB", "A59BC2FB", 
+                            "58BA635B", "90EA7A4A", "3E185BD1", "B9714AA0", "9E947C28"]
+            UserDefaultsDiagnostics.purgePhotosFromUserDefaults(
+                locationID: locationID,
+                confirmedFilesSaved: savedIDs
+            )
+        } label: {
+            Text("🗑️")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.red.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("Purge Photos from UD")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - UserDefaults Cleanup Function (callable from Xcode console)
+
+// Call this from Xcode console during debugging:
+// expr -l Swift -- cleanupUserDefaults()
+func cleanupUserDefaults() {
+    print("🧹 Starting UserDefaults cleanup...")
+    
+    // First, show what we have
+    UserDefaultsDiagnostics.printInventory()
+    
+    // Identify heavy keys
+    let heavyKeys = UserDefaultsDiagnostics.identifyHeavyData()
+    
+    // Dry run first
+    print("\n🔍 Performing DRY RUN...")
+    UserDefaultsDiagnostics.removeKeys(Array(heavyKeys.keys), dryRun: true)
+    
+    // Uncomment the line below to actually delete:
+    // UserDefaultsDiagnostics.removeKeys(Array(heavyKeys.keys), dryRun: false)
 }
 
 // MARK: - Export Bundle Type
