@@ -17,10 +17,17 @@ struct ARViewContainer: UIViewRepresentable {
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = [.horizontal]
         sceneView.session.run(config)
+        
+        // Enable ARKit debug visuals
+        sceneView.debugOptions = [
+            .showFeaturePoints,
+            .showWorldOrigin
+        ]
 
         context.coordinator.sceneView = sceneView
         context.coordinator.setMode(mode)
         context.coordinator.setupTapGesture()
+        context.coordinator.setupScene()
 
         return sceneView
     }
@@ -33,9 +40,14 @@ struct ARViewContainer: UIViewRepresentable {
         var sceneView: ARSCNView?
         var currentMode: ARMode = .idle
         var placedMarkers: [UUID: SCNNode] = [:] // Track placed markers by ID
+        private var crosshairNode: GroundCrosshairNode?
+        var currentCursorPosition: simd_float3?
         
-        // Default user height (will be configurable later)
-        var userHeight: Float = 1.7
+        // User device height (centralized constant)
+        var userDeviceHeight: Float = ARVisualDefaults.userDeviceHeight
+        
+        // Timer for updating crosshair
+        private var crosshairUpdateTimer: Timer?
 
         func setMode(_ mode: ARMode) {
             guard mode != currentMode else { return }
@@ -77,6 +89,22 @@ struct ARViewContainer: UIViewRepresentable {
             let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTapGesture(_:)))
             sceneView.addGestureRecognizer(tapGesture)
             print("👆 Tap gesture configured")
+            
+            // Listen for PlaceMarkerAtCursor notification
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handlePlaceMarkerAtCursor),
+                name: NSNotification.Name("PlaceMarkerAtCursor"),
+                object: nil
+            )
+        }
+        
+        @objc func handlePlaceMarkerAtCursor() {
+            guard let position = currentCursorPosition else {
+                print("⚠️ No cursor position available for marker placement")
+                return
+            }
+            placeMarker(at: position)
         }
 
         @objc func handleTapGesture(_ sender: UITapGestureRecognizer) {
@@ -124,7 +152,7 @@ struct ARViewContainer: UIViewRepresentable {
             let options = MarkerOptions(
                 color: markerColor,
                 markerID: markerID,
-                userHeight: userHeight
+                userDeviceHeight: userDeviceHeight
             )
             
             let markerNode = ARMarkerRenderer.createNode(at: position, options: options)
@@ -146,7 +174,77 @@ struct ARViewContainer: UIViewRepresentable {
             )
         }
 
+        func setupScene() {
+            guard let sceneView = sceneView else { return }
+            
+            // Setup modular crosshair
+            crosshairNode = GroundCrosshairNode()
+            if let node = crosshairNode {
+                sceneView.scene.rootNode.addChildNode(node)
+            }
+            
+            // Start updating crosshair position
+            crosshairUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                self?.updateCrosshair()
+            }
+            
+            print("➕ Ground crosshair configured")
+        }
+        
+        func updateCrosshair() {
+            guard let sceneView = sceneView,
+                  let crosshair = crosshairNode else { return }
+            
+            let screenCenter = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
+            
+            guard let query = sceneView.raycastQuery(from: screenCenter, allowing: .estimatedPlane, alignment: .horizontal) else {
+                crosshair.hide()
+                currentCursorPosition = nil
+                return
+            }
+            
+            let results = sceneView.session.raycast(query)
+            
+            if let result = results.first {
+                let rawPosition = simd_float3(
+                    result.worldTransform.columns.3.x,
+                    result.worldTransform.columns.3.y,
+                    result.worldTransform.columns.3.z
+                )
+                
+                // Check for corner snapping (optional - can be enhanced later)
+                let snappedPosition = findNearbyCorner(from: rawPosition) ?? rawPosition
+                let isSnapped = snappedPosition != rawPosition
+                let isConfident = isPlaneConfident(result)
+                
+                crosshair.update(position: snappedPosition, snapped: isSnapped, confident: isConfident)
+                currentCursorPosition = snappedPosition
+                
+                if isSnapped {
+                    print("📍 Crosshair snapped to corner")
+                }
+            } else {
+                crosshair.hide()
+                currentCursorPosition = nil
+            }
+        }
+        
+        private func isPlaneConfident(_ result: ARRaycastResult) -> Bool {
+            guard let planeAnchor = result.anchor as? ARPlaneAnchor else { return false }
+            let extent = planeAnchor.planeExtent
+            return (extent.width * extent.height) > 0.5
+        }
+        
+        private func findNearbyCorner(from position: simd_float3) -> simd_float3? {
+            // TODO: Implement corner detection logic if needed
+            // For now, return nil to disable snapping
+            return nil
+        }
+
         func teardownSession() {
+            crosshairUpdateTimer?.invalidate()
+            crosshairUpdateTimer = nil
+            NotificationCenter.default.removeObserver(self)
             sceneView?.session.pause()
             print("🔧 AR session paused and torn down.")
         }

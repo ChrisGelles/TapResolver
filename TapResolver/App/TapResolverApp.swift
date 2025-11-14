@@ -39,9 +39,26 @@ struct TapResolverApp: App {
     // Consolidates polling logic previously duplicated in RSSILabelsOverlay and ScanQualityViewModel
     @StateObject private var beaconState = BeaconStateManager()
     @StateObject private var arWorldMapStore = ARWorldMapStore()
-    @StateObject private var arCalibrationCoordinator = ARCalibrationCoordinator()
+    @StateObject private var trianglePatchStore = TrianglePatchStore()
+    @StateObject private var arCalibrationCoordinator: ARCalibrationCoordinator
     
     @State private var showAuthorNamePrompt = AppSettings.needsAuthorName
+    
+    init() {
+        // Initialize coordinator with temporary stores
+        // These will be updated to reference the actual @StateObject instances in onAppear
+        let tempARStore = ARWorldMapStore()
+        let tempMapStore = MapPointStore()
+        let tempTriangleStore = TrianglePatchStore()
+        let tempMetricStore = MetricSquareStore()
+        
+        _arCalibrationCoordinator = StateObject(wrappedValue: ARCalibrationCoordinator(
+            arStore: tempARStore,
+            mapStore: tempMapStore,
+            triangleStore: tempTriangleStore,
+            metricSquareStore: tempMetricStore
+        ))
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -61,6 +78,12 @@ struct TapResolverApp: App {
                 .environmentObject(arWorldMapStore)
                 .environmentObject(arCalibrationCoordinator)
                 .onAppear {
+                    // Update coordinator to use the actual store instances
+                    arCalibrationCoordinator.arStore = arWorldMapStore
+                    arCalibrationCoordinator.mapStore = mapPointStore
+                    arCalibrationCoordinator.triangleStore = trianglePatchStore
+                    arCalibrationCoordinator.metricSquareStore = metricSquares
+                    
                     LocationMigration.runIfNeeded()
                     squareMetrics.setMetricSquareStore(metricSquares)
                     orientationManager.start()

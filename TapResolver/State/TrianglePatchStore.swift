@@ -449,6 +449,63 @@ class TrianglePatchStore: ObservableObject {
         return projected
     }
     
+    // MARK: - Phase 4 Coordinator Helpers
+    
+    /// Find a triangle by its ID
+    func triangle(withID id: UUID) -> TrianglePatch? {
+        triangles.first(where: { $0.id == id })
+    }
+    
+    /// Add an AR marker ID to a triangle's vertex
+    func addMarker(mapPointID: UUID, markerID: UUID) {
+        guard let index = triangles.firstIndex(where: { $0.vertexIDs.contains(mapPointID) }) else {
+            print("⚠️ Cannot add marker: No triangle found with vertex \(String(mapPointID.uuidString.prefix(8)))")
+            return
+        }
+        
+        let markerIDString = markerID.uuidString
+        if !triangles[index].arMarkerIDs.contains(markerIDString) {
+            // Find the index of the vertex in the triangle
+            if let vertexIndex = triangles[index].vertexIDs.firstIndex(of: mapPointID) {
+                // Ensure arMarkerIDs array has enough elements
+                while triangles[index].arMarkerIDs.count <= vertexIndex {
+                    triangles[index].arMarkerIDs.append("")
+                }
+                triangles[index].arMarkerIDs[vertexIndex] = markerIDString
+                save()
+                print("✅ Added marker \(String(markerIDString.prefix(8))) to triangle vertex \(vertexIndex)")
+            }
+        }
+    }
+    
+    /// Mark a triangle as calibrated with quality score
+    func markCalibrated(_ id: UUID, quality: Float) {
+        guard let index = triangles.firstIndex(where: { $0.id == id }) else {
+            print("⚠️ Cannot mark calibrated: Triangle \(String(id.uuidString.prefix(8))) not found")
+            return
+        }
+        
+        triangles[index].isCalibrated = true
+        triangles[index].calibrationQuality = quality
+        triangles[index].lastCalibratedAt = Date()
+        save()
+        
+        print("✅ Marked triangle \(String(id.uuidString.prefix(8))) as calibrated (quality: \(Int(quality * 100))%)")
+    }
+    
+    /// Set leg measurements for a triangle
+    func setLegMeasurements(for triangleID: UUID, measurements: [TriangleLegMeasurement]) {
+        guard let index = triangles.firstIndex(where: { $0.id == triangleID }) else {
+            print("⚠️ Cannot set leg measurements: Triangle \(String(triangleID.uuidString.prefix(8))) not found")
+            return
+        }
+        
+        triangles[index].legMeasurements = measurements
+        save()
+        
+        print("✅ Set \(measurements.count) leg measurements for triangle \(String(triangleID.uuidString.prefix(8)))")
+    }
+    
     // MARK: - Persistence
     
     func save() {

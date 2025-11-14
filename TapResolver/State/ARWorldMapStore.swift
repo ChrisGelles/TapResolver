@@ -140,7 +140,8 @@ public final class ARWorldMapStore: ObservableObject {
     public init() {
         print("🧠 ARWorldMapStore init (ARWorldMap-first architecture)")
         loadGlobalMapMetadata()
-        loadMarkers()
+        // LEGACY: Marker loading removed - markers are now created on-demand during sessions
+        // No longer loading persisted marker metadata at startup
         
         NotificationCenter.default.addObserver(
             self,
@@ -158,7 +159,7 @@ public final class ARWorldMapStore: ObservableObject {
         print("📍 ARWorldMapStore: Location changed → \(ctx.locationID)")
         DispatchQueue.main.async {
             self.loadGlobalMapMetadata()
-            self.loadMarkers()
+            // LEGACY: Marker loading removed - markers are now created on-demand during sessions
         }
     }
     
@@ -385,11 +386,12 @@ public final class ARWorldMapStore: ObservableObject {
         return try NSKeyedUnarchiver.unarchivedObject(ofClass: ARWorldMap.self, from: data)
     }
     
-    private func loadMarkers() {
+    // LEGACY: Marker loading removed - markers are now created on-demand during AR sessions
+    // This function is kept for diagnostic purposes only (loads markers on-demand for inspection)
+    private func loadMarkersForDiagnostics() -> [ARMarker] {
         let dir = markersDirectory()
         guard let entries = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else {
-            DispatchQueue.main.async { self.markers = [] }
-            return
+            return []
         }
         
         var loaded: [ARMarker] = []
@@ -406,11 +408,125 @@ public final class ARWorldMapStore: ObservableObject {
             }
         }
         
-        DispatchQueue.main.async {
-            self.markers = loaded.sorted { $0.createdAt < $1.createdAt }
+        return loaded.sorted { $0.createdAt < $1.createdAt }
+    }
+    
+    // MARK: - Marker Access Helpers
+    
+    /// Find a marker by its ID (UUID string)
+    public func marker(withID id: UUID) -> ARMarker? {
+        let idString = id.uuidString
+        return markers.first(where: { $0.id == idString })
+    }
+    
+    // MARK: - Diagnostic Functions
+    
+    /// Inspect persisted AR markers for the current location (loads on-demand from disk)
+    public func inspectMarkers() {
+        let locationID = ctx.locationID
+        // Load markers on-demand for diagnostics (legacy markers only)
+        let loadedMarkers = loadMarkersForDiagnostics()
+        let count = loadedMarkers.count
+        
+        print("\n" + String(repeating: "=", count: 80))
+        print("🔍 AR MARKER INSPECTION: '\(locationID)'")
+        print(String(repeating: "=", count: 80))
+        print("⚠️  NOTE: These are legacy persisted markers (not used by current system)")
+        print("   Current system creates markers on-demand during AR sessions")
+        print("")
+        print("📊 Total legacy markers found: \(count)")
+        print("")
+        
+        if loadedMarkers.isEmpty {
+            print("📍 No persisted markers found")
+            print("   Path: \(markersDirectory().path)")
+        } else {
+            for (index, marker) in loadedMarkers.enumerated() {
+                let position = marker.worldTransform.toSimd().columns.3
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateStyle = .medium
+                dateFormatter.timeStyle = .short
+                
+                print("  [\(index + 1)] 📍 Marker ID: \(marker.id)")
+                print("      mapPointID: \(marker.mapPointID)")
+                print("      createdAt: \(dateFormatter.string(from: marker.createdAt))")
+                print("      Position: (\(String(format: "%.3f", position.x)), \(String(format: "%.3f", position.y)), \(String(format: "%.3f", position.z)))")
+                
+                if let observations = marker.observations {
+                    print("      Observations:")
+                    print("        - Distances: \(observations.distances_m.count) samples")
+                    print("        - Yaw coverage: \(observations.yawCoverage_deg.count) samples")
+                    if let jitter = observations.jitterStdDev_m {
+                        print("        - Jitter std dev: \(String(format: "%.4f", jitter)) m")
+                    }
+                } else {
+                    print("      Observations: None")
+                }
+                print("")
+            }
         }
         
-        print("📍 Loaded \(loaded.count) marker(s)")
+        print(String(repeating: "=", count: 80) + "\n")
+    }
+    
+    /// Delete all persisted marker metadata files for the current location
+    public func deleteAllMarkers() {
+        let locationID = ctx.locationID
+        let markersDir = markersDirectory()
+        
+        print("\n" + String(repeating: "=", count: 80))
+        print("🗑️ DELETING ALL AR MARKERS: '\(locationID)'")
+        print(String(repeating: "=", count: 80))
+        print("   Path: \(markersDir.path)")
+        print("")
+        
+        guard FileManager.default.fileExists(atPath: markersDir.path) else {
+            print("📍 No markers directory found - nothing to delete")
+            print(String(repeating: "=", count: 80) + "\n")
+            return
+        }
+        
+        do {
+            let markerDirs = try FileManager.default.contentsOfDirectory(
+                at: markersDir,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ).filter { $0.hasDirectoryPath }
+            
+            var deletedCount = 0
+            var failedCount = 0
+            
+            for dir in markerDirs {
+                do {
+                    try FileManager.default.removeItem(at: dir)
+                    deletedCount += 1
+                    print("  ✅ Deleted: \(dir.lastPathComponent)")
+                } catch {
+                    failedCount += 1
+                    print("  ❌ Failed to delete \(dir.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+            
+            print("")
+            print(String(repeating: "-", count: 80))
+            print("📊 DELETION RESULTS:")
+            print("   Deleted: \(deletedCount) marker(s)")
+            if failedCount > 0 {
+                print("   Failed: \(failedCount) marker(s)")
+            }
+            print("")
+            print("✅ Marker deletion complete")
+            print(String(repeating: "=", count: 80) + "\n")
+            
+            // Clear in-memory markers array (legacy, but kept for consistency)
+            DispatchQueue.main.async {
+                self.markers = []
+            }
+            
+        } catch {
+            print("❌ Failed to access markers directory: \(error.localizedDescription)")
+            print(String(repeating: "=", count: 80) + "\n")
+        }
     }
     
     // MARK: - Config preservation

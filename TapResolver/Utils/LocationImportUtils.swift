@@ -575,243 +575,82 @@ enum LocationImportUtils {
     
     /// Ensure a stub exists; create it if missing by probing assets images.
     private static func ensureStubForLocation(at dir: URL, id: String) -> LocationStub? {
-        print("🔍 Checking location: \(id)")
-        print("📂 Location directory: \(dir.path)")
-        
-        // STEP 1: Check if location.json already exists
+        // Check if location.json already exists
         let stubURL = dir.appendingPathComponent("location.json")
-        print("📄 Checking for existing stub at: \(stubURL.path)")
         
         if let data = try? Data(contentsOf: stubURL),
            let stub = try? JSONDecoder().decode(LocationStub.self, from: data) {
-            print("📋 Found existing stub for location: \(id)")
-            print("   - Name: \(stub.name)")
-            print("   - Display image: \(stub.mapDisplayRel)")
-            print("   - Thumbnail: \(stub.thumbnailRel)")
-            
-            // Check if stub is complete (has all required fields)
+            // Stub exists and is complete
             if !stub.mapDisplayRel.isEmpty && !stub.thumbnailRel.isEmpty {
-                print("✅ Location \(id) has complete stub - no action needed")
                 return stub
             }
-            print("⚠️ Location \(id) has incomplete stub, regenerating...")
             // If incomplete, we'll regenerate it below
-        } else {
-            print("⚠️ Location \(id) has no stub, creating...")
         }
         
-        // STEP 2: Look for existing image assets in the location folder
+        // Look for existing image assets in the location folder
         let assets = dir.appendingPathComponent("assets", isDirectory: true)
-        print("📁 Checking assets directory: \(assets.path)")
-        
-        // Check if assets directory exists
         let fm = FileManager.default
+        
         if !fm.fileExists(atPath: assets.path) {
-            print("📁 Assets directory doesn't exist, creating it...")
             try? fm.createDirectory(at: assets, withIntermediateDirectories: true)
         }
         
-        // List all files in assets directory
         let assetFiles = (try? fm.contentsOfDirectory(at: assets, includingPropertiesForKeys: nil)) ?? []
-        print("📋 Found \(assetFiles.count) files in assets directory:")
-        for file in assetFiles {
-            print("   - \(file.lastPathComponent)")
-        }
         
-        // STEP 3: Try to find display image first
+        // Try to find display image first
         let display = assets.appendingPathComponent("map_display.png")
-        print("🖼️ Looking for display image at: \(display.path)")
         
-        if fm.fileExists(atPath: display.path) {
-            print("✅ Found existing display image")
-            if let img = UIImage(contentsOfFile: display.path)?.normalized() {
-                print("✅ Successfully loaded display image: \(img.size)")
-                return writeStub(id: id, dir: dir, img: img, displayURL: display)
-            } else {
-                print("❌ Failed to load display image")
-            }
-        } else {
-            print("❌ Display image not found")
+        if fm.fileExists(atPath: display.path),
+           let img = UIImage(contentsOfFile: display.path)?.normalized() {
+            return writeStub(id: id, dir: dir, img: img, displayURL: display)
         }
         
-        // STEP 4: Try to find original image as fallback
-        print("🔍 Looking for original image files...")
+        // Try to find original image as fallback
         let originalFiles = assetFiles.filter { $0.lastPathComponent.hasPrefix("map_original.") }
-        print("📋 Found \(originalFiles.count) original image files")
         
-        if let originalURL = originalFiles.first {
-            print("🖼️ Found original image: \(originalURL.lastPathComponent)")
-            if let img = UIImage(contentsOfFile: originalURL.path)?.normalized() {
-                print("✅ Successfully loaded original image: \(img.size)")
-                
-                // Create display copy for consistency
-                let displayURL = assets.appendingPathComponent("map_display.png")
-                print("📝 Creating display copy at: \(displayURL.path)")
-                let displayImage = img.downscaled(longEdge: 4096)
-                if let data = displayImage.pngData() { 
-                    try? data.write(to: displayURL, options: .atomic)
-                    print("✅ Created display image from original")
-                }
-                return writeStub(id: id, dir: dir, img: img, displayURL: displayURL)
-            } else {
-                print("❌ Failed to load original image")
+        if let originalURL = originalFiles.first,
+           let img = UIImage(contentsOfFile: originalURL.path)?.normalized() {
+            // Create display copy for consistency
+            let displayURL = assets.appendingPathComponent("map_display.png")
+            let displayImage = img.downscaled(longEdge: 4096)
+            if let data = displayImage.pngData() { 
+                try? data.write(to: displayURL, options: .atomic)
             }
-        } else {
-            print("❌ No original images found")
+            return writeStub(id: id, dir: dir, img: img, displayURL: displayURL)
         }
         
-        // STEP 5: If no images found, try to create from bundled asset
-        print("🔍 No local images found, trying to load bundled asset...")
-        
-        // COMPREHENSIVE BUNDLE EXPLORATION
-        print("🔍 === COMPREHENSIVE BUNDLE EXPLORATION ===")
-        print("📱 Bundle identifier: \(Bundle.main.bundleIdentifier ?? "unknown")")
-        print("📱 Bundle path: \(Bundle.main.bundlePath)")
-        
-        if let resourcePath = Bundle.main.resourcePath {
-            print("📁 Resource path: \(resourcePath)")
-            let resourceURL = URL(fileURLWithPath: resourcePath)
-            
-            // List ALL files in bundle recursively
-            print("📋 === ALL BUNDLE FILES ===")
-            let enumerator = fm.enumerator(at: resourceURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
-            var fileCount = 0
-            while let fileURL = enumerator?.nextObject() as? URL {
-                fileCount += 1
-                let isDir = (try? fileURL.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-                let prefix = isDir ? "📁" : "📄"
-                let relativePath = fileURL.path.replacingOccurrences(of: resourcePath, with: "")
-                print("\(prefix) \(relativePath)")
-                if fileCount > 50 { // Limit output
-                    print("... (showing first 50 files)")
-                    break
-                }
-            }
-            print("📊 Total files found: \(fileCount)")
-        }
-        
-        // Try multiple asset name variations
-        let assetVariations = [
-            "myFirstFloor_v03-metric",
-            "myFirstFloor_v03-metric.png", 
-            "myFirstFloor_v03-metric.jpg",
-            "myFirstFloor_v03-metric.jpeg",
-            "myFirstFloor_v03-metric",
-            "myFirstFloor_v03-metric.png"
-        ]
-        
-        print("🔍 === TRYING ASSET VARIATIONS ===")
-        for (index, assetName) in assetVariations.enumerated() {
-            print("🔍 Attempt \(index + 1): Looking for '\(assetName)'")
-            
-            let (name, ext) = assetName.contains(".") ? 
-                (String(assetName.dropLast(4)), String(assetName.suffix(4))) :
-                (assetName, nil)
-            
-            if let assetURL = Bundle.main.url(forResource: name, withExtension: ext) {
-                print("✅ FOUND ASSET: \(assetURL.path)")
-                if let imageData = try? Data(contentsOf: assetURL) {
-                    print("✅ Loaded image data: \(imageData.count) bytes")
-                    if let img = UIImage(data: imageData)?.normalized() {
-                        print("✅ Created UIImage from bundled asset: \(img.size)")
-                        
-                        // Create display image
-                        let displayURL = assets.appendingPathComponent("map_display.png")
-                        print("📝 Creating display image from bundled asset at: \(displayURL.path)")
-                        let displayImage = img.downscaled(longEdge: 4096)
-                        if let data = displayImage.pngData() {
-                            try? data.write(to: displayURL, options: .atomic)
-                            print("✅ Created display image from bundled asset")
-                        } else {
-                            print("❌ Failed to create display image from bundled asset")
-                        }
-                        return writeStub(id: id, dir: dir, img: img, displayURL: displayURL)
-                    } else {
-                        print("❌ Failed to create UIImage from bundled asset data")
-                    }
-                } else {
-                    print("❌ Failed to load image data from bundled asset: \(assetURL.path)")
-                }
-            } else {
-                print("❌ Asset not found: '\(assetName)'")
-            }
-        }
-        
-        // Try to find ANY image files in the bundle
-        print("🔍 === SEARCHING FOR ANY IMAGE FILES ===")
-        if let resourcePath = Bundle.main.resourcePath {
-            let resourceURL = URL(fileURLWithPath: resourcePath)
-            let imageExtensions = ["png", "jpg", "jpeg", "gif", "bmp", "tiff"]
-            var foundImages: [URL] = []
-            
-            for ext in imageExtensions {
-                let enumerator = fm.enumerator(at: resourceURL, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
-                while let fileURL = enumerator?.nextObject() as? URL {
-                    if fileURL.pathExtension.lowercased() == ext {
-                        foundImages.append(fileURL)
-                    }
-                }
-            }
-            
-            print("🖼️ Found \(foundImages.count) image files:")
-            for imgURL in foundImages.prefix(20) { // Show first 20
-                let relativePath = imgURL.path.replacingOccurrences(of: resourcePath, with: "")
-                print("   📄 \(relativePath)")
-            }
-        }
-        
-        print("❌ Failed to create stub for location: \(id) - no suitable images found")
+        // No images found - return nil (don't create from bundled assets)
         return nil
     }
     
     /// Write a location stub (metadata file) for a location
     private static func writeStub(id: String, dir: URL, img: UIImage, displayURL: URL) -> LocationStub? {
-        print("📝 Writing stub for location: \(id)")
-        print("   - Image size: \(img.size)")
-        print("   - Display URL: \(displayURL.path)")
-        
         let now = ISO8601DateFormatter().string(from: Date())
         let assets = dir.appendingPathComponent("assets", isDirectory: true)
-        print("📁 Ensuring assets directory exists: \(assets.path)")
         try? FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
         
         let stub = LocationStub(
             id: id,
             name: "Unnamed Location",
-            originalID: UUID().uuidString,  // NEW
+            originalID: UUID().uuidString,
             createdISO: now,
-            createdBy: AppSettings.authorName,  // NEW
+            createdBy: AppSettings.authorName,
             updatedISO: now,
-            lastModifiedBy: AppSettings.authorName,  // NEW
-            mapOriginalRel: "assets/\(displayURL.lastPathComponent)", // we may not know original; ok
+            lastModifiedBy: AppSettings.authorName,
+            mapOriginalRel: "assets/\(displayURL.lastPathComponent)",
             mapDisplayRel: "assets/\(displayURL.lastPathComponent)",
             thumbnailRel: "assets/thumbnail.jpg",
             displayWidth: Int(img.size.width.rounded()),
             displayHeight: Int(img.size.height.rounded()),
-            beaconCount: 0,  // NEW - will be updated when beacons are added
-            sessionCount: 0  // NEW - will be updated when sessions are recorded
+            beaconCount: 0,
+            sessionCount: 0
         )
         
-        print("📋 Created stub with:")
-        print("   - ID: \(stub.id)")
-        print("   - Name: \(stub.name)")
-        print("   - Display image: \(stub.mapDisplayRel)")
-        print("   - Thumbnail: \(stub.thumbnailRel)")
-        print("   - Dimensions: \(stub.displayWidth)x\(stub.displayHeight)")
-        
         let stubURL = dir.appendingPathComponent("location.json")
-        print("💾 Writing stub to: \(stubURL.path)")
         
         if let data = try? JSONEncoder().encode(stub) {
-            do {
-                try data.write(to: stubURL, options: .atomic)
-                print("✅ Successfully wrote stub for location: \(id)")
-                return stub
-            } catch {
-                print("❌ Failed to write stub file: \(error)")
-            }
-        } else {
-            print("❌ Failed to encode stub data")
+            try? data.write(to: stubURL, options: .atomic)
+            return stub
         }
         return nil
     }
@@ -819,39 +658,22 @@ enum LocationImportUtils {
     /// Ensure a thumbnail exists for the location; create it if missing
     private static func ensureThumbnail(for dir: URL, stub: inout LocationStub) {
         let thumbURL = dir.appendingPathComponent(stub.thumbnailRel)
-        print("🖼️ Checking for thumbnail at: \(thumbURL.path)")
         
         if FileManager.default.fileExists(atPath: thumbURL.path) { 
-            print("✅ Thumbnail already exists, skipping creation")
             return 
         }
         
-        print("📝 Thumbnail missing, creating from display image...")
         let displayURL = dir.appendingPathComponent(stub.mapDisplayRel)
-        print("🖼️ Loading display image from: \(displayURL.path)")
         
         guard let img = UIImage(contentsOfFile: displayURL.path)?.normalized() else { 
-            print("❌ Failed to load display image for thumbnail creation")
             return 
         }
         
-        print("✅ Loaded display image: \(img.size)")
-        print("📏 Creating thumbnail (max 512px)...")
         let thumb = img.downscaled(longEdge: 512)
-        print("✅ Created thumbnail: \(thumb.size)")
         
         if let data = thumb.jpegData(compressionQuality: 0.9) {
-            print("💾 Writing thumbnail data: \(data.count) bytes")
-            do {
-                try data.write(to: thumbURL, options: .atomic)
-                print("✅ Successfully created thumbnail at: \(thumbURL.path)")
-                stub.updatedISO = ISO8601DateFormatter().string(from: Date())
-                print("📅 Updated stub timestamp")
-            } catch {
-                print("❌ Failed to write thumbnail: \(error)")
-            }
-        } else {
-            print("❌ Failed to create thumbnail JPEG data")
+            try? data.write(to: thumbURL, options: .atomic)
+            stub.updatedISO = ISO8601DateFormatter().string(from: Date())
         }
     }
 

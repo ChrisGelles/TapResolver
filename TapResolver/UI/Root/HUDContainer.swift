@@ -39,6 +39,7 @@ struct HUDContainer: View {
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var beaconState: BeaconStateManager
     @EnvironmentObject private var triangleStore: TrianglePatchStore
+    @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
     @StateObject private var beaconLogger = SimpleBeaconLogger()
 
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
@@ -95,12 +96,26 @@ struct HUDContainer: View {
                         BluetoothScanButton()
                         RSSIMeterButton()
                         FacingToggleButton()
+                        // MARK: - Initial Diagnostic Buttons (Hidden - can be restored if needed)
+                        /*
                         UserDefaultsDiagnosticButton()
                         MapPointsInspectionButton()
                         PhotoMigrationPlanButton()
                         MapPointStructureButton()
                         PhotoManagerButton()
                         PurgePhotosButton()
+                        */
+                        // MARK: - Triangle Diagnostic Buttons (Hidden - can be restored if needed)
+                        /*
+                        TriangleInspectionButton()      // 🔺 Inspect Triangle Data
+                        TriangleValidationButton()      // ✓🔺 Validate Triangle Vertex IDs
+                        DeleteMalformedTrianglesButton() // 🗑️🔺 Delete Malformed Triangles
+                        */
+                        // MARK: - AR Marker Diagnostic Buttons (Hidden - can be restored if needed)
+                        /*
+                        MarkerInspectionButton()        // 🧠📍 Inspect AR Markers
+                        MarkerDeletionButton()          // 🗑️📍 Delete All AR Markers
+                        */
                     }
                 }
                 Spacer()
@@ -1047,6 +1062,182 @@ private struct PhotoManagerButton: View {
 }
 
 // MARK: - Purge Photos Button
+
+// MARK: - Debug Button Component (Future-Proof)
+private struct DebugButton: View {
+    var icon: String
+    var color: Color
+    var action: () -> Void
+    var accessibility: String
+    
+    var body: some View {
+        Button(action: action) {
+            Text(icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(color.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel(accessibility)
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - Triangle Inspection Button
+private struct TriangleInspectionButton: View {
+    @EnvironmentObject private var locationManager: LocationManager
+    
+    var body: some View {
+        DebugButton(
+            icon: "🔺",
+            color: .purple,
+            action: {
+                let currentLoc = PersistenceContext.shared.locationID
+                UserDefaultsDiagnostics.inspectTriangles(locationID: currentLoc)
+                // TODO: Pipe results into user-visible HUD or log overlay for faster dev loop
+            },
+            accessibility: "Inspect Triangle Data"
+        )
+    }
+}
+
+// MARK: - Triangle Validation Button
+private struct TriangleValidationButton: View {
+    @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var mapPointStore: MapPointStore
+    
+    var body: some View {
+        DebugButton(
+            icon: "✓🔺",
+            color: .purple,
+            action: {
+                // Fail-safe: Check if MapPoints are loaded
+                guard !mapPointStore.points.isEmpty else {
+                    print("⚠️ Map Points not yet loaded — validation aborted.")
+                    print("   Current MapPoint count: \(mapPointStore.points.count)")
+                    return
+                }
+                
+                let currentLoc = PersistenceContext.shared.locationID
+                UserDefaultsDiagnostics.validateTriangleVertices(locationID: currentLoc, mapPointStore: mapPointStore)
+                // TODO: Pipe results into user-visible HUD or log overlay for faster dev loop
+            },
+            accessibility: "Validate Triangle Vertex IDs"
+        )
+    }
+}
+
+// MARK: - Delete Malformed Triangles Button
+private struct DeleteMalformedTrianglesButton: View {
+    @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var mapPointStore: MapPointStore
+    @State private var showConfirmation = false
+    @State private var showResultAlert = false
+    @State private var deletionResult: (deletedCount: Int, remainingCount: Int)? = nil
+    
+    var body: some View {
+        DebugButton(
+            icon: "🗑️🔺",
+            color: .red,
+            action: {
+                // Fail-safe: Check if MapPoints are loaded
+                guard !mapPointStore.points.isEmpty else {
+                    print("⚠️ Map Points not yet loaded — deletion aborted.")
+                    print("   Current MapPoint count: \(mapPointStore.points.count)")
+                    return
+                }
+                
+                showConfirmation = true
+            },
+            accessibility: "Delete Malformed Triangles"
+        )
+        .alert("Delete Malformed Triangles?", isPresented: $showConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                performDeletion()
+            }
+        } message: {
+            Text("This will permanently delete all triangles with invalid vertex IDs (referencing non-existent MapPoints). This action cannot be undone.")
+        }
+        .alert("Deletion Complete", isPresented: $showResultAlert) {
+            Button("OK") {
+                deletionResult = nil
+            }
+        } message: {
+            if let result = deletionResult {
+                if result.deletedCount > 0 {
+                    Text("Deleted \(result.deletedCount) malformed triangle(s).\n\(result.remainingCount) valid triangle(s) remaining.")
+                } else {
+                    Text("No malformed triangles found. All triangles are valid.")
+                }
+            } else {
+                Text("Deletion completed.")
+            }
+        }
+    }
+    
+    private func performDeletion() {
+        let currentLoc = PersistenceContext.shared.locationID
+        let result = UserDefaultsDiagnostics.deleteMalformedTriangles(
+            locationID: currentLoc,
+            mapPointStore: mapPointStore
+        )
+        
+        // Show result alert
+        deletionResult = result
+        showResultAlert = true
+        
+        // Reload triangles in TrianglePatchStore if needed
+        // Note: TrianglePatchStore will reload on next access, but we could post a notification here
+        NotificationCenter.default.post(name: NSNotification.Name("TrianglesUpdated"), object: nil)
+        
+        print("✅ Deletion complete: \(result.deletedCount) deleted, \(result.remainingCount) remaining")
+    }
+}
+
+// MARK: - AR Marker Diagnostic Buttons
+
+private struct MarkerInspectionButton: View {
+    @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
+    
+    var body: some View {
+        DebugButton(
+            icon: "🧠📍",
+            color: .orange,
+            action: {
+                arWorldMapStore.inspectMarkers()
+                // TODO: Pipe results into user-visible HUD or log overlay for faster dev loop
+            },
+            accessibility: "Inspect AR Markers"
+        )
+    }
+}
+
+private struct MarkerDeletionButton: View {
+    @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
+    @State private var showConfirmation = false
+    
+    var body: some View {
+        DebugButton(
+            icon: "🗑️📍",
+            color: .red,
+            action: {
+                showConfirmation = true
+            },
+            accessibility: "Delete All AR Markers"
+        )
+        .alert("Delete All AR Markers?", isPresented: $showConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                arWorldMapStore.deleteAllMarkers()
+            }
+        } message: {
+            Text("This will permanently delete all persisted AR marker metadata files for the current location. This action cannot be undone and will not affect active ARKit anchors.")
+        }
+    }
+}
 
 private struct PurgePhotosButton: View {
     var body: some View {

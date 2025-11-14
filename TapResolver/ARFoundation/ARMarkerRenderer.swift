@@ -12,7 +12,7 @@ import simd
 struct MarkerOptions {
     var color: UIColor = UIColor.ARPalette.markerBase
     var markerID: UUID = UUID()
-    var userHeight: Float = 1.6
+    var userDeviceHeight: Float = ARVisualDefaults.userDeviceHeight
     var badgeColor: UIColor? = nil
     var radius: CGFloat = 0.03
 }
@@ -37,7 +37,7 @@ class ARMarkerRenderer {
         markerNode.addChildNode(fillNode)
         
         // Vertical line
-        let line = SCNCylinder(radius: 0.00125, height: CGFloat(options.userHeight))
+        let line = SCNCylinder(radius: 0.00125, height: CGFloat(options.userDeviceHeight))
         line.firstMaterial?.diffuse.contents = UIColor.ARPalette.markerLine
         let lineNode = SCNNode(geometry: line)
         lineNode.position = SCNVector3(0, Float(line.height/2), 0)
@@ -49,7 +49,7 @@ class ARMarkerRenderer {
         sphere.firstMaterial?.specular.contents = UIColor.white
         sphere.firstMaterial?.shininess = 0.8
         let sphereNode = SCNNode(geometry: sphere)
-        sphereNode.position = SCNVector3(0, Float(line.height), 0)
+        sphereNode.position = SCNVector3(0, options.userDeviceHeight, 0)
         sphereNode.name = "arMarkerSphere_\(options.markerID.uuidString)"
         markerNode.addChildNode(sphereNode)
         

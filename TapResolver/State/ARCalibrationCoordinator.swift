@@ -2,55 +2,74 @@
 //  ARCalibrationCoordinator.swift
 //  TapResolver
 //
-//  Coordinates sequential AR marker placement for triangle calibration
+//  Coordinates triangle calibration workflow with AR marker placement
 //
 
 import SwiftUI
 import Combine
+import simd
 
-class ARCalibrationCoordinator: ObservableObject {
+final class ARCalibrationCoordinator: ObservableObject {
+    @Published var activeTriangleID: UUID?
+    @Published var placedMarkers: [UUID] = []  // MapPoint IDs that have been calibrated
+    @Published var statusText: String = ""
+    @Published var progressDots: (Bool, Bool, Bool) = (false, false, false)
+    
+    // Legacy compatibility properties
     @Published var isActive: Bool = false
     @Published var currentTriangleID: UUID?
-    @Published var currentVertexIndex: Int = 0  // 0, 1, or 2
+    @Published var currentVertexIndex: Int = 0
     @Published var referencePhotoData: Data?
     @Published var completedMarkerCount: Int = 0
     
     private var triangleVertices: [UUID] = []
-    private var cancellables = Set<AnyCancellable>()
     
-    init() {
-        // Listen for calibration start notifications
-        NotificationCenter.default.publisher(for: NSNotification.Name("StartTriangleCalibration"))
-            .sink { [weak self] notification in
-                guard let triangleID = notification.userInfo?["triangleID"] as? UUID else { return }
-                self?.startCalibration(triangleID: triangleID)
-            }
-            .store(in: &cancellables)
-        
-        // Listen for marker placement notifications
-        NotificationCenter.default.publisher(for: NSNotification.Name("ARMarkerPlaced"))
-            .sink { [weak self] notification in
-                self?.handleMarkerPlaced()
-            }
-            .store(in: &cancellables)
+    var arStore: ARWorldMapStore
+    var mapStore: MapPointStore
+    var triangleStore: TrianglePatchStore
+    var metricSquareStore: MetricSquareStore?
+    
+    init(arStore: ARWorldMapStore, mapStore: MapPointStore, triangleStore: TrianglePatchStore, metricSquareStore: MetricSquareStore? = nil) {
+        self.arStore = arStore
+        self.mapStore = mapStore
+        self.triangleStore = triangleStore
+        self.metricSquareStore = metricSquareStore
     }
     
-    func startCalibration(triangleID: UUID) {
-        print("🎯 Starting calibration for triangle: \(triangleID)")
+    /// Get pixels per meter conversion factor from MetricSquareStore
+    private func getPixelsPerMeter() -> Float? {
+        guard let squareStore = metricSquareStore else { return nil }
         
-        // This will be populated by the view that presents the AR session
+        // Use first locked square, or any square if none are locked
+        let lockedSquares = squareStore.squares.filter { $0.isLocked }
+        let squaresToUse = lockedSquares.isEmpty ? squareStore.squares : lockedSquares
+        
+        guard let square = squaresToUse.first, square.meters > 0 else { return nil }
+        
+        // pixels per meter = side_pixels / side_meters
+        let pixelsPerMeter = Float(square.side) / Float(square.meters)
+        return pixelsPerMeter > 0 ? pixelsPerMeter : nil
+    }
+    
+    func startCalibration(for triangleID: UUID) {
+        guard let triangle = triangleStore.triangle(withID: triangleID) else {
+            print("❌ Cannot start calibration: Triangle \(triangleID) not found")
+            return
+        }
+        
+        activeTriangleID = triangleID
         currentTriangleID = triangleID
+        placedMarkers = []
+        progressDots = (false, false, false)
+        statusText = "Place AR markers for triangle (0/3)"
+        isActive = true
         currentVertexIndex = 0
         completedMarkerCount = 0
-        isActive = true
         
-        // Notification will be caught by the main view to present AR session
-        NotificationCenter.default.post(
-            name: NSNotification.Name("PresentARCalibration"),
-            object: nil,
-            userInfo: ["triangleID": triangleID]
-        )
+        print("🎯 ARCalibrationCoordinator: Starting calibration for triangle \(String(triangleID.uuidString.prefix(8)))")
     }
+    
+    // MARK: - Legacy Compatibility Methods
     
     func setVertices(_ vertices: [UUID]) {
         triangleVertices = vertices
@@ -66,55 +85,242 @@ class ARCalibrationCoordinator: ObservableObject {
         referencePhotoData = photoData
     }
     
-    private func handleMarkerPlaced() {
-        completedMarkerCount += 1
-        print("✅ Marker \(completedMarkerCount)/3 placed")
+    func registerMarker(mapPointID: UUID, marker: ARMarker) {
+        guard let triangleID = activeTriangleID,
+              let triangle = triangleStore.triangle(withID: triangleID) else {
+            print("❌ Cannot register marker: No active triangle")
+            return
+        }
         
-        if completedMarkerCount >= 3 {
-            // All markers placed - calibration complete
-            completeCalibration()
-        } else {
-            // Advance to next vertex
-            currentVertexIndex += 1
+        // Validate this mapPointID is a vertex of the active triangle
+        guard triangle.vertexIDs.contains(mapPointID) else {
+            print("❌ MapPoint \(String(mapPointID.uuidString.prefix(8))) is not a vertex of triangle \(String(triangleID.uuidString.prefix(8)))")
+            return
+        }
+        
+        // Check if this mapPoint already has a marker (only 1 marker per MapPoint)
+        guard !placedMarkers.contains(mapPointID) else {
+            print("⚠️ MapPoint \(String(mapPointID.uuidString.prefix(8))) already has a marker")
+            return
+        }
+        
+        // Save marker to ARWorldMapStore (convert to ARWorldMapStore.ARMarker format)
+        do {
+            let worldMapMarker = convertToWorldMapMarker(marker)
+            try arStore.saveMarker(worldMapMarker)
+        } catch {
+            print("❌ Failed to save marker to ARWorldMapStore: \(error)")
+            return
+        }
+        
+        // Update triangle with marker ID
+        triangleStore.addMarker(mapPointID: mapPointID, markerID: marker.id)
+        
+        // Track placed marker
+        placedMarkers.append(mapPointID)
+        updateProgressDots()
+        
+        let count = placedMarkers.count
+        statusText = "Place AR markers for triangle (\(count)/3)"
+        
+        print("✅ ARCalibrationCoordinator: Registered marker for MapPoint \(String(mapPointID.uuidString.prefix(8))) (\(count)/3)")
+        
+        if placedMarkers.count == 3 {
+            finalizeCalibration(for: triangle)
         }
     }
     
-    private func completeCalibration() {
-        print("🎉 Triangle calibration complete!")
+    private func updateProgressDots() {
+        guard let triangleID = activeTriangleID,
+              let triangle = triangleStore.triangle(withID: triangleID) else {
+            progressDots = (false, false, false)
+            return
+        }
         
-        // Post completion notification with marker IDs
+        var states = [false, false, false]
+        for (index, vertexID) in triangle.vertexIDs.enumerated() {
+            if index < 3 {
+                states[index] = placedMarkers.contains(vertexID)
+            }
+        }
+        progressDots = (states[0], states[1], states[2])
+    }
+    
+    private func finalizeCalibration(for triangle: TrianglePatch) {
+        let quality = computeCalibrationQuality(triangle)
+        triangleStore.markCalibrated(triangle.id, quality: quality)
+        
+        statusText = "✅ Triangle calibrated with quality \(Int(quality * 100))%"
+        
+        print("🎉 ARCalibrationCoordinator: Triangle \(String(triangle.id.uuidString.prefix(8))) calibration complete (quality: \(Int(quality * 100))%)")
+        
+        // Post completion notification
         NotificationCenter.default.post(
             name: NSNotification.Name("TriangleCalibrationComplete"),
             object: nil,
-            userInfo: [
-                "triangleID": currentTriangleID as Any,
-                "vertices": triangleVertices as Any
-            ]
+            userInfo: ["triangleID": triangle.id]
         )
         
-        // Trigger ghost marker generation for adjacent triangles
-        NotificationCenter.default.post(
-            name: NSNotification.Name("GenerateGhostMarkers"),
-            object: nil,
-            userInfo: ["triangleID": currentTriangleID as Any]
-        )
+        // Find and suggest next adjacent uncalibrated triangle for crawling
+        if let nextTriangle = findAdjacentUncalibratedTriangle(to: triangle.id) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.startCalibration(for: nextTriangle.id)
+                self.statusText = "➡️ Continue: Calibrate adjacent triangle"
+                print("🔄 ARCalibrationCoordinator: Auto-starting calibration for adjacent triangle \(String(nextTriangle.id.uuidString.prefix(8)))")
+            }
+        } else {
+            // No adjacent triangles found - reset
+            reset()
+        }
+    }
+    
+    /// Find an adjacent uncalibrated triangle to suggest for calibration crawling
+    private func findAdjacentUncalibratedTriangle(to triangleID: UUID) -> TrianglePatch? {
+        guard let triangle = triangleStore.triangle(withID: triangleID) else {
+            return nil
+        }
         
-        reset()
+        let vertexSet = Set(triangle.vertexIDs)
+        
+        // Find triangles that:
+        // 1. Are not calibrated
+        // 2. Are not the current triangle
+        // 3. Share at least one vertex with the current triangle (adjacent)
+        return triangleStore.triangles.first { candidate in
+            !candidate.isCalibrated &&
+            candidate.id != triangleID &&
+            !Set(candidate.vertexIDs).intersection(vertexSet).isEmpty
+        }
+    }
+    
+    private func computeCalibrationQuality(_ triangle: TrianglePatch) -> Float {
+        guard triangle.arMarkerIDs.count == 3 else {
+            print("⚠️ Cannot compute quality: Need 3 AR marker IDs")
+            return 0.0
+        }
+        
+        // Load AR markers from ARWorldMapStore
+        let arMarkers = triangle.arMarkerIDs.compactMap { markerIDString -> ARWorldMapStore.ARMarker? in
+            guard let markerUUID = UUID(uuidString: markerIDString) else { return nil }
+            return arStore.marker(withID: markerUUID)
+        }
+        
+        guard arMarkers.count == 3 else {
+            print("⚠️ Cannot compute quality: Only found \(arMarkers.count)/3 AR markers")
+            return 0.0
+        }
+        
+        // Get MapPoints for the 3 vertices
+        let vertexIDs = triangle.vertexIDs
+        let mapPoints = vertexIDs.compactMap { vertexID in
+            mapStore.points.first(where: { $0.id == vertexID })
+        }
+        
+        guard mapPoints.count == 3 else {
+            print("⚠️ Cannot compute quality: Only found \(mapPoints.count)/3 MapPoints")
+            return 0.0
+        }
+        
+        // Define triangle legs: (0,1), (1,2), (2,0)
+        let legs: [(Int, Int)] = [(0, 1), (1, 2), (2, 0)]
+        var measurements: [TriangleLegMeasurement] = []
+        
+        for (i, j) in legs {
+            // Get 2D map positions
+            let mapA = mapPoints[i].mapPoint
+            let mapB = mapPoints[j].mapPoint
+            
+            // Get 3D AR positions from transform matrices
+            let arTransformA = arMarkers[i].worldTransform.toSimd()
+            let arTransformB = arMarkers[j].worldTransform.toSimd()
+            
+            let arA = simd_float3(arTransformA.columns.3.x, arTransformA.columns.3.y, arTransformA.columns.3.z)
+            let arB = simd_float3(arTransformB.columns.3.x, arTransformB.columns.3.y, arTransformB.columns.3.z)
+            
+            // Calculate distances
+            // Map distance is in pixels - convert to meters using pxPerMeter
+            let mapDistPixels = simd_distance(
+                simd_float2(Float(mapA.x), Float(mapA.y)),
+                simd_float2(Float(mapB.x), Float(mapB.y))
+            )
+            
+            // Convert pixels to meters
+            guard let pxPerMeter = getPixelsPerMeter(), pxPerMeter > 0 else {
+                print("⚠️ Cannot convert map distance: pxPerMeter not available")
+                return 0.0
+            }
+            
+            let mapDist = mapDistPixels / pxPerMeter  // Now in meters
+            let arDist = simd_distance(arA, arB)  // Already in meters
+            
+            // Create measurement
+            let measurement = TriangleLegMeasurement(
+                vertexA: vertexIDs[i],
+                vertexB: vertexIDs[j],
+                mapDistance: mapDist,
+                arDistance: arDist
+            )
+            measurements.append(measurement)
+            
+            print("   Leg \(i)-\(j): Map=\(String(format: "%.3f", mapDist))m, AR=\(String(format: "%.3f", arDist))m, Ratio=\(String(format: "%.3f", measurement.distortionRatio))")
+        }
+        
+        // Compute quality: average of normalized distortion ratios
+        // Quality is higher when ratios are closer to 1.0 (perfect match)
+        let distortionScores = measurements.map { measurement -> Float in
+            let ratio = measurement.distortionRatio
+            // Normalize: ratio of 1.0 = perfect (score 1.0), ratios further from 1.0 = lower score
+            // Use min(ratio, 1/ratio) to handle both >1 and <1 cases symmetrically
+            return min(ratio, 1.0 / ratio)
+        }
+        
+        let quality = distortionScores.reduce(0, +) / Float(distortionScores.count)
+        
+        // Store measurements in triangle
+        triangleStore.setLegMeasurements(for: triangle.id, measurements: measurements)
+        
+        print("📊 Calibration quality computed: \(String(format: "%.2f", quality)) (avg distortion score)")
+        
+        return quality
     }
     
     func reset() {
-        isActive = false
+        activeTriangleID = nil
         currentTriangleID = nil
+        placedMarkers = []
+        statusText = ""
+        progressDots = (false, false, false)
+        isActive = false
         currentVertexIndex = 0
         triangleVertices = []
         referencePhotoData = nil
         completedMarkerCount = 0
+    }
+    
+    // MARK: - Helper: Convert ARMarker to ARWorldMapStore.ARMarker
+    
+    private func convertToWorldMapMarker(_ marker: ARMarker) -> ARWorldMapStore.ARMarker {
+        // Convert UUID to String for ARWorldMapStore format
+        let markerIDString = marker.id.uuidString
+        let mapPointIDString = marker.linkedMapPointID.uuidString
         
-        // Reset coordinator calibration mode
-        // TODO: Re-enable after Phase 4 coordinator integration
-        // if let coordinator = ARViewContainer.Coordinator.current {
-        //     coordinator.isCalibrationMode = false
-        //     coordinator.calibrationTargetPointID = nil
-        // }
+        // Convert simd_float3 position to transform matrix (identity rotation, translation from position)
+        let transform = simd_float4x4(
+            SIMD4<Float>(1, 0, 0, 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(0, 0, 1, 0),
+            SIMD4<Float>(marker.arPosition.x, marker.arPosition.y, marker.arPosition.z, 1)
+        )
+        
+        let codableTransform = ARWorldMapStore.CodableTransform(from: transform)
+        
+        // Use memberwise initializer (all properties are let)
+        return ARWorldMapStore.ARMarker(
+            id: markerIDString,
+            mapPointID: mapPointIDString,
+            worldTransform: codableTransform,
+            createdAt: marker.createdAt,
+            observations: nil
+        )
     }
 }

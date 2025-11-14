@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftUI
 
 struct UserDefaultsDiagnostics {
     
@@ -496,7 +497,233 @@ struct UserDefaultsDiagnostics {
         print(String(repeating: "=", count: 80) + "\n")
     }
     
-    /// Nuclear option: Clear ALL UserDefaults (use with extreme caution!)
+    /// Inspect triangle patch persistence for a given location
+    static func inspectTriangles(locationID: String) {
+        print("\n" + String(repeating: "=", count: 80))
+        print("🔺 TRIANGLE PATCH INSPECTION: '\(locationID)'")
+        print(String(repeating: "=", count: 80))
+        
+        let key = "locations.\(locationID).triangles_v1"
+        let defaults = UserDefaults.standard
+        
+        guard let data = defaults.data(forKey: key) else {
+            print("❌ No triangles found for key: \(key)")
+            print("   Current locationID: \(PersistenceContext.shared.locationID)")
+            print(String(repeating: "=", count: 80) + "\n")
+            return
+        }
+        
+        let sizeKB = Double(data.count) / 1024
+        print("✅ Found triangles data: \(String(format: "%.2f KB", sizeKB)) (\(data.count) bytes)")
+        print("")
+        
+        // Try to decode
+        do {
+            // Use default decoder (TrianglePatch has custom decoder that handles both ISO8601 and timestamp)
+            let decoder = JSONDecoder()
+            // Don't set dateDecodingStrategy - TrianglePatch custom decoder handles both formats
+            
+            let triangles = try decoder.decode([TrianglePatch].self, from: data)
+            print("✅ Successfully decoded \(triangles.count) triangle(s)")
+            print("")
+            
+            for (idx, tri) in triangles.enumerated() {
+                let triID = String(tri.id.uuidString.prefix(8))
+                let vertexIDs = tri.vertexIDs.map { String($0.uuidString.prefix(8)) }
+                
+                print("  [\(idx+1)] Triangle \(triID)")
+                print("      Vertices: \(vertexIDs.joined(separator: ", "))")
+                print("      Calibrated: \(tri.isCalibrated ? "✅" : "❌")")
+                
+                if let calibratedAt = tri.lastCalibratedAt {
+                    print("      Last calibrated: \(calibratedAt)")
+                }
+                
+                // calibrationQuality is non-optional, so print it directly
+                print("      Quality: \(String(format: "%.2f", tri.calibrationQuality))")
+                
+                print("")
+            }
+            
+            print(String(repeating: "-", count: 80))
+            print("📊 SUMMARY:")
+            print("   Total triangles: \(triangles.count)")
+            print("   Calibrated: \(triangles.filter { $0.isCalibrated }.count)")
+            print("   Uncalibrated: \(triangles.filter { !$0.isCalibrated }.count)")
+            
+        } catch {
+            print("❌ Failed to decode triangles: \(error)")
+            print("   Error details: \(error.localizedDescription)")
+            
+            // Try to see raw structure
+            if let json = try? JSONSerialization.jsonObject(with: data) {
+                print("   Raw JSON type: \(type(of: json))")
+                if let array = json as? [Any] {
+                    print("   Array count: \(array.count)")
+                    if let first = array.first {
+                        print("   First item type: \(type(of: first))")
+                        if let dict = first as? [String: Any] {
+                            print("   First item keys: \(dict.keys.sorted().joined(separator: ", "))")
+                        }
+                    }
+                }
+            }
+        }
+        
+        print(String(repeating: "=", count: 80) + "\n")
+    }
+    
+    /// Check if triangle vertex IDs match existing MapPoints
+    static func validateTriangleVertices(locationID: String, mapPointStore: MapPointStore) {
+        print("\n" + String(repeating: "=", count: 80))
+        print("🔍 TRIANGLE VERTEX VALIDATION: '\(locationID)'")
+        print(String(repeating: "=", count: 80))
+        
+        let key = "locations.\(locationID).triangles_v1"
+        let defaults = UserDefaults.standard
+        
+        guard let data = defaults.data(forKey: key) else {
+            print("❌ No triangles found")
+            print(String(repeating: "=", count: 80) + "\n")
+            return
+        }
+        
+        do {
+            // Use default decoder (TrianglePatch has custom decoder that handles both ISO8601 and timestamp)
+            let decoder = JSONDecoder()
+            // Don't set dateDecodingStrategy - TrianglePatch custom decoder handles both formats
+            let triangles = try decoder.decode([TrianglePatch].self, from: data)
+            
+            print("📊 Validating \(triangles.count) triangle(s) against \(mapPointStore.points.count) MapPoint(s)")
+            print("")
+            
+            var validCount = 0
+            var invalidCount = 0
+            
+            for (idx, tri) in triangles.enumerated() {
+                let triID = String(tri.id.uuidString.prefix(8))
+                var allValid = true
+                var missingVertices: [String] = []
+                
+                for vertexID in tri.vertexIDs {
+                    if mapPointStore.points.first(where: { $0.id == vertexID }) == nil {
+                        allValid = false
+                        missingVertices.append(String(vertexID.uuidString.prefix(8)))
+                    }
+                }
+                
+                if allValid {
+                    validCount += 1
+                    print("  ✅ [\(idx+1)] Triangle \(triID): All vertices valid")
+                } else {
+                    invalidCount += 1
+                    print("  ❌ [\(idx+1)] Triangle \(triID): Missing vertices \(missingVertices.joined(separator: ", "))")
+                }
+            }
+            
+            print("")
+            print(String(repeating: "-", count: 80))
+            print("📊 VALIDATION RESULTS:")
+            print("   Valid triangles: \(validCount)")
+            print("   Invalid triangles: \(invalidCount)")
+            
+            if invalidCount > 0 {
+                print("")
+                print("⚠️ WARNING: Some triangles reference MapPoints that don't exist")
+                print("   These triangles won't render until MapPoints are created")
+            }
+            
+        } catch {
+            print("❌ Failed to decode triangles: \(error)")
+        }
+        
+        print(String(repeating: "=", count: 80) + "\n")
+    }
+    
+    /// Delete triangles with invalid vertex IDs (malformed triangles)
+    /// Returns: (deletedCount: Int, remainingCount: Int)
+    static func deleteMalformedTriangles(locationID: String, mapPointStore: MapPointStore) -> (deletedCount: Int, remainingCount: Int) {
+        print("\n" + String(repeating: "=", count: 80))
+        print("🗑️ DELETING MALFORMED TRIANGLES: '\(locationID)'")
+        print(String(repeating: "=", count: 80))
+        
+        let key = "locations.\(locationID).triangles_v1"
+        let defaults = UserDefaults.standard
+        
+        guard let data = defaults.data(forKey: key) else {
+            print("❌ No triangles found")
+            print(String(repeating: "=", count: 80) + "\n")
+            return (deletedCount: 0, remainingCount: 0)
+        }
+        
+        do {
+            // Use default decoder (TrianglePatch has custom decoder that handles both ISO8601 and timestamp)
+            let decoder = JSONDecoder()
+            // Don't set dateDecodingStrategy - TrianglePatch custom decoder handles both formats
+            var triangles = try decoder.decode([TrianglePatch].self, from: data)
+            
+            let originalCount = triangles.count
+            print("📊 Starting with \(originalCount) triangle(s)")
+            print("   Validating against \(mapPointStore.points.count) MapPoint(s)")
+            print("")
+            
+            // Identify malformed triangles (those with invalid vertex IDs)
+            var malformedTriangles: [TrianglePatch] = []
+            var validTriangles: [TrianglePatch] = []
+            
+            for tri in triangles {
+                var isMalformed = false
+                var missingVertices: [String] = []
+                
+                // Check all three vertices
+                for vertexID in tri.vertexIDs {
+                    if mapPointStore.points.first(where: { $0.id == vertexID }) == nil {
+                        isMalformed = true
+                        missingVertices.append(String(vertexID.uuidString.prefix(8)))
+                    }
+                }
+                
+                if isMalformed {
+                    malformedTriangles.append(tri)
+                    let triID = String(tri.id.uuidString.prefix(8))
+                    print("  ❌ [DELETE] Triangle \(triID): Missing vertices \(missingVertices.joined(separator: ", "))")
+                } else {
+                    validTriangles.append(tri)
+                }
+            }
+            
+            if malformedTriangles.isEmpty {
+                print("")
+                print("✅ No malformed triangles found — all triangles are valid")
+                print(String(repeating: "=", count: 80) + "\n")
+                return (deletedCount: 0, remainingCount: originalCount)
+            }
+            
+            // Save only valid triangles back to UserDefaults
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let validData = try encoder.encode(validTriangles)
+            defaults.set(validData, forKey: key)
+            defaults.synchronize()
+            
+            print("")
+            print(String(repeating: "-", count: 80))
+            print("📊 DELETION RESULTS:")
+            print("   Deleted: \(malformedTriangles.count) malformed triangle(s)")
+            print("   Remaining: \(validTriangles.count) valid triangle(s)")
+            print("")
+            print("✅ Updated triangles saved to UserDefaults")
+            print(String(repeating: "=", count: 80) + "\n")
+            
+            return (deletedCount: malformedTriangles.count, remainingCount: validTriangles.count)
+            
+        } catch {
+            print("❌ Failed to process triangles: \(error)")
+            print(String(repeating: "=", count: 80) + "\n")
+            return (deletedCount: 0, remainingCount: 0)
+        }
+    }
+    
     static func nukeAllData(confirmation: String) {
         guard confirmation == "I understand this will delete everything" else {
             print("❌ Confirmation string incorrect. No data deleted.")
