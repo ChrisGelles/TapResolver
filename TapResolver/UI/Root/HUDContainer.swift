@@ -43,8 +43,8 @@ struct HUDContainer: View {
     @StateObject private var beaconLogger = SimpleBeaconLogger()
 
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
-    @State private var showARCalibration = false
     @State private var showMetricSquareAR = false
+    @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
 
     @State private var selectedBeaconForTxPower: String? = nil
     @State private var showScanQuality = true  // Temporary: always show for testing
@@ -65,6 +65,8 @@ struct HUDContainer: View {
                     selectedBeaconForTxPower = beaconID
                 }
             }
+            // AR view launch is now handled via ARViewLaunchContext
+            // Removed notification handler - using direct method call instead
             .overlay(alignment: .topLeading) { topLeftButtons }
             .overlay(alignment: .topLeading) { rolePanelOverlay }
             .overlay { txPowerOverlay }
@@ -217,12 +219,10 @@ struct HUDContainer: View {
                     print("🔍 DEBUG: Total points in store = \(mapPointStore.points.count)")
                 }
             
-            // AR Calibration button (always visible)
+            // AR View button (always visible)
             Button(action: {
-                print("Launching AR View Tools")
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    showARCalibration = true
-                }
+                print("📱 HUDContainer: Launching generic AR view — FROM HUD")
+                arViewLaunchContext.launchGeneric()
             }) {
                 Image(systemName: "cube.fill")
                     .font(.system(size: 24, weight: .semibold))
@@ -410,10 +410,8 @@ struct HUDContainer: View {
 
     @ViewBuilder
     private var arViewOverlay: some View {
-        if showARCalibration {
-            ARCalibrationView(isPresented: $showARCalibration)
-                .allowsHitTesting(true)
-        }
+        // AR View is now presented via ContentView's fullScreenCover
+        // No overlay needed here anymore
         
         if showMetricSquareAR, let activeID = metricSquares.activeSquareID {
             MetricSquareARView(
@@ -450,7 +448,7 @@ struct HUDContainer: View {
     
     @ViewBuilder
     private var interpolationModeBanner: some View {
-        if mapPointStore.isInterpolationMode && !showARCalibration {
+        if mapPointStore.isInterpolationMode && !arViewLaunchContext.isPresented {
             VStack(spacing: 0) {
                 // Push banner down below status bar
                 Color.clear

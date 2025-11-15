@@ -5,9 +5,17 @@ import simd
 
 struct ARViewContainer: UIViewRepresentable {
     @Binding var mode: ARMode
+    
+    // Calibration mode properties
+    var isCalibrationMode: Bool = false
+    var selectedTriangle: TrianglePatch? = nil
+    var onDismiss: (() -> Void)? = nil
 
     func makeCoordinator() -> ARViewCoordinator {
-        ARViewCoordinator()
+        let coordinator = ARViewCoordinator()
+        coordinator.selectedTriangle = selectedTriangle
+        coordinator.isCalibrationMode = isCalibrationMode
+        return coordinator
     }
 
     func makeUIView(context: Context) -> ARSCNView {
@@ -34,6 +42,8 @@ struct ARViewContainer: UIViewRepresentable {
 
     func updateUIView(_ uiView: ARSCNView, context: Context) {
         context.coordinator.setMode(mode)
+        context.coordinator.selectedTriangle = selectedTriangle
+        context.coordinator.isCalibrationMode = isCalibrationMode
     }
 
     class ARViewCoordinator: NSObject {
@@ -42,6 +52,10 @@ struct ARViewContainer: UIViewRepresentable {
         var placedMarkers: [UUID: SCNNode] = [:] // Track placed markers by ID
         private var crosshairNode: GroundCrosshairNode?
         var currentCursorPosition: simd_float3?
+        
+        // Calibration mode state
+        var isCalibrationMode: Bool = false
+        var selectedTriangle: TrianglePatch? = nil
         
         // User device height (centralized constant)
         var userDeviceHeight: Float = ARVisualDefaults.userDeviceHeight
@@ -64,6 +78,10 @@ struct ARViewContainer: UIViewRepresentable {
             case .calibration(let pointID):
                 print("📍 Entering calibration mode for point: \(pointID)")
                 // Start calibration logic
+
+            case .triangleCalibration(let triangleID):
+                print("🔺 Entering triangle calibration mode for triangle: \(triangleID)")
+                // Triangle calibration logic handled via isCalibrationMode and selectedTriangle
 
             case .interpolation(let first, let second):
                 print("📐 Interpolation between \(first) and \(second)")
@@ -142,6 +160,8 @@ struct ARViewContainer: UIViewRepresentable {
             switch currentMode {
             case .calibration:
                 markerColor = UIColor.ARPalette.calibration
+            case .triangleCalibration:
+                markerColor = UIColor.ARPalette.calibration  // Orange for triangle calibration
             case .anchor:
                 markerColor = UIColor.ARPalette.anchor
             default:

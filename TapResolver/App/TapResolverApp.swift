@@ -40,6 +40,7 @@ struct TapResolverApp: App {
     @StateObject private var beaconState = BeaconStateManager()
     @StateObject private var arWorldMapStore = ARWorldMapStore()
     @StateObject private var trianglePatchStore = TrianglePatchStore()
+    @StateObject private var arViewLaunchContext = ARViewLaunchContext()
     @StateObject private var arCalibrationCoordinator: ARCalibrationCoordinator
     
     @State private var showAuthorNamePrompt = AppSettings.needsAuthorName
@@ -47,9 +48,10 @@ struct TapResolverApp: App {
     init() {
         // Initialize coordinator with temporary stores
         // These will be updated to reference the actual @StateObject instances in onAppear
+        // Note: triangleStore will be set to the shared trianglePatchStore instance in onAppear
         let tempARStore = ARWorldMapStore()
         let tempMapStore = MapPointStore()
-        let tempTriangleStore = TrianglePatchStore()
+        let tempTriangleStore = TrianglePatchStore()  // Temporary - replaced in onAppear
         let tempMetricStore = MetricSquareStore()
         
         _arCalibrationCoordinator = StateObject(wrappedValue: ARCalibrationCoordinator(
@@ -76,6 +78,8 @@ struct TapResolverApp: App {
                 .environmentObject(scanUtility)
                 .environmentObject(beaconState)  // Inject BeaconStateManager into view hierarchy
                 .environmentObject(arWorldMapStore)
+                .environmentObject(trianglePatchStore)  // Shared TrianglePatchStore instance
+                .environmentObject(arViewLaunchContext)  // Unified AR view launch context
                 .environmentObject(arCalibrationCoordinator)
                 .onAppear {
                     // Update coordinator to use the actual store instances

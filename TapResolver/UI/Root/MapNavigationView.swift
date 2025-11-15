@@ -21,9 +21,9 @@ struct MapNavigationView: View {
     
     @State private var mapUIImage: UIImage?
     @State private var overlaysReady = false
-    @State private var showARCalibration = false
     @State private var showPhotoManager = false
     @State private var photoManagerLocationID = ""
+    @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
 
     var body: some View {
         GeometryReader { geo in
@@ -60,34 +60,24 @@ struct MapNavigationView: View {
             .onChange(of: locationManager.currentLocationID) { newID in
                 switchToLocation(newID)
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("StartTriangleCalibration"))) { notification in
+                guard let triangleID = notification.userInfo?["triangleID"] as? UUID else { return }
+                
+                // Get triangle from shared store and launch unified AR view in calibration mode
+                if let triangle = trianglePatchStore.triangle(withID: triangleID) {
+                    print("📱 MapNavigationView: Launching AR view for triangle calibration — FROM MapNav: \(String(triangleID.uuidString.prefix(8)))")
+                    arViewLaunchContext.launchTriangleCalibration(triangle: triangle)
+                } else {
+                    print("⚠️ MapNavigationView: Triangle \(String(triangleID.uuidString.prefix(8))) not found in store")
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PresentARCalibration"))) { notification in
                 guard let triangleID = notification.userInfo?["triangleID"] as? UUID else { return }
                 
-                // Get triangle vertices
-                if let triangle = trianglePatchStore.triangles.first(where: { $0.id == triangleID }) {
-                    arCalibrationCoordinator.setVertices(triangle.vertexIDs)
-                    
-                    // Set first vertex as target
-                    if let firstVertexID = triangle.vertexIDs.first,
-                       let mapPoint = mapPointStore.points.first(where: { $0.id == firstVertexID }) {
-                        
-                        // Try to load from disk first, fall back to memory if needed
-                        var photoData: Data? = nil
-                        if let diskData = mapPointStore.loadPhotoFromDisk(for: firstVertexID) {
-                            photoData = diskData
-                        } else if let memoryData = mapPoint.locationPhotoData {
-                            // Legacy: photo still in memory
-                            photoData = memoryData
-                        }
-                        
-                        arCalibrationCoordinator.setReferencePhoto(photoData)
-                        
-                        // Present AR view (wrap @Published mutation in async)
-                        print("📱 Presenting AR view for calibration")
-                        DispatchQueue.main.async {
-                            showARCalibration = true
-                        }
-                    }
+                // Get triangle and launch unified AR view in calibration mode
+                if let triangle = trianglePatchStore.triangle(withID: triangleID) {
+                    print("📱 MapNavigationView: Launching AR view via PresentARCalibration — FROM MapNav: \(String(triangleID.uuidString.prefix(8)))")
+                    arViewLaunchContext.launchTriangleCalibration(triangle: triangle)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("TriangleCalibrationComplete"))) { notification in
@@ -131,9 +121,8 @@ struct MapNavigationView: View {
                     showPhotoManager = true
                 }
             }
-            .sheet(isPresented: $showARCalibration) {
-                ARCalibrationView(isPresented: $showARCalibration)
-            }
+            // AR View is now presented via ContentView's fullScreenCover
+            // Removed sheet presentation - using unified ARViewLaunchContext instead
             .sheet(isPresented: $showPhotoManager) {
                 PhotoManagementView(
                     isPresented: $showPhotoManager,

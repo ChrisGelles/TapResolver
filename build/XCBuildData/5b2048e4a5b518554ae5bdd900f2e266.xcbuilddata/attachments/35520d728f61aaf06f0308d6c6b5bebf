@@ -7,6 +7,46 @@
     "emit-module-diagnostics" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-master-emit-module.dia",
     "swift-dependencies" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-master.swiftdeps"
   },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/AR/ARSurveyCoordinator.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARSurveyCoordinator.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARSurveyCoordinator.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARSurveyCoordinator.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/AR/WorldMapPatch.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/WorldMapPatch.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/WorldMapPatch.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/WorldMapPatch.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/ARFoundation/ARMarkerRenderer.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARMarkerRenderer.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARMarkerRenderer.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARMarkerRenderer.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/ARFoundation/ARMode.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARMode.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARMode.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARMode.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/ARFoundation/ARReferenceImageView.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARReferenceImageView.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARReferenceImageView.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARReferenceImageView.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/ARFoundation/ARViewContainer.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARViewContainer.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARViewContainer.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARViewContainer.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/ARFoundation/ARViewWithOverlays.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARViewWithOverlays.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARViewWithOverlays.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARViewWithOverlays.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/ARFoundation/UIColor+ARPalette.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/UIColor+ARPalette.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/UIColor+ARPalette.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/UIColor+ARPalette.o"
+  },
   "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/App/AppBootstrap.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AppBootstrap.o",
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AppBootstrap.bc",
@@ -52,6 +92,16 @@
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ScanV1Exporter.bc",
     "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ScanV1Exporter.o"
   },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/Data/Model/AnchorDataStructures.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AnchorDataStructures.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AnchorDataStructures.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AnchorDataStructures.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/Data/Model/AnchorSpatialData.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AnchorSpatialData.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AnchorSpatialData.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AnchorSpatialData.o"
+  },
   "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/Data/Model/LocationConfigV1.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/LocationConfigV1.o",
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/LocationConfigV1.bc",
@@ -86,6 +136,11 @@
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ScanPersistence.o",
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ScanPersistence.bc",
     "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ScanPersistence.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/State/ARCalibrationCoordinator.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARCalibrationCoordinator.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARCalibrationCoordinator.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARCalibrationCoordinator.o"
   },
   "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/State/ARMarker.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARMarker.o",
@@ -162,10 +217,15 @@
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/SquareMetrics.bc",
     "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/SquareMetrics.o"
   },
-  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/State/WorldMapPatch.swift" : {
-    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/WorldMapPatch.o",
-    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/WorldMapPatch.bc",
-    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/WorldMapPatch.o"
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/State/TrianglePatch.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TrianglePatch.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TrianglePatch.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TrianglePatch.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/State/TrianglePatchStore.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TrianglePatchStore.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TrianglePatchStore.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TrianglePatchStore.o"
   },
   "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/Transforms/GestureHandler.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/GestureHandler.o",
@@ -187,25 +247,35 @@
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TransformProcessing.bc",
     "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TransformProcessing.o"
   },
-  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/ARKit/ARCalibrationView.swift" : {
-    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARCalibrationView.o",
-    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARCalibrationView.bc",
-    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARCalibrationView.o"
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/ARKit/ARInterpolationLayout.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARInterpolationLayout.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARInterpolationLayout.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARInterpolationLayout.o"
   },
-  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/ARKit/ARViewContainer.swift" : {
-    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARViewContainer.o",
-    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARViewContainer.bc",
-    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARViewContainer.o"
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/ARKit/ARSurveyView.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARSurveyView.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARSurveyView.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARSurveyView.o"
   },
-  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/ARKit/ARWorldMapScanView.swift" : {
-    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARWorldMapScanView.o",
-    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARWorldMapScanView.bc",
-    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARWorldMapScanView.o"
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/ARKit/ARVisualDefaults.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARVisualDefaults.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARVisualDefaults.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARVisualDefaults.o"
   },
   "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/ARKit/MetricSquareARView.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/MetricSquareARView.o",
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/MetricSquareARView.bc",
     "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/MetricSquareARView.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/ARKit/Nodes/GroundCrosshairNode.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/GroundCrosshairNode.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/GroundCrosshairNode.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/GroundCrosshairNode.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/ARKit/PatchNamePromptView.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/PatchNamePromptView.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/PatchNamePromptView.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/PatchNamePromptView.o"
   },
   "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/Components/DocumentExportPicker.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/DocumentExportPicker.o",
@@ -267,15 +337,25 @@
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/PhotosImporter.bc",
     "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/PhotosImporter.o"
   },
-  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/LocationSettings/ARWorldMapManagementView.swift" : {
-    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARWorldMapManagementView.o",
-    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARWorldMapManagementView.bc",
-    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARWorldMapManagementView.o"
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/LocationSettings/ARMarkerListItem.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARMarkerListItem.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARMarkerListItem.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ARMarkerListItem.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/LocationSettings/AnchorManagementView.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AnchorManagementView.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AnchorManagementView.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AnchorManagementView.o"
   },
   "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/Map/MapContainer.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/MapContainer.o",
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/MapContainer.bc",
     "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/MapContainer.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/Map/MapPointRolePanel.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/MapPointRolePanel.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/MapPointRolePanel.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/MapPointRolePanel.o"
   },
   "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/MapPointLog/MapPointLogView.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/MapPointLogView.o",
@@ -291,6 +371,11 @@
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AuthorNamePromptView.o",
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AuthorNamePromptView.bc",
     "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AuthorNamePromptView.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/Overlays/AnchorQualityOverlay.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AnchorQualityOverlay.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AnchorQualityOverlay.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/AnchorQualityOverlay.o"
   },
   "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/Overlays/BeaconOverlayDots.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/BeaconOverlayDots.o",
@@ -332,6 +417,11 @@
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/RSSILabelsOverlay.bc",
     "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/RSSILabelsOverlay.o"
   },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/Overlays/TriangleOverlay.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TriangleOverlay.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TriangleOverlay.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TriangleOverlay.o"
+  },
   "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/Overlays/UIElements.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/UIElements.o",
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/UIElements.bc",
@@ -342,10 +432,20 @@
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/UserFacingCalibrationOverlay.bc",
     "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/UserFacingCalibrationOverlay.o"
   },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/PhotoManagementView.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/PhotoManagementView.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/PhotoManagementView.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/PhotoManagementView.o"
+  },
   "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/Root/ContentView.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ContentView.o",
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ContentView.bc",
     "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/ContentView.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/Root/FloorMarkerPositionView.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/FloorMarkerPositionView.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/FloorMarkerPositionView.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/FloorMarkerPositionView.o"
   },
   "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/Root/HUDContainer.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/HUDContainer.o",
@@ -381,6 +481,11 @@
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/CompassOrientationManager.o",
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/CompassOrientationManager.bc",
     "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/CompassOrientationManager.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/Utils/Extensions.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/Extensions.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/Extensions.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/Extensions.o"
   },
   "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/Utils/JSONFileViewer.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/JSONFileViewer.o",
@@ -421,6 +526,11 @@
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/UserDataBackup.o",
     "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/UserDataBackup.bc",
     "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/UserDataBackup.o"
+  },
+  "/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/Utils/UserDefaultsDiagnostics.swift" : {
+    "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/UserDefaultsDiagnostics.o",
+    "llvm-bc" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/UserDefaultsDiagnostics.bc",
+    "object" : "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/UserDefaultsDiagnostics.o"
   },
   "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/DerivedSources/GeneratedAssetSymbols.swift" : {
     "index-unit-output-path" : "/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/GeneratedAssetSymbols.o",

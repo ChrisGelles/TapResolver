@@ -120,6 +120,31 @@ final class ARCalibrationCoordinator: ObservableObject {
         placedMarkers.append(mapPointID)
         updateProgressDots()
         
+        // Advance to next vertex if not all placed
+        if placedMarkers.count < 3 {
+            // Find next unplaced vertex
+            for vertexID in triangle.vertexIDs {
+                if !placedMarkers.contains(vertexID) {
+                    // Update currentVertexIndex to point to this vertex
+                    if let index = triangle.vertexIDs.firstIndex(of: vertexID) {
+                        currentVertexIndex = index
+                        // Update reference photo for next vertex
+                        if let mapPoint = mapStore.points.first(where: { $0.id == vertexID }) {
+                            let photoData: Data? = {
+                                if let diskData = mapStore.loadPhotoFromDisk(for: vertexID) {
+                                    return diskData
+                                } else {
+                                    return mapPoint.locationPhotoData
+                                }
+                            }()
+                            setReferencePhoto(photoData)
+                        }
+                        break
+                    }
+                }
+            }
+        }
+        
         let count = placedMarkers.count
         statusText = "Place AR markers for triangle (\(count)/3)"
         

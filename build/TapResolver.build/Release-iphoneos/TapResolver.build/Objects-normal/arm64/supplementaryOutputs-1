@@ -1,9 +1,9 @@
-"/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/Components/ScanQualityDisplayView.swift":
-  const-values: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-master.swiftconstvalues"
-  swiftdoc: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver.swiftdoc"
+"/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/Components/SaveToFiles.swift":
   swiftmodule: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver.swiftmodule"
   diagnostics: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-master.dia"
-  objc-header: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-Swift.h"
-  abi-baseline-json: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver.abi.json"
   dependencies: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-master.d"
+  const-values: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-master.swiftconstvalues"
+  objc-header: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-Swift.h"
   swiftsourceinfo: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver.swiftsourceinfo"
+  swiftdoc: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver.swiftdoc"
+  abi-baseline-json: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver.abi.json"

@@ -19,7 +19,8 @@ struct ContentView: View {
     @StateObject private var locationManager = LocationManager()
     @StateObject private var mapPointStore = MapPointStore()
     @StateObject private var transformProcessor = TransformProcessor()
-    @StateObject private var trianglePatchStore = TrianglePatchStore()
+    @EnvironmentObject private var trianglePatchStore: TrianglePatchStore
+    @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
 
     var body: some View {
         Group {
@@ -33,13 +34,31 @@ struct ContentView: View {
             transformProcessor.bind(to: mapTransform)
             transformProcessor.passThrough = true   // keep UX identical for now
         }
+        // Unified AR View presentation (single location)
+        .fullScreenCover(isPresented: Binding(
+            get: { arViewLaunchContext.isPresented },
+            set: { newValue in
+                if !newValue {
+                    arViewLaunchContext.dismiss()
+                }
+            }
+        )) {
+            ARViewWithOverlays(
+                isPresented: Binding(
+                    get: { arViewLaunchContext.isPresented },
+                    set: { if !$0 { arViewLaunchContext.dismiss() } }
+                ),
+                isCalibrationMode: arViewLaunchContext.isCalibrationMode,
+                selectedTriangle: arViewLaunchContext.selectedTriangle
+            )
+        }
         // Provide environments exactly as before + new locationManager
         .environmentObject(beaconDotStore)
         .environmentObject(hudPanels)
         .environmentObject(locationManager)
         .environmentObject(mapPointStore)
         .environmentObject(transformProcessor)
-        .environmentObject(trianglePatchStore)
+        // trianglePatchStore and arViewLaunchContext are already injected from TapResolverApp
     }
 }
 
