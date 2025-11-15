@@ -44,9 +44,14 @@ struct ARViewContainer: UIViewRepresentable {
         context.coordinator.setMode(mode)
         context.coordinator.selectedTriangle = selectedTriangle
         context.coordinator.isCalibrationMode = isCalibrationMode
+        
+        // Store coordinator reference for world map access
+        ARViewContainer.Coordinator.current = context.coordinator
     }
 
     class ARViewCoordinator: NSObject {
+        static var current: ARViewCoordinator?
+        
         var sceneView: ARSCNView?
         var currentMode: ARMode = .idle
         var placedMarkers: [UUID: SCNNode] = [:] // Track placed markers by ID
@@ -267,6 +272,18 @@ struct ARViewContainer: UIViewRepresentable {
             return nil
         }
 
+        /// Get the current ARWorldMap from the session (async)
+        func getCurrentWorldMap(completion: @escaping (ARWorldMap?, Error?) -> Void) {
+            guard let session = sceneView?.session else {
+                completion(nil, NSError(domain: "ARViewContainer", code: -1, userInfo: [NSLocalizedDescriptionKey: "No AR session available"]))
+                return
+            }
+            
+            session.getCurrentWorldMap { map, error in
+                completion(map, error)
+            }
+        }
+        
         func teardownSession() {
             crosshairUpdateTimer?.invalidate()
             crosshairUpdateTimer = nil

@@ -8,6 +8,7 @@
 import SwiftUI
 import Combine
 import simd
+import ARKit
 
 final class ARCalibrationCoordinator: ObservableObject {
     @Published var activeTriangleID: UUID?
@@ -179,6 +180,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         print("🎉 ARCalibrationCoordinator: Triangle \(String(triangle.id.uuidString.prefix(8))) calibration complete (quality: \(Int(quality * 100))%)")
         
+        // Save ARWorldMap for this triangle
+        saveWorldMapForTriangle(triangle)
+        
         // Post completion notification
         NotificationCenter.default.post(
             name: NSNotification.Name("TriangleCalibrationComplete"),
@@ -196,6 +200,90 @@ final class ARCalibrationCoordinator: ObservableObject {
         } else {
             // No adjacent triangles found - reset
             reset()
+        }
+    }
+    
+    /// Save ARWorldMap after successful triangle calibration
+    private func saveWorldMapForTriangle(_ triangle: TrianglePatch) {
+        // Get the current ARViewCoordinator to access the session
+        guard let coordinator = ARViewContainer.Coordinator.current else {
+            print("⚠️ Cannot save world map: No ARViewCoordinator available")
+            return
+        }
+        
+        // Get the current world map from the AR session
+        coordinator.getCurrentWorldMap { [weak self] map, error in
+            guard let self = self else { return }
+            
+            if let error = error {
+                print("❌ Failed to get current world map: \(error.localizedDescription)")
+                return
+            }
+            
+            guard let worldMap = map else {
+                print("⚠️ No world map available to save")
+                return
+            }
+            
+            // Calculate center point from triangle vertices
+            let vertexIDs = triangle.vertexIDs
+            let mapPoints = vertexIDs.compactMap { vertexID in
+                self.mapStore.points.first(where: { $0.id == vertexID })
+            }
+            
+            guard mapPoints.count == 3 else {
+                print("⚠️ Cannot compute center: Only found \(mapPoints.count)/3 MapPoints")
+                return
+            }
+            
+            // Calculate center as average of vertex positions
+            let centerX = mapPoints.map { $0.mapPoint.x }.reduce(0, +) / CGFloat(mapPoints.count)
+            let centerY = mapPoints.map { $0.mapPoint.y }.reduce(0, +) / CGFloat(mapPoints.count)
+            let center2D = CGPoint(x: centerX, y: centerY)
+            
+            // Estimate radius from triangle vertices (max distance from center)
+            let maxDistance = mapPoints.map { point in
+                let dx = point.mapPoint.x - centerX
+                let dy = point.mapPoint.y - centerY
+                return sqrt(dx * dx + dy * dy)
+            }.max() ?? 0
+            
+            // Convert pixels to meters (rough estimate)
+            guard let pxPerMeter = self.getPixelsPerMeter(), pxPerMeter > 0 else {
+                print("⚠️ Cannot convert radius: pxPerMeter not available")
+                return
+            }
+            let radiusM = Float(maxDistance) / pxPerMeter
+            
+            // Create patch metadata (savePatch will handle archiving and byteSize calculation)
+            let featureCount = worldMap.rawFeaturePoints.points.count
+            let patchMeta = WorldMapPatchMeta(
+                id: triangle.id,  // Use triangle ID as patch ID
+                name: "Triangle \(String(triangle.id.uuidString.prefix(8)))",
+                captureDate: Date(),
+                featureCount: featureCount,
+                byteSize: 0,  // savePatch will calculate this internally
+                center2D: center2D,
+                radiusM: radiusM,
+                version: 1
+            )
+            
+            // Save the patch using existing ARWorldMapStore.savePatch() (DRY - it handles archiving)
+            do {
+                try self.arStore.savePatch(worldMap, meta: patchMeta)
+                
+                // Store filename in triangle (format: "{triangleID}.armap")
+                let filename = "\(triangle.id.uuidString).armap"
+                self.triangleStore.setWorldMapFilename(for: triangle.id, filename: filename)
+                
+                print("✅ Saved ARWorldMap for triangle \(String(triangle.id.uuidString.prefix(8)))")
+                print("   Features: \(featureCount)")
+                print("   Center: (\(Int(center2D.x)), \(Int(center2D.y)))")
+                print("   Radius: \(String(format: "%.2f", radiusM))m")
+                print("   Filename: \(filename)")
+            } catch {
+                print("❌ Failed to save world map patch: \(error)")
+            }
         }
     }
     

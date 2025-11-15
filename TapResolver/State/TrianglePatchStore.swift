@@ -506,6 +506,18 @@ class TrianglePatchStore: ObservableObject {
         print("✅ Set \(measurements.count) leg measurements for triangle \(String(triangleID.uuidString.prefix(8)))")
     }
     
+    func setWorldMapFilename(for triangleID: UUID, filename: String) {
+        guard let index = triangles.firstIndex(where: { $0.id == triangleID }) else {
+            print("⚠️ Cannot set world map filename: Triangle \(String(triangleID.uuidString.prefix(8))) not found")
+            return
+        }
+        
+        triangles[index].worldMapFilename = filename
+        save()
+        
+        print("✅ Set world map filename '\(filename)' for triangle \(String(triangleID.uuidString.prefix(8)))")
+    }
+    
     // MARK: - Persistence
     
     func save() {
