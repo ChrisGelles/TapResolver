@@ -152,51 +152,50 @@ struct ARViewWithOverlays: View {
                 // For now, this notification can be handled by external photo capture flow
             }
             
-            // Exit button (top-left) - always visible
-            Button(action: {
-                isPresented = false
-            }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 30))
-                    .foregroundColor(.white)
-                    .padding(.top, 50)
-                    .padding(.leading, 16)
-            }
-            .zIndex(1000)
-            
-            // PiP Map (top-right) - always visible
-            ARPiPMapView()
-                .environmentObject(mapPointStore)
-                .environmentObject(locationManager)
-                .frame(width: 180, height: 180)
-                .cornerRadius(12)
-                .padding(.top, 50)
-                .padding(.trailing, 20)
-                .zIndex(998)
-            
-            // Reference image PiP (bottom-left) - only in calibration mode
-            // Positioned to avoid overlap with PiP Map (top-right) and exit button (top-left)
-            if isCalibrationMode,
-               let triangle = selectedTriangle,
-               let currentVertexID = arCalibrationCoordinator.getCurrentVertexID(),
-               let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }) {
+            // Overlay UI elements with precise positioning using GeometryReader
+            GeometryReader { geo in
+                // Exit button (top-left) - slightly higher
+                Button(action: {
+                    isPresented = false
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 30))
+                        .foregroundColor(.white)
+                }
+                .position(x: 40, y: 50) // Slightly higher, safely above PiP/Reference UI
+                .zIndex(1000)
                 
-                // Try to load photo from disk first, fall back to memory
-                let photoData: Data? = {
-                    if let diskData = mapPointStore.loadPhotoFromDisk(for: currentVertexID) {
-                        return diskData
-                    } else {
-                        return mapPoint.locationPhotoData
-                    }
-                }()
+                // PiP Map View (top-right)
+                // Pass focused point ID during calibration mode
+                ARPiPMapView(
+                    focusedPointID: isCalibrationMode ? arCalibrationCoordinator.getCurrentVertexID() : nil,
+                    isCalibrationMode: isCalibrationMode,
+                    selectedTriangle: selectedTriangle
+                )
+                    .environmentObject(mapPointStore)
+                    .environmentObject(locationManager)
+                    .environmentObject(arCalibrationCoordinator)
+                    .frame(width: 180, height: 180)
+                    .cornerRadius(12)
+                    .position(x: geo.size.width - 100, y: 110) // 100 = half width + margin
+                    .zIndex(998)
                 
-                if let photoData = photoData,
+                // Reference Image View (top-left, below xmark) - only in calibration mode
+                if isCalibrationMode,
+                   let triangle = selectedTriangle,
+                   let currentVertexID = arCalibrationCoordinator.getCurrentVertexID(),
+                   let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }),
+                   let photoData = mapPointStore.loadPhotoFromDisk(for: currentVertexID) ?? mapPoint.locationPhotoData,
                    let uiImage = UIImage(data: photoData) {
+                    
                     ARReferenceImageView(
                         image: uiImage,
                         mapPoint: mapPoint,
                         isOutdated: mapPoint.photoOutdated ?? false
                     )
+                    .frame(width: 180, height: 180)
+                    .cornerRadius(12)
+                    .position(x: 100, y: 110) // 100 = half width + margin
                     .zIndex(999)
                 }
             }
@@ -205,6 +204,50 @@ struct ARViewWithOverlays: View {
             if isCalibrationMode {
                 VStack {
                     Spacer()
+                    
+                    // Outdated photo warning (non-blocking call-to-action)
+                    if let currentVertexID = arCalibrationCoordinator.getCurrentVertexID(),
+                       let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }),
+                       mapPoint.photoOutdated == true,
+                       mapPoint.locationPhotoData != nil || mapPoint.photoFilename != nil {
+                        VStack(spacing: 8) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(.yellow)
+                                Text("Reference image is outdated.")
+                                    .font(.subheadline)
+                                    .foregroundColor(.white)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.black.opacity(0.7))
+                            .cornerRadius(8)
+                            
+                            Button(action: {
+                                // Trigger photo update flow
+                                NotificationCenter.default.post(
+                                    name: NSNotification.Name("UpdateMapPointPhoto"),
+                                    object: nil,
+                                    userInfo: ["mapPointID": currentVertexID]
+                                )
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "camera.fill")
+                                        .font(.system(size: 12))
+                                    Text("Retake Photo")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(Color.red.opacity(0.9))
+                                .cornerRadius(8)
+                            }
+                        }
+                        .padding(.bottom, 12)
+                    }
                     
                     // Progress dots indicator
                     HStack(spacing: 8) {
@@ -302,23 +345,173 @@ struct ARViewWithOverlays: View {
     }
 }
 
+// MARK: - PiP Map Transform
+
+/// Simple transform struct for PiP Map zoom and pan
+struct PiPMapTransform {
+    var scale: CGFloat
+    var offset: CGSize
+    
+    static let identity = PiPMapTransform(scale: 1.0, offset: .zero)
+    
+    /// Create a transform that centers the map image in the frame
+    static func centered(on imageSize: CGSize, in frameSize: CGSize) -> PiPMapTransform {
+        // .scaledToFit() already handles fitting, so scale should be 4.0 (zoomed in)
+        return PiPMapTransform(scale: 16.0, offset: .zero)
+    }
+    
+    /// Create a transform that zooms to a specific point
+    /// Uses EXACTLY the same logic as MapTransformStore.centerOnPoint()
+    static func focused(on point: CGPoint, 
+                       imageSize: CGSize, 
+                       frameSize: CGSize, 
+                       targetZoom: CGFloat = 16.0) -> PiPMapTransform {
+        // EXACT COPY of centerOnPoint() logic (lines 42-54):
+        let Cmap = CGPoint(x: imageSize.width / 2, y: imageSize.height / 2)
+        let v = CGPoint(x: point.x - Cmap.x, y: point.y - Cmap.y)
+        
+        // For PiP: totalScale = baseScale * targetZoom (since .scaledToFit() then .scaleEffect())
+        // This is equivalent to the main map's totalScale when centering
+        let baseScale = min(frameSize.width / imageSize.width, frameSize.height / imageSize.height)
+        let totalScale = baseScale * targetZoom
+        
+        // Line 45: vScaled = v * totalScale
+        let vScaled = CGPoint(x: v.x * totalScale, y: v.y * totalScale)
+        
+        // Lines 47-52: Rotation (theta = 0 for PiP, so vRot = vScaled)
+        let theta: CGFloat = 0.0  // No rotation for PiP Map
+        let c = cos(theta)
+        let ss = sin(theta)
+        let vRot = CGPoint(
+            x: c * vScaled.x - ss * vScaled.y,
+            y: ss * vScaled.x + c * vScaled.y
+        )
+        
+        // Line 54: newOffset = -vRot
+        let newOffset = CGSize(width: -vRot.x, height: -vRot.y)
+        
+        print("🎯 PiP focused() calculation:")
+        print("   point: (\(Int(point.x)), \(Int(point.y)))")
+        print("   Cmap: (\(Int(Cmap.x)), \(Int(Cmap.y)))")
+        print("   v: (\(Int(v.x)), \(Int(v.y)))")
+        print("   baseScale: \(String(format: "%.6f", baseScale))")
+        print("   targetZoom: \(String(format: "%.3f", targetZoom))")
+        print("   totalScale: \(String(format: "%.6f", totalScale))")
+        print("   vScaled: (\(String(format: "%.1f", vScaled.x)), \(String(format: "%.1f", vScaled.y)))")
+        print("   vRot: (\(String(format: "%.1f", vRot.x)), \(String(format: "%.1f", vRot.y)))")
+        print("   newOffset: (\(String(format: "%.1f", newOffset.width)), \(String(format: "%.1f", newOffset.height)))")
+        
+        return PiPMapTransform(
+            scale: targetZoom,
+            offset: newOffset
+        )
+    }
+}
+
 // MARK: - PiP Map View (migrated from ARCalibrationView)
 
 struct ARPiPMapView: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
+    
+    // Focused point ID for zoom/center (nil = show full map)
+    let focusedPointID: UUID?
+    
+    // Calibration mode properties for user position tracking
+    let isCalibrationMode: Bool
+    let selectedTriangle: TrianglePatch?
+    
+    // Separate transform stores for PiP (independent from main map)
+    @StateObject private var pipTransform = MapTransformStore()
+    @StateObject private var pipProcessor = TransformProcessor()
+    
     @State private var mapImage: UIImage?
+    @State private var currentScale: CGFloat = 1.0
+    @State private var currentOffset: CGSize = .zero
+    
+    // User position tracking
+    @State private var userMapPosition: CGPoint? = nil
+    @State private var positionUpdateTimer: Timer? = nil
+    @State private var isAnimating: Bool = false
+    @State private var positionSamples: [simd_float3] = [] // Ring buffer for smoothing
     
     var body: some View {
         Group {
             if let mapImage = mapImage {
-                Image(uiImage: mapImage)
-                    .resizable()
-                    .scaledToFit()
+                GeometryReader { geo in
+                    // Calculate target transform based on focused point
+                    let targets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
+                    
+                    ZStack {
+                        // Use MapContainer (same as main map view)
+                        MapContainer(mapImage: mapImage)
+                            .environmentObject(pipTransform)
+                            .environmentObject(pipProcessor)
+                            .frame(width: mapImage.size.width, height: mapImage.size.height)
+                            .allowsHitTesting(false) // Disable gestures in PiP
+                        
+                        // User position dot overlay (only in calibration mode)
+                        if isCalibrationMode, let userPos = userMapPosition {
+                            // User position is in map coordinates, position directly
+                            // Note: This will be transformed by the scaleEffect/offset applied to the ZStack
+                            ZStack {
+                                // Base dot
+                                Circle()
+                                    .fill(Color(red: 103/255, green: 31/255, blue: 121/255))
+                                    .frame(width: 15, height: 15)
+                                
+                                // Pulse animation ring
+                                Circle()
+                                    .stroke(Color(red: 73/255, green: 206/255, blue: 248/255), lineWidth: 2)
+                                    .frame(width: 15, height: 15)
+                                    .scaleEffect(isAnimating ? 22.0/15.0 : 1.0) // Grow from 15px to 22px
+                                    .opacity(isAnimating ? 0.0 : 0.5) // Fade from 0.5 to 0
+                                    .onAppear {
+                                        // Start repeating animation
+                                        withAnimation(Animation.easeOut(duration: 1.0).repeatForever(autoreverses: false)) {
+                                            isAnimating = true
+                                        }
+                                    }
+                            }
+                            .position(userPos)
+                        }
+                        
+                        // Focused point indicator (if any)
+                        if let pointID = focusedPointID,
+                           let point = mapPointStore.points.first(where: { $0.id == pointID }) {
+                            Circle()
+                                .fill(Color.cyan)
+                                .frame(width: 12, height: 12)
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.white, lineWidth: 2)
+                                )
+                                .position(point.mapPoint)
+                        }
+                    }
+                    .scaleEffect(currentScale)
+                    .offset(currentOffset)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(Color.white.opacity(0.3), lineWidth: 2)
                     )
+                    .onAppear {
+                        setupPiPTransform(image: mapImage, frameSize: geo.size)
+                        currentScale = targets.scale
+                        currentOffset = targets.offset
+                    }
+                    .onChange(of: focusedPointID) { _ in
+                        // Recalculate when focused point changes
+                        let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
+                        withAnimation(.easeInOut(duration: 0.5)) {
+                            currentScale = newTargets.scale
+                            currentOffset = newTargets.offset
+                        }
+                    }
+                }
             } else {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color.gray.opacity(0.3))
@@ -331,9 +524,22 @@ struct ARPiPMapView: View {
         }
         .onAppear {
             loadMapImage()
+            if isCalibrationMode {
+                startUserPositionTracking()
+            }
+        }
+        .onDisappear {
+            stopUserPositionTracking()
         }
         .onChange(of: locationManager.currentLocationID) { _ in
             loadMapImage()
+        }
+        .onChange(of: isCalibrationMode) { newValue in
+            if newValue {
+                startUserPositionTracking()
+            } else {
+                stopUserPositionTracking()
+            }
         }
     }
     
@@ -359,6 +565,285 @@ struct ARPiPMapView: View {
         }
         
         mapImage = UIImage(named: assetName)
+    }
+    
+    /// Setup PiP transform stores
+    private func setupPiPTransform(image: UIImage, frameSize: CGSize) {
+        pipProcessor.bind(to: pipTransform)
+        pipProcessor.setMapSize(CGSize(width: image.size.width, height: image.size.height))
+        pipProcessor.setScreenCenter(CGPoint(x: frameSize.width / 2, y: frameSize.height / 2))
+    }
+    
+    /// Calculate target transform based on focused point (or full map)
+    private func calculateTargetTransform(image: UIImage, frameSize: CGSize) -> (scale: CGFloat, offset: CGSize) {
+        let imageSize = image.size
+        
+        if let pointID = focusedPointID,
+           let point = mapPointStore.points.first(where: { $0.id == pointID }) {
+            // Single point mode - create region around point
+            let regionSize: CGFloat = 400
+            let cornerA = CGPoint(x: point.mapPoint.x - regionSize/2, y: point.mapPoint.y - regionSize/2)
+            let cornerB = CGPoint(x: point.mapPoint.x + regionSize/2, y: point.mapPoint.y + regionSize/2)
+            
+            let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+            let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+            return (scale, offset)
+        } else {
+            // Full map mode - show entire map
+            let cornerA = CGPoint(x: 0, y: 0)
+            let cornerB = CGPoint(x: imageSize.width, y: imageSize.height)
+            
+            let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+            let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+            return (scale, offset)
+        }
+    }
+    
+    /// Calculate scale to fit region between two points
+    private func calculateScale(pointA: CGPoint, pointB: CGPoint, frameSize: CGSize, imageSize: CGSize) -> CGFloat {
+        // Calculate center point between A and B
+        let centerX = (pointA.x + pointB.x) / 2
+        let centerY = (pointA.y + pointB.y) / 2
+        
+        // Calculate max distances from center to either point
+        let maxXDistance = max(abs(pointA.x - centerX), abs(pointB.x - centerX))
+        let maxYDistance = max(abs(pointA.y - centerY), abs(pointB.y - centerY))
+        
+        // Add padding (10% extra space around points)
+        let paddingFactor: CGFloat = 1.1
+        let paddedXDistance = maxXDistance * 2 * paddingFactor
+        let paddedYDistance = maxYDistance * 2 * paddingFactor
+        
+        // Calculate scale factors for each dimension
+        let scaleX = frameSize.width / paddedXDistance
+        let scaleY = frameSize.height / paddedYDistance
+        
+        // Use the smaller scale to ensure both points fit
+        return min(scaleX, scaleY)
+    }
+    
+    /// Calculate offset to center region between two points
+    private func calculateOffset(pointA: CGPoint, pointB: CGPoint, frameSize: CGSize, imageSize: CGSize) -> CGSize {
+        let scale = calculateScale(pointA: pointA, pointB: pointB, frameSize: frameSize, imageSize: imageSize)
+        
+        // Calculate average of the two points (center between them)
+        let Xavg = (pointA.x + pointB.x) / 2
+        let Yavg = (pointA.y + pointB.y) / 2
+        
+        // Image center
+        let imageCenterX = imageSize.width / 2
+        let imageCenterY = imageSize.height / 2
+        
+        // Offset from image center to average point
+        let offsetFromImageCenter_X = imageCenterX - Xavg
+        let offsetFromImageCenter_Y = imageCenterY - Yavg
+        
+        // Apply scale factor
+        let offsetX = offsetFromImageCenter_X * scale
+        let offsetY = offsetFromImageCenter_Y * scale
+        
+        return CGSize(width: offsetX, height: offsetY)
+    }
+    
+    // MARK: - User Position Tracking
+    
+    private func startUserPositionTracking() {
+        guard isCalibrationMode else { return }
+        
+        // Start pulse animation
+        isAnimating = true
+        
+        // Start position update timer (every 1 second)
+        // Note: Using Timer with struct - timer will be invalidated on deinit
+        positionUpdateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            self.updateUserPosition()
+        }
+        
+        // Initial update
+        updateUserPosition()
+    }
+    
+    private func stopUserPositionTracking() {
+        positionUpdateTimer?.invalidate()
+        positionUpdateTimer = nil
+        userMapPosition = nil
+        positionSamples.removeAll()
+        isAnimating = false
+    }
+    
+    private func updateUserPosition() {
+        guard isCalibrationMode,
+              let coordinator = ARViewContainer.Coordinator.current,
+              let cameraPosition = coordinator.getCurrentCameraPosition() else {
+            userMapPosition = nil
+            return
+        }
+        
+        // Add to ring buffer for smoothing (keep last 5 samples)
+        positionSamples.append(cameraPosition)
+        if positionSamples.count > 5 {
+            positionSamples.removeFirst()
+        }
+        
+        // Average the samples for smoothing
+        let smoothedPosition = positionSamples.reduce(simd_float3(0, 0, 0), +) / Float(positionSamples.count)
+        
+        // Project AR world position to 2D map coordinates
+        if let projectedPosition = projectARPositionToMap(arPosition: smoothedPosition) {
+            userMapPosition = projectedPosition
+        }
+    }
+    
+    /// Project AR world position to 2D map coordinates using placed markers
+    private func projectARPositionToMap(arPosition: simd_float3) -> CGPoint? {
+        guard let triangle = selectedTriangle else {
+            return nil
+        }
+        
+        let arStore = arCalibrationCoordinator.arStore
+        
+        // Get placed markers for this triangle
+        let placedMarkerMapPointIDs = arCalibrationCoordinator.placedMarkers
+        guard placedMarkerMapPointIDs.count >= 2 else {
+            // Need at least 2 markers for projection
+            return nil
+        }
+        
+        // Collect AR world positions and corresponding 2D map positions
+        var arPositions: [simd_float3] = []
+        var mapPositions: [CGPoint] = []
+        
+        for mapPointID in placedMarkerMapPointIDs {
+            // Find AR marker linked to this mapPointID
+            // Look through triangle's arMarkerIDs to find the marker
+            for markerIDString in triangle.arMarkerIDs {
+                guard let markerUUID = UUID(uuidString: markerIDString),
+                      let arMarker = arStore.marker(withID: markerUUID),
+                      arMarker.mapPointID == mapPointID.uuidString,
+                      let mapPoint = mapPointStore.points.first(where: { $0.id == mapPointID }) else {
+                    continue
+                }
+                
+                // Extract AR position from transform
+                let transform = arMarker.worldTransform.toSimd()
+                let arPos = simd_float3(
+                    transform.columns.3.x,
+                    transform.columns.3.y,
+                    transform.columns.3.z
+                )
+                arPositions.append(arPos)
+                mapPositions.append(mapPoint.mapPoint)
+                break // Found marker for this mapPointID
+            }
+        }
+        
+        guard arPositions.count >= 2 else {
+            return nil
+        }
+        
+        // Use barycentric interpolation for 3 points, or linear interpolation for 2 points
+        if arPositions.count == 3 {
+            return projectUsingBarycentric(
+                userARPos: arPosition,
+                arPositions: arPositions,
+                mapPositions: mapPositions
+            )
+        } else {
+            // Linear interpolation using 2 points
+            return projectUsingLinear(
+                userARPos: arPosition,
+                arPositions: Array(arPositions.prefix(2)),
+                mapPositions: Array(mapPositions.prefix(2))
+            )
+        }
+    }
+    
+    /// Project using barycentric coordinates (for 3 points)
+    private func projectUsingBarycentric(
+        userARPos: simd_float3,
+        arPositions: [simd_float3],
+        mapPositions: [CGPoint]
+    ) -> CGPoint? {
+        guard arPositions.count == 3, mapPositions.count == 3 else { return nil }
+        
+        let p0 = arPositions[0]
+        let p1 = arPositions[1]
+        let p2 = arPositions[2]
+        
+        // Project to 2D plane (use XZ plane, ignoring Y height)
+        let v0 = simd_float2(p1.x - p0.x, p1.z - p0.z)
+        let v1 = simd_float2(p2.x - p0.x, p2.z - p0.z)
+        let v2 = simd_float2(userARPos.x - p0.x, userARPos.z - p0.z)
+        
+        let dot00 = simd_dot(v0, v0)
+        let dot01 = simd_dot(v0, v1)
+        let dot02 = simd_dot(v0, v2)
+        let dot11 = simd_dot(v1, v1)
+        let dot12 = simd_dot(v1, v2)
+        
+        let invDenom = 1 / (dot00 * dot11 - dot01 * dot01)
+        let u = (dot11 * dot02 - dot01 * dot12) * invDenom
+        let v = (dot00 * dot12 - dot01 * dot02) * invDenom
+        
+        // Check if point is inside triangle
+        if u >= 0 && v >= 0 && (u + v) <= 1 {
+            // Interpolate map positions
+            let map0 = mapPositions[0]
+            let map1 = mapPositions[1]
+            let map2 = mapPositions[2]
+            
+            let w = CGFloat(1.0 - u - v)
+            let uCGFloat = CGFloat(u)
+            let vCGFloat = CGFloat(v)
+            
+            // Break up complex expressions
+            let term0X = w * map0.x
+            let term1X = uCGFloat * map1.x
+            let term2X = vCGFloat * map2.x
+            let mapX = term0X + term1X + term2X
+            
+            let term0Y = w * map0.y
+            let term1Y = uCGFloat * map1.y
+            let term2Y = vCGFloat * map2.y
+            let mapY = term0Y + term1Y + term2Y
+            
+            return CGPoint(x: mapX, y: mapY)
+        }
+        
+        return nil
+    }
+    
+    /// Project using linear interpolation (for 2 points)
+    private func projectUsingLinear(
+        userARPos: simd_float3,
+        arPositions: [simd_float3],
+        mapPositions: [CGPoint]
+    ) -> CGPoint? {
+        guard arPositions.count == 2, mapPositions.count == 2 else { return nil }
+        
+        let p0 = arPositions[0]
+        let p1 = arPositions[1]
+        
+        // Project to 2D plane (use XZ plane)
+        let v0 = simd_float2(p1.x - p0.x, p1.z - p0.z)
+        let v1 = simd_float2(userARPos.x - p0.x, userARPos.z - p0.z)
+        
+        let len = simd_length(v0)
+        guard len > 0.001 else { return nil } // Avoid division by zero
+        
+        let t = simd_dot(v1, v0) / (len * len)
+        let tCGFloat = CGFloat(t)
+        
+        // Interpolate map positions
+        let map0 = mapPositions[0]
+        let map1 = mapPositions[1]
+        
+        let deltaX = map1.x - map0.x
+        let deltaY = map1.y - map0.y
+        let mapX = map0.x + tCGFloat * deltaX
+        let mapY = map0.y + tCGFloat * deltaY
+        
+        return CGPoint(x: mapX, y: mapY)
     }
 }
 
