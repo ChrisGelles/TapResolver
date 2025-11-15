@@ -157,25 +157,31 @@ struct ARViewContainer: UIViewRepresentable {
             
             // Determine color based on current mode
             let markerColor: UIColor
+            let shouldAnimate: Bool
             switch currentMode {
             case .calibration:
                 markerColor = UIColor.ARPalette.calibration
-            case .triangleCalibration:
+                shouldAnimate = false
+            case .triangleCalibration(_):
                 markerColor = UIColor.ARPalette.calibration  // Orange for triangle calibration
+                shouldAnimate = true
             case .anchor:
                 markerColor = UIColor.ARPalette.anchor
+                shouldAnimate = false
             default:
                 markerColor = UIColor.ARPalette.markerBase
+                shouldAnimate = false
             }
             
-            // Create marker with standardized options
+            // Create marker using centralized renderer
             let options = MarkerOptions(
                 color: markerColor,
                 markerID: markerID,
-                userDeviceHeight: userDeviceHeight
+                userDeviceHeight: userDeviceHeight,
+                animateOnAppearance: shouldAnimate
             )
-            
             let markerNode = ARMarkerRenderer.createNode(at: position, options: options)
+            
             sceneView.scene.rootNode.addChildNode(markerNode)
             
             // Track the marker
