@@ -34,7 +34,8 @@ struct TrianglePatch: Codable, Identifiable {
     var arMarkerIDs: [String] = []  // AR marker IDs for the 3 vertices (matches order of vertexIDs)
     var userPositionWhenCalibrated: simd_float3?  // User's AR position when final marker placed
     var legMeasurements: [TriangleLegMeasurement] = []  // Leg distance measurements for quality computation
-    var worldMapFilename: String?  // Filename of saved ARWorldMap patch (e.g., "{triangleID}.armap")
+    var worldMapFilename: String?  // Legacy: Filename of saved ARWorldMap patch (deprecated - use worldMapFilesByStrategy)
+    var worldMapFilesByStrategy: [String: String] = [:]  // [strategyName: filename] - Multiple world maps per strategy
     
     init(vertexIDs: [UUID]) {
         self.id = UUID()
@@ -69,7 +70,7 @@ struct TrianglePatch: Codable, Identifiable {
 extension TrianglePatch {
     enum CodingKeys: String, CodingKey {
         case id, vertexIDs, arMarkerIDs, calibrationQuality, isCalibrated, createdAt, lastCalibratedAt
-        case transform, userPositionWhenCalibrated, legMeasurements, worldMapFilename
+        case transform, userPositionWhenCalibrated, legMeasurements, worldMapFilename, worldMapFilesByStrategy
     }
     
     init(from decoder: Decoder) throws {
@@ -111,6 +112,9 @@ extension TrianglePatch {
         
         // Decode worldMapFilename (optional for backward compatibility)
         worldMapFilename = try container.decodeIfPresent(String.self, forKey: .worldMapFilename)
+        
+        // Decode worldMapFilesByStrategy (optional for backward compatibility)
+        worldMapFilesByStrategy = try container.decodeIfPresent([String: String].self, forKey: .worldMapFilesByStrategy) ?? [:]
         
         // Backward compatibility: accept both ISO8601 String or Unix timestamp (Double) for createdAt
         if let dateString = try? container.decode(String.self, forKey: .createdAt),
@@ -155,8 +159,13 @@ extension TrianglePatch {
         // Encode legMeasurements
         try container.encode(legMeasurements, forKey: .legMeasurements)
         
-        // Encode worldMapFilename
+        // Encode worldMapFilename (legacy)
         try container.encodeIfPresent(worldMapFilename, forKey: .worldMapFilename)
+        
+        // Encode worldMapFilesByStrategy
+        if !worldMapFilesByStrategy.isEmpty {
+            try container.encode(worldMapFilesByStrategy, forKey: .worldMapFilesByStrategy)
+        }
     }
 }
 

@@ -135,10 +135,56 @@ public final class ARWorldMapStore: ObservableObject {
         patchesDirectory().appendingPathComponent("patch_index.json")
     }
     
+    // MARK: - Strategy-specific directory helpers
+    
+    /// Get the base directory for relocalization strategies
+    private func strategiesDirectory() -> URL {
+        let dir = baseDirectory().appendingPathComponent("Strategies", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+    
+    /// Get directory for a specific strategy
+    private func strategyDirectory(strategyID: String) -> URL {
+        let dir = strategiesDirectory().appendingPathComponent(strategyID, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+    
+    /// Get URL for a world map file in a strategy-specific folder
+    /// - Parameters:
+    ///   - triangleID: The triangle ID
+    ///   - strategyID: The strategy identifier (e.g., "worldmap")
+    /// - Returns: URL to the .armap file
+    static func strategyWorldMapURL(for triangleID: UUID, strategyID: String) -> URL {
+        let ctx = PersistenceContext.shared
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = docs
+            .appendingPathComponent("locations")
+            .appendingPathComponent(ctx.locationID)
+            .appendingPathComponent("ARSpatial", isDirectory: true)
+            .appendingPathComponent("Strategies", isDirectory: true)
+            .appendingPathComponent(strategyID, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("\(triangleID.uuidString).armap")
+    }
+    
+    /// Get URL for saving a world map in a strategy-specific folder
+    private func strategyWorldMapURL(for triangleID: UUID, strategyID: String) -> URL {
+        strategyDirectory(strategyID: strategyID).appendingPathComponent("\(triangleID.uuidString).armap")
+    }
+    
     // MARK: - Lifecycle
     
+    // Static flag to ensure init message only prints once
+    private static var hasLoggedInit = false
+    
     public init() {
-        print("🧠 ARWorldMapStore init (ARWorldMap-first architecture)")
+        // Only log initialization once (for debugging)
+        if !Self.hasLoggedInit {
+            print("🧠 ARWorldMapStore init (ARWorldMap-first architecture)")
+            Self.hasLoggedInit = true
+        }
         loadGlobalMapMetadata()
         // LEGACY: Marker loading removed - markers are now created on-demand during sessions
         // No longer loading persisted marker metadata at startup
@@ -223,7 +269,7 @@ public final class ARWorldMapStore: ObservableObject {
 
     // MARK: - Multi-Patch Support
 
-    /// Save a patch with metadata
+    /// Save a patch with metadata (legacy: saves to Patches/ folder)
     public func savePatch(_ map: ARWorldMap, meta: WorldMapPatchMeta) throws {
         let data = try NSKeyedArchiver.archivedData(withRootObject: map, requiringSecureCoding: true)
         let patchFile = patchURL(for: meta.id)
@@ -256,6 +302,28 @@ public final class ARWorldMapStore: ObservableObject {
         print("   Size: \(sizeString)")
         print("   Center: (\(Int(finalMeta.center2D.x)), \(Int(finalMeta.center2D.y)))")
         print("   Total patches for location: \(index.patches.count)")
+    }
+    
+    /// Save a patch to a strategy-specific folder
+    /// - Parameters:
+    ///   - map: The ARWorldMap to save
+    ///   - triangleID: The triangle ID (used as filename)
+    ///   - strategyID: The strategy identifier (e.g., "worldmap")
+    public func savePatchForStrategy(_ map: ARWorldMap, triangleID: UUID, strategyID: String) throws {
+        let url = strategyWorldMapURL(for: triangleID, strategyID: strategyID)
+        let data = try NSKeyedArchiver.archivedData(withRootObject: map, requiringSecureCoding: true)
+        try data.write(to: url, options: .atomic)
+        
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB]
+        formatter.countStyle = .file
+        let sizeString = formatter.string(fromByteCount: Int64(data.count))
+        
+        print("📦 Saved ARWorldMap for strategy '\(strategyID)'")
+        print("   Triangle: \(String(triangleID.uuidString.prefix(8)))")
+        print("   Features: \(map.rawFeaturePoints.points.count)")
+        print("   Size: \(sizeString)")
+        print("   Path: \(url.path)")
     }
 
     /// Load a specific patch by ID

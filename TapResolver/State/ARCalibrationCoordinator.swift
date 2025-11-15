@@ -268,15 +268,23 @@ final class ARCalibrationCoordinator: ObservableObject {
                 version: 1
             )
             
-            // Save the patch using existing ARWorldMapStore.savePatch() (DRY - it handles archiving)
+            // Save the patch to strategy-specific folder (WorldMap strategy)
             do {
-                try self.arStore.savePatch(worldMap, meta: patchMeta)
+                let strategyID = "worldmap"
+                let strategyDisplayName = "ARWorldMap"
+                try self.arStore.savePatchForStrategy(worldMap, triangleID: triangle.id, strategyID: strategyID)
                 
                 // Store filename in triangle (format: "{triangleID}.armap")
                 let filename = "\(triangle.id.uuidString).armap"
+                
+                // Update legacy worldMapFilename for backward compatibility
                 self.triangleStore.setWorldMapFilename(for: triangle.id, filename: filename)
                 
+                // Update worldMapFilesByStrategy dictionary
+                self.triangleStore.setWorldMapFilename(for: triangle.id, strategyName: strategyDisplayName, filename: filename)
+                
                 print("✅ Saved ARWorldMap for triangle \(String(triangle.id.uuidString.prefix(8)))")
+                print("   Strategy: \(strategyID) (\(strategyDisplayName))")
                 print("   Features: \(featureCount)")
                 print("   Center: (\(Int(center2D.x)), \(Int(center2D.y)))")
                 print("   Radius: \(String(format: "%.2f", radiusM))m")

@@ -518,6 +518,19 @@ class TrianglePatchStore: ObservableObject {
         print("✅ Set world map filename '\(filename)' for triangle \(String(triangleID.uuidString.prefix(8)))")
     }
     
+    /// Set world map filename for a specific strategy (multi-strategy support)
+    func setWorldMapFilename(for triangleID: UUID, strategyName: String, filename: String) {
+        guard let index = triangles.firstIndex(where: { $0.id == triangleID }) else {
+            print("⚠️ Cannot set world map filename: Triangle \(String(triangleID.uuidString.prefix(8))) not found")
+            return
+        }
+        
+        triangles[index].worldMapFilesByStrategy[strategyName] = filename
+        save()
+        
+        print("✅ Set world map filename '\(filename)' for strategy '\(strategyName)' on triangle \(String(triangleID.uuidString.prefix(8)))")
+    }
+    
     // MARK: - Persistence
     
     func save() {

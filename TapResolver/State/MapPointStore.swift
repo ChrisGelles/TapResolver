@@ -75,6 +75,8 @@ public final class MapPointStore: ObservableObject {
         public var roles: Set<MapPointRole> = []
         public var locationPhotoData: Data? = nil
         public var photoFilename: String? = nil  // NEW: Filename of photo on disk
+        public var photoOutdated: Bool? = nil  // Flagged when MapPoint position changes after photo was captured
+        public var photoCapturedAtPosition: CGPoint? = nil  // Position when photo was last captured
         public var triangleMemberships: [UUID] = []
         public var isLocked: Bool = true  // ✅ New points default to locked
         
@@ -326,6 +328,24 @@ public final class MapPointStore: ObservableObject {
     /// Update a map point's position (used while dragging)
     public func updatePoint(id: UUID, to newPosition: CGPoint) {
         guard let index = points.firstIndex(where: { $0.id == id }) else { return }
+        let point = points[index]
+        
+        // Check if position changed significantly and photo exists
+        if let capturedPosition = point.photoCapturedAtPosition,
+           point.locationPhotoData != nil || point.photoFilename != nil {
+            let distance = sqrt(
+                pow(newPosition.x - capturedPosition.x, 2) +
+                pow(newPosition.y - capturedPosition.y, 2)
+            )
+            // Mark as outdated if moved more than 5 pixels (movementThreshold)
+            // This is a conservative threshold - adjust as needed based on map scale
+            let movementThreshold: CGFloat = 5.0
+            if distance > movementThreshold {
+                points[index].photoOutdated = true
+                print("⚠️ Photo marked as outdated: MapPoint moved \(String(format: "%.1f", distance)) pixels from capture position")
+            }
+        }
+        
         points[index].position = newPosition
         // Note: We don't save() here to avoid excessive I/O during drag
         // The position will be saved when drag ends via the existing save mechanism
@@ -400,6 +420,9 @@ public final class MapPointStore: ObservableObject {
         let roles: [MapPointRole]?
         let locationPhotoData: Data?
         let photoFilename: String?  // NEW
+        let photoOutdated: Bool?  // Optional for backward compatibility
+        let photoCapturedAtPositionX: CGFloat?  // Optional for backward compatibility
+        let photoCapturedAtPositionY: CGFloat?  // Optional for backward compatibility
         let triangleMemberships: [UUID]?
         let isLocked: Bool?  // ✅ Optional for backward compatibility
     }
@@ -445,7 +468,10 @@ public final class MapPointStore: ObservableObject {
                 roles: Array(point.roles),
                 locationPhotoData: photoData,
                 photoFilename: point.photoFilename,  // NEW
-                triangleMemberships: point.triangleMemberships,
+                photoOutdated: point.photoOutdated,
+                photoCapturedAtPositionX: point.photoCapturedAtPosition?.x,
+                photoCapturedAtPositionY: point.photoCapturedAtPosition?.y,
+                triangleMemberships: point.triangleMemberships.isEmpty ? nil : point.triangleMemberships,
                 isLocked: point.isLocked
             )
         }
@@ -490,6 +516,15 @@ public final class MapPointStore: ObservableObject {
                     photoData = dtoItem.locationPhotoData
                 }
                 
+                // Reconstruct photoCapturedAtPosition from separate x/y fields
+                let capturedPosition: CGPoint? = {
+                    if let x = dtoItem.photoCapturedAtPositionX,
+                       let y = dtoItem.photoCapturedAtPositionY {
+                        return CGPoint(x: x, y: y)
+                    }
+                    return nil
+                }()
+                
                 var point = MapPoint(
                     id: dtoItem.id,
                     mapPoint: CGPoint(x: dtoItem.x, y: dtoItem.y),
@@ -502,6 +537,10 @@ public final class MapPointStore: ObservableObject {
                     triangleMemberships: dtoItem.triangleMemberships ?? [],
                     isLocked: dtoItem.isLocked ?? true  // Default to locked for backward compatibility
                 )
+                
+                // Set photo tracking fields
+                point.photoOutdated = dtoItem.photoOutdated
+                point.photoCapturedAtPosition = capturedPosition
                 if dtoItem.roles == nil || dtoItem.triangleMemberships == nil || dtoItem.isLocked == nil {
                     needsSave = true
                 }
@@ -1046,6 +1085,8 @@ public final class MapPointStore: ObservableObject {
                 // Update point with filename and clear memory data
                 points[index].photoFilename = filename
                 points[index].locationPhotoData = nil  // Clear from memory
+                points[index].photoCapturedAtPosition = points[index].position  // Record capture position
+                points[index].photoOutdated = false  // Clear outdated flag when new photo is captured
                 
                 print("📸 Saved photo to disk: \(filename) (\(jpegData.count / 1024) KB)")
                 return true

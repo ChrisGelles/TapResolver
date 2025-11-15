@@ -2,6 +2,7 @@ import SwiftUI
 import ARKit
 import SceneKit
 import simd
+import CoreImage
 
 struct ARViewContainer: UIViewRepresentable {
     @Binding var mode: ARMode
@@ -131,6 +132,12 @@ struct ARViewContainer: UIViewRepresentable {
         }
 
         @objc func handleTapGesture(_ sender: UITapGestureRecognizer) {
+            // Disable tap-to-place in idle mode - use Place AR Marker button instead
+            guard currentMode != .idle else {
+                print("👆 Tap ignored in idle mode — use Place AR Marker button")
+                return
+            }
+            
             guard let sceneView = sceneView else { return }
             
             let location = sender.location(in: sceneView)
@@ -282,6 +289,36 @@ struct ARViewContainer: UIViewRepresentable {
             session.getCurrentWorldMap { map, error in
                 completion(map, error)
             }
+        }
+        
+        /// Capture current AR camera frame as UIImage
+        func captureARFrame(completion: @escaping (UIImage?) -> Void) {
+            guard let sceneView = sceneView else {
+                completion(nil)
+                return
+            }
+            
+            // Get current ARFrame from session
+            guard let frame = sceneView.session.currentFrame else {
+                print("⚠️ No current ARFrame available")
+                completion(nil)
+                return
+            }
+            
+            // Convert ARFrame's capturedImage (CVPixelBuffer) to UIImage
+            let pixelBuffer = frame.capturedImage
+            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+            let context = CIContext()
+            
+            guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
+                print("⚠️ Failed to create CGImage from ARFrame")
+                completion(nil)
+                return
+            }
+            
+            // Convert to UIImage, accounting for camera orientation
+            let image = UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
+            completion(image)
         }
         
         func teardownSession() {

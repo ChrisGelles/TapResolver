@@ -41,6 +41,7 @@ struct HUDContainer: View {
     @EnvironmentObject private var triangleStore: TrianglePatchStore
     @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
     @StateObject private var beaconLogger = SimpleBeaconLogger()
+    @StateObject private var relocalizationCoordinator: RelocalizationCoordinator
 
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
     @State private var showMetricSquareAR = false
@@ -49,6 +50,7 @@ struct HUDContainer: View {
     @State private var selectedBeaconForTxPower: String? = nil
     @State private var showScanQuality = true  // Temporary: always show for testing
     @State private var activeIntervalEdit: (beaconID: String, text: String)? = nil
+    @State private var showRelocalizationDebug = false  // Debug UI toggle
 
     var body: some View {
         baseContent
@@ -74,7 +76,19 @@ struct HUDContainer: View {
             .overlay { arViewOverlay }
             .overlay(alignment: .top) { interpolationModeBanner }
             .overlay { triangleCreationInstructions }
+            .overlay(alignment: .bottomTrailing) { relocalizationDebugOverlay }
+            .onAppear {
+                // Update coordinator to use actual ARWorldMapStore
+                relocalizationCoordinator.updateARStore(arWorldMapStore)
+            }
         }
+        
+    init() {
+        // Initialize relocalization coordinator with temporary store
+        // Will be updated to use actual store in onAppear
+        let tempARStore = ARWorldMapStore()
+        _relocalizationCoordinator = StateObject(wrappedValue: RelocalizationCoordinator(arStore: tempARStore))
+    }
     
     // MARK: - View Composition Helpers
         
@@ -98,6 +112,7 @@ struct HUDContainer: View {
                         BluetoothScanButton()
                         RSSIMeterButton()
                         FacingToggleButton()
+                        RelocalizationDebugToggleButton(showDebug: $showRelocalizationDebug)
                         // MARK: - Initial Diagnostic Buttons (Hidden - can be restored if needed)
                         /*
                         UserDefaultsDiagnosticButton()
@@ -342,6 +357,15 @@ struct HUDContainer: View {
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        }
+    }
+    
+    @ViewBuilder
+    private var relocalizationDebugOverlay: some View {
+        if showRelocalizationDebug {
+            RelocalizationDebugView(coordinator: relocalizationCoordinator)
+                .frame(maxWidth: 350, maxHeight: 500)
+                .padding()
         }
     }
 
@@ -944,6 +968,27 @@ private struct FacingToggleButton: View {
                 .background(.ultraThinMaterial, in: Circle())
         }
         .accessibilityLabel("Toggle facing overlay")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - Relocalization Debug Toggle Button
+
+private struct RelocalizationDebugToggleButton: View {
+    @Binding var showDebug: Bool
+    
+    var body: some View {
+        Button {
+            showDebug.toggle()
+        } label: {
+            Image(systemName: showDebug ? "location.magnifyingglass.fill" : "location.magnifyingglass")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.primary)
+                .padding(10)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .accessibilityLabel("Toggle relocalization debug")
         .buttonStyle(.plain)
         .allowsHitTesting(true)
     }

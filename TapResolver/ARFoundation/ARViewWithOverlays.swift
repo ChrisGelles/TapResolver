@@ -22,6 +22,20 @@ struct ARViewWithOverlays: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
+    @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
+    
+    // Relocalization coordinator for strategy selection (developer UI)
+    @StateObject private var relocalizationCoordinator: RelocalizationCoordinator
+    
+    init(isPresented: Binding<Bool>, isCalibrationMode: Bool = false, selectedTriangle: TrianglePatch? = nil) {
+        self._isPresented = isPresented
+        self.isCalibrationMode = isCalibrationMode
+        self.selectedTriangle = selectedTriangle
+        
+        // Initialize with temporary store, will be updated in onAppear
+        let tempStore = ARWorldMapStore()
+        _relocalizationCoordinator = StateObject(wrappedValue: RelocalizationCoordinator(arStore: tempStore))
+    }
     
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -36,6 +50,9 @@ struct ARViewWithOverlays: View {
             )
             .edgesIgnoringSafeArea(.all)
             .onAppear {
+                // Update relocalization coordinator to use actual store
+                relocalizationCoordinator.updateARStore(arWorldMapStore)
+                
                 // Debug: Print instance and mode
                 let instanceAddress = Unmanaged.passUnretained(self as AnyObject).toOpaque()
                 
@@ -76,6 +93,34 @@ struct ARViewWithOverlays: View {
                     return
                 }
                 
+                // Check if photo is outdated and needs replacement
+                if let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }),
+                   mapPoint.photoOutdated == true {
+                    // Auto-capture new photo from AR camera feed
+                    if let coordinator = ARViewContainer.Coordinator.current {
+                        coordinator.captureARFrame { image in
+                            guard let image = image else {
+                                print("⚠️ Failed to capture AR frame for photo replacement")
+                                return
+                            }
+                            
+                            // Convert UIImage to Data
+                            if let imageData = image.jpegData(compressionQuality: 0.8) {
+                                // Save photo and update metadata
+                                if mapPointStore.savePhotoToDisk(for: currentVertexID, photoData: imageData) {
+                                    // Update capture position to current position
+                                    if let index = mapPointStore.points.firstIndex(where: { $0.id == currentVertexID }) {
+                                        mapPointStore.points[index].photoCapturedAtPosition = mapPoint.mapPoint
+                                        mapPointStore.points[index].photoOutdated = false
+                                        mapPointStore.save()
+                                    }
+                                    print("📸 Auto-replaced outdated photo for MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 // Create ARMarker
                 let arPosition = simd_float3(positionArray[0], positionArray[1], positionArray[2])
                 let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID })
@@ -94,6 +139,18 @@ struct ARViewWithOverlays: View {
                 
                 print("✅ Registered marker \(String(markerID.uuidString.prefix(8))) for vertex \(String(currentVertexID.uuidString.prefix(8)))")
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UpdateMapPointPhoto"))) { notification in
+                // Handle photo update request
+                guard let mapPointID = notification.userInfo?["mapPointID"] as? UUID else {
+                    print("⚠️ No mapPointID in UpdateMapPointPhoto notification")
+                    return
+                }
+                
+                // Trigger photo capture flow (for now, just log - can be enhanced with camera picker)
+                print("📸 Photo update requested for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+                // TODO: Integrate with photo capture UI when available
+                // For now, this notification can be handled by external photo capture flow
+            }
             
             // Exit button (top-left) - always visible
             Button(action: {
@@ -107,15 +164,26 @@ struct ARViewWithOverlays: View {
             }
             .zIndex(1000)
             
-            // Reference image PiP (top-left, below exit button) - only in calibration mode
+            // PiP Map (top-right) - always visible
+            ARPiPMapView()
+                .environmentObject(mapPointStore)
+                .environmentObject(locationManager)
+                .frame(width: 180, height: 180)
+                .cornerRadius(12)
+                .padding(.top, 50)
+                .padding(.trailing, 20)
+                .zIndex(998)
+            
+            // Reference image PiP (bottom-left) - only in calibration mode
+            // Positioned to avoid overlap with PiP Map (top-right) and exit button (top-left)
             if isCalibrationMode,
                let triangle = selectedTriangle,
-               let firstVertexID = triangle.vertexIDs.first,
-               let mapPoint = mapPointStore.points.first(where: { $0.id == firstVertexID }) {
+               let currentVertexID = arCalibrationCoordinator.getCurrentVertexID(),
+               let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }) {
                 
                 // Try to load photo from disk first, fall back to memory
                 let photoData: Data? = {
-                    if let diskData = mapPointStore.loadPhotoFromDisk(for: firstVertexID) {
+                    if let diskData = mapPointStore.loadPhotoFromDisk(for: currentVertexID) {
                         return diskData
                     } else {
                         return mapPoint.locationPhotoData
@@ -124,20 +192,14 @@ struct ARViewWithOverlays: View {
                 
                 if let photoData = photoData,
                    let uiImage = UIImage(data: photoData) {
-                    ARReferenceImageView(image: uiImage)
-                        .zIndex(999)
+                    ARReferenceImageView(
+                        image: uiImage,
+                        mapPoint: mapPoint,
+                        isOutdated: mapPoint.photoOutdated ?? false
+                    )
+                    .zIndex(999)
                 }
             }
-            
-            // PiP Map (top-right) - always visible
-            ARPiPMapView()
-                .environmentObject(mapPointStore)
-                .environmentObject(locationManager)
-                .frame(width: 150, height: 150)
-                .cornerRadius(12)
-                .padding(.top, 50)
-                .padding(.trailing, 20)
-                .zIndex(998)
             
             // Tap-to-Place Button (bottom) - only in calibration mode
             if isCalibrationMode {
@@ -172,6 +234,58 @@ struct ARViewWithOverlays: View {
                         )
                     }) {
                         Text("Place Marker")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                            .background(.ultraThickMaterial)
+                            .cornerRadius(12)
+                    }
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 60)
+                }
+                .zIndex(997)
+            }
+            
+            // Place AR Marker Button + Strategy Picker (bottom) - only in idle mode
+            if currentMode == .idle {
+                VStack {
+                    Spacer()
+                    
+                    // Strategy Picker (developer UI)
+                    VStack(spacing: 8) {
+                        Text("Relocalization Strategy")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.8))
+                        
+                        Picker("Strategy", selection: Binding(
+                            get: { relocalizationCoordinator.selectedStrategyName },
+                            set: { newName in
+                                relocalizationCoordinator.selectedStrategyName = newName
+                                // Update selectedStrategyID to match
+                                if let strategy = relocalizationCoordinator.availableStrategies.first(where: { $0.displayName == newName }) {
+                                    relocalizationCoordinator.selectedStrategyID = strategy.id
+                                }
+                            }
+                        )) {
+                            ForEach(relocalizationCoordinator.availableStrategies, id: \.id) { strategy in
+                                Text(strategy.displayName).tag(strategy.displayName)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(8)
+                    }
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 12)
+                    
+                    Button(action: {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("PlaceMarkerAtCursor"),
+                            object: nil
+                        )
+                    }) {
+                        Text("Place AR Marker")
                             .font(.headline)
                             .foregroundColor(.white)
                             .padding()
