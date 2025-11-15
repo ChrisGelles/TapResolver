@@ -175,28 +175,42 @@ struct ARViewWithOverlays: View {
                     .environmentObject(mapPointStore)
                     .environmentObject(locationManager)
                     .environmentObject(arCalibrationCoordinator)
-                    .frame(width: 180, height: 180)
+                    .frame(width: 280, height: 220)
                     .cornerRadius(12)
-                    .position(x: geo.size.width - 100, y: 110) // 100 = half width + margin
+                    .position(x: geo.size.width - 120, y: 130) // Adjusted for larger size
                     .zIndex(998)
                 
                 // Reference Image View (top-left, below xmark) - only in calibration mode
                 if isCalibrationMode,
-                   let triangle = selectedTriangle,
                    let currentVertexID = arCalibrationCoordinator.getCurrentVertexID(),
-                   let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }),
-                   let photoData = mapPointStore.loadPhotoFromDisk(for: currentVertexID) ?? mapPoint.locationPhotoData,
-                   let uiImage = UIImage(data: photoData) {
+                   let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }) {
                     
-                    ARReferenceImageView(
-                        image: uiImage,
-                        mapPoint: mapPoint,
-                        isOutdated: mapPoint.photoOutdated ?? false
-                    )
-                    .frame(width: 180, height: 180)
-                    .cornerRadius(12)
-                    .position(x: 100, y: 110) // 100 = half width + margin
-                    .zIndex(999)
+                    if let photoData = mapPointStore.loadPhotoFromDisk(for: currentVertexID) ?? mapPoint.locationPhotoData,
+                       let uiImage = UIImage(data: photoData) {
+                        
+                        ARReferenceImageView(
+                            image: uiImage,
+                            mapPoint: mapPoint,
+                            isOutdated: mapPoint.photoOutdated ?? false
+                        )
+                        .frame(width: 180, height: 180)
+                        .cornerRadius(12)
+                        .position(x: 100, y: 110) // 100 = half width + margin
+                        .zIndex(999)
+                        
+                    } else {
+                        // ⛔️ No photo available — show fallback placeholder
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.black.opacity(0.5))
+                            .frame(width: 180, height: 180)
+                            .overlay(
+                                Text("No Photo")
+                                    .foregroundColor(.white.opacity(0.6))
+                                    .font(.caption)
+                            )
+                            .position(x: 100, y: 110)
+                            .zIndex(999)
+                    }
                 }
             }
             
