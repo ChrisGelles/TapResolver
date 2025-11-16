@@ -11,11 +11,15 @@ struct ARViewContainer: UIViewRepresentable {
     var isCalibrationMode: Bool = false
     var selectedTriangle: TrianglePatch? = nil
     var onDismiss: (() -> Void)? = nil
+    
+    // Plane visualization toggle
+    @Binding var showPlaneVisualization: Bool
 
     func makeCoordinator() -> ARViewCoordinator {
         let coordinator = ARViewCoordinator()
         coordinator.selectedTriangle = selectedTriangle
         coordinator.isCalibrationMode = isCalibrationMode
+        coordinator.showPlaneVisualization = showPlaneVisualization
         return coordinator
     }
 
@@ -24,8 +28,11 @@ struct ARViewContainer: UIViewRepresentable {
         sceneView.scene = SCNScene()
 
         let config = ARWorldTrackingConfiguration()
-        config.planeDetection = [.horizontal]
+        config.planeDetection = [.horizontal, .vertical]  // Enable both horizontal and vertical plane detection
         sceneView.session.run(config)
+        
+        // Set delegate for plane visualization
+        sceneView.delegate = context.coordinator
         
         // Enable ARKit debug visuals
         sceneView.debugOptions = [
@@ -45,6 +52,7 @@ struct ARViewContainer: UIViewRepresentable {
         context.coordinator.setMode(mode)
         context.coordinator.selectedTriangle = selectedTriangle
         context.coordinator.isCalibrationMode = isCalibrationMode
+        context.coordinator.showPlaneVisualization = showPlaneVisualization
         
         // Store coordinator reference for world map access
         ARViewContainer.Coordinator.current = context.coordinator
@@ -56,12 +64,16 @@ struct ARViewContainer: UIViewRepresentable {
         var sceneView: ARSCNView?
         var currentMode: ARMode = .idle
         var placedMarkers: [UUID: SCNNode] = [:] // Track placed markers by ID
+        var ghostMarkers: [UUID: SCNNode] = [:] // Track ghost markers by MapPoint ID
         private var crosshairNode: GroundCrosshairNode?
         var currentCursorPosition: simd_float3?
         
         // Calibration mode state
         var isCalibrationMode: Bool = false
         var selectedTriangle: TrianglePatch? = nil
+        
+        // Plane visualization toggle
+        var showPlaneVisualization: Bool = true  // Default to enabled
         
         // User device height (centralized constant)
         var userDeviceHeight: Float = ARVisualDefaults.userDeviceHeight
@@ -343,6 +355,81 @@ struct ARViewContainer: UIViewRepresentable {
             return position
         }
         
+        /// Estimate world position for a map point using calibrated triangle transform or heuristic
+        func estimateWorldPosition(for mapPoint: CGPoint, using triangle: TrianglePatch?) -> simd_float3? {
+            guard let sceneView = sceneView,
+                  let frame = sceneView.session.currentFrame else {
+                return nil
+            }
+            
+            // If triangle has a transform, use it to project map coordinates to AR space
+            if let triangle = triangle,
+               let transform = triangle.transform {
+                // Convert map point to AR space using Similarity2D transform
+                let mapPointFloat = simd_float2(Float(mapPoint.x), Float(mapPoint.y))
+                let transformed = transform.rotation * (mapPointFloat * transform.scale) + transform.translation
+                // Assume ground plane (y = 0) for now
+                return simd_float3(transformed.x, 0.0, transformed.y)
+            }
+            
+            // Fallback: Place in front of camera on ground plane
+            let cameraTransform = frame.camera.transform
+            let cameraPosition = simd_float3(
+                cameraTransform.columns.3.x,
+                cameraTransform.columns.3.y,
+                cameraTransform.columns.3.z
+            )
+            
+            // Forward vector (negative Z in camera space)
+            let forward = simd_float3(
+                -cameraTransform.columns.2.x,
+                -cameraTransform.columns.2.y,
+                -cameraTransform.columns.2.z
+            )
+            
+            // Place 1 meter in front of camera, on ground plane
+            let estimatedPosition = cameraPosition + forward * 1.0
+            return simd_float3(estimatedPosition.x, 0.0, estimatedPosition.z)
+        }
+        
+        /// Add a ghost marker for a map point
+        func addGhostMarker(mapPointID: UUID, mapPoint: CGPoint, using triangle: TrianglePatch?) {
+            guard let sceneView = sceneView else { return }
+            
+            // Don't add if already has a real marker
+            if placedMarkers.values.contains(where: { $0.name?.contains(mapPointID.uuidString) ?? false }) {
+                return
+            }
+            
+            // Don't add if already has a ghost marker
+            if ghostMarkers[mapPointID] != nil {
+                return
+            }
+            
+            guard let estimatedPosition = estimateWorldPosition(for: mapPoint, using: triangle) else {
+                print("⚠️ Could not estimate world position for ghost marker")
+                return
+            }
+            
+            let ghostMarkerID = UUID()
+            let options = MarkerOptions(
+                color: UIColor.systemGray.withAlphaComponent(0.6),
+                markerID: ghostMarkerID,
+                userDeviceHeight: userDeviceHeight,
+                radius: 0.025,  // Slightly smaller than regular markers
+                animateOnAppearance: false,
+                isGhost: true
+            )
+            
+            let ghostNode = ARMarkerRenderer.createNode(at: estimatedPosition, options: options)
+            ghostNode.name = "ghostMarker_\(mapPointID.uuidString)"
+            
+            sceneView.scene.rootNode.addChildNode(ghostNode)
+            ghostMarkers[mapPointID] = ghostNode
+            
+            print("👻 Planted ghost marker for MapPoint \(String(mapPointID.uuidString.prefix(8))) at \(estimatedPosition)")
+        }
+        
         func teardownSession() {
             crosshairUpdateTimer?.invalidate()
             crosshairUpdateTimer = nil
@@ -353,6 +440,71 @@ struct ARViewContainer: UIViewRepresentable {
 
         deinit {
             teardownSession()
+        }
+    }
+}
+
+// MARK: - ARSCNViewDelegate for Plane Visualization
+extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
+    // MARK: - Plane Visualization
+    
+    func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
+        guard showPlaneVisualization else { return }
+        
+        guard let planeAnchor = anchor as? ARPlaneAnchor else { return }
+        
+        let plane = SCNPlane(
+            width: CGFloat(planeAnchor.planeExtent.width),
+            height: CGFloat(planeAnchor.planeExtent.height)
+        )
+        
+        let material = SCNMaterial()
+        // Purple for horizontal, Green for vertical
+        if planeAnchor.alignment == .horizontal {
+            material.diffuse.contents = UIColor.purple.withAlphaComponent(0.3)
+        } else {
+            material.diffuse.contents = UIColor.green.withAlphaComponent(0.3)
+        }
+        material.isDoubleSided = true
+        plane.materials = [material]
+        
+        let planeNode = SCNNode(geometry: plane)
+        
+        // Position and rotate based on plane alignment
+        if planeAnchor.alignment == .horizontal {
+            // Horizontal planes: position at ground level (y=0), rotate to lie flat
+            planeNode.position = SCNVector3(planeAnchor.center.x, 0, planeAnchor.center.z)
+            planeNode.eulerAngles.x = -.pi / 2
+        } else {
+            // Vertical planes: use actual center position, no rotation needed
+            planeNode.position = SCNVector3(planeAnchor.center.x, planeAnchor.center.y, planeAnchor.center.z)
+            planeNode.eulerAngles.x = 0
+        }
+        
+        planeNode.name = "planeVisualization"  // Tag for easy removal
+        
+        node.addChildNode(planeNode)
+    }
+    
+    func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
+        guard showPlaneVisualization else {
+            // Remove plane visualization if toggle is off
+            node.childNodes.first(where: { $0.name == "planeVisualization" })?.removeFromParentNode()
+            return
+        }
+        
+        guard let planeAnchor = anchor as? ARPlaneAnchor,
+              let planeNode = node.childNodes.first(where: { $0.name == "planeVisualization" }),
+              let plane = planeNode.geometry as? SCNPlane else { return }
+        
+        plane.width = CGFloat(planeAnchor.planeExtent.width)
+        plane.height = CGFloat(planeAnchor.planeExtent.height)
+        
+        // Update position based on plane alignment
+        if planeAnchor.alignment == .horizontal {
+            planeNode.position = SCNVector3(planeAnchor.center.x, 0, planeAnchor.center.z)
+        } else {
+            planeNode.position = SCNVector3(planeAnchor.center.x, planeAnchor.center.y, planeAnchor.center.z)
         }
     }
 }

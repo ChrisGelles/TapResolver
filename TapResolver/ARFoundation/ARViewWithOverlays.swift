@@ -19,6 +19,9 @@ struct ARViewWithOverlays: View {
     var isCalibrationMode: Bool = false
     var selectedTriangle: TrianglePatch? = nil
     
+    // Plane visualization toggle
+    @State private var showPlaneVisualization: Bool = true
+    
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
@@ -46,7 +49,8 @@ struct ARViewWithOverlays: View {
                 selectedTriangle: selectedTriangle,
                 onDismiss: {
                     isPresented = false
-                }
+                },
+                showPlaneVisualization: $showPlaneVisualization
             )
             .edgesIgnoringSafeArea(.all)
             .onAppear {
@@ -163,6 +167,29 @@ struct ARViewWithOverlays: View {
                 }
                 .position(x: 40, y: 50) // Slightly higher, safely above PiP/Reference UI
                 .zIndex(1000)
+                
+                // Plane Visualization Toggle (top-right, above PiP map)
+                VStack {
+                    HStack {
+                        Spacer()
+                        
+                        Button(action: {
+                            showPlaneVisualization.toggle()
+                        }) {
+                            Image(systemName: showPlaneVisualization ? "grid.circle.fill" : "grid.circle")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundColor(showPlaneVisualization ? .purple : .gray)
+                                .frame(width: 50, height: 50)
+                                .background(Color.black.opacity(0.6))
+                                .cornerRadius(10)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 20)
+                        .padding(.top, 60)
+                    }
+                    Spacer()
+                }
+                .zIndex(4000)
                 
                 // PiP Map View (top-right)
                 // focusedPointID is now computed reactively inside ARPiPMapView

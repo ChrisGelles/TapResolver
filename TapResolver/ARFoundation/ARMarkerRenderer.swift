@@ -17,6 +17,7 @@ struct MarkerOptions {
     var radius: CGFloat = 0.03
     var animateOnAppearance: Bool = false
     var animationOvershoot: Float = 0.04  // Overshoot in meters (default 4cm)
+    var isGhost: Bool = false  // Ghost markers are semi-transparent and pulsing
 }
 
 class ARMarkerRenderer {
@@ -53,6 +54,14 @@ class ARMarkerRenderer {
         sphere.firstMaterial?.diffuse.contents = options.color
         sphere.firstMaterial?.specular.contents = UIColor.white
         sphere.firstMaterial?.shininess = 0.8
+        
+        // Ghost marker styling: semi-transparent and pulsing
+        // Note: We'll animate node opacity instead of material transparency for smoother pulsing
+        if options.isGhost {
+            // Set initial opacity on the node (will be animated)
+            markerNode.opacity = 0.5  // Start at 50% opacity
+        }
+        
         let sphereNode = SCNNode(geometry: sphere)
         // Position sphere at top of rod (resting on top)
         sphereNode.position = SCNVector3(0, options.userDeviceHeight, 0)
@@ -63,6 +72,7 @@ class ARMarkerRenderer {
         if let badgeColor = options.badgeColor {
             let badgeSphere = SCNSphere(radius: 0.05)
             badgeSphere.firstMaterial?.diffuse.contents = badgeColor
+            // Badge opacity is controlled by parent node's opacity animation
             let badgeNode = SCNNode(geometry: badgeSphere)
             badgeNode.position = SCNVector3(0, 0.5, 0)
             badgeNode.name = "badge_\(options.markerID.uuidString)"
@@ -78,6 +88,16 @@ class ARMarkerRenderer {
                 finalHeight: options.userDeviceHeight,
                 overshoot: options.animationOvershoot
             )
+        }
+        
+        // Ghost marker pulsing animation
+        if options.isGhost {
+            let pulseAction = SCNAction.sequence([
+                SCNAction.fadeOpacity(to: 0.4, duration: 1.0),
+                SCNAction.fadeOpacity(to: 0.85, duration: 1.0)
+            ])
+            let pulseForever = SCNAction.repeatForever(pulseAction)
+            markerNode.runAction(pulseForever)
         }
         
         return markerNode

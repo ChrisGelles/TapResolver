@@ -247,6 +247,14 @@ final class ARCalibrationCoordinator: ObservableObject {
             userInfo: ["triangleID": triangle.id]
         )
         
+        // Check if this is the first triangle calibrated (all triangles were uncalibrated before)
+        let wasFirstTriangle = triangleStore.triangles.filter { $0.isCalibrated }.count == 1
+        
+        // Plant ghost markers for all remaining map points after first triangle calibration
+        if wasFirstTriangle {
+            plantGhostMarkers(using: triangle)
+        }
+        
         // Find and suggest next adjacent uncalibrated triangle for crawling
         if let nextTriangle = findAdjacentUncalibratedTriangle(to: triangle.id, userMapPosition: lastKnownUserPosition) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -410,6 +418,38 @@ final class ARCalibrationCoordinator: ObservableObject {
         let dx = p1.x - p2.x
         let dy = p1.y - p2.y
         return sqrt(dx * dx + dy * dy)
+    }
+    
+    /// Plant ghost markers for all remaining map points that don't have AR markers yet
+    func plantGhostMarkers(using calibratedTriangle: TrianglePatch) {
+        guard let coordinator = ARViewContainer.Coordinator.current else {
+            print("⚠️ Cannot plant ghost markers: No ARViewCoordinator available")
+            return
+        }
+        
+        // Get all map point IDs that already have markers (from placedMarkers array)
+        let alreadyPlacedIDs = Set(placedMarkers)
+        
+        // Get all remaining map points that don't have markers
+        let remainingPoints = mapStore.points.filter { !alreadyPlacedIDs.contains($0.id) }
+        
+        guard !remainingPoints.isEmpty else {
+            print("ℹ️ No remaining map points to plant ghost markers for")
+            return
+        }
+        
+        print("👻 Planting ghost markers for \(remainingPoints.count) remaining map points...")
+        
+        // Plant ghost marker for each remaining point
+        for point in remainingPoints {
+            coordinator.addGhostMarker(
+                mapPointID: point.id,
+                mapPoint: point.mapPoint,
+                using: calibratedTriangle
+            )
+        }
+        
+        print("✅ Ghost marker planting complete")
     }
     
     private func computeCalibrationQuality(_ triangle: TrianglePatch) -> Float {
