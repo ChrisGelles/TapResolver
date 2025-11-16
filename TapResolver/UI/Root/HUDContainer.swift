@@ -113,6 +113,7 @@ struct HUDContainer: View {
                         RSSIMeterButton()
                         FacingToggleButton()
                         RelocalizationDebugToggleButton(showDebug: $showRelocalizationDebug)
+                        // MapPointDiagnosticButton()  // Hidden - diagnostic tool
                         // MARK: - Initial Diagnostic Buttons (Hidden - can be restored if needed)
                         /*
                         UserDefaultsDiagnosticButton()
@@ -363,7 +364,7 @@ struct HUDContainer: View {
     @ViewBuilder
     private var relocalizationDebugOverlay: some View {
         if showRelocalizationDebug {
-            RelocalizationDebugView(coordinator: relocalizationCoordinator)
+            RelocalizationDebugView(coordinator: relocalizationCoordinator, isPresented: $showRelocalizationDebug)
                 .frame(maxWidth: 350, maxHeight: 500)
                 .padding()
         }
@@ -974,6 +975,25 @@ private struct FacingToggleButton: View {
 }
 
 // MARK: - Relocalization Debug Toggle Button
+
+private struct MapPointDiagnosticButton: View {
+    var body: some View {
+        Button(action: {
+            Task {
+                await MapPointDebugTool.runDiagnostic()
+            }
+        }) {
+            Image(systemName: "magnifyingglass.circle.fill")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.orange.opacity(0.9), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("Map Point Diagnostic")
+        .buttonStyle(.plain)
+    }
+}
 
 private struct RelocalizationDebugToggleButton: View {
     @Binding var showDebug: Bool

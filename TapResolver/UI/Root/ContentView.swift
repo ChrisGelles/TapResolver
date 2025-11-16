@@ -17,7 +17,7 @@ struct ContentView: View {
     @EnvironmentObject private var btScanner: BluetoothScanner
     @StateObject private var hudPanels     = HUDPanelsState()
     @StateObject private var locationManager = LocationManager()
-    @StateObject private var mapPointStore = MapPointStore()
+    @EnvironmentObject private var mapPointStore: MapPointStore  // ✅ USE APP-LEVEL INSTANCE
     @StateObject private var transformProcessor = TransformProcessor()
     @EnvironmentObject private var trianglePatchStore: TrianglePatchStore
     @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext

@@ -156,6 +156,12 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
     }
     
+    /// Check if the active triangle has all 3 markers placed (calibration complete)
+    func isTriangleComplete(_ triangleID: UUID) -> Bool {
+        guard let triangle = triangleStore.triangle(withID: triangleID) else { return false }
+        return placedMarkers.count == 3 && triangle.vertexIDs.allSatisfy { placedMarkers.contains($0) }
+    }
+    
     private func updateProgressDots() {
         guard let triangleID = activeTriangleID,
               let triangle = triangleStore.triangle(withID: triangleID) else {

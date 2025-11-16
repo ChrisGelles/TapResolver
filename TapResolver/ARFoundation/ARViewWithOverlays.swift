@@ -166,9 +166,8 @@ struct ARViewWithOverlays: View {
                 .zIndex(1000)
                 
                 // PiP Map View (top-right)
-                // Pass focused point ID during calibration mode
+                // focusedPointID is now computed reactively inside ARPiPMapView
                 ARPiPMapView(
-                    focusedPointID: isCalibrationMode ? arCalibrationCoordinator.getCurrentVertexID() : nil,
                     isCalibrationMode: isCalibrationMode,
                     selectedTriangle: selectedTriangle
                 )
@@ -430,7 +429,10 @@ struct ARPiPMapView: View {
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
     
     // Focused point ID for zoom/center (nil = show full map)
-    let focusedPointID: UUID?
+    // Computed reactively from arCalibrationCoordinator to respond to currentVertexIndex changes
+    private var focusedPointID: UUID? {
+        isCalibrationMode ? arCalibrationCoordinator.getCurrentVertexID() : nil
+    }
     
     // Calibration mode properties for user position tracking
     let isCalibrationMode: Bool
@@ -525,6 +527,27 @@ struct ARPiPMapView: View {
                             currentOffset = newTargets.offset
                         }
                     }
+                    .onChange(of: arCalibrationCoordinator.currentVertexIndex) { _ in
+                        // Recalculate when calibration advances to next vertex
+                        let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
+                        withAnimation(.easeInOut(duration: 0.5)) {
+                            currentScale = newTargets.scale
+                            currentOffset = newTargets.offset
+                        }
+                    }
+                    .onChange(of: arCalibrationCoordinator.placedMarkers.count) { _ in
+                        // Recalculate when marker count changes
+                        // When triangle is complete (3 markers), PiP map will zoom to fit all vertices
+                        if let triangle = selectedTriangle,
+                           arCalibrationCoordinator.isTriangleComplete(triangle.id) {
+                            print("🎯 PiP Map: Triangle complete - fitting all 3 vertices")
+                        }
+                        let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
+                        withAnimation(.easeInOut(duration: 0.5)) {
+                            currentScale = newTargets.scale
+                            currentOffset = newTargets.offset
+                        }
+                    }
                 }
             } else {
                 RoundedRectangle(cornerRadius: 12)
@@ -592,9 +615,10 @@ struct ARPiPMapView: View {
     private func calculateTargetTransform(image: UIImage, frameSize: CGSize) -> (scale: CGFloat, offset: CGSize) {
         let imageSize = image.size
         
+        // CASE 1: Focus on single point (vertex during calibration)
         if let pointID = focusedPointID,
            let point = mapPointStore.points.first(where: { $0.id == pointID }) {
-            // Single point mode - create region around point
+            // Single point mode - create region around point with calibration zoom
             let regionSize: CGFloat = 400
             let cornerA = CGPoint(x: point.mapPoint.x - regionSize/2, y: point.mapPoint.y - regionSize/2)
             let cornerB = CGPoint(x: point.mapPoint.x + regionSize/2, y: point.mapPoint.y + regionSize/2)
@@ -602,15 +626,71 @@ struct ARPiPMapView: View {
             let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
             let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
             return (scale, offset)
-        } else {
-            // Full map mode - show entire map
-            let cornerA = CGPoint(x: 0, y: 0)
-            let cornerB = CGPoint(x: imageSize.width, y: imageSize.height)
-            
-            let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
-            let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
-            return (scale, offset)
         }
+        
+        // CASE 2: Focus on full triangle (all 3 points) when calibration complete
+        if let triangle = selectedTriangle,
+           arCalibrationCoordinator.placedMarkers.count == 3 {
+            let vertices = triangle.vertexIDs.compactMap { id in
+                mapPointStore.points.first(where: { $0.id == id })?.mapPoint
+            }
+            guard vertices.count == 3 else {
+                // Fallback to full map if we can't get all vertices
+                return calculateFullMapTransform(frameSize: frameSize, imageSize: imageSize)
+            }
+            
+            return calculateFittingTransform(points: vertices, frameSize: frameSize, imageSize: imageSize)
+        }
+        
+        // CASE 3: Default → zoom out to full map
+        return calculateFullMapTransform(frameSize: frameSize, imageSize: imageSize)
+    }
+    
+    /// Calculate transform for full map view
+    private func calculateFullMapTransform(frameSize: CGSize, imageSize: CGSize) -> (scale: CGFloat, offset: CGSize) {
+        let cornerA = CGPoint(x: 0, y: 0)
+        let cornerB = CGPoint(x: imageSize.width, y: imageSize.height)
+        
+        let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+        let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+        return (scale, offset)
+    }
+    
+    /// Calculate transform to fit multiple points (for triangle view)
+    private func calculateFittingTransform(points: [CGPoint], frameSize: CGSize, imageSize: CGSize, padding: CGFloat = 40) -> (scale: CGFloat, offset: CGSize) {
+        guard points.count >= 2 else {
+            return calculateFullMapTransform(frameSize: frameSize, imageSize: imageSize)
+        }
+        
+        // Compute bounding box of all points
+        let minX = points.map(\.x).min()!
+        let maxX = points.map(\.x).max()!
+        let minY = points.map(\.y).min()!
+        let maxY = points.map(\.y).max()!
+        
+        let boxWidth = maxX - minX
+        let boxHeight = maxY - minY
+        
+        // Scale calculation to fit bounding box with padding
+        let scaleX = (frameSize.width - padding * 2) / boxWidth
+        let scaleY = (frameSize.height - padding * 2) / boxHeight
+        let scale = min(scaleX, scaleY)
+        
+        // Box center
+        let centerX = (minX + maxX) / 2
+        let centerY = (minY + maxY) / 2
+        
+        // Calculate offset using same logic as calculateOffset
+        let imageCenterX = imageSize.width / 2
+        let imageCenterY = imageSize.height / 2
+        
+        let offsetFromImageCenter_X = imageCenterX - centerX
+        let offsetFromImageCenter_Y = imageCenterY - centerY
+        
+        let offsetX = offsetFromImageCenter_X * scale
+        let offsetY = offsetFromImageCenter_Y * scale
+        
+        return (scale, CGSize(width: offsetX, height: offsetY))
     }
     
     /// Calculate scale to fit region between two points
