@@ -14,12 +14,16 @@ struct ARViewContainer: UIViewRepresentable {
     
     // Plane visualization toggle
     @Binding var showPlaneVisualization: Bool
+    
+    // Metric square store for map scale
+    var metricSquareStore: MetricSquareStore?
 
     func makeCoordinator() -> ARViewCoordinator {
         let coordinator = ARViewCoordinator()
         coordinator.selectedTriangle = selectedTriangle
         coordinator.isCalibrationMode = isCalibrationMode
         coordinator.showPlaneVisualization = showPlaneVisualization
+        coordinator.metricSquareStore = metricSquareStore
         return coordinator
     }
 
@@ -65,6 +69,8 @@ struct ARViewContainer: UIViewRepresentable {
         var currentMode: ARMode = .idle
         var placedMarkers: [UUID: SCNNode] = [:] // Track placed markers by ID
         var ghostMarkers: [UUID: SCNNode] = [:] // Track ghost markers by MapPoint ID
+        var surveyMarkers: [UUID: SCNNode] = [:]  // markerID -> node
+        weak var metricSquareStore: MetricSquareStore?
         private var crosshairNode: GroundCrosshairNode?
         var currentCursorPosition: simd_float3?
         
@@ -434,8 +440,140 @@ struct ARViewContainer: UIViewRepresentable {
             crosshairUpdateTimer?.invalidate()
             crosshairUpdateTimer = nil
             NotificationCenter.default.removeObserver(self)
+            clearSurveyMarkers()
             sceneView?.session.pause()
             print("🔧 AR session paused and torn down.")
+        }
+        
+        // MARK: - Survey Marker Generation
+        
+        /// Generate temporary survey markers across calibrated triangle
+        func generateSurveyMarkers(
+            calibrationCoordinator: ARCalibrationCoordinator,
+            mapPointStore: MapPointStore,
+            arWorldMapStore: ARWorldMapStore,
+            spacingMeters: Float = 1.0
+        ) {
+            // Clear existing survey markers
+            clearSurveyMarkers()
+            
+            // Get current triangle from calibration coordinator
+            guard let currentTriangleID = calibrationCoordinator.activeTriangleID,
+                  let currentTriangle = calibrationCoordinator.triangleStore.triangle(withID: currentTriangleID),
+                  calibrationCoordinator.isTriangleComplete(currentTriangleID) else {
+                print("⚠️ Cannot generate survey markers: no calibrated triangle")
+                return
+            }
+            
+            // Get triangle vertices from map point store
+            guard let pointA = mapPointStore.points.first(where: { $0.id == currentTriangle.vertexIDs[0] }),
+                  let pointB = mapPointStore.points.first(where: { $0.id == currentTriangle.vertexIDs[1] }),
+                  let pointC = mapPointStore.points.first(where: { $0.id == currentTriangle.vertexIDs[2] }) else {
+                print("⚠️ Cannot find triangle vertices in map point store")
+                return
+            }
+            
+            // Get AR marker positions from ARWorldMapStore
+            guard let markerA = arWorldMapStore.markers.first(where: { $0.mapPointID == currentTriangle.vertexIDs[0].uuidString }),
+                  let markerB = arWorldMapStore.markers.first(where: { $0.mapPointID == currentTriangle.vertexIDs[1].uuidString }),
+                  let markerC = arWorldMapStore.markers.first(where: { $0.mapPointID == currentTriangle.vertexIDs[2].uuidString }) else {
+                print("⚠️ AR markers not found for triangle vertices")
+                return
+            }
+            
+            // Extract positions from transforms
+            let transformA = markerA.worldTransform.toSimd()
+            let transformB = markerB.worldTransform.toSimd()
+            let transformC = markerC.worldTransform.toSimd()
+            
+            let triangle2D = [
+                pointA.mapPoint,
+                pointB.mapPoint,
+                pointC.mapPoint
+            ]
+            
+            let triangle3D = [
+                simd_float3(transformA.columns.3.x, transformA.columns.3.y, transformA.columns.3.z),
+                simd_float3(transformB.columns.3.x, transformB.columns.3.y, transformB.columns.3.z),
+                simd_float3(transformC.columns.3.x, transformC.columns.3.y, transformC.columns.3.z)
+            ]
+            
+            // Get REAL map scale from MetricSquareStore
+            guard let pxPerMeter = getPixelsPerMeter() else {
+                print("⚠️ Cannot generate survey markers: no metric square calibrated")
+                print("   Please create and lock a metric square first")
+                return
+            }
+            
+            print("📐 Using map scale: \(pxPerMeter) pixels per meter")
+            
+            // Generate 2D fill points
+            let fillPoints = generateTriangleFillPoints(
+                triangle: triangle2D,
+                spacingMeters: spacingMeters,
+                pxPerMeter: pxPerMeter
+            )
+            
+            print("📍 Generating \(fillPoints.count) survey markers with \(spacingMeters)m spacing")
+            
+            // Interpolate to 3D and create AR markers
+            for mapPoint in fillPoints {
+                guard let arPosition = interpolateARPosition(
+                    fromMapPoint: mapPoint,
+                    triangle2D: triangle2D,
+                    triangle3D: triangle3D
+                ) else {
+                    continue
+                }
+                
+                // Create survey marker (red sphere)
+                let markerID = UUID()
+                let markerNode = createSurveyMarkerNode(at: arPosition)
+                markerNode.name = "surveyMarker_\(markerID.uuidString)"
+                
+                sceneView?.scene.rootNode.addChildNode(markerNode)
+                surveyMarkers[markerID] = markerNode
+            }
+            
+            print("✅ Placed \(surveyMarkers.count) survey markers")
+        }
+        
+        /// Create visual node for survey marker (red sphere)
+        private func createSurveyMarkerNode(at position: simd_float3) -> SCNNode {
+            // Small red sphere
+            let sphere = SCNSphere(radius: 0.05)  // 5cm radius
+            let material = SCNMaterial()
+            material.diffuse.contents = UIColor.red.withAlphaComponent(0.8)
+            sphere.materials = [material]
+            
+            let node = SCNNode(geometry: sphere)
+            node.position = SCNVector3(position.x, position.y, position.z)
+            
+            return node
+        }
+        
+        /// Clear all survey markers from scene
+        func clearSurveyMarkers() {
+            for (_, node) in surveyMarkers {
+                node.removeFromParentNode()
+            }
+            surveyMarkers.removeAll()
+            print("🧹 Cleared survey markers")
+        }
+        
+        /// Get pixels per meter from MetricSquareStore (same logic as ARCalibrationCoordinator)
+        private func getPixelsPerMeter() -> Float? {
+            guard let squareStore = metricSquareStore else { return nil }
+            
+            // Use first locked square, or any square if none are locked
+            let lockedSquares = squareStore.squares.filter { $0.isLocked }
+            let squaresToUse = lockedSquares.isEmpty ? squareStore.squares : lockedSquares
+            
+            guard let square = squaresToUse.first, square.meters > 0 else { return nil }
+            
+            // pixels per meter = side_pixels / side_meters
+            let pixelsPerMeter = Float(square.side) / Float(square.meters)
+            return pixelsPerMeter > 0 ? pixelsPerMeter : nil
         }
 
         deinit {

@@ -26,6 +26,7 @@ struct ARViewWithOverlays: View {
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
     @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
+    @EnvironmentObject private var metricSquares: MetricSquareStore
     
     // Relocalization coordinator for strategy selection (developer UI)
     @StateObject private var relocalizationCoordinator: RelocalizationCoordinator
@@ -50,7 +51,8 @@ struct ARViewWithOverlays: View {
                 onDismiss: {
                     isPresented = false
                 },
-                showPlaneVisualization: $showPlaneVisualization
+                showPlaneVisualization: $showPlaneVisualization,
+                metricSquareStore: metricSquares
             )
             .edgesIgnoringSafeArea(.all)
             .onAppear {
@@ -324,7 +326,42 @@ struct ARViewWithOverlays: View {
                             .cornerRadius(12)
                     }
                     .padding(.horizontal, 40)
-                    .padding(.bottom, 60)
+                    .padding(.bottom, 12)
+                    
+                    // Survey Marker Generation Button
+                    if let coordinator = ARViewContainer.Coordinator.current,
+                       let currentTriangleID = arCalibrationCoordinator.activeTriangleID,
+                       arCalibrationCoordinator.isTriangleComplete(currentTriangleID) {
+                        
+                        Button(action: {
+                            coordinator.generateSurveyMarkers(
+                                calibrationCoordinator: arCalibrationCoordinator,
+                                mapPointStore: mapPointStore,
+                                arWorldMapStore: arWorldMapStore,
+                                spacingMeters: 1.0
+                            )
+                        }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "circle.grid.3x3.fill")
+                                    .font(.system(size: 22, weight: .semibold))
+                                Text("Fill Triangle")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.red.opacity(0.8))
+                            .cornerRadius(10)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 40)
+                        .padding(.bottom, 60)
+                    } else {
+                        // Spacer to maintain layout when button is hidden
+                        Spacer()
+                            .frame(height: 60)
+                            .padding(.bottom, 60)
+                    }
                 }
                 .zIndex(997)
             }

@@ -70,30 +70,15 @@ final class ARCalibrationCoordinator: ObservableObject {
         currentTriangleID = triangleID
         triangleVertices = triangle.vertexIDs
         
-        // Check which vertices already have markers (from previous calibration or adjacent triangles)
-        var existingMarkers: [UUID] = []
-        for (index, vertexID) in triangle.vertexIDs.enumerated() {
-            // Check if this vertex already has a marker ID stored
-            if index < triangle.arMarkerIDs.count && !triangle.arMarkerIDs[index].isEmpty {
-                existingMarkers.append(vertexID)
-                print("✅ Vertex \(index) (\(String(vertexID.uuidString.prefix(8)))) already has marker: \(triangle.arMarkerIDs[index].prefix(8))")
-            }
+        // Clear any existing markers - we're re-calibrating from scratch
+        placedMarkers = []
+        completedMarkerCount = 0
+        currentVertexIndex = 0  // Start with first vertex
+        
+        // If triangle had previous markers, log them but don't use them
+        if !triangle.arMarkerIDs.isEmpty && triangle.arMarkerIDs.contains(where: { !$0.isEmpty }) {
+            print("🔄 Re-calibrating triangle - clearing \(triangle.arMarkerIDs.filter { !$0.isEmpty }.count) existing markers")
         }
-        
-        placedMarkers = existingMarkers
-        completedMarkerCount = existingMarkers.count
-        
-        // Find first vertex without a marker
-        var firstUnplacedIndex: Int? = nil
-        for (index, vertexID) in triangle.vertexIDs.enumerated() {
-            if !placedMarkers.contains(vertexID) {
-                firstUnplacedIndex = index
-                break
-            }
-        }
-        
-        // Set current vertex index to first unplaced, or 0 if all are placed (shouldn't happen)
-        currentVertexIndex = firstUnplacedIndex ?? 0
         
         // Update reference photo for the current vertex
         if let currentVertexID = getCurrentVertexID(),
@@ -109,16 +94,11 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
         
         // Update UI state
-        updateProgressDots()
-        statusText = "Place AR markers for triangle (\(placedMarkers.count)/3)"
+        progressDots = (false, false, false)
+        statusText = "Place AR markers for triangle (0/3)"
         isActive = true
         
-        if placedMarkers.count == 3 {
-            print("🎯 ARCalibrationCoordinator: Triangle \(String(triangleID.uuidString.prefix(8))) already has all 3 markers - finalizing")
-            finalizeCalibration(for: triangle)
-        } else {
-            print("🎯 ARCalibrationCoordinator: Starting calibration for triangle \(String(triangleID.uuidString.prefix(8))) - \(placedMarkers.count)/3 markers already placed")
-        }
+        print("🎯 ARCalibrationCoordinator: Starting calibration for triangle \(String(triangleID.uuidString.prefix(8)))")
     }
     
     // MARK: - Legacy Compatibility Methods
@@ -544,6 +524,11 @@ final class ARCalibrationCoordinator: ObservableObject {
     }
     
     func reset() {
+        // Clear any existing survey markers
+        if let coordinator = ARViewContainer.Coordinator.current {
+            coordinator.clearSurveyMarkers()
+        }
+        
         activeTriangleID = nil
         currentTriangleID = nil
         placedMarkers = []
