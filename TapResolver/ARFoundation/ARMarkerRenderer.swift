@@ -42,15 +42,19 @@ class ARMarkerRenderer {
         let line = SCNCylinder(radius: 0.00125, height: CGFloat(options.userDeviceHeight))
         line.firstMaterial?.diffuse.contents = UIColor.ARPalette.markerLine
         let lineNode = SCNNode(geometry: line)
-        lineNode.position = SCNVector3(0, Float(line.height/2), 0)
+        // Set pivot at bottom so rod grows upward from ground
+        lineNode.pivot = SCNMatrix4MakeTranslation(0, -Float(line.height) / 2.0, 0)
+        // Position at ground level (pivot is at bottom, so node position is at ground)
+        lineNode.position = SCNVector3(0, 0, 0)
         markerNode.addChildNode(lineNode)
         
-        // Sphere top
+        // Sphere top - positioned at top of rod
         let sphere = SCNSphere(radius: options.radius)
         sphere.firstMaterial?.diffuse.contents = options.color
         sphere.firstMaterial?.specular.contents = UIColor.white
         sphere.firstMaterial?.shininess = 0.8
         let sphereNode = SCNNode(geometry: sphere)
+        // Position sphere at top of rod (resting on top)
         sphereNode.position = SCNVector3(0, options.userDeviceHeight, 0)
         sphereNode.name = "arMarkerSphere_\(options.markerID.uuidString)"
         markerNode.addChildNode(sphereNode)
@@ -97,10 +101,14 @@ class ARMarkerRenderer {
         ringNode.runAction(ringScaleUp)
         
         // 2. Rod: Grow from 0 → overshoot height (0.0s - 0.20s)
-        // Set pivot at bottom so scaling grows upward
+        // Pivot is already set at bottom in createNode, so scaling grows upward from ground
         guard let cylinder = lineNode.geometry as? SCNCylinder else { return }
+        // Ensure pivot is at bottom (should already be set, but ensure it)
         lineNode.pivot = SCNMatrix4MakeTranslation(0, -Float(cylinder.height) / 2, 0)
+        // Start with zero scale on Y-axis (rod starts invisible)
         lineNode.scale = SCNVector3(1, 0, 1)
+        // Position at ground level (pivot is at bottom, so node stays at ground)
+        lineNode.position = SCNVector3(0, 0, 0)
         
         let rodGrowUp = SCNAction.customAction(duration: 0.20) { node, elapsedTime in
             let progress = Float(elapsedTime / 0.20)
@@ -108,10 +116,11 @@ class ARMarkerRenderer {
             let easedProgress = 1.0 - pow(1.0 - progress, 3.0)
             let currentHeight = easedProgress * overshootHeight
             let scaleY = currentHeight / finalHeight
+            // Scale only Y-axis to grow upward from pivot (bottom)
+            // With pivot at bottom, scaling grows upward from ground
             node.scale = SCNVector3(1, scaleY, 1)
-            
-            // Update rod position to keep base at origin (pivot is at bottom)
-            node.position = SCNVector3(0, currentHeight / 2, 0)
+            // Position stays at ground level (pivot handles the growth)
+            node.position = SCNVector3(0, 0, 0)
         }
         rodGrowUp.timingMode = .easeOut
         
@@ -146,10 +155,10 @@ class ARMarkerRenderer {
             // Rod: Scale from overshoot → final
             let currentHeight = overshootHeight - (easedProgress * (overshootHeight - finalHeight))
             let scaleY = currentHeight / finalHeight
+            // Scale only Y-axis (pivot at bottom handles growth)
             node.scale = SCNVector3(1, scaleY, 1)
-            
-            // Update rod position (pivot is at bottom, so position is at half height)
-            node.position = SCNVector3(0, currentHeight / 2, 0)
+            // Position stays at ground level
+            node.position = SCNVector3(0, 0, 0)
         }
         rodSettleDown.timingMode = .easeInEaseOut
         
@@ -173,8 +182,10 @@ class ARMarkerRenderer {
             let bounceHeight = finalHeight + bounce
             
             let scaleY = bounceHeight / finalHeight
+            // Scale only Y-axis (pivot at bottom handles growth)
             node.scale = SCNVector3(1, scaleY, 1)
-            node.position = SCNVector3(0, bounceHeight / 2, 0)
+            // Position stays at ground level
+            node.position = SCNVector3(0, 0, 0)
         }
         
         let sphereFinalSettle = SCNAction.customAction(duration: 0.05) { node, elapsedTime in
@@ -187,7 +198,9 @@ class ARMarkerRenderer {
         // Ensure final position is exact after animation completes
         let ensureFinalPosition = SCNAction.run { _ in
             lineNode.scale = SCNVector3(1, 1, 1)
-            lineNode.position = SCNVector3(0, finalHeight / 2, 0)
+            // Rod position stays at ground (pivot at bottom handles growth)
+            lineNode.position = SCNVector3(0, 0, 0)
+            // Sphere sits at top of rod
             sphereNode.position = SCNVector3(0, finalHeight, 0)
         }
         

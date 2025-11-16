@@ -138,6 +138,12 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
+            // Disable tap-to-place in triangle calibration mode - use Place Marker button instead
+            if case .triangleCalibration = currentMode {
+                print("👆 Tap ignored in triangle calibration mode — use Place Marker button")
+                return
+            }
+            
             guard let sceneView = sceneView else { return }
             
             let location = sender.location(in: sceneView)
@@ -319,6 +325,22 @@ struct ARViewContainer: UIViewRepresentable {
             // Convert to UIImage, accounting for camera orientation
             let image = UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
             completion(image)
+        }
+        
+        /// Get current AR camera world position
+        func getCurrentCameraPosition() -> simd_float3? {
+            guard let sceneView = sceneView,
+                  let frame = sceneView.session.currentFrame else {
+                return nil
+            }
+            
+            let cameraTransform = frame.camera.transform
+            let position = simd_float3(
+                cameraTransform.columns.3.x,
+                cameraTransform.columns.3.y,
+                cameraTransform.columns.3.z
+            )
+            return position
         }
         
         func teardownSession() {

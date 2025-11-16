@@ -23,6 +23,14 @@ final class ARCalibrationCoordinator: ObservableObject {
     @Published var referencePhotoData: Data?
     @Published var completedMarkerCount: Int = 0
     
+    // User position tracking (updated from ARPiPMapView)
+    @Published private(set) var lastKnownUserPosition: CGPoint? = nil
+    
+    // Update user position from PiP map
+    func updateUserPosition(_ position: CGPoint?) {
+        self.lastKnownUserPosition = position
+    }
+    
     private var triangleVertices: [UUID] = []
     
     var arStore: ARWorldMapStore
@@ -60,14 +68,57 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         activeTriangleID = triangleID
         currentTriangleID = triangleID
-        placedMarkers = []
-        progressDots = (false, false, false)
-        statusText = "Place AR markers for triangle (0/3)"
-        isActive = true
-        currentVertexIndex = 0
-        completedMarkerCount = 0
+        triangleVertices = triangle.vertexIDs
         
-        print("🎯 ARCalibrationCoordinator: Starting calibration for triangle \(String(triangleID.uuidString.prefix(8)))")
+        // Check which vertices already have markers (from previous calibration or adjacent triangles)
+        var existingMarkers: [UUID] = []
+        for (index, vertexID) in triangle.vertexIDs.enumerated() {
+            // Check if this vertex already has a marker ID stored
+            if index < triangle.arMarkerIDs.count && !triangle.arMarkerIDs[index].isEmpty {
+                existingMarkers.append(vertexID)
+                print("✅ Vertex \(index) (\(String(vertexID.uuidString.prefix(8)))) already has marker: \(triangle.arMarkerIDs[index].prefix(8))")
+            }
+        }
+        
+        placedMarkers = existingMarkers
+        completedMarkerCount = existingMarkers.count
+        
+        // Find first vertex without a marker
+        var firstUnplacedIndex: Int? = nil
+        for (index, vertexID) in triangle.vertexIDs.enumerated() {
+            if !placedMarkers.contains(vertexID) {
+                firstUnplacedIndex = index
+                break
+            }
+        }
+        
+        // Set current vertex index to first unplaced, or 0 if all are placed (shouldn't happen)
+        currentVertexIndex = firstUnplacedIndex ?? 0
+        
+        // Update reference photo for the current vertex
+        if let currentVertexID = getCurrentVertexID(),
+           let mapPoint = mapStore.points.first(where: { $0.id == currentVertexID }) {
+            let photoData: Data? = {
+                if let diskData = mapStore.loadPhotoFromDisk(for: currentVertexID) {
+                    return diskData
+                } else {
+                    return mapPoint.locationPhotoData
+                }
+            }()
+            setReferencePhoto(photoData)
+        }
+        
+        // Update UI state
+        updateProgressDots()
+        statusText = "Place AR markers for triangle (\(placedMarkers.count)/3)"
+        isActive = true
+        
+        if placedMarkers.count == 3 {
+            print("🎯 ARCalibrationCoordinator: Triangle \(String(triangleID.uuidString.prefix(8))) already has all 3 markers - finalizing")
+            finalizeCalibration(for: triangle)
+        } else {
+            print("🎯 ARCalibrationCoordinator: Starting calibration for triangle \(String(triangleID.uuidString.prefix(8))) - \(placedMarkers.count)/3 markers already placed")
+        }
     }
     
     // MARK: - Legacy Compatibility Methods
@@ -197,11 +248,18 @@ final class ARCalibrationCoordinator: ObservableObject {
         )
         
         // Find and suggest next adjacent uncalibrated triangle for crawling
-        if let nextTriangle = findAdjacentUncalibratedTriangle(to: triangle.id) {
+        if let nextTriangle = findAdjacentUncalibratedTriangle(to: triangle.id, userMapPosition: lastKnownUserPosition) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 self.startCalibration(for: nextTriangle.id)
                 self.statusText = "➡️ Continue: Calibrate adjacent triangle"
                 print("🔄 ARCalibrationCoordinator: Auto-starting calibration for adjacent triangle \(String(nextTriangle.id.uuidString.prefix(8)))")
+                
+                // Post notification to center PiP map on new triangle
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("CenterPiPOnTriangle"),
+                    object: nil,
+                    userInfo: ["triangleID": nextTriangle.id]
+                )
             }
         } else {
             // No adjacent triangles found - reset
@@ -302,22 +360,56 @@ final class ARCalibrationCoordinator: ObservableObject {
     }
     
     /// Find an adjacent uncalibrated triangle to suggest for calibration crawling
-    private func findAdjacentUncalibratedTriangle(to triangleID: UUID) -> TrianglePatch? {
+    private func findAdjacentUncalibratedTriangle(to triangleID: UUID, userMapPosition: CGPoint?) -> TrianglePatch? {
         guard let triangle = triangleStore.triangle(withID: triangleID) else {
             return nil
         }
         
-        let vertexSet = Set(triangle.vertexIDs)
+        // Get all adjacent uncalibrated triangles (share an edge = 2 vertices)
+        let adjacentCandidates = triangleStore.findAdjacentTriangles(triangleID)
+            .filter { !$0.isCalibrated }
         
-        // Find triangles that:
-        // 1. Are not calibrated
-        // 2. Are not the current triangle
-        // 3. Share at least one vertex with the current triangle (adjacent)
-        return triangleStore.triangles.first { candidate in
-            !candidate.isCalibrated &&
-            candidate.id != triangleID &&
-            !Set(candidate.vertexIDs).intersection(vertexSet).isEmpty
+        guard !adjacentCandidates.isEmpty else {
+            print("🔍 No uncalibrated adjacent triangles found")
+            return nil
         }
+        
+        // If we don't have user position, just return first candidate
+        guard let userPos = userMapPosition else {
+            print("⚠️ User position unavailable, returning first adjacent triangle")
+            return adjacentCandidates.first
+        }
+        
+        // Find closest triangle based on distance to its "far vertex"
+        let closestTriangle = adjacentCandidates.min { candidateA, candidateB in
+            guard let farVertexA = triangleStore.getFarVertex(adjacentTriangle: candidateA, sourceTriangle: triangle),
+                  let farVertexB = triangleStore.getFarVertex(adjacentTriangle: candidateB, sourceTriangle: triangle),
+                  let pointA = mapStore.points.first(where: { $0.id == farVertexA }),
+                  let pointB = mapStore.points.first(where: { $0.id == farVertexB }) else {
+                return false
+            }
+            
+            let distA = distance(userPos, pointA.mapPoint)
+            let distB = distance(userPos, pointB.mapPoint)
+            
+            return distA < distB
+        }
+        
+        if let next = closestTriangle,
+           let farVertex = triangleStore.getFarVertex(adjacentTriangle: next, sourceTriangle: triangle),
+           let farPoint = mapStore.points.first(where: { $0.id == farVertex }) {
+            let dist = distance(userPos, farPoint.mapPoint)
+            print("📍 Selected nearest triangle (far vertex distance: \(Int(dist))px)")
+        }
+        
+        return closestTriangle
+    }
+    
+    // Helper: Calculate 2D distance
+    private func distance(_ p1: CGPoint, _ p2: CGPoint) -> CGFloat {
+        let dx = p1.x - p2.x
+        let dy = p1.y - p2.y
+        return sqrt(dx * dx + dy * dy)
     }
     
     private func computeCalibrationQuality(_ triangle: TrianglePatch) -> Float {

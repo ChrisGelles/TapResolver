@@ -1,9 +1,9 @@
-"/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/Components/SaveToFiles.swift":
+"/Users/cgelles/Documents/GitHub/TapResolver/TapResolver/UI/LocationSettings/ARMarkerListItem.swift":
   swiftmodule: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver.swiftmodule"
   diagnostics: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-master.dia"
-  dependencies: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-master.d"
-  const-values: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-master.swiftconstvalues"
-  objc-header: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-Swift.h"
-  swiftsourceinfo: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver.swiftsourceinfo"
   swiftdoc: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver.swiftdoc"
+  const-values: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-master.swiftconstvalues"
+  swiftsourceinfo: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver.swiftsourceinfo"
+  dependencies: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-master.d"
+  objc-header: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver-Swift.h"
   abi-baseline-json: "/Users/cgelles/Documents/GitHub/TapResolver/build/TapResolver.build/Release-iphoneos/TapResolver.build/Objects-normal/arm64/TapResolver.abi.json"

@@ -82,8 +82,6 @@ struct ARReferenceImageView: View {
                 }
             }
         }
-        .padding(.bottom, 60)
-        .padding(.leading, 20)
         .background(Color.black.opacity(0.3))
         .cornerRadius(12)
         .onTapGesture {
@@ -100,6 +98,11 @@ struct FullImageView: View {
     var image: UIImage
     var mapPoint: MapPointStore.MapPoint
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var mapPointStore: MapPointStore
+    
+    private var isOutdated: Bool {
+        mapPoint.photoOutdated ?? false
+    }
     
     var body: some View {
         NavigationView {
@@ -110,6 +113,59 @@ struct FullImageView: View {
                     .resizable()
                     .scaledToFit()
                     .ignoresSafeArea()
+                    .overlay(
+                        // Dim overlay for outdated photos
+                        isOutdated ? Color.yellow.opacity(0.15) : Color.clear
+                    )
+                
+                // Outdated warning banner at top
+                if isOutdated {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            VStack(spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 16, weight: .bold))
+                                    Text("Outdated Image – Map Point moved")
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                }
+                                .foregroundColor(.yellow)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color.black.opacity(0.7))
+                                .cornerRadius(8)
+                                
+                                Button(action: {
+                                    // Trigger photo update flow
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("UpdateMapPointPhoto"),
+                                        object: nil,
+                                        userInfo: ["mapPointID": mapPoint.id]
+                                    )
+                                    dismiss()
+                                }) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "camera.fill")
+                                            .font(.system(size: 12))
+                                        Text("Retake Photo")
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                    }
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                    .background(Color.red.opacity(0.9))
+                                    .cornerRadius(8)
+                                }
+                            }
+                            Spacer()
+                        }
+                        .padding(.top, 20)
+                        Spacer()
+                    }
+                }
             }
             .navigationTitle("Reference Photo")
             .navigationBarTitleDisplayMode(.inline)

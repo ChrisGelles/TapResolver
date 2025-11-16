@@ -93,9 +93,8 @@ struct ARViewWithOverlays: View {
                     return
                 }
                 
-                // Check if photo is outdated and needs replacement
-                if let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }),
-                   mapPoint.photoOutdated == true {
+                // Capture photo from AR camera feed when marker is placed
+                if let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }) {
                     // Auto-capture new photo from AR camera feed
                     if let coordinator = ARViewContainer.Coordinator.current {
                         coordinator.captureARFrame { image in
@@ -114,7 +113,7 @@ struct ARViewWithOverlays: View {
                                         mapPointStore.points[index].photoOutdated = false
                                         mapPointStore.save()
                                     }
-                                    print("📸 Auto-replaced outdated photo for MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
+                                    print("📸 Captured photo for MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
                                 }
                             }
                         }
@@ -548,6 +547,34 @@ struct ARPiPMapView: View {
                             currentOffset = newTargets.offset
                         }
                     }
+                    .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CenterPiPOnTriangle"))) { notification in
+                        guard let triangleID = notification.userInfo?["triangleID"] as? UUID,
+                              let triangle = arCalibrationCoordinator.triangleStore.triangle(withID: triangleID) else {
+                            return
+                        }
+                        
+                        // Get triangle vertices' map positions
+                        let vertexPositions = triangle.vertexIDs.compactMap { vertexID -> CGPoint? in
+                            mapPointStore.points.first(where: { $0.id == vertexID })?.mapPoint
+                        }
+                        
+                        guard vertexPositions.count == 3 else { return }
+                        
+                        let frameSize = CGSize(width: 180, height: 180)
+                        let newTransform = calculateFittingTransform(
+                            points: vertexPositions,
+                            frameSize: frameSize,
+                            imageSize: mapImage.size,
+                            padding: 40
+                        )
+                        
+                        withAnimation(.easeInOut(duration: 0.6)) {
+                            currentScale = newTransform.scale
+                            currentOffset = newTransform.offset
+                        }
+                        
+                        print("🎯 PiP centered on triangle \(String(triangleID.uuidString.prefix(8)))")
+                    }
                 }
             } else {
                 RoundedRectangle(cornerRadius: 12)
@@ -785,6 +812,8 @@ struct ARPiPMapView: View {
         // Project AR world position to 2D map coordinates
         if let projectedPosition = projectARPositionToMap(arPosition: smoothedPosition) {
             userMapPosition = projectedPosition
+            // Share position with coordinator for proximity-based triangle selection
+            arCalibrationCoordinator.updateUserPosition(projectedPosition)
         }
     }
     
