@@ -159,6 +159,18 @@ struct ARViewContainer: UIViewRepresentable {
                 name: NSNotification.Name("FillTriangleWithSurveyMarkers"),
                 object: nil
             )
+            
+            // Listen for triangle calibration complete
+            NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("TriangleCalibrationComplete"),
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self,
+                      let triangleID = notification.userInfo?["triangleID"] as? UUID else { return }
+                print("📐 Triangle calibration complete - drawing lines for \(String(triangleID.uuidString.prefix(8)))")
+                self.drawTriangleLines(triangleID: triangleID)
+            }
         }
         
         @objc func handlePlaceMarkerAtCursor() {
@@ -409,8 +421,9 @@ struct ARViewContainer: UIViewRepresentable {
                 // Convert map point to AR space using Similarity2D transform
                 let mapPointFloat = simd_float2(Float(mapPoint.x), Float(mapPoint.y))
                 let transformed = transform.rotation * (mapPointFloat * transform.scale) + transform.translation
-                // Assume ground plane (y = 0) for now
-                return simd_float3(transformed.x, 0.0, transformed.y)
+                // Use device height to place on ground
+                let groundY = userDeviceHeight > 0 ? -userDeviceHeight : -1.0
+                return simd_float3(transformed.x, groundY, transformed.y)
             }
             
             // Fallback: Place in front of camera on ground plane
@@ -430,7 +443,8 @@ struct ARViewContainer: UIViewRepresentable {
             
             // Place 1 meter in front of camera, on ground plane
             let estimatedPosition = cameraPosition + forward * 1.0
-            return simd_float3(estimatedPosition.x, 0.0, estimatedPosition.z)
+            let groundY = userDeviceHeight > 0 ? -userDeviceHeight : -1.0
+            return simd_float3(estimatedPosition.x, groundY, estimatedPosition.z)
         }
         
         /// Add a ghost marker for a map point
@@ -733,6 +747,80 @@ struct ARViewContainer: UIViewRepresentable {
             surveyMarkers.removeAll()
             lastHapticTriggerTime.removeAll()  // Clear collision tracking state
             print("🧹 Cleared survey markers")
+        }
+        
+        /// Draw yellow lines connecting triangle vertices
+        func drawTriangleLines(triangleID: UUID) {
+            guard let sceneView = sceneView else { return }
+            
+            // Remove existing triangle lines
+            sceneView.scene.rootNode.enumerateChildNodes { node, _ in
+                if node.name?.hasPrefix("triangleLine_") == true {
+                    node.removeFromParentNode()
+                }
+            }
+            
+            // Get triangle from selectedTriangle or use triangleID to look it up
+            // We'll use the selectedTriangle if it matches, otherwise we need to access via coordinator
+            guard let triangle = selectedTriangle, triangle.id == triangleID else {
+                print("⚠️ Triangle \(String(triangleID.uuidString.prefix(8))) not found in selectedTriangle")
+                return
+            }
+            
+            // Get AR marker positions
+            guard triangle.arMarkerIDs.count == 3 else {
+                print("⚠️ Triangle doesn't have 3 AR markers yet")
+                return
+            }
+            
+            var vertices: [simd_float3] = []
+            for markerIDString in triangle.arMarkerIDs {
+                guard let markerUUID = UUID(uuidString: markerIDString),
+                      let markerNode = placedMarkers[markerUUID] else {
+                    print("⚠️ Could not find marker node for \(markerIDString)")
+                    return
+                }
+                vertices.append(markerNode.simdPosition)
+            }
+            
+            guard vertices.count == 3 else { return }
+            
+            // Create lines for each edge
+            let edges = [
+                (vertices[0], vertices[1], "triangleLine_01"),
+                (vertices[1], vertices[2], "triangleLine_12"),
+                (vertices[2], vertices[0], "triangleLine_20")
+            ]
+            
+            for (start, end, name) in edges {
+                let vector = end - start
+                let distance = simd_length(vector)
+                
+                let cylinder = SCNCylinder(radius: 0.01, height: CGFloat(distance))
+                cylinder.firstMaterial?.diffuse.contents = UIColor.yellow.withAlphaComponent(0.8)
+                
+                let lineNode = SCNNode(geometry: cylinder)
+                lineNode.name = name
+                
+                // Position and orient
+                let midpoint = (start + end) / 2
+                lineNode.simdPosition = midpoint
+                
+                // Orient cylinder along edge
+                let direction = simd_normalize(vector)
+                let defaultUp = simd_float3(0, 1, 0)
+                
+                let angle = acos(simd_dot(defaultUp, direction))
+                let axis = simd_cross(defaultUp, direction)
+                
+                if simd_length(axis) > 0.001 {
+                    lineNode.simdOrientation = simd_quatf(angle: angle, axis: simd_normalize(axis))
+                }
+                
+                sceneView.scene.rootNode.addChildNode(lineNode)
+            }
+            
+            print("📐 Drew triangle lines connecting 3 vertices")
         }
         
         /// Check for camera collisions with survey marker spheres

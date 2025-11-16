@@ -249,24 +249,8 @@ final class ARCalibrationCoordinator: ObservableObject {
             plantGhostMarkers(using: triangle)
         }
         
-        // Find and suggest next adjacent uncalibrated triangle for crawling
-        if let nextTriangle = findAdjacentUncalibratedTriangle(to: triangle.id, userMapPosition: lastKnownUserPosition) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                self.startCalibration(for: nextTriangle.id)
-                self.statusText = "➡️ Continue: Calibrate adjacent triangle"
-                print("🔄 ARCalibrationCoordinator: Auto-starting calibration for adjacent triangle \(String(nextTriangle.id.uuidString.prefix(8)))")
-                
-                // Post notification to center PiP map on new triangle
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("CenterPiPOnTriangle"),
-                    object: nil,
-                    userInfo: ["triangleID": nextTriangle.id]
-                )
-            }
-        } else {
-            // No adjacent triangles found - reset
-            reset()
-        }
+        // Don't auto-start next triangle - let user decide
+        print("ℹ️ Calibration complete. User can now fill triangle or manually start next calibration.")
     }
     
     /// Save ARWorldMap after successful triangle calibration
