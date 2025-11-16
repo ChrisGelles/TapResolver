@@ -91,6 +91,9 @@ final class ARCalibrationCoordinator: ObservableObject {
                 }
             }()
             setReferencePhoto(photoData)
+            
+            // Log map point guidance
+            print("🎯 Guiding user to Map Point (\(String(format: "%.1f", mapPoint.mapPoint.x)), \(String(format: "%.1f", mapPoint.mapPoint.y)))")
         }
         
         // Update UI state
@@ -137,9 +140,17 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
         
         // Save marker to ARWorldMapStore (convert to ARWorldMapStore.ARMarker format)
+        // Log marker persistence details
+        print("💾 Saving AR Marker:")
+        print("   Marker ID: \(marker.id)")
+        print("   Linked Map Point: \(marker.linkedMapPointID)")
+        print("   AR Position: (\(String(format: "%.2f", marker.arPosition.x)), \(String(format: "%.2f", marker.arPosition.y)), \(String(format: "%.2f", marker.arPosition.z))) meters")
+        print("   Map Coordinates: (\(String(format: "%.1f", marker.mapCoordinates.x)), \(String(format: "%.1f", marker.mapCoordinates.y))) pixels")
+        
         do {
             let worldMapMarker = convertToWorldMapMarker(marker)
             try arStore.saveMarker(worldMapMarker)
+            print("   Storage Key: ARWorldMapStore (saved successfully)")
         } catch {
             print("❌ Failed to save marker to ARWorldMapStore: \(error)")
             return
@@ -170,6 +181,9 @@ final class ARCalibrationCoordinator: ObservableObject {
                                 }
                             }()
                             setReferencePhoto(photoData)
+                            
+                            // Log map point guidance for next vertex
+                            print("🎯 Guiding user to Map Point (\(String(format: "%.1f", mapPoint.mapPoint.x)), \(String(format: "%.1f", mapPoint.mapPoint.y)))")
                         }
                         break
                     }

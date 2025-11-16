@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Combine
+import Foundation
 
 // MARK: - Notification Extensions
 extension Notification.Name {
@@ -48,6 +49,7 @@ struct HUDContainer: View {
     @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
 
     @State private var selectedBeaconForTxPower: String? = nil
+    @State private var showingSoftResetAlert = false
     @State private var showScanQuality = true  // Temporary: always show for testing
     @State private var activeIntervalEdit: (beaconID: String, text: String)? = nil
     @State private var showRelocalizationDebug = false  // Debug UI toggle
@@ -80,6 +82,14 @@ struct HUDContainer: View {
             .onAppear {
                 // Update coordinator to use actual ARWorldMapStore
                 relocalizationCoordinator.updateARStore(arWorldMapStore)
+            }
+            .alert("Soft Reset Calibration?", isPresented: $showingSoftResetAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Reset", role: .destructive) {
+                    performSoftReset()
+                }
+            } message: {
+                Text("This will clear all calibration data for '\(PersistenceContext.shared.locationID)' location.\n\nTriangle mesh structure will be preserved.\nOther locations (museum, etc.) will NOT be affected.")
             }
         }
         
@@ -114,6 +124,35 @@ struct HUDContainer: View {
                         FacingToggleButton()
                         RelocalizationDebugToggleButton(showDebug: $showRelocalizationDebug)
                         // MapPointDiagnosticButton()  // Hidden - diagnostic tool
+                        
+                        // Diagnostic & Maintenance Buttons
+                        HStack(spacing: 12) {
+                            // Eyeball button - Show purge diagnostic
+                            Button(action: {
+                                showPurgeDiagnostic()
+                            }) {
+                                Image(systemName: "eye.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.blue)
+                                    .frame(width: 44, height: 44)
+                                    .background(Color.white.opacity(0.9))
+                                    .cornerRadius(8)
+                            }
+                            .buttonStyle(.plain)
+                            
+                            // Red X button - Soft reset calibration
+                            Button(action: {
+                                confirmSoftReset()
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.red)
+                                    .frame(width: 44, height: 44)
+                                    .background(Color.white.opacity(0.9))
+                                    .cornerRadius(8)
+                            }
+                            .buttonStyle(.plain)
+                        }
                         // MARK: - Initial Diagnostic Buttons (Hidden - can be restored if needed)
                         /*
                         UserDefaultsDiagnosticButton()
@@ -647,6 +686,140 @@ struct HUDContainer: View {
             beaconDotStore: beaconDotStore,
             scanUtility: scanUtility
         )
+    }
+    
+    // MARK: - Diagnostic & Maintenance Functions
+    
+    /// Show diagnostic info about what would be purged
+    func showPurgeDiagnostic() {
+        let currentLocation = PersistenceContext.shared.locationID
+        
+        print("================================================================================")
+        print("👁️ PURGE DIAGNOSTIC - LOCATION ISOLATION CHECK")
+        print("================================================================================")
+        print("📍 Current Location: '\(currentLocation)'")
+        print("")
+        print("🗑️ WILL AFFECT:")
+        print("   ✓ Triangles: /Documents/locations/\(currentLocation)/dots.json")
+        print("   ✓ ARWorldMaps: /Documents/locations/\(currentLocation)/ARSpatial/")
+        print("   ✓ Triangle count: \(triangleStore.triangles.count)")
+        
+        let calibratedCount = triangleStore.triangles.filter { $0.isCalibrated }.count
+        let totalMarkers = triangleStore.triangles.reduce(0) { $0 + $1.arMarkerIDs.count }
+        
+        print("   ✓ Calibrated triangles: \(calibratedCount)")
+        print("   ✓ Total AR markers: \(totalMarkers)")
+        print("")
+        print("🛡️ WILL NOT AFFECT:")
+        
+        // List other locations
+        let locationsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("locations")
+        
+        if let locationDirs = try? FileManager.default.contentsOfDirectory(atPath: locationsURL.path) {
+            for dir in locationDirs where dir != currentLocation {
+                print("   ✓ Location '\(dir)' - UNTOUCHED")
+            }
+        }
+        
+        print("")
+        print("🎯 ACTION:")
+        print("   Soft reset will clear calibration data but keep triangle mesh structure")
+        print("   All triangles will be marked uncalibrated (isCalibrated = false)")
+        print("   AR marker associations will be cleared (arMarkerIDs = [])")
+        print("   Triangle vertices and mesh connectivity preserved")
+        print("================================================================================")
+    }
+    
+    /// Show confirmation dialog before soft reset
+    func confirmSoftReset() {
+        showingSoftResetAlert = true
+    }
+    
+    /// Perform soft reset - clear calibration but keep mesh
+    func performSoftReset() {
+        let currentLocation = PersistenceContext.shared.locationID
+        
+        print("================================================================================")
+        print("🗑️ SOFT RESET - CLEARING CALIBRATION DATA")
+        print("================================================================================")
+        print("📍 Target Location: '\(currentLocation)'")
+        print("")
+        
+        let beforeCount = triangleStore.triangles.filter { $0.isCalibrated }.count
+        let beforeMarkers = triangleStore.triangles.reduce(0) { $0 + $1.arMarkerIDs.count }
+        
+        print("📊 Before reset:")
+        print("   Calibrated triangles: \(beforeCount)")
+        print("   Total AR markers: \(beforeMarkers)")
+        print("")
+        
+        // Clear calibration data for all triangles
+        for i in 0..<triangleStore.triangles.count {
+            triangleStore.triangles[i].isCalibrated = false
+            triangleStore.triangles[i].arMarkerIDs = []
+            triangleStore.triangles[i].calibrationQuality = 0.0
+            triangleStore.triangles[i].legMeasurements = []
+            triangleStore.triangles[i].worldMapFilename = nil
+            triangleStore.triangles[i].worldMapFilesByStrategy = [:]
+            triangleStore.triangles[i].transform = nil
+            triangleStore.triangles[i].lastCalibratedAt = nil
+            triangleStore.triangles[i].userPositionWhenCalibrated = nil
+        }
+        
+        // Save changes
+        triangleStore.save()
+        
+        print("✅ Cleared calibration data:")
+        print("   - Set isCalibrated = false for all triangles")
+        print("   - Cleared arMarkerIDs arrays")
+        print("   - Reset calibrationQuality to 0.0")
+        print("   - Cleared legMeasurements")
+        print("   - Cleared ARWorldMap filenames")
+        print("   - Cleared transform data")
+        print("   - Cleared lastCalibratedAt")
+        print("   - Cleared userPositionWhenCalibrated")
+        print("")
+        print("✅ Preserved:")
+        print("   - Triangle vertices (\(triangleStore.triangles.reduce(0) { $0 + $1.vertexIDs.count }) total)")
+        print("   - Mesh connectivity")
+        print("   - Triangle structure (\(triangleStore.triangles.count) triangles)")
+        print("")
+        
+        // Delete ARWorldMap files for this location
+        let arSpatialURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("locations")
+            .appendingPathComponent(currentLocation)
+            .appendingPathComponent("ARSpatial")
+        
+        if FileManager.default.fileExists(atPath: arSpatialURL.path) {
+            do {
+                try FileManager.default.removeItem(at: arSpatialURL)
+                print("🗑️ Deleted ARWorldMap files at: \(arSpatialURL.path)")
+            } catch {
+                print("⚠️ Failed to delete ARWorldMap files: \(error)")
+            }
+        }
+        
+        print("")
+        print("🛡️ Other locations UNTOUCHED:")
+        
+        // Verify other locations still exist
+        let locationsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("locations")
+        
+        if let locationDirs = try? FileManager.default.contentsOfDirectory(atPath: locationsURL.path) {
+            for dir in locationDirs where dir != currentLocation {
+                let dotsPath = locationsURL.appendingPathComponent(dir).appendingPathComponent("dots.json").path
+                if FileManager.default.fileExists(atPath: dotsPath) {
+                    print("   ✓ Location '\(dir)' - VERIFIED INTACT")
+                }
+            }
+        }
+        
+        print("================================================================================")
+        print("✅ Soft reset complete for location '\(currentLocation)'")
+        print("================================================================================")
     }
 
 }

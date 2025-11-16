@@ -22,6 +22,9 @@ struct ARViewWithOverlays: View {
     // Plane visualization toggle
     @State private var showPlaneVisualization: Bool = true
     
+    // Survey marker spacing
+    @State private var surveySpacing: Float = 1.0
+    
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
@@ -52,7 +55,8 @@ struct ARViewWithOverlays: View {
                     isPresented = false
                 },
                 showPlaneVisualization: $showPlaneVisualization,
-                metricSquareStore: metricSquares
+                metricSquareStore: metricSquares,
+                mapPointStore: mapPointStore
             )
             .edgesIgnoringSafeArea(.all)
             .onAppear {
@@ -62,20 +66,10 @@ struct ARViewWithOverlays: View {
                 // Debug: Print instance and mode
                 let instanceAddress = Unmanaged.passUnretained(self as AnyObject).toOpaque()
                 
-                // Set mode based on calibration mode
-                if isCalibrationMode, let triangle = selectedTriangle {
-                    currentMode = .triangleCalibration(triangleID: triangle.id)
-                    print("🧪 ARView ID: triangle calibration mode for \(String(triangle.id.uuidString.prefix(8)))")
-                    print("🧪 ARViewWithOverlays instance: \(instanceAddress)")
-                    // Initialize coordinator for this triangle
-                    arCalibrationCoordinator.startCalibration(for: triangle.id)
-                    // Set vertices for legacy compatibility
-                    arCalibrationCoordinator.setVertices(triangle.vertexIDs)
-                } else {
-                    currentMode = .idle
-                    print("🧪 ARView ID: generic/idle mode")
-                    print("🧪 ARViewWithOverlays instance: \(instanceAddress)")
-                }
+                // Set mode to idle - user will choose Calibrate or Relocalize
+                currentMode = .idle
+                print("🧪 ARView ID: triangle viewing mode for \(selectedTriangle.map { String($0.id.uuidString.prefix(8)) } ?? "none")")
+                print("🧪 ARViewWithOverlays instance: \(instanceAddress)")
             }
             .onDisappear {
                 // Clean up on dismiss
@@ -130,6 +124,9 @@ struct ARViewWithOverlays: View {
                 let arPosition = simd_float3(positionArray[0], positionArray[1], positionArray[2])
                 let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID })
                 let mapCoordinates = mapPoint?.mapPoint ?? CGPoint.zero
+                
+                // Log AR position and map position correlation
+                print("🔗 AR Marker planted at AR(\(String(format: "%.2f", arPosition.x)), \(String(format: "%.2f", arPosition.y)), \(String(format: "%.2f", arPosition.z))) meters for Map Point (\(String(format: "%.1f", mapCoordinates.x)), \(String(format: "%.1f", mapCoordinates.y))) pixels")
                 
                 let marker = ARMarker(
                     id: markerID,
@@ -197,7 +194,8 @@ struct ARViewWithOverlays: View {
                 // focusedPointID is now computed reactively inside ARPiPMapView
                 ARPiPMapView(
                     isCalibrationMode: isCalibrationMode,
-                    selectedTriangle: selectedTriangle
+                    selectedTriangle: selectedTriangle,
+                    autoZoomToTriangle: true  // Enable auto-zoom to fit triangle
                 )
                     .environmentObject(mapPointStore)
                     .environmentObject(locationManager)
@@ -206,6 +204,68 @@ struct ARViewWithOverlays: View {
                     .cornerRadius(12)
                     .position(x: geo.size.width - 120, y: 130) // Adjusted for larger size
                     .zIndex(998)
+                
+                // Survey Marker Controls (below PiP map) - only when triangle is calibrated
+                if let triangle = selectedTriangle,
+                   triangle.isCalibrated {
+                    VStack(spacing: 12) {
+                        // Spacing slider
+                        VStack(spacing: 4) {
+                            Text("Survey Spacing")
+                                .font(.caption)
+                                .foregroundColor(.white)
+                            
+                            HStack(spacing: 8) {
+                                Text("0.5m")
+                                    .font(.caption2)
+                                    .foregroundColor(surveySpacing == 0.5 ? .green : .gray)
+                                    .onTapGesture { surveySpacing = 0.5 }
+                                
+                                Text("0.75m")
+                                    .font(.caption2)
+                                    .foregroundColor(surveySpacing == 0.75 ? .green : .gray)
+                                    .onTapGesture { surveySpacing = 0.75 }
+                                
+                                Text("1.0m")
+                                    .font(.caption2)
+                                    .foregroundColor(surveySpacing == 1.0 ? .green : .gray)
+                                    .onTapGesture { surveySpacing = 1.0 }
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.7))
+                        .cornerRadius(8)
+                        
+                        // Fill Triangle button
+                        Button(action: {
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("FillTriangleWithSurveyMarkers"),
+                                object: nil,
+                                userInfo: [
+                                    "triangleID": triangle.id,
+                                    "spacing": surveySpacing
+                                ]
+                            )
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "grid.circle.fill")
+                                    .font(.system(size: 14))
+                                Text("Fill Triangle")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.red.opacity(0.8))
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .position(x: geo.size.width - 120, y: 270) // Below PiP map
+                    .zIndex(997)
+                }
                 
                 // Reference Image View (top-left, below xmark) - only in calibration mode
                 if isCalibrationMode,
@@ -241,8 +301,8 @@ struct ARViewWithOverlays: View {
                 }
             }
             
-            // Tap-to-Place Button (bottom) - only in calibration mode
-            if isCalibrationMode {
+            // Tap-to-Place Button (bottom) - only in ACTIVE triangle calibration mode
+            if case .triangleCalibration = currentMode {
                 VStack {
                     Spacer()
                     
@@ -366,8 +426,8 @@ struct ARViewWithOverlays: View {
                 .zIndex(997)
             }
             
-            // Place AR Marker Button + Strategy Picker (bottom) - only in idle mode
-            if currentMode == .idle {
+            // Place AR Marker Button + Strategy Picker (bottom) - only in idle mode with no triangle selected
+            if currentMode == .idle && selectedTriangle == nil {
                 VStack {
                     Spacer()
                     
@@ -416,6 +476,61 @@ struct ARViewWithOverlays: View {
                     .padding(.bottom, 60)
                 }
                 .zIndex(997)
+            }
+            
+            // Calibrate / Relocalize buttons - shown when triangle is selected but NOT calibrated or NOT in calibration mode
+            if let triangle = selectedTriangle,
+               currentMode != .triangleCalibration(triangleID: triangle.id) {
+                VStack {
+                    Spacer()
+                    
+                    HStack(spacing: 40) {
+                        // Calibrate Patch button (left)
+                        Button(action: {
+                            // Enter calibration mode
+                            currentMode = .triangleCalibration(triangleID: triangle.id)
+                            arCalibrationCoordinator.startCalibration(for: triangle.id)
+                            arCalibrationCoordinator.setVertices(triangle.vertexIDs)
+                            print("🎯 Entering calibration mode for triangle \(String(triangle.id.uuidString.prefix(8)))")
+                        }) {
+                            VStack(spacing: 6) {
+                                Image(systemName: "triangle")
+                                    .font(.system(size: 24, weight: .semibold))
+                                Text("Calibrate Patch")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 14)
+                            .background(Color.orange.opacity(0.9))
+                            .cornerRadius(12)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Relocalize button (right)
+                        Button(action: {
+                            print("🔄 Relocalize button tapped for triangle \(String(triangle.id.uuidString.prefix(8)))")
+                            // TODO: Implement relocalization logic
+                        }) {
+                            VStack(spacing: 6) {
+                                Image(systemName: "location.circle")
+                                    .font(.system(size: 24, weight: .semibold))
+                                Text("Relocalize")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 14)
+                            .background(Color.blue.opacity(0.9))
+                            .cornerRadius(12)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.bottom, 50)
+                }
+                .zIndex(990)
             }
         }
     }
@@ -500,6 +615,7 @@ struct ARPiPMapView: View {
     // Calibration mode properties for user position tracking
     let isCalibrationMode: Bool
     let selectedTriangle: TrianglePatch?
+    let autoZoomToTriangle: Bool
     
     // Separate transform stores for PiP (independent from main map)
     @StateObject private var pipTransform = MapTransformStore()
@@ -604,11 +720,35 @@ struct ARPiPMapView: View {
                         if let triangle = selectedTriangle,
                            arCalibrationCoordinator.isTriangleComplete(triangle.id) {
                             print("🎯 PiP Map: Triangle complete - fitting all 3 vertices")
+                            
+                            // Draw triangle lines on ground
+                            if let coordinator = ARViewContainer.Coordinator.current {
+                                var vertices: [simd_float3] = []
+                                for markerIDString in triangle.arMarkerIDs {
+                                    if let markerUUID = UUID(uuidString: markerIDString),
+                                       let markerNode = coordinator.placedMarkers[markerUUID] {
+                                        vertices.append(markerNode.simdPosition)
+                                    }
+                                }
+                                if vertices.count == 3 {
+                                    coordinator.drawTriangleLines(vertices: vertices)
+                                }
+                            }
                         }
                         let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
                         withAnimation(.easeInOut(duration: 0.5)) {
                             currentScale = newTargets.scale
                             currentOffset = newTargets.offset
+                        }
+                    }
+                    .onChange(of: selectedTriangle?.id) { _ in
+                        // Recalculate when triangle selection changes (for auto-zoom)
+                        if autoZoomToTriangle {
+                            let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
+                            withAnimation(.easeInOut(duration: 0.6)) {
+                                currentScale = newTargets.scale
+                                currentOffset = newTargets.offset
+                            }
                         }
                     }
                     .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CenterPiPOnTriangle"))) { notification in
@@ -705,6 +845,18 @@ struct ARPiPMapView: View {
     /// Calculate target transform based on focused point (or full map)
     private func calculateTargetTransform(image: UIImage, frameSize: CGSize) -> (scale: CGFloat, offset: CGSize) {
         let imageSize = image.size
+        
+        // CASE 0: Auto-zoom to triangle if enabled and triangle is selected
+        if autoZoomToTriangle, let triangle = selectedTriangle {
+            let vertexPoints = triangle.vertexIDs.compactMap { vertexID in
+                mapPointStore.points.first(where: { $0.id == vertexID })?.mapPoint
+            }
+            
+            if vertexPoints.count == 3 {
+                // Use existing fitting transform logic with padding
+                return calculateFittingTransform(points: vertexPoints, frameSize: frameSize, imageSize: imageSize, padding: frameSize.width * 0.1) // 10% padding
+            }
+        }
         
         // CASE 1: Focus on single point (vertex during calibration)
         if let pointID = focusedPointID,

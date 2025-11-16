@@ -17,6 +17,9 @@ struct ARViewContainer: UIViewRepresentable {
     
     // Metric square store for map scale
     var metricSquareStore: MetricSquareStore?
+    
+    // Map point store for survey markers
+    var mapPointStore: MapPointStore?
 
     func makeCoordinator() -> ARViewCoordinator {
         let coordinator = ARViewCoordinator()
@@ -24,6 +27,7 @@ struct ARViewContainer: UIViewRepresentable {
         coordinator.isCalibrationMode = isCalibrationMode
         coordinator.showPlaneVisualization = showPlaneVisualization
         coordinator.metricSquareStore = metricSquareStore
+        coordinator.mapPointStore = mapPointStore
         return coordinator
     }
 
@@ -57,6 +61,8 @@ struct ARViewContainer: UIViewRepresentable {
         context.coordinator.selectedTriangle = selectedTriangle
         context.coordinator.isCalibrationMode = isCalibrationMode
         context.coordinator.showPlaneVisualization = showPlaneVisualization
+        context.coordinator.metricSquareStore = metricSquareStore
+        context.coordinator.mapPointStore = mapPointStore
         
         // Store coordinator reference for world map access
         ARViewContainer.Coordinator.current = context.coordinator
@@ -71,6 +77,7 @@ struct ARViewContainer: UIViewRepresentable {
         var ghostMarkers: [UUID: SCNNode] = [:] // Track ghost markers by MapPoint ID
         var surveyMarkers: [UUID: SCNNode] = [:]  // markerID -> node
         weak var metricSquareStore: MetricSquareStore?
+        weak var mapPointStore: MapPointStore?
         private var crosshairNode: GroundCrosshairNode?
         var currentCursorPosition: simd_float3?
         
@@ -83,6 +90,11 @@ struct ARViewContainer: UIViewRepresentable {
         
         // User device height (centralized constant)
         var userDeviceHeight: Float = ARVisualDefaults.userDeviceHeight
+        
+        // Survey marker collision tracking
+        private var lastHapticTriggerTime: [UUID: TimeInterval] = [:]  // Debounce haptics per marker
+        private let hapticCooldown: TimeInterval = 0.5  // 500ms between haptics for same marker
+        private let collisionRadius: Float = 0.03  // Match sphere radius from ARMarkerRenderer
         
         // Timer for updating crosshair
         private var crosshairUpdateTimer: Timer?
@@ -139,6 +151,14 @@ struct ARViewContainer: UIViewRepresentable {
                 name: NSNotification.Name("PlaceMarkerAtCursor"),
                 object: nil
             )
+            
+            // Listen for FillTriangleWithSurveyMarkers notification
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleFillTriangleWithSurveyMarkers),
+                name: NSNotification.Name("FillTriangleWithSurveyMarkers"),
+                object: nil
+            )
         }
         
         @objc func handlePlaceMarkerAtCursor() {
@@ -147,6 +167,18 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             placeMarker(at: position)
+        }
+        
+        @objc func handleFillTriangleWithSurveyMarkers(notification: Notification) {
+            guard let triangleID = notification.userInfo?["triangleID"] as? UUID,
+                  let spacing = notification.userInfo?["spacing"] as? Float,
+                  let triangle = selectedTriangle,
+                  triangle.id == triangleID else {
+                print("⚠️ Invalid triangle or spacing for survey marker generation")
+                return
+            }
+            
+            generateSurveyMarkers(for: triangle, spacing: spacing)
         }
 
         @objc func handleTapGesture(_ sender: UITapGestureRecognizer) {
@@ -223,7 +255,7 @@ struct ARViewContainer: UIViewRepresentable {
             // Track the marker
             placedMarkers[markerID] = markerNode
             
-            print("📍 Placed marker \(String(markerID.uuidString.prefix(8))) at \(position)")
+            print("📍 Placed marker \(String(markerID.uuidString.prefix(8))) at AR(\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z))) meters")
             
             // Post notification for marker placement
             NotificationCenter.default.post(
@@ -289,6 +321,9 @@ struct ARViewContainer: UIViewRepresentable {
                 crosshair.hide()
                 currentCursorPosition = nil
             }
+            
+            // Check for survey marker collisions
+            checkSurveyMarkerCollisions()
         }
         
         private func isPlaneConfident(_ result: ARRaycastResult) -> Bool {
@@ -440,14 +475,152 @@ struct ARViewContainer: UIViewRepresentable {
             crosshairUpdateTimer?.invalidate()
             crosshairUpdateTimer = nil
             NotificationCenter.default.removeObserver(self)
-            clearSurveyMarkers()
             sceneView?.session.pause()
             print("🔧 AR session paused and torn down.")
         }
         
         // MARK: - Survey Marker Generation
         
-        /// Generate temporary survey markers across calibrated triangle
+        /// Generate survey markers inside a calibrated triangle
+        private func generateSurveyMarkers(for triangle: TrianglePatch, spacing: Float) {
+            // Clear existing survey markers
+            clearSurveyMarkers()
+            
+            // Get triangle vertices from MapPointStore
+            guard let mapPointStore = mapPointStore else {
+                print("⚠️ MapPointStore not available")
+                return
+            }
+            
+            let vertexPoints = triangle.vertexIDs.compactMap { vertexID in
+                mapPointStore.points.first(where: { $0.id == vertexID })
+            }
+            
+            guard vertexPoints.count == 3 else {
+                print("⚠️ Triangle does not have 3 valid vertices")
+                return
+            }
+            
+            // Get 2D map coordinates
+            let triangle2D = vertexPoints.map { $0.mapPoint }
+            
+            print("📍 Plotting points within triangle A(\(String(format: "%.1f", triangle2D[0].x)), \(String(format: "%.1f", triangle2D[0].y))) B(\(String(format: "%.1f", triangle2D[1].x)), \(String(format: "%.1f", triangle2D[1].y))) C(\(String(format: "%.1f", triangle2D[2].x)), \(String(format: "%.1f", triangle2D[2].y)))")
+            
+            // Get 3D AR positions from placed markers using index matching
+            // triangle.arMarkerIDs[i] corresponds to triangle.vertexIDs[i]
+            var triangle3D: [simd_float3] = []
+            
+            guard triangle.arMarkerIDs.count == 3 else {
+                print("⚠️ Triangle does not have 3 AR markers (has \(triangle.arMarkerIDs.count))")
+                return
+            }
+            
+            for (index, markerIDString) in triangle.arMarkerIDs.enumerated() {
+                guard let markerUUID = UUID(uuidString: markerIDString) else {
+                    print("⚠️ Invalid marker ID string: \(markerIDString)")
+                    continue
+                }
+                
+                // Look up marker node in placedMarkers dictionary
+                if let markerNode = placedMarkers[markerUUID] {
+                    triangle3D.append(markerNode.simdPosition)
+                    let vertexID = triangle.vertexIDs[index]
+                    print("✅ Found AR marker \(String(markerUUID.uuidString.prefix(8))) for vertex \(String(vertexID.uuidString.prefix(8))) at \(markerNode.simdPosition)")
+                } else {
+                    let vertexID = triangle.vertexIDs[index]
+                    print("⚠️ Marker \(String(markerUUID.uuidString.prefix(8))) not found in placedMarkers dictionary for vertex \(String(vertexID.uuidString.prefix(8)))")
+                    print("📋 Available markers: \(placedMarkers.keys.map { String($0.uuidString.prefix(8)) })")
+                }
+            }
+            
+            guard triangle3D.count == 3 else {
+                print("⚠️ Could not retrieve 3 AR positions for triangle vertices (got \(triangle3D.count)/3)")
+                return
+            }
+            
+            print("🌍 Planting Survey Markers within triangle A(\(String(format: "%.2f", triangle3D[0].x)), \(String(format: "%.2f", triangle3D[0].y)), \(String(format: "%.2f", triangle3D[0].z))) B(\(String(format: "%.2f", triangle3D[1].x)), \(String(format: "%.2f", triangle3D[1].y)), \(String(format: "%.2f", triangle3D[1].z))) C(\(String(format: "%.2f", triangle3D[2].x)), \(String(format: "%.2f", triangle3D[2].y)), \(String(format: "%.2f", triangle3D[2].z)))")
+            
+            // Get map scale (pixels per meter)
+            guard let pxPerMeter = getPixelsPerMeter() else {
+                print("⚠️ No map scale available (pxPerMeter)")
+                return
+            }
+            
+            // Generate 2D fill points
+            let fillPoints2D = generateTriangleFillPoints(
+                triangle: triangle2D,
+                spacingMeters: spacing,
+                pxPerMeter: pxPerMeter
+            )
+            
+            print("📍 Generated \(fillPoints2D.count) survey points at \(spacing)m spacing")
+            
+            // Log first few 2D points
+            let pointsToShow = min(fillPoints2D.count, 20)
+            var pointsList = ""
+            for i in 0..<pointsToShow {
+                let p = fillPoints2D[i]
+                pointsList += "s\(i+1)(\(String(format: "%.1f", p.x)), \(String(format: "%.1f", p.y))) "
+            }
+            if fillPoints2D.count > 20 {
+                pointsList += "... (\(fillPoints2D.count - 20) more)"
+            }
+            print("📊 2D Survey Points: \(pointsList)")
+            
+            // Interpolate to 3D AR positions and place markers
+            for (index, point2D) in fillPoints2D.enumerated() {
+                // Round 2D coordinates to 1 decimal place for future data export
+                let roundedX = round(point2D.x * 10) / 10
+                let roundedY = round(point2D.y * 10) / 10
+                let roundedPoint2D = CGPoint(x: roundedX, y: roundedY)
+                
+                guard let position3D = interpolateARPosition(
+                    fromMapPoint: roundedPoint2D,
+                    triangle2D: triangle2D,
+                    triangle3D: triangle3D
+                ) else {
+                    print("⚠️ Could not interpolate AR position for point \(index)")
+                    continue
+                }
+                
+                // Create survey marker using existing renderer
+                let markerID = UUID()
+                let options = MarkerOptions(
+                    color: UIColor.red,  // RED sphere for survey markers
+                    markerID: markerID,
+                    userDeviceHeight: userDeviceHeight,
+                    animateOnAppearance: false  // No animation for survey markers
+                )
+                
+                let markerNode = ARMarkerRenderer.createNode(at: position3D, options: options)
+                markerNode.name = "surveyMarker_\(markerID.uuidString)"
+                
+                // Add to scene
+                sceneView?.scene.rootNode.addChildNode(markerNode)
+                
+                // Track marker
+                surveyMarkers[markerID] = markerNode
+                
+                print("📍 Placed survey marker at map(\(roundedX), \(roundedY)) → AR\(position3D)")
+            }
+            
+            // Log first few 3D positions
+            var markers3D = ""
+            var markerCount = 0
+            for (_, node) in surveyMarkers.prefix(20) {
+                markerCount += 1
+                let pos = node.simdPosition
+                markers3D += "s\(markerCount)(\(String(format: "%.2f", pos.x)), \(String(format: "%.2f", pos.y)), \(String(format: "%.2f", pos.z))) "
+            }
+            if surveyMarkers.count > 20 {
+                markers3D += "... (\(surveyMarkers.count - 20) more)"
+            }
+            print("📊 3D Survey Markers: \(markers3D)")
+            
+            print("✅ Placed \(surveyMarkers.count) survey markers")
+        }
+        
+        /// Generate temporary survey markers across calibrated triangle (legacy - kept for compatibility)
         func generateSurveyMarkers(
             calibrationCoordinator: ARCalibrationCoordinator,
             mapPointStore: MapPointStore,
@@ -558,7 +731,121 @@ struct ARViewContainer: UIViewRepresentable {
                 node.removeFromParentNode()
             }
             surveyMarkers.removeAll()
+            lastHapticTriggerTime.removeAll()  // Clear collision tracking state
             print("🧹 Cleared survey markers")
+        }
+        
+        /// Check for camera collisions with survey marker spheres
+        private func checkSurveyMarkerCollisions() {
+            guard !surveyMarkers.isEmpty else { return }
+            
+            // Get current camera position
+            guard let cameraPosition = getCurrentCameraPosition() else { return }
+            
+            let currentTime = CACurrentMediaTime()
+            
+            // Check distance to each survey marker
+            for (markerID, markerNode) in surveyMarkers {
+                let markerPosition = markerNode.simdPosition
+                let distance = simd_distance(cameraPosition, markerPosition)
+                
+                // Check if camera is inside sphere volume
+                if distance < collisionRadius {
+                    // Check cooldown
+                    let lastTrigger = lastHapticTriggerTime[markerID] ?? 0
+                    let timeSinceLastTrigger = currentTime - lastTrigger
+                    
+                    if timeSinceLastTrigger >= hapticCooldown {
+                        // Trigger haptic feedback
+                        triggerCollisionHaptic()
+                        lastHapticTriggerTime[markerID] = currentTime
+                        
+                        print("💥 Camera collision with survey marker \(String(markerID.uuidString.prefix(8))) at distance \(String(format: "%.3f", distance))m")
+                    }
+                }
+            }
+        }
+        
+        /// Trigger haptic feedback for survey marker collision
+        private func triggerCollisionHaptic() {
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.prepare()
+            generator.impactOccurred()
+        }
+        
+        /// Draw lines connecting triangle vertices on the ground
+        func drawTriangleLines(vertices: [simd_float3]) {
+            guard vertices.count == 3 else { return }
+            
+            // Remove any existing triangle lines
+            sceneView?.scene.rootNode.enumerateChildNodes { node, _ in
+                if node.name?.hasPrefix("triangleLine_") == true {
+                    node.removeFromParentNode()
+                }
+            }
+            
+            // Create lines for each edge
+            let edges = [
+                (vertices[0], vertices[1], "triangleLine_01"),
+                (vertices[1], vertices[2], "triangleLine_12"),
+                (vertices[2], vertices[0], "triangleLine_20")
+            ]
+            
+            for (start, end, name) in edges {
+                // Create cylinder to represent line
+                let vector = end - start
+                let distance = simd_length(vector)
+                
+                let cylinder = SCNCylinder(radius: 0.005, height: CGFloat(distance))
+                cylinder.firstMaterial?.diffuse.contents = UIColor.yellow.withAlphaComponent(0.7)
+                
+                let lineNode = SCNNode(geometry: cylinder)
+                lineNode.name = name
+                
+                // Position at midpoint
+                let midpoint = (start + end) / 2
+                lineNode.simdPosition = midpoint
+                
+                // Orient cylinder along the edge (cylinder default axis is Y, we want it along the edge)
+                let direction = simd_normalize(vector)
+                let up = simd_float3(0, 1, 0) // Default cylinder axis
+                
+                // Calculate rotation to align Y-axis with edge direction
+                let rotation = rotationBetweenVectors(from: up, to: direction)
+                lineNode.simdOrientation = rotation
+                
+                // Lower the line slightly below ground level for visibility
+                lineNode.simdPosition.y = midpoint.y - 0.01
+                
+                sceneView?.scene.rootNode.addChildNode(lineNode)
+            }
+            
+            print("📐 Drew triangle lines connecting vertices")
+        }
+        
+        /// Helper: Calculate rotation between two vectors
+        private func rotationBetweenVectors(from: simd_float3, to: simd_float3) -> simd_quatf {
+            let normalizedFrom = simd_normalize(from)
+            let normalizedTo = simd_normalize(to)
+            
+            let dot = simd_dot(normalizedFrom, normalizedTo)
+            let clampedDot = max(-1.0, min(1.0, dot)) // Clamp to avoid NaN from acos
+            
+            // If vectors are parallel or anti-parallel
+            if abs(clampedDot - 1.0) < 0.001 {
+                return simd_quatf(angle: 0, axis: simd_float3(0, 1, 0))
+            }
+            
+            let axis = simd_cross(normalizedFrom, normalizedTo)
+            let axisLength = simd_length(axis)
+            
+            if axisLength < 0.001 {
+                // Vectors are parallel
+                return simd_quatf(angle: 0, axis: simd_float3(0, 1, 0))
+            }
+            
+            let angle = acos(clampedDot)
+            return simd_quatf(angle: angle, axis: simd_normalize(axis))
         }
         
         /// Get pixels per meter from MetricSquareStore (same logic as ARCalibrationCoordinator)
@@ -573,11 +860,17 @@ struct ARViewContainer: UIViewRepresentable {
             
             // pixels per meter = side_pixels / side_meters
             let pixelsPerMeter = Float(square.side) / Float(square.meters)
+            if pixelsPerMeter > 0 {
+                print("📏 Map scale set: \(pixelsPerMeter) pixels per meter (1 meter = \(pixelsPerMeter) pixels)")
+            }
             return pixelsPerMeter > 0 ? pixelsPerMeter : nil
         }
 
         deinit {
-            teardownSession()
+            clearSurveyMarkers()
+            lastHapticTriggerTime.removeAll()
+            crosshairUpdateTimer?.invalidate()
+            NotificationCenter.default.removeObserver(self)
         }
     }
 }

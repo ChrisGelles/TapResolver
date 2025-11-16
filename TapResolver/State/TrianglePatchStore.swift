@@ -536,6 +536,15 @@ class TrianglePatchStore: ObservableObject {
     func save() {
         ctx.write(persistenceKey, value: triangles)
         print("💾 Saved \(triangles.count) triangle(s)")
+        
+        // Log detailed triangle data
+        for triangle in triangles {
+            print("💾 Saving Triangle \(String(triangle.id.uuidString.prefix(8))):")
+            print("   Vertices: \(triangle.vertexIDs.map { String($0.uuidString.prefix(8)) })")
+            print("   AR Markers: \(triangle.arMarkerIDs.map { String($0.prefix(8)) })")
+            print("   Calibrated: \(triangle.isCalibrated)")
+            print("   Quality: \(Int(triangle.calibrationQuality * 100))%")
+        }
     }
     
     func load() {
