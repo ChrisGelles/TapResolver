@@ -66,8 +66,17 @@ struct ARViewWithOverlays: View {
                 // Debug: Print instance and mode
                 let instanceAddress = Unmanaged.passUnretained(self as AnyObject).toOpaque()
                 
-                // Set mode to idle - user will choose Calibrate or Relocalize
-                currentMode = .idle
+                // If in calibration mode with a selected triangle, initialize calibration state
+                if isCalibrationMode, let triangle = selectedTriangle {
+                    arCalibrationCoordinator.startCalibration(for: triangle.id)
+                    arCalibrationCoordinator.setVertices(triangle.vertexIDs)
+                    currentMode = .triangleCalibration(triangleID: triangle.id)
+                    print("🎯 ARViewWithOverlays: Auto-initialized calibration for triangle \(String(triangle.id.uuidString.prefix(8)))")
+                } else {
+                    // Set mode to idle - user will choose Calibrate or Relocalize
+                    currentMode = .idle
+                }
+                
                 print("🧪 ARView ID: triangle viewing mode for \(selectedTriangle.map { String($0.id.uuidString.prefix(8)) } ?? "none")")
                 print("🧪 ARViewWithOverlays instance: \(instanceAddress)")
             }
@@ -260,6 +269,32 @@ struct ARViewWithOverlays: View {
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
                             .background(Color.red.opacity(0.8))
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Ghost Markers button
+                        Button(action: {
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("PlantGhostMarkers"),
+                                object: nil,
+                                userInfo: [
+                                    "triangleID": triangle.id,
+                                    "triangleStore": arCalibrationCoordinator.triangleStore
+                                ]
+                            )
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "eye.trianglebadge.exclamationmark.fill")
+                                    .font(.system(size: 14))
+                                Text("Show Ghost Markers")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.purple.opacity(0.8))
                             .cornerRadius(8)
                         }
                         .buttonStyle(.plain)
@@ -678,17 +713,32 @@ struct ARPiPMapView: View {
                             .position(userPos)
                         }
                         
-                        // Focused point indicator (if any)
+                        // Focused point indicator (if any) - must be after MapContainer to render on top
                         if let pointID = focusedPointID,
                            let point = mapPointStore.points.first(where: { $0.id == pointID }) {
-                            Circle()
-                                .fill(Color.cyan)
-                                .frame(width: 12, height: 12)
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color.white, lineWidth: 2)
-                                )
-                                .position(point.mapPoint)
+                            ZStack {
+                                // Outer ring for visibility
+                                Circle()
+                                    .fill(Color.cyan.opacity(0.3))
+                                    .frame(width: 20, height: 20)
+                                
+                                // Inner circle
+                                Circle()
+                                    .fill(Color.cyan)
+                                    .frame(width: 12, height: 12)
+                                
+                                // White border
+                                Circle()
+                                    .stroke(Color.white, lineWidth: 2)
+                                    .frame(width: 12, height: 12)
+                            }
+                            .position(point.mapPoint)
+                            .onAppear {
+                                print("📍 PiP Map: Displaying focused point \(String(pointID.uuidString.prefix(8))) at (\(Int(point.mapPoint.x)), \(Int(point.mapPoint.y)))")
+                            }
+                        } else if isCalibrationMode {
+                            // Debug: Log when focused point should be shown but isn't
+                            let _ = print("⚠️ PiP Map: isCalibrationMode=\(isCalibrationMode), focusedPointID=\(focusedPointID?.uuidString.prefix(8) ?? "nil"), currentVertexIndex=\(arCalibrationCoordinator.currentVertexIndex)")
                         }
                     }
                     .scaleEffect(currentScale)
@@ -852,7 +902,23 @@ struct ARPiPMapView: View {
     private func calculateTargetTransform(image: UIImage, frameSize: CGSize) -> (scale: CGFloat, offset: CGSize) {
         let imageSize = image.size
         
+        // CASE 1: Focus on single point (vertex during calibration) - PRIORITY: check this FIRST
+        // During calibration, we want to zoom in on the current vertex, not the whole triangle
+        if let pointID = focusedPointID,
+           let point = mapPointStore.points.first(where: { $0.id == pointID }) {
+            // Single point mode - create region around point with calibration zoom
+            // Reduced regionSize for tighter zoom (was 400, now 250 for closer view)
+            let regionSize: CGFloat = 250
+            let cornerA = CGPoint(x: point.mapPoint.x - regionSize/2, y: point.mapPoint.y - regionSize/2)
+            let cornerB = CGPoint(x: point.mapPoint.x + regionSize/2, y: point.mapPoint.y + regionSize/2)
+            
+            let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+            let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+            return (scale, offset)
+        }
+        
         // CASE 0: Auto-zoom to triangle if enabled and triangle is selected
+        // Only use this when NOT in calibration mode (no focused point)
         if autoZoomToTriangle, let triangle = selectedTriangle {
             let vertexPoints = triangle.vertexIDs.compactMap { vertexID in
                 mapPointStore.points.first(where: { $0.id == vertexID })?.mapPoint
@@ -862,19 +928,6 @@ struct ARPiPMapView: View {
                 // Use existing fitting transform logic with padding
                 return calculateFittingTransform(points: vertexPoints, frameSize: frameSize, imageSize: imageSize, padding: frameSize.width * 0.1) // 10% padding
             }
-        }
-        
-        // CASE 1: Focus on single point (vertex during calibration)
-        if let pointID = focusedPointID,
-           let point = mapPointStore.points.first(where: { $0.id == pointID }) {
-            // Single point mode - create region around point with calibration zoom
-            let regionSize: CGFloat = 400
-            let cornerA = CGPoint(x: point.mapPoint.x - regionSize/2, y: point.mapPoint.y - regionSize/2)
-            let cornerB = CGPoint(x: point.mapPoint.x + regionSize/2, y: point.mapPoint.y + regionSize/2)
-            
-            let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
-            let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
-            return (scale, offset)
         }
         
         // CASE 2: Focus on full triangle (all 3 points) when calibration complete

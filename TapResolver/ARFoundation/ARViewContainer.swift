@@ -4,6 +4,14 @@ import SceneKit
 import simd
 import CoreImage
 
+/// Filter options for ghost marker generation
+enum GhostMarkerFilter {
+    case all                    // All map points
+    case adjacentTriangles      // Only vertices of adjacent triangles
+    case edgePoints             // Only points with triangleEdge role
+    case adjacentEdges          // Adjacent triangles AND edge role (recommended)
+}
+
 struct ARViewContainer: UIViewRepresentable {
     @Binding var mode: ARMode
     
@@ -174,6 +182,23 @@ struct ARViewContainer: UIViewRepresentable {
                       let triangleID = notification.userInfo?["triangleID"] as? UUID else { return }
                 print("📐 Triangle calibration complete - drawing lines for \(String(triangleID.uuidString.prefix(8)))")
                 self.drawTriangleLines(triangleID: triangleID)
+            }
+            
+            // Listen for ghost marker generation request
+            NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("PlantGhostMarkers"),
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self,
+                      let triangleID = notification.userInfo?["triangleID"] as? UUID,
+                      let triangleStore = notification.userInfo?["triangleStore"] as? TrianglePatchStore,
+                      let triangle = triangleStore.triangle(withID: triangleID) else { return }
+                
+                print("👻 Ghost marker request received for triangle \(String(triangleID.uuidString.prefix(8)))")
+                
+                // Use adjacentEdges filter (adjacent triangles + edge designation)
+                self.plantGhostMarkers(calibratedTriangle: triangle, triangleStore: triangleStore, filter: .adjacentEdges)
             }
         }
         
@@ -677,6 +702,170 @@ struct ARViewContainer: UIViewRepresentable {
             surveyMarkers.removeAll()
             lastHapticTriggerTime.removeAll()  // Clear collision tracking state
             print("🧹 Cleared survey markers")
+        }
+        
+        // MARK: - Ghost Marker Generation
+        
+        /// Get vertices of triangles adjacent to the given triangle
+        private func getAdjacentTriangleVertices(
+            to triangle: TrianglePatch,
+            triangleStore: TrianglePatchStore,
+            mapPointStore: MapPointStore
+        ) -> [MapPointStore.MapPoint] {
+            // Get all adjacent triangles (share 2 vertices)
+            let adjacentTriangles = triangleStore.findAdjacentTriangles(triangle.id)
+            
+            // Get all vertex IDs from adjacent triangles
+            let vertexIDs = Set(adjacentTriangles.flatMap { $0.vertexIDs })
+            
+            // Convert to MapPoint objects
+            return vertexIDs.compactMap { vertexID in
+                mapPointStore.points.first(where: { $0.id == vertexID })
+            }
+        }
+        
+        /// Filter map points by role
+        private func filterByRole(
+            points: [MapPointStore.MapPoint],
+            role: MapPointRole
+        ) -> [MapPointStore.MapPoint] {
+            return points.filter { $0.roles.contains(role) }
+        }
+        
+        /// Exclude points that already have AR markers
+        private func excludeExistingMarkers(
+            points: [MapPointStore.MapPoint],
+            arWorldMapStore: ARWorldMapStore
+        ) -> [MapPointStore.MapPoint] {
+            let markedIDs = Set(arWorldMapStore.markers.compactMap { marker in
+                UUID(uuidString: marker.mapPointID)
+            })
+            
+            return points.filter { !markedIDs.contains($0.id) }
+        }
+        
+        /// Plant ghost markers for map points based on calibrated triangle
+        func plantGhostMarkers(
+            calibratedTriangle: TrianglePatch,
+            triangleStore: TrianglePatchStore,
+            filter: GhostMarkerFilter = .adjacentEdges
+        ) {
+            guard let mapPointStore = mapPointStore,
+                  let sceneView = sceneView else {
+                print("⚠️ Cannot plant ghost markers: stores not available")
+                return
+            }
+            
+            guard calibratedTriangle.isCalibrated,
+                  calibratedTriangle.arMarkerIDs.count == 3 else {
+                print("⚠️ Triangle must be calibrated with 3 AR markers")
+                return
+            }
+            
+            // Get triangle vertices in 2D map space
+            let vertices2D = calibratedTriangle.vertexIDs.compactMap { vertexID in
+                mapPointStore.points.first(where: { $0.id == vertexID })?.mapPoint
+            }
+            
+            // Get triangle vertices in 3D AR space
+            let vertices3D = calibratedTriangle.arMarkerIDs.compactMap { markerIDString -> simd_float3? in
+                guard let markerUUID = UUID(uuidString: markerIDString),
+                      let markerNode = placedMarkers[markerUUID] else { return nil }
+                return markerNode.simdPosition
+            }
+            
+            guard vertices2D.count == 3, vertices3D.count == 3 else {
+                print("⚠️ Could not get all triangle vertices")
+                return
+            }
+            
+            // Get ground Y (average of triangle vertices)
+            let groundY = (vertices3D[0].y + vertices3D[1].y + vertices3D[2].y) / 3.0
+            
+            // Get candidate points based on filter
+            var candidatePoints: [MapPointStore.MapPoint] = []
+            
+            switch filter {
+            case .all:
+                candidatePoints = mapPointStore.points
+                
+            case .adjacentTriangles:
+                candidatePoints = getAdjacentTriangleVertices(
+                    to: calibratedTriangle,
+                    triangleStore: triangleStore,
+                    mapPointStore: mapPointStore
+                )
+                
+            case .edgePoints:
+                candidatePoints = filterByRole(
+                    points: mapPointStore.points,
+                    role: .triangleEdge
+                )
+                
+            case .adjacentEdges:
+                let adjacentPoints = getAdjacentTriangleVertices(
+                    to: calibratedTriangle,
+                    triangleStore: triangleStore,
+                    mapPointStore: mapPointStore
+                )
+                candidatePoints = filterByRole(points: adjacentPoints, role: .triangleEdge)
+            }
+            
+            // Exclude points that already have markers (need arWorldMapStore for this)
+            // For now, we'll skip this check since we don't have direct access
+            // The markers will be filtered by checking placedMarkers
+            
+            // Exclude the calibrated triangle's own vertices
+            let calibratedVertexIDs = Set(calibratedTriangle.vertexIDs)
+            candidatePoints = candidatePoints.filter { !calibratedVertexIDs.contains($0.id) }
+            
+            print("👻 Planting ghost markers for \(candidatePoints.count) map points...")
+            
+            // Plant ghost marker for each candidate point
+            for point in candidatePoints {
+                // Use existing interpolation function to get 3D position
+                guard let estimated3D = interpolateARPosition(
+                    fromMapPoint: point.mapPoint,
+                    triangle2D: vertices2D,
+                    triangle3D: vertices3D
+                ) else {
+                    print("⚠️ Could not interpolate position for point \(String(point.id.uuidString.prefix(8)))")
+                    continue
+                }
+                
+                // Use consistent ground Y
+                let ghostPosition = simd_float3(estimated3D.x, groundY, estimated3D.z)
+                
+                // Create ghost marker
+                let ghostID = UUID()
+                let options = MarkerOptions(
+                    color: UIColor.systemGray.withAlphaComponent(0.6),
+                    markerID: ghostID,
+                    userDeviceHeight: userDeviceHeight,
+                    radius: 0.03,
+                    animateOnAppearance: false,
+                    isGhost: true
+                )
+                
+                let ghostNode = ARMarkerRenderer.createNode(at: ghostPosition, options: options)
+                ghostNode.name = "ghostMarker_\(point.id.uuidString)"
+                
+                sceneView.scene.rootNode.addChildNode(ghostNode)
+                ghostMarkers[point.id] = ghostNode
+                
+                print("👻 Planted ghost marker for MapPoint \(String(point.id.uuidString.prefix(8))) at (\(String(format: "%.2f", ghostPosition.x)), \(String(format: "%.2f", ghostPosition.y)), \(String(format: "%.2f", ghostPosition.z)))")
+            }
+            
+            print("✅ Ghost marker planting complete: \(ghostMarkers.count) markers")
+        }
+        
+        /// Clear all ghost markers
+        func clearGhostMarkers() {
+            for (_, node) in ghostMarkers {
+                node.removeFromParentNode()
+            }
+            ghostMarkers.removeAll()
+            print("🧹 Cleared ghost markers")
         }
         
         /// Draw yellow lines connecting triangle vertices
