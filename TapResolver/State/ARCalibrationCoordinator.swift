@@ -93,6 +93,14 @@ final class ARCalibrationCoordinator: ObservableObject {
         calibrationState = .placingVertices(currentIndex: 0)
         print("🎯 CalibrationState → \(stateDescription)")
         
+        // Clear ALL marker IDs for re-calibration
+        print("🔄 Re-calibrating triangle - clearing ALL existing markers")
+        print("   Old arMarkerIDs: \(triangle.arMarkerIDs)")
+        triangleStore.clearAllMarkers(for: triangleID)
+        if let updatedTriangle = triangleStore.triangle(withID: triangleID) {
+            print("   New arMarkerIDs: \(updatedTriangle.arMarkerIDs)")
+        }
+        
         // Validate triangleVertices is set correctly
         guard triangleVertices.count == 3 else {
             print("❌ Invalid triangle: expected 3 vertices, got \(triangleVertices.count)")

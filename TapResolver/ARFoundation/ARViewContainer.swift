@@ -178,8 +178,12 @@ struct ARViewContainer: UIViewRepresentable {
         }
         
         @objc func handlePlaceMarkerAtCursor() {
+            print("🔍 [PLACE_MARKER_CROSSHAIR] Called")
+            
+            // Note: Calibration state check should be done before posting notification
+            // This is a fallback guard in case notification is posted incorrectly
             guard let position = currentCursorPosition else {
-                print("⚠️ No cursor position available for marker placement")
+                print("⚠️ [PLACE_MARKER_CROSSHAIR] No cursor position available for marker placement")
                 return
             }
             placeMarker(at: position)

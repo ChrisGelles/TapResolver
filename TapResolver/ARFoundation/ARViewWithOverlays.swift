@@ -122,6 +122,14 @@ struct ARViewWithOverlays: View {
                 print("   markerID: \(String(markerID.uuidString.prefix(8)))")
                 print("   currentVertexID: \(String(currentVertexID.uuidString.prefix(8)))")
                 
+                // CRITICAL SAFETY CHECK: Block if not in placing vertices state
+                guard case .placingVertices = arCalibrationCoordinator.calibrationState else {
+                    print("⚠️ [REGISTER_MARKER_TRACE] CRITICAL: registerMarker called outside placingVertices state!")
+                    print("   Current state: \(arCalibrationCoordinator.stateDescription)")
+                    print("   This should never happen - investigating caller")
+                    return
+                }
+                
                 // Only capture photo when placing vertices (not in survey mode)
                 if case .placingVertices = arCalibrationCoordinator.calibrationState {
                     print("🔍 [PHOTO_TRACE] Photo capture requested (placing vertices)")
@@ -286,7 +294,13 @@ struct ARViewWithOverlays: View {
                         
                         // Fill Triangle button
                         Button(action: {
+                            print("🎯 [FILL_TRIANGLE_BTN] Button tapped")
+                            print("   Current state: \(arCalibrationCoordinator.stateDescription)")
+                            
                             arCalibrationCoordinator.enterSurveyMode()
+                            
+                            print("🎯 [FILL_TRIANGLE_BTN] Entering survey mode")
+                            print("   New state: \(arCalibrationCoordinator.stateDescription)")
                             
                             NotificationCenter.default.post(
                                 name: NSNotification.Name("FillTriangleWithSurveyMarkers"),
@@ -322,12 +336,6 @@ struct ARViewWithOverlays: View {
                    let currentVertexID = arCalibrationCoordinator.getCurrentVertexID(),
                    let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }) {
                     
-                    // Only print if vertex ID changed (prevent spam)
-                    if lastPrintedPhotoRefVertexID != currentVertexID {
-                        print("🔍 [PHOTO_REF] Displaying photo reference for vertex \(String(currentVertexID.uuidString.prefix(8)))")
-                        lastPrintedPhotoRefVertexID = currentVertexID
-                    }
-                    
                     if let photoData = mapPointStore.loadPhotoFromDisk(for: currentVertexID) ?? mapPoint.locationPhotoData,
                        let uiImage = UIImage(data: photoData) {
                         
@@ -340,6 +348,13 @@ struct ARViewWithOverlays: View {
                         .cornerRadius(12)
                         .position(x: 100, y: 110) // 100 = half width + margin
                         .zIndex(999)
+                        .onAppear {
+                            // Only print if vertex ID changed (prevent spam)
+                            if lastPrintedPhotoRefVertexID != currentVertexID {
+                                print("🔍 [PHOTO_REF] Displaying photo reference for vertex \(String(currentVertexID.uuidString.prefix(8)))")
+                                lastPrintedPhotoRefVertexID = currentVertexID
+                            }
+                        }
                         
                     } else {
                         // ⛔️ No photo available — show fallback placeholder
@@ -353,6 +368,13 @@ struct ARViewWithOverlays: View {
                             )
                             .position(x: 100, y: 110)
                             .zIndex(999)
+                            .onAppear {
+                                // Only print if vertex ID changed (prevent spam)
+                                if lastPrintedPhotoRefVertexID != currentVertexID {
+                                    print("🔍 [PHOTO_REF] Displaying photo reference for vertex \(String(currentVertexID.uuidString.prefix(8)))")
+                                    lastPrintedPhotoRefVertexID = currentVertexID
+                                }
+                            }
                     }
                 }
             }
@@ -426,31 +448,33 @@ struct ARViewWithOverlays: View {
                         .foregroundColor(.white)
                         .padding(.bottom, 8)
                     
-                    // Place Marker button
-                    Button(action: {
-                        print("🔍 [PLACE_MARKER_BTN] Button tapped")
-                        print("   Calibration state: \(arCalibrationCoordinator.stateDescription)")
-                        
-                        guard case .placingVertices = arCalibrationCoordinator.calibrationState else {
-                            print("⚠️ [PLACE_MARKER_BTN] Blocked - not in placingVertices state")
-                            return
+                    // Place Marker button - only visible during vertex placement
+                    if case .placingVertices = arCalibrationCoordinator.calibrationState {
+                        Button(action: {
+                            print("🔍 [PLACE_MARKER_BTN] Button tapped")
+                            print("   Calibration state: \(arCalibrationCoordinator.stateDescription)")
+                            
+                            guard case .placingVertices = arCalibrationCoordinator.calibrationState else {
+                                print("⚠️ [PLACE_MARKER_BTN] Blocked - not in placingVertices state")
+                                return
+                            }
+                            
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("PlaceMarkerAtCursor"),
+                                object: nil
+                            )
+                        }) {
+                            Text("Place Marker")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(.ultraThickMaterial)
+                                .cornerRadius(12)
                         }
-                        
-                        NotificationCenter.default.post(
-                            name: NSNotification.Name("PlaceMarkerAtCursor"),
-                            object: nil
-                        )
-                    }) {
-                        Text("Place Marker")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .padding()
-                            .frame(maxWidth: .infinity)
-                            .background(.ultraThickMaterial)
-                            .cornerRadius(12)
+                        .padding(.horizontal, 40)
+                        .padding(.bottom, 12)
                     }
-                    .padding(.horizontal, 40)
-                    .padding(.bottom, 12)
                     
                     // Survey Marker Generation Button
                     if let currentTriangleID = arCalibrationCoordinator.activeTriangleID,
@@ -459,7 +483,13 @@ struct ARViewWithOverlays: View {
                        arCalibrationCoordinator.isTriangleComplete(currentTriangleID) {
                         
                         Button(action: {
+                            print("🎯 [FILL_TRIANGLE_BTN] Button tapped")
+                            print("   Current state: \(arCalibrationCoordinator.stateDescription)")
+                            
                             arCalibrationCoordinator.enterSurveyMode()
+                            
+                            print("🎯 [FILL_TRIANGLE_BTN] Entering survey mode")
+                            print("   New state: \(arCalibrationCoordinator.stateDescription)")
                             
                             // Post notification to trigger survey marker generation
                             NotificationCenter.default.post(
@@ -529,22 +559,26 @@ struct ARViewWithOverlays: View {
                     .padding(.horizontal, 40)
                     .padding(.bottom, 12)
                     
-                    Button(action: {
-                        NotificationCenter.default.post(
-                            name: NSNotification.Name("PlaceMarkerAtCursor"),
-                            object: nil
-                        )
-                    }) {
-                        Text("Place AR Marker")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .padding()
-                            .frame(maxWidth: .infinity)
-                            .background(.ultraThickMaterial)
-                            .cornerRadius(12)
+                    // Place AR Marker button - only in idle mode (not during calibration)
+                    if case .idle = arCalibrationCoordinator.calibrationState {
+                        Button(action: {
+                            print("🔍 [PLACE_AR_MARKER_BTN] Button tapped (idle mode)")
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("PlaceMarkerAtCursor"),
+                                object: nil
+                            )
+                        }) {
+                            Text("Place AR Marker")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(.ultraThickMaterial)
+                                .cornerRadius(12)
+                        }
+                        .padding(.horizontal, 40)
+                        .padding(.bottom, 60)
                     }
-                    .padding(.horizontal, 40)
-                    .padding(.bottom, 60)
                 }
                 .zIndex(997)
             }

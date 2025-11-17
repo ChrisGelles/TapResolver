@@ -456,6 +456,25 @@ class TrianglePatchStore: ObservableObject {
         triangles.first(where: { $0.id == id })
     }
     
+    /// Clears all AR marker IDs from a triangle (used for re-calibration)
+    func clearAllMarkers(for triangleID: UUID) {
+        guard let index = triangles.firstIndex(where: { $0.id == triangleID }) else {
+            print("⚠️ [CLEAR_MARKERS] Triangle not found for marker clearing: \(String(triangleID.uuidString.prefix(8)))")
+            return
+        }
+        
+        print("🧹 [CLEAR_MARKERS] Clearing markers for triangle \(String(triangleID.uuidString.prefix(8)))")
+        print("   Before: \(triangles[index].arMarkerIDs)")
+        
+        triangles[index].arMarkerIDs = []
+        triangles[index].isCalibrated = false
+        
+        print("   After: \(triangles[index].arMarkerIDs)")
+        
+        save()
+        print("✅ [CLEAR_MARKERS] Cleared and saved")
+    }
+    
     /// Add an AR marker ID to a triangle's vertex
     func addMarker(mapPointID: UUID, markerID: UUID) {
         print("🔍 [ADD_MARKER_TRACE] Called with:")
@@ -478,11 +497,19 @@ class TrianglePatchStore: ObservableObject {
             if let vertexIndex = triangles[index].vertexIDs.firstIndex(of: mapPointID) {
                 print("🔍 [ADD_MARKER_TRACE] Found vertex at index \(vertexIndex)")
                 
+                // Ensure array has exactly 3 slots, all initialized to empty string if needed
+                if triangles[index].arMarkerIDs.isEmpty {
+                    triangles[index].arMarkerIDs = ["", "", ""]
+                    print("🔍 [ADD_MARKER_TRACE] Initialized arMarkerIDs array with 3 empty slots")
+                }
+                
                 // Ensure arMarkerIDs array has enough elements
-                while triangles[index].arMarkerIDs.count <= vertexIndex {
+                while triangles[index].arMarkerIDs.count < 3 {
                     triangles[index].arMarkerIDs.append("")
                     print("🔍 [ADD_MARKER_TRACE] Expanded arMarkerIDs array to \(triangles[index].arMarkerIDs.count) slots")
                 }
+                
+                print("🔍 [ADD_MARKER_TRACE] Array ready, setting index \(vertexIndex)")
                 
                 let oldValue = triangles[index].arMarkerIDs[vertexIndex]
                 triangles[index].arMarkerIDs[vertexIndex] = markerIDString
