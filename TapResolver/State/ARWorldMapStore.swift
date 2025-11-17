@@ -23,6 +23,23 @@ public final class ARWorldMapStore: ObservableObject {
     @Published public var markers: [ARMarker] = []
     @Published public var isLoading: Bool = false
     
+    // RELOCALIZATION PREP: Current AR session identifier
+    // Every time a new AR session starts, generate a new UUID.
+    // This tracks which markers belong to which session for coordinate system management.
+    // TODO: When implementing relocalization, use this to detect when markers from different
+    // sessions are being mixed, and trigger the transformation calculation.
+    @Published public var currentSessionID: UUID = UUID()
+    @Published public var currentSessionStartTime: Date = Date()
+    
+    // RELOCALIZATION PREP: Historical session metadata
+    // TODO: Store all previous session origins and transformations
+    // var sessionTransforms: [UUID: SessionTransform] = [:]
+    // struct SessionTransform {
+    //     let sessionID: UUID
+    //     let originTransform: simd_float4x4  // Where the origin was in world space
+    //     let transformToCurrentSession: simd_float4x4?  // Transformation matrix to current session
+    // }
+    
     // MARK: - Debounce helpers
     
     private var lastConfigSig: String = ""
@@ -46,6 +63,88 @@ public final class ARWorldMapStore: ObservableObject {
         public let worldTransform: CodableTransform
         public let createdAt: Date
         public var observations: MarkerObservations?
+        
+        // RELOCALIZATION PREP: Session tracking
+        // When we implement lightweight relocalization, this will identify which AR session
+        // created this marker. Markers from different sessions have different coordinate origins.
+        // TODO: Use this to group markers by session and calculate transformations between sessions.
+        public let sessionID: UUID
+        public let sessionTimestamp: Date
+        
+        // RELOCALIZATION PREP: Original position at time of placement
+        // This is the raw position relative to the session's origin (0,0,0).
+        // When relocalization is implemented, we'll transform this using the session transform matrix.
+        public var positionInSession: simd_float3 {
+            let transform = worldTransform.toSimd()
+            return simd_float3(
+                transform.columns.3.x,
+                transform.columns.3.y,
+                transform.columns.3.z
+            )
+        }
+        
+        // RELOCALIZATION PREP: Future property for transformed position
+        // TODO: When implementing relocalization, add:
+        // var transformedPosition: simd_float3?  // Position after applying session transformation
+        // var isRelocalized: Bool                 // Has this been transformed to current session?
+        
+        public init(id: String, mapPointID: String, worldTransform: CodableTransform, createdAt: Date = Date(), observations: MarkerObservations? = nil, sessionID: UUID, sessionTimestamp: Date) {
+            self.id = id
+            self.mapPointID = mapPointID
+            self.worldTransform = worldTransform
+            self.createdAt = createdAt
+            self.observations = observations
+            self.sessionID = sessionID
+            self.sessionTimestamp = sessionTimestamp
+        }
+        
+        // MARK: - Codable Implementation (with backward compatibility)
+        
+        enum CodingKeys: String, CodingKey {
+            case id
+            case mapPointID
+            case worldTransform
+            case createdAt
+            case observations
+            case sessionID
+            case sessionTimestamp
+        }
+        
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            
+            id = try container.decode(String.self, forKey: .id)
+            mapPointID = try container.decode(String.self, forKey: .mapPointID)
+            worldTransform = try container.decode(CodableTransform.self, forKey: .worldTransform)
+            createdAt = try container.decode(Date.self, forKey: .createdAt)
+            observations = try container.decodeIfPresent(MarkerObservations.self, forKey: .observations)
+            
+            // Backward compatibility: If sessionID/sessionTimestamp are missing, use defaults
+            // This handles old markers saved before session tracking was implemented
+            if let sessionID = try? container.decode(UUID.self, forKey: .sessionID),
+               let sessionTimestamp = try? container.decode(Date.self, forKey: .sessionTimestamp) {
+                self.sessionID = sessionID
+                self.sessionTimestamp = sessionTimestamp
+            } else {
+                // Legacy marker - assign to a default "unknown" session
+                // This marks it as needing re-calibration in a new session
+                self.sessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000000") ?? UUID()
+                self.sessionTimestamp = createdAt
+                print("⚠️ Loaded legacy marker \(id) without session info - assigned to unknown session")
+            }
+        }
+        
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            
+            try container.encode(id, forKey: .id)
+            try container.encode(mapPointID, forKey: .mapPointID)
+            try container.encode(worldTransform, forKey: .worldTransform)
+            try container.encode(createdAt, forKey: .createdAt)
+            try container.encodeIfPresent(observations, forKey: .observations)
+            try container.encode(sessionID, forKey: .sessionID)
+            try container.encode(sessionTimestamp, forKey: .sessionTimestamp)
+        }
     }
     
     public struct MarkerObservations: Codable {
@@ -633,12 +732,31 @@ public final class ARWorldMapStore: ObservableObject {
         print("   Max tracked: \(cfg.maximumNumberOfTrackedImages)")
     }
     
+    // MARK: - Session Management
+    
+    /// Call this when a new AR session begins to generate a new session ID
+    /// RELOCALIZATION PREP: In the future, this will also detect known markers and calculate transformations
+    public func startNewSession() {
+        currentSessionID = UUID()
+        currentSessionStartTime = Date()
+        print("🆕 New AR session started: \(currentSessionID)")
+        print("   Session timestamp: \(currentSessionStartTime)")
+        
+        // RELOCALIZATION TODO: When implementing relocalization:
+        // 1. Detect if any known markers are visible in the new session
+        // 2. Compare their old positions (from previous session) with new positions
+        // 3. Calculate transformation matrix: old -> new
+        // 4. Apply transformation to all markers from previous sessions
+        // 5. Store the transformation for future use
+    }
+    
     // MARK: - Diagnostics
     
     public func printDiagnostic() {
         print("\n📊 ARWorldMapStore Diagnostic")
         print("Location: \(ctx.locationID)")
         print("GlobalMap exists: \(globalMapExists)")
+        print("Current session: \(currentSessionID)")
         if let meta = globalMapMeta {
             print("  Version: \(meta.version)")
             print("  Feature points: \(meta.featurePointCount)")
@@ -651,6 +769,7 @@ public final class ARWorldMapStore: ObservableObject {
             print("  • \(marker.id)")
             print("    MapPoint: \(marker.mapPointID)")
             print("    Created: \(marker.createdAt)")
+            print("    Session: \(marker.sessionID)")
         }
         print()
     }

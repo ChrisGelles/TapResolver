@@ -491,26 +491,27 @@ class TrianglePatchStore: ObservableObject {
     }
     
     /// Add an AR marker ID to a triangle's vertex
-    func addMarker(mapPointID: UUID, markerID: UUID) {
+    func addMarkerToTriangle(triangleID: UUID, vertexMapPointID: UUID, markerID: UUID) {
         saveQueue.sync {
-            _addMarker(mapPointID: mapPointID, markerID: markerID)
+            _addMarkerToTriangle(triangleID: triangleID, vertexMapPointID: vertexMapPointID, markerID: markerID)
         }
     }
     
-    private func _addMarker(mapPointID: UUID, markerID: UUID) {
+    private func _addMarkerToTriangle(triangleID: UUID, vertexMapPointID: UUID, markerID: UUID) {
         isModifying = true
         defer { isModifying = false }
         
         print("🔍 [ADD_MARKER_TRACE] Called with:")
-        print("   mapPointID: \(String(mapPointID.uuidString.prefix(8)))")
+        print("   triangleID: \(String(triangleID.uuidString.prefix(8)))")
+        print("   vertexMapPointID: \(String(vertexMapPointID.uuidString.prefix(8)))")
         print("   markerID: \(String(markerID.uuidString.prefix(8)))")
         
-        guard let index = triangles.firstIndex(where: { $0.vertexIDs.contains(mapPointID) }) else {
-            print("⚠️ [ADD_MARKER_TRACE] Cannot add marker: No triangle found with vertex \(String(mapPointID.uuidString.prefix(8)))")
+        guard let index = triangles.firstIndex(where: { $0.id == triangleID }) else {
+            print("⚠️ [ADD_MARKER_TRACE] Cannot add marker: No triangle found with ID \(String(triangleID.uuidString.prefix(8)))")
             return
         }
         
-        print("🔍 [ADD_MARKER_TRACE] Triangle found at index \(index):")
+        print("🔍 [ADD_MARKER_TRACE] Triangle found:")
         print("   Triangle ID: \(String(triangles[index].id.uuidString.prefix(8)))")
         print("   Current arMarkerIDs: \(triangles[index].arMarkerIDs)")
         print("   Current arMarkerIDs.count: \(triangles[index].arMarkerIDs.count)")
@@ -518,7 +519,7 @@ class TrianglePatchStore: ObservableObject {
         let markerIDString = markerID.uuidString
         if !triangles[index].arMarkerIDs.contains(markerIDString) {
             // Find the index of the vertex in the triangle
-            if let vertexIndex = triangles[index].vertexIDs.firstIndex(of: mapPointID) {
+            if let vertexIndex = triangles[index].vertexIDs.firstIndex(of: vertexMapPointID) {
                 print("🔍 [ADD_MARKER_TRACE] Found vertex at index \(vertexIndex)")
                 
                 // Ensure array has exactly 3 slots, all initialized to empty string if needed
@@ -559,7 +560,7 @@ class TrianglePatchStore: ObservableObject {
                 print("✅ [ADD_MARKER_TRACE] Saved triangles to storage")
                 print("✅ Added marker \(String(markerIDString.prefix(8))) to triangle vertex \(vertexIndex)")
             } else {
-                print("⚠️ [ADD_MARKER_TRACE] Could not find vertex index for mapPointID \(String(mapPointID.uuidString.prefix(8)))")
+                print("⚠️ [ADD_MARKER_TRACE] Could not find vertex index for vertexMapPointID \(String(vertexMapPointID.uuidString.prefix(8)))")
             }
         } else {
             print("⚠️ [ADD_MARKER_TRACE] Marker \(String(markerIDString.prefix(8))) already exists in triangle")

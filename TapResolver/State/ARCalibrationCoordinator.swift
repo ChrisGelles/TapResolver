@@ -215,6 +215,10 @@ final class ARCalibrationCoordinator: ObservableObject {
         do {
             let worldMapMarker = convertToWorldMapMarker(marker)
             try arStore.saveMarker(worldMapMarker)
+            print("💾 Saving AR Marker with session context:")
+            print("   Marker ID: \(marker.id)")
+            print("   Session ID: \(arStore.currentSessionID)")
+            print("   Session Time: \(arStore.currentSessionStartTime)")
             print("   Storage Key: ARWorldMapStore (saved successfully)")
         } catch {
             print("❌ Failed to save marker to ARWorldMapStore: \(error)")
@@ -222,7 +226,11 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
         
         // Update triangle with marker ID
-        triangleStore.addMarker(mapPointID: mapPointID, markerID: marker.id)
+        triangleStore.addMarkerToTriangle(
+            triangleID: triangleID,
+            vertexMapPointID: mapPointID,
+            markerID: marker.id
+        )
         
         // Track placed marker
         placedMarkers.append(mapPointID)
@@ -684,13 +692,15 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         let codableTransform = ARWorldMapStore.CodableTransform(from: transform)
         
-        // Use memberwise initializer (all properties are let)
+        // Include session tracking for relocalization prep
         return ARWorldMapStore.ARMarker(
             id: markerIDString,
             mapPointID: mapPointIDString,
             worldTransform: codableTransform,
             createdAt: marker.createdAt,
-            observations: nil
+            observations: nil,
+            sessionID: arStore.currentSessionID,
+            sessionTimestamp: arStore.currentSessionStartTime
         )
     }
 }

@@ -63,6 +63,10 @@ struct ARViewWithOverlays: View {
             )
             .edgesIgnoringSafeArea(.all)
             .onAppear {
+                // RELOCALIZATION PREP: Start new AR session when view appears
+                // This ensures each AR session gets a unique session ID for coordinate tracking
+                arWorldMapStore.startNewSession()
+                
                 // Update relocalization coordinator to use actual store
                 relocalizationCoordinator.updateARStore(arWorldMapStore)
                 
@@ -492,13 +496,16 @@ struct ARViewWithOverlays: View {
                             print("   New state: \(arCalibrationCoordinator.stateDescription)")
                             
                             // Post notification to trigger survey marker generation
+                            // CRITICAL: Pass triangleStore so we can look up triangle by ID
+                            // Don't rely on selectedTriangle which might be stale
                             NotificationCenter.default.post(
                                 name: NSNotification.Name("FillTriangleWithSurveyMarkers"),
                                 object: nil,
                                 userInfo: [
                                     "triangleID": currentTriangleID,
                                     "spacing": surveySpacing,
-                                    "arWorldMapStore": arCalibrationCoordinator.arStore
+                                    "arWorldMapStore": arCalibrationCoordinator.arStore,
+                                    "triangleStore": arCalibrationCoordinator.triangleStore
                                 ]
                             )
                         }) {
