@@ -104,7 +104,7 @@ extension ARSurveyCoordinator: ARSCNViewDelegate, ARSessionDelegate {
 
         let planeNode = SCNNode(geometry: plane)
         planeNode.position = SCNVector3(planeAnchor.center.x, 0, planeAnchor.center.z)
-        planeNode.eulerAngles.x = -.pi / 2
+        planeNode.eulerAngles.x = 0 //-.pi / 2
 
         node.addChildNode(planeNode)
     }

@@ -711,10 +711,25 @@ struct ARPiPMapView: View {
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
     
-    // Focused point ID for zoom/center (nil = show full map)
+    // Focused point ID for zoom/center (nil = show full map or frame triangle)
     // Computed reactively from arCalibrationCoordinator to respond to currentVertexIndex changes
     private var focusedPointID: UUID? {
-        isCalibrationMode ? arCalibrationCoordinator.getCurrentVertexID() : nil
+        guard isCalibrationMode else { return nil }
+        
+        // When calibration is complete (readyToFill state), return nil to trigger triangle framing
+        if case .readyToFill = arCalibrationCoordinator.calibrationState {
+            print("🔍 [FOCUSED_POINT] readyToFill state - returning nil to frame triangle")
+            return nil
+        }
+        
+        // During vertex placement, focus on current vertex
+        if case .placingVertices = arCalibrationCoordinator.calibrationState {
+            let vertexID = arCalibrationCoordinator.getCurrentVertexID()
+            print("🔍 [FOCUSED_POINT] placingVertices state - focusing on \(vertexID.map { String($0.uuidString.prefix(8)) } ?? "none")")
+            return vertexID
+        }
+        
+        return nil
     }
     
     // Calibration mode properties for user position tracking
@@ -832,6 +847,22 @@ struct ARPiPMapView: View {
                         withAnimation(.easeInOut(duration: 0.5)) {
                             currentScale = newTargets.scale
                             currentOffset = newTargets.offset
+                        }
+                    }
+                    .onChange(of: arCalibrationCoordinator.calibrationState) { oldState, newState in
+                        print("🔍 [PIP_ONCHANGE] Calibration state changed: \(arCalibrationCoordinator.stateDescription)")
+                        
+                        if case .readyToFill = newState {
+                            print("🎯 [PIP_ONCHANGE] Triggering triangle frame calculation")
+                            
+                            // Recalculate transform to frame the entire triangle
+                            let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
+                            withAnimation(.easeInOut(duration: 0.5)) {
+                                currentScale = newTargets.scale
+                                currentOffset = newTargets.offset
+                            }
+                            
+                            print("✅ [PIP_ONCHANGE] Applied triangle framing transform")
                         }
                     }
                     .onChange(of: arCalibrationCoordinator.placedMarkers.count) { _ in
@@ -978,6 +1009,43 @@ struct ARPiPMapView: View {
             
             let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
             let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+            return (scale, offset)
+        }
+        
+        // CASE 2: Frame entire triangle when calibration complete (readyToFill state)
+        if case .readyToFill = arCalibrationCoordinator.calibrationState,
+           let triangle = selectedTriangle,
+           triangle.vertexIDs.count == 3 {
+            
+            print("🎯 [PIP_TRANSFORM] readyToFill state - calculating triangle bounds")
+            
+            let vertexPoints = triangle.vertexIDs.compactMap { vertexID in
+                mapPointStore.points.first(where: { $0.id == vertexID })?.mapPoint
+            }
+            
+            guard vertexPoints.count == 3 else {
+                print("⚠️ [PIP_TRANSFORM] Could not find all 3 vertices")
+                // Fall through to full map view
+                return calculateFullMapTransform(frameSize: frameSize, imageSize: imageSize)
+            }
+            
+            let minX = vertexPoints.map { $0.x }.min()!
+            let maxX = vertexPoints.map { $0.x }.max()!
+            let minY = vertexPoints.map { $0.y }.min()!
+            let maxY = vertexPoints.map { $0.y }.max()!
+            
+            let padding: CGFloat = 100 // Padding around triangle
+            let cornerA = CGPoint(x: minX - padding, y: minY - padding)
+            let cornerB = CGPoint(x: maxX + padding, y: maxY + padding)
+            
+            print("📐 [PIP_TRANSFORM] Triangle bounds:")
+            print("   Corner A: (\(Int(cornerA.x)), \(Int(cornerA.y)))")
+            print("   Corner B: (\(Int(cornerB.x)), \(Int(cornerB.y)))")
+            
+            let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+            let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+            
+            print("✅ [PIP_TRANSFORM] Calculated triangle frame - scale: \(String(format: "%.3f", scale)), offset: (\(String(format: "%.1f", offset.width)), \(String(format: "%.1f", offset.height)))")
             return (scale, offset)
         }
         

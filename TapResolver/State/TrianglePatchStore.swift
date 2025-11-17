@@ -18,6 +18,12 @@ class TrianglePatchStore: ObservableObject {
     @Published var isCreatingTriangle: Bool = false
     @Published var creationVertices: [UUID] = []  // 0-3 selected vertices
     
+    // CRITICAL: Serial queue to prevent race conditions
+    private let saveQueue = DispatchQueue(label: "com.tapresolver.trianglepatchstore.save", qos: .userInitiated)
+    
+    // CRITICAL: Flag to prevent reload during modification
+    private var isModifying = false
+    
     private let persistenceKey = "triangles_v1"
     private let ctx = PersistenceContext.shared
     
@@ -458,6 +464,15 @@ class TrianglePatchStore: ObservableObject {
     
     /// Clears all AR marker IDs from a triangle (used for re-calibration)
     func clearAllMarkers(for triangleID: UUID) {
+        saveQueue.sync {
+            _clearAllMarkers(for: triangleID)
+        }
+    }
+    
+    private func _clearAllMarkers(for triangleID: UUID) {
+        isModifying = true
+        defer { isModifying = false }
+        
         guard let index = triangles.firstIndex(where: { $0.id == triangleID }) else {
             print("⚠️ [CLEAR_MARKERS] Triangle not found for marker clearing: \(String(triangleID.uuidString.prefix(8)))")
             return
@@ -477,6 +492,15 @@ class TrianglePatchStore: ObservableObject {
     
     /// Add an AR marker ID to a triangle's vertex
     func addMarker(mapPointID: UUID, markerID: UUID) {
+        saveQueue.sync {
+            _addMarker(mapPointID: mapPointID, markerID: markerID)
+        }
+    }
+    
+    private func _addMarker(mapPointID: UUID, markerID: UUID) {
+        isModifying = true
+        defer { isModifying = false }
+        
         print("🔍 [ADD_MARKER_TRACE] Called with:")
         print("   mapPointID: \(String(mapPointID.uuidString.prefix(8)))")
         print("   markerID: \(String(markerID.uuidString.prefix(8)))")
@@ -518,7 +542,20 @@ class TrianglePatchStore: ObservableObject {
                 print("   New value: '\(markerIDString)'")
                 print("   Updated arMarkerIDs: \(triangles[index].arMarkerIDs)")
                 
+                // CRITICAL: Verify update before save
+                print("🔍 [ADD_MARKER_TRACE] Verifying update BEFORE save:")
+                print("   triangles[\(index)].arMarkerIDs = \(triangles[index].arMarkerIDs)")
+                
                 save()
+                
+                // CRITICAL: Verify update after save
+                print("🔍 [ADD_MARKER_TRACE] Verifying update AFTER save:")
+                if index < triangles.count {
+                    print("   triangles[\(index)].arMarkerIDs = \(triangles[index].arMarkerIDs)")
+                } else {
+                    print("   ⚠️ Index out of bounds after save!")
+                }
+                
                 print("✅ [ADD_MARKER_TRACE] Saved triangles to storage")
                 print("✅ Added marker \(String(markerIDString.prefix(8))) to triangle vertex \(vertexIndex)")
             } else {
@@ -585,6 +622,18 @@ class TrianglePatchStore: ObservableObject {
     // MARK: - Persistence
     
     func save() {
+        print("🔍 [SAVE_TRACE] save() called")
+        print("   Thread: \(Thread.current)")
+        print("   Triangle count: \(triangles.count)")
+        
+        // Print first 3 triangles' AR markers for debugging
+        for (index, triangle) in triangles.prefix(3).enumerated() {
+            print("   Triangle[\(index)] markers: \(triangle.arMarkerIDs)")
+        }
+        
+        print("🔍 [SAVE_TRACE] Call stack:")
+        Thread.callStackSymbols.prefix(5).forEach { print("   \($0)") }
+        
         ctx.write(persistenceKey, value: triangles)
         print("💾 Saved \(triangles.count) triangle(s)")
         
@@ -599,6 +648,11 @@ class TrianglePatchStore: ObservableObject {
     }
     
     func load() {
+        guard !isModifying else {
+            print("⚠️ [LOAD_TRACE] Load blocked - modification in progress")
+            return
+        }
+        
         guard let decoded: [TrianglePatch] = ctx.read(persistenceKey, as: [TrianglePatch].self) else {
             print("📂 No saved triangles found")
             return
