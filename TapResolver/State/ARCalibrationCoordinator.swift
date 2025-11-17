@@ -66,6 +66,11 @@ final class ARCalibrationCoordinator: ObservableObject {
             return
         }
         
+        // Clear any existing calibration markers from scene - we're re-calibrating from scratch
+        if let coordinator = ARViewContainer.Coordinator.current {
+            coordinator.clearCalibrationMarkers()  // Remove old marker nodes from scene
+        }
+        
         activeTriangleID = triangleID
         currentTriangleID = triangleID
         triangleVertices = triangle.vertexIDs
@@ -73,14 +78,22 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Clear any existing markers - we're re-calibrating from scratch
         placedMarkers = []
         completedMarkerCount = 0
-        currentVertexIndex = 0  // Start with first vertex
+        currentVertexIndex = 0  // Start with first vertex - ensure proper photo selection
+        
+        // Validate triangleVertices is set correctly
+        guard triangleVertices.count == 3 else {
+            print("❌ Invalid triangle: expected 3 vertices, got \(triangleVertices.count)")
+            return
+        }
+        
+        print("📍 Starting calibration with vertices: \(triangleVertices.map { String($0.uuidString.prefix(8)) })")
         
         // If triangle had previous markers, log them but don't use them
         if !triangle.arMarkerIDs.isEmpty && triangle.arMarkerIDs.contains(where: { !$0.isEmpty }) {
             print("🔄 Re-calibrating triangle - clearing \(triangle.arMarkerIDs.filter { !$0.isEmpty }.count) existing markers")
         }
         
-        // Update reference photo for the current vertex
+        // Update reference photo for the current vertex (first vertex, index 0)
         if let currentVertexID = getCurrentVertexID(),
            let mapPoint = mapStore.points.first(where: { $0.id == currentVertexID }) {
             let photoData: Data? = {
@@ -94,6 +107,8 @@ final class ARCalibrationCoordinator: ObservableObject {
             
             // Log map point guidance
             print("🎯 Guiding user to Map Point (\(String(format: "%.1f", mapPoint.mapPoint.x)), \(String(format: "%.1f", mapPoint.mapPoint.y)))")
+        } else {
+            print("⚠️ Could not load reference photo for first vertex")
         }
         
         // Update UI state
@@ -112,8 +127,20 @@ final class ARCalibrationCoordinator: ObservableObject {
     }
     
     func getCurrentVertexID() -> UUID? {
-        guard currentVertexIndex < triangleVertices.count else { return nil }
-        return triangleVertices[currentVertexIndex]
+        // Ensure triangleVertices is set and currentVertexIndex is valid
+        guard !triangleVertices.isEmpty else {
+            print("⚠️ getCurrentVertexID: triangleVertices is empty")
+            return nil
+        }
+        guard currentVertexIndex >= 0 && currentVertexIndex < triangleVertices.count else {
+            print("⚠️ getCurrentVertexID: currentVertexIndex (\(currentVertexIndex)) out of bounds (0..<\(triangleVertices.count))")
+            // Reset to first vertex if out of bounds
+            currentVertexIndex = 0
+            return triangleVertices.isEmpty ? nil : triangleVertices[0]
+        }
+        let vertexID = triangleVertices[currentVertexIndex]
+        print("📍 getCurrentVertexID: returning vertex[\(currentVertexIndex)] = \(String(vertexID.uuidString.prefix(8)))")
+        return vertexID
     }
     
     func setReferencePhoto(_ photoData: Data?) {
@@ -165,12 +192,14 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // Advance to next vertex if not all placed
         if placedMarkers.count < 3 {
-            // Find next unplaced vertex
-            for vertexID in triangle.vertexIDs {
+            // Find next unplaced vertex - use triangleVertices to ensure consistency
+            for vertexID in triangleVertices {
                 if !placedMarkers.contains(vertexID) {
-                    // Update currentVertexIndex to point to this vertex
-                    if let index = triangle.vertexIDs.firstIndex(of: vertexID) {
+                    // Update currentVertexIndex to point to this vertex in triangleVertices
+                    if let index = triangleVertices.firstIndex(of: vertexID) {
                         currentVertexIndex = index
+                        print("📍 Advanced to next vertex: index=\(index), vertexID=\(String(vertexID.uuidString.prefix(8)))")
+                        
                         // Update reference photo for next vertex
                         if let mapPoint = mapStore.points.first(where: { $0.id == vertexID }) {
                             let photoData: Data? = {
@@ -184,8 +213,12 @@ final class ARCalibrationCoordinator: ObservableObject {
                             
                             // Log map point guidance for next vertex
                             print("🎯 Guiding user to Map Point (\(String(format: "%.1f", mapPoint.mapPoint.x)), \(String(format: "%.1f", mapPoint.mapPoint.y)))")
+                        } else {
+                            print("⚠️ Could not find MapPoint for vertexID \(String(vertexID.uuidString.prefix(8)))")
                         }
                         break
+                    } else {
+                        print("⚠️ VertexID \(String(vertexID.uuidString.prefix(8))) not found in triangleVertices")
                     }
                 }
             }
@@ -522,9 +555,10 @@ final class ARCalibrationCoordinator: ObservableObject {
     }
     
     func reset() {
-        // Clear any existing survey markers
+        // Clear any existing survey markers and calibration markers
         if let coordinator = ARViewContainer.Coordinator.current {
             coordinator.clearSurveyMarkers()
+            coordinator.clearCalibrationMarkers()  // Clear AR marker nodes from scene
         }
         
         activeTriangleID = nil
@@ -537,6 +571,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         triangleVertices = []
         referencePhotoData = nil
         completedMarkerCount = 0
+        
+        print("🔄 ARCalibrationCoordinator: Reset complete - all markers cleared")
     }
     
     // MARK: - Helper: Convert ARMarker to ARWorldMapStore.ARMarker
