@@ -199,15 +199,18 @@ struct ARViewContainer: UIViewRepresentable {
         }
 
         @objc func handleTapGesture(_ sender: UITapGestureRecognizer) {
+            print("🔍 [TAP_TRACE] Tap detected")
+            print("   Current mode: \(currentMode)")
+            
             // Disable tap-to-place in idle mode - use Place AR Marker button instead
             guard currentMode != .idle else {
-                print("👆 Tap ignored in idle mode — use Place AR Marker button")
+                print("👆 [TAP_TRACE] Tap ignored in idle mode — use Place AR Marker button")
                 return
             }
             
             // Disable tap-to-place in triangle calibration mode - use Place Marker button instead
             if case .triangleCalibration = currentMode {
-                print("👆 Tap ignored in triangle calibration mode — use Place Marker button")
+                print("👆 [TAP_TRACE] Tap ignored in triangle calibration mode — use Place Marker button")
                 return
             }
             

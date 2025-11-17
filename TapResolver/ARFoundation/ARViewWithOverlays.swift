@@ -25,6 +25,9 @@ struct ARViewWithOverlays: View {
     // Survey marker spacing
     @State private var surveySpacing: Float = 1.0
     
+    // Track last printed vertex ID to prevent spam
+    @State private var lastPrintedPhotoRefVertexID: UUID? = nil
+    
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
@@ -84,49 +87,75 @@ struct ARViewWithOverlays: View {
                 // Clean up on dismiss
                 currentMode = .idle
                 arCalibrationCoordinator.reset()
+                lastPrintedPhotoRefVertexID = nil  // Reset photo ref tracking
                 print("🧹 ARViewWithOverlays: Cleaned up on disappear")
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ARMarkerPlaced"))) { notification in
+                print("🔍 [REGISTER_MARKER_TRACE] ARMarkerPlaced notification received")
+                print("   Calibration state: \(arCalibrationCoordinator.stateDescription)")
+                print("   Call stack trace:")
+                Thread.callStackSymbols.prefix(5).forEach { print("      \($0)") }
+                
+                // Block marker registration during survey mode
+                if case .surveyMode = arCalibrationCoordinator.calibrationState {
+                    print("⚠️ [REGISTER_MARKER_TRACE] Blocked - in survey mode (should use placeSurveyMarkerOnly)")
+                    return
+                }
+                
                 // Handle marker placement in calibration mode
                 guard isCalibrationMode,
                       let triangle = selectedTriangle,
                       let markerID = notification.userInfo?["markerID"] as? UUID,
                       let positionArray = notification.userInfo?["position"] as? [Float],
                       positionArray.count == 3 else {
+                    print("⚠️ [REGISTER_MARKER_TRACE] Guard failed - isCalibrationMode=\(isCalibrationMode), triangle=\(selectedTriangle != nil), markerID=\(notification.userInfo?["markerID"] != nil)")
                     return
                 }
                 
                 // Get current vertex being calibrated
                 guard let currentVertexID = arCalibrationCoordinator.getCurrentVertexID() else {
-                    print("⚠️ No current vertex ID for marker placement")
+                    print("⚠️ [REGISTER_MARKER_TRACE] No current vertex ID for marker placement")
                     return
                 }
                 
-                // Capture photo from AR camera feed when marker is placed
-                if let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }) {
-                    // Auto-capture new photo from AR camera feed
-                    if let coordinator = ARViewContainer.Coordinator.current {
-                        coordinator.captureARFrame { image in
-                            guard let image = image else {
-                                print("⚠️ Failed to capture AR frame for photo replacement")
-                                return
-                            }
-                            
-                            // Convert UIImage to Data
-                            if let imageData = image.jpegData(compressionQuality: 0.8) {
-                                // Save photo and update metadata
-                                if mapPointStore.savePhotoToDisk(for: currentVertexID, photoData: imageData) {
-                                    // Update capture position to current position
-                                    if let index = mapPointStore.points.firstIndex(where: { $0.id == currentVertexID }) {
-                                        mapPointStore.points[index].photoCapturedAtPosition = mapPoint.mapPoint
-                                        mapPointStore.points[index].photoOutdated = false
-                                        mapPointStore.save()
+                print("🔍 [REGISTER_MARKER_TRACE] Processing marker:")
+                print("   markerID: \(String(markerID.uuidString.prefix(8)))")
+                print("   currentVertexID: \(String(currentVertexID.uuidString.prefix(8)))")
+                
+                // Only capture photo when placing vertices (not in survey mode)
+                if case .placingVertices = arCalibrationCoordinator.calibrationState {
+                    print("🔍 [PHOTO_TRACE] Photo capture requested (placing vertices)")
+                    print("   mapPoint.id: \(String(currentVertexID.uuidString.prefix(8)))")
+                    print("   Calibration state: \(arCalibrationCoordinator.stateDescription)")
+                    
+                    // Capture photo from AR camera feed when marker is placed
+                    if let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }) {
+                        // Auto-capture new photo from AR camera feed
+                        if let coordinator = ARViewContainer.Coordinator.current {
+                            coordinator.captureARFrame { image in
+                                guard let image = image else {
+                                    print("⚠️ [PHOTO_TRACE] Failed to capture AR frame for photo replacement")
+                                    return
+                                }
+                                
+                                // Convert UIImage to Data
+                                if let imageData = image.jpegData(compressionQuality: 0.8) {
+                                    // Save photo and update metadata
+                                    if mapPointStore.savePhotoToDisk(for: currentVertexID, photoData: imageData) {
+                                        // Update capture position to current position
+                                        if let index = mapPointStore.points.firstIndex(where: { $0.id == currentVertexID }) {
+                                            mapPointStore.points[index].photoCapturedAtPosition = mapPoint.mapPoint
+                                            mapPointStore.points[index].photoOutdated = false
+                                            mapPointStore.save()
+                                        }
+                                        print("📸 [PHOTO_TRACE] Captured photo for MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
                                     }
-                                    print("📸 Captured photo for MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
                                 }
                             }
                         }
                     }
+                } else {
+                    print("⚠️ [PHOTO_TRACE] Photo capture skipped - not in placingVertices state")
                 }
                 
                 // Create ARMarker
@@ -210,6 +239,15 @@ struct ARViewWithOverlays: View {
                     .environmentObject(locationManager)
                     .environmentObject(arCalibrationCoordinator)
                     .frame(width: 280, height: 220)
+                    .onChange(of: arCalibrationCoordinator.calibrationState) { oldState, newState in
+                        print("🔍 [PIP_MAP] State changed: \(arCalibrationCoordinator.stateDescription)")
+                        
+                        if case .readyToFill = newState {
+                            print("🎯 [PIP_MAP] Triangle complete - should frame entire triangle")
+                            // TODO: Call fitToTriangle() on PiP map
+                            // This will need to be implemented based on your PiP map architecture
+                        }
+                    }
                     .cornerRadius(12)
                     .position(x: geo.size.width - 120, y: 130) // Adjusted for larger size
                     .zIndex(998)
@@ -283,6 +321,12 @@ struct ARViewWithOverlays: View {
                 if case .placingVertices = arCalibrationCoordinator.calibrationState,
                    let currentVertexID = arCalibrationCoordinator.getCurrentVertexID(),
                    let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }) {
+                    
+                    // Only print if vertex ID changed (prevent spam)
+                    if lastPrintedPhotoRefVertexID != currentVertexID {
+                        print("🔍 [PHOTO_REF] Displaying photo reference for vertex \(String(currentVertexID.uuidString.prefix(8)))")
+                        lastPrintedPhotoRefVertexID = currentVertexID
+                    }
                     
                     if let photoData = mapPointStore.loadPhotoFromDisk(for: currentVertexID) ?? mapPoint.locationPhotoData,
                        let uiImage = UIImage(data: photoData) {
@@ -384,6 +428,14 @@ struct ARViewWithOverlays: View {
                     
                     // Place Marker button
                     Button(action: {
+                        print("🔍 [PLACE_MARKER_BTN] Button tapped")
+                        print("   Calibration state: \(arCalibrationCoordinator.stateDescription)")
+                        
+                        guard case .placingVertices = arCalibrationCoordinator.calibrationState else {
+                            print("⚠️ [PLACE_MARKER_BTN] Blocked - not in placingVertices state")
+                            return
+                        }
+                        
                         NotificationCenter.default.post(
                             name: NSNotification.Name("PlaceMarkerAtCursor"),
                             object: nil

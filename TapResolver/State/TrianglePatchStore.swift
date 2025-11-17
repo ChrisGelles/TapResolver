@@ -458,23 +458,47 @@ class TrianglePatchStore: ObservableObject {
     
     /// Add an AR marker ID to a triangle's vertex
     func addMarker(mapPointID: UUID, markerID: UUID) {
+        print("🔍 [ADD_MARKER_TRACE] Called with:")
+        print("   mapPointID: \(String(mapPointID.uuidString.prefix(8)))")
+        print("   markerID: \(String(markerID.uuidString.prefix(8)))")
+        
         guard let index = triangles.firstIndex(where: { $0.vertexIDs.contains(mapPointID) }) else {
-            print("⚠️ Cannot add marker: No triangle found with vertex \(String(mapPointID.uuidString.prefix(8)))")
+            print("⚠️ [ADD_MARKER_TRACE] Cannot add marker: No triangle found with vertex \(String(mapPointID.uuidString.prefix(8)))")
             return
         }
+        
+        print("🔍 [ADD_MARKER_TRACE] Triangle found at index \(index):")
+        print("   Triangle ID: \(String(triangles[index].id.uuidString.prefix(8)))")
+        print("   Current arMarkerIDs: \(triangles[index].arMarkerIDs)")
+        print("   Current arMarkerIDs.count: \(triangles[index].arMarkerIDs.count)")
         
         let markerIDString = markerID.uuidString
         if !triangles[index].arMarkerIDs.contains(markerIDString) {
             // Find the index of the vertex in the triangle
             if let vertexIndex = triangles[index].vertexIDs.firstIndex(of: mapPointID) {
+                print("🔍 [ADD_MARKER_TRACE] Found vertex at index \(vertexIndex)")
+                
                 // Ensure arMarkerIDs array has enough elements
                 while triangles[index].arMarkerIDs.count <= vertexIndex {
                     triangles[index].arMarkerIDs.append("")
+                    print("🔍 [ADD_MARKER_TRACE] Expanded arMarkerIDs array to \(triangles[index].arMarkerIDs.count) slots")
                 }
+                
+                let oldValue = triangles[index].arMarkerIDs[vertexIndex]
                 triangles[index].arMarkerIDs[vertexIndex] = markerIDString
+                print("🔍 [ADD_MARKER_TRACE] Set arMarkerIDs[\(vertexIndex)]:")
+                print("   Old value: '\(oldValue)'")
+                print("   New value: '\(markerIDString)'")
+                print("   Updated arMarkerIDs: \(triangles[index].arMarkerIDs)")
+                
                 save()
+                print("✅ [ADD_MARKER_TRACE] Saved triangles to storage")
                 print("✅ Added marker \(String(markerIDString.prefix(8))) to triangle vertex \(vertexIndex)")
+            } else {
+                print("⚠️ [ADD_MARKER_TRACE] Could not find vertex index for mapPointID \(String(mapPointID.uuidString.prefix(8)))")
             }
+        } else {
+            print("⚠️ [ADD_MARKER_TRACE] Marker \(String(markerIDString.prefix(8))) already exists in triangle")
         }
     }
     
