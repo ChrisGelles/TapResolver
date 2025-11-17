@@ -244,7 +244,8 @@ struct ARViewWithOverlays: View {
                                 object: nil,
                                 userInfo: [
                                     "triangleID": triangle.id,
-                                    "spacing": surveySpacing
+                                    "spacing": surveySpacing,
+                                    "arWorldMapStore": arCalibrationCoordinator.arStore
                                 ]
                             )
                         }) {
@@ -389,16 +390,21 @@ struct ARViewWithOverlays: View {
                     .padding(.bottom, 12)
                     
                     // Survey Marker Generation Button
-                    if let coordinator = ARViewContainer.Coordinator.current,
-                       let currentTriangleID = arCalibrationCoordinator.activeTriangleID,
+                    if let currentTriangleID = arCalibrationCoordinator.activeTriangleID,
+                       let triangle = selectedTriangle,
+                       triangle.id == currentTriangleID,
                        arCalibrationCoordinator.isTriangleComplete(currentTriangleID) {
                         
                         Button(action: {
-                            coordinator.generateSurveyMarkers(
-                                calibrationCoordinator: arCalibrationCoordinator,
-                                mapPointStore: mapPointStore,
-                                arWorldMapStore: arWorldMapStore,
-                                spacingMeters: 1.0
+                            // Post notification to trigger survey marker generation
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("FillTriangleWithSurveyMarkers"),
+                                object: nil,
+                                userInfo: [
+                                    "triangleID": currentTriangleID,
+                                    "spacing": surveySpacing,
+                                    "arWorldMapStore": arCalibrationCoordinator.arStore
+                                ]
                             )
                         }) {
                             VStack(spacing: 4) {

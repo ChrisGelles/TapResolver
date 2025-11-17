@@ -34,6 +34,10 @@ struct ARViewContainer: UIViewRepresentable {
     func makeUIView(context: Context) -> ARSCNView {
         let sceneView = ARSCNView(frame: .zero)
         sceneView.scene = SCNScene()
+        
+        // Disable automatic occlusion so markers aren't clipped by ground plane
+        sceneView.automaticallyUpdatesLighting = false
+        sceneView.rendersCameraGrain = false
 
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = [.horizontal, .vertical]  // Enable both horizontal and vertical plane detection
@@ -185,12 +189,13 @@ struct ARViewContainer: UIViewRepresentable {
             guard let triangleID = notification.userInfo?["triangleID"] as? UUID,
                   let spacing = notification.userInfo?["spacing"] as? Float,
                   let triangle = selectedTriangle,
-                  triangle.id == triangleID else {
-                print("⚠️ Invalid triangle or spacing for survey marker generation")
+                  triangle.id == triangleID,
+                  let arWorldMapStore = notification.userInfo?["arWorldMapStore"] as? ARWorldMapStore else {
+                print("⚠️ Invalid triangle, spacing, or arWorldMapStore for survey marker generation")
                 return
             }
             
-            generateSurveyMarkers(for: triangle, spacing: spacing)
+            generateSurveyMarkers(for: triangle, spacing: spacing, arWorldMapStore: arWorldMapStore)
         }
 
         @objc func handleTapGesture(_ sender: UITapGestureRecognizer) {
@@ -230,8 +235,9 @@ struct ARViewContainer: UIViewRepresentable {
             placeMarker(at: position)
         }
 
-        func placeMarker(at position: simd_float3) {
-            guard let sceneView = sceneView else { return }
+        @discardableResult
+        func placeMarker(at position: simd_float3) -> UUID {
+            guard let sceneView = sceneView else { return UUID() }
             
             let markerID = UUID()
             
@@ -278,6 +284,8 @@ struct ARViewContainer: UIViewRepresentable {
                     "position": [position.x, position.y, position.z] // Convert simd_float3 to array
                 ]
             )
+            
+            return markerID
         }
 
         func setupScene() {
@@ -496,7 +504,7 @@ struct ARViewContainer: UIViewRepresentable {
         // MARK: - Survey Marker Generation
         
         /// Generate survey markers inside a calibrated triangle
-        private func generateSurveyMarkers(for triangle: TrianglePatch, spacing: Float) {
+        private func generateSurveyMarkers(for triangle: TrianglePatch, spacing: Float, arWorldMapStore: ARWorldMapStore) {
             // Clear existing survey markers
             clearSurveyMarkers()
             
@@ -520,30 +528,33 @@ struct ARViewContainer: UIViewRepresentable {
             
             print("📍 Plotting points within triangle A(\(String(format: "%.1f", triangle2D[0].x)), \(String(format: "%.1f", triangle2D[0].y))) B(\(String(format: "%.1f", triangle2D[1].x)), \(String(format: "%.1f", triangle2D[1].y))) C(\(String(format: "%.1f", triangle2D[2].x)), \(String(format: "%.1f", triangle2D[2].y)))")
             
-            // Get 3D AR positions from placed markers using index matching
-            // triangle.arMarkerIDs[i] corresponds to triangle.vertexIDs[i]
+            // Get 3D AR positions from ARWorldMapStore by matching mapPointID to vertex IDs
+            // This works even if triangle.arMarkerIDs is empty
             var triangle3D: [simd_float3] = []
             
-            guard triangle.arMarkerIDs.count == 3 else {
-                print("⚠️ Triangle does not have 3 AR markers (has \(triangle.arMarkerIDs.count))")
-                return
-            }
-            
-            for (index, markerIDString) in triangle.arMarkerIDs.enumerated() {
-                guard let markerUUID = UUID(uuidString: markerIDString) else {
-                    print("⚠️ Invalid marker ID string: \(markerIDString)")
-                    continue
-                }
-                
-                // Look up marker node in placedMarkers dictionary
-                if let markerNode = placedMarkers[markerUUID] {
-                    triangle3D.append(markerNode.simdPosition)
-                    let vertexID = triangle.vertexIDs[index]
-                    print("✅ Found AR marker \(String(markerUUID.uuidString.prefix(8))) for vertex \(String(vertexID.uuidString.prefix(8))) at \(markerNode.simdPosition)")
+            for (index, vertexID) in triangle.vertexIDs.enumerated() {
+                // Look up marker from ARWorldMapStore by matching mapPointID
+                if let marker = arWorldMapStore.markers.first(where: { $0.mapPointID == vertexID.uuidString }) {
+                    // Extract position from transform matrix
+                    let transform = marker.worldTransform.toSimd()
+                    let position = simd_float3(
+                        transform.columns.3.x,
+                        transform.columns.3.y,
+                        transform.columns.3.z
+                    )
+                    triangle3D.append(position)
+                    print("✅ Found AR marker \(String(marker.id.prefix(8))) for vertex \(String(vertexID.uuidString.prefix(8))) at \(position)")
                 } else {
-                    let vertexID = triangle.vertexIDs[index]
-                    print("⚠️ Marker \(String(markerUUID.uuidString.prefix(8))) not found in placedMarkers dictionary for vertex \(String(vertexID.uuidString.prefix(8)))")
-                    print("📋 Available markers: \(placedMarkers.keys.map { String($0.uuidString.prefix(8)) })")
+                    // Fallback: Try to find marker in placedMarkers if triangle.arMarkerIDs has entries
+                    if index < triangle.arMarkerIDs.count,
+                       let markerIDString = triangle.arMarkerIDs[index].isEmpty ? nil : triangle.arMarkerIDs[index],
+                       let markerUUID = UUID(uuidString: markerIDString),
+                       let markerNode = placedMarkers[markerUUID] {
+                        triangle3D.append(markerNode.simdPosition)
+                        print("✅ Found AR marker \(String(markerUUID.uuidString.prefix(8))) for vertex \(String(vertexID.uuidString.prefix(8))) at \(markerNode.simdPosition) (from placedMarkers)")
+                    } else {
+                        print("⚠️ No AR marker found for vertex \(String(vertexID.uuidString.prefix(8)))")
+                    }
                 }
             }
             
@@ -582,6 +593,10 @@ struct ARViewContainer: UIViewRepresentable {
             print("📊 2D Survey Points: \(pointsList)")
             
             // Interpolate to 3D AR positions and place markers
+            // Use the AVERAGE Y of the three calibration markers as ground level
+            // This ensures survey markers are on the same plane as calibration markers
+            let groundY = (triangle3D[0].y + triangle3D[1].y + triangle3D[2].y) / 3.0
+            
             for (index, point2D) in fillPoints2D.enumerated() {
                 // Round 2D coordinates to 1 decimal place for future data export
                 let roundedX = round(point2D.x * 10) / 10
@@ -597,25 +612,45 @@ struct ARViewContainer: UIViewRepresentable {
                     continue
                 }
                 
-                // Create survey marker using existing renderer
-                let markerID = UUID()
-                let options = MarkerOptions(
-                    color: UIColor.red,  // RED sphere for survey markers
-                    markerID: markerID,
-                    userDeviceHeight: userDeviceHeight,
-                    animateOnAppearance: false  // No animation for survey markers
-                )
+                // Create position with interpolated X/Z but consistent ground Y
+                let groundPosition = simd_float3(position3D.x, groundY, position3D.z)
                 
-                let markerNode = ARMarkerRenderer.createNode(at: position3D, options: options)
-                markerNode.name = "surveyMarker_\(markerID.uuidString)"
+                // Log position BEFORE placing marker
+                print("📍 Survey Marker placed at (\(String(format: "%.2f", groundPosition.x)), \(String(format: "%.2f", groundPosition.y)), \(String(format: "%.2f", groundPosition.z)))")
                 
-                // Add to scene
-                sceneView?.scene.rootNode.addChildNode(markerNode)
+                // Use placeMarker() to create the marker, then customize it for survey
+                let markerID = placeMarker(at: groundPosition)
                 
-                // Track marker
+                print("🔍 DEBUG: placeMarker returned markerID: \(String(markerID.uuidString.prefix(8)))")
+                print("🔍 DEBUG: placedMarkers count: \(placedMarkers.count)")
+                print("🔍 DEBUG: placedMarkers keys: \(placedMarkers.keys.map { String($0.uuidString.prefix(8)) })")
+                
+                // Get the marker that was just placed
+                guard let markerNode = placedMarkers[markerID] else {
+                    print("⚠️ Failed to create survey marker - markerID \(String(markerID.uuidString.prefix(8))) not found in placedMarkers")
+                    continue
+                }
+                
+                print("✅ Found marker node, customizing for survey...")
+                
+                // Remove from placedMarkers and add to surveyMarkers
+                placedMarkers.removeValue(forKey: markerID)
                 surveyMarkers[markerID] = markerNode
                 
-                print("📍 Placed survey marker at map(\(roundedX), \(roundedY)) → AR\(position3D)")
+                // Update marker to red color and larger radius
+                if let sphereNode = markerNode.childNode(withName: "arMarkerSphere_\(markerID.uuidString)", recursively: true),
+                   let sphere = sphereNode.geometry as? SCNSphere {
+                    sphere.radius = 0.035
+                    sphere.firstMaterial?.diffuse.contents = UIColor.red
+                    print("✅ Updated sphere to red, radius 0.035")
+                } else {
+                    print("⚠️ Could not find sphere node to update color")
+                }
+                
+                // Update name
+                markerNode.name = "surveyMarker_\(markerID.uuidString)"
+                
+                print("📍 Placed survey marker at map(\(roundedX), \(roundedY)) → AR(\(String(format: "%.2f", groundPosition.x)), \(String(format: "%.2f", groundPosition.y)), \(String(format: "%.2f", groundPosition.z)))")
             }
             
             // Log first few 3D positions
@@ -632,111 +667,6 @@ struct ARViewContainer: UIViewRepresentable {
             print("📊 3D Survey Markers: \(markers3D)")
             
             print("✅ Placed \(surveyMarkers.count) survey markers")
-        }
-        
-        /// Generate temporary survey markers across calibrated triangle (legacy - kept for compatibility)
-        func generateSurveyMarkers(
-            calibrationCoordinator: ARCalibrationCoordinator,
-            mapPointStore: MapPointStore,
-            arWorldMapStore: ARWorldMapStore,
-            spacingMeters: Float = 1.0
-        ) {
-            // Clear existing survey markers
-            clearSurveyMarkers()
-            
-            // Get current triangle from calibration coordinator
-            guard let currentTriangleID = calibrationCoordinator.activeTriangleID,
-                  let currentTriangle = calibrationCoordinator.triangleStore.triangle(withID: currentTriangleID),
-                  calibrationCoordinator.isTriangleComplete(currentTriangleID) else {
-                print("⚠️ Cannot generate survey markers: no calibrated triangle")
-                return
-            }
-            
-            // Get triangle vertices from map point store
-            guard let pointA = mapPointStore.points.first(where: { $0.id == currentTriangle.vertexIDs[0] }),
-                  let pointB = mapPointStore.points.first(where: { $0.id == currentTriangle.vertexIDs[1] }),
-                  let pointC = mapPointStore.points.first(where: { $0.id == currentTriangle.vertexIDs[2] }) else {
-                print("⚠️ Cannot find triangle vertices in map point store")
-                return
-            }
-            
-            // Get AR marker positions from ARWorldMapStore
-            guard let markerA = arWorldMapStore.markers.first(where: { $0.mapPointID == currentTriangle.vertexIDs[0].uuidString }),
-                  let markerB = arWorldMapStore.markers.first(where: { $0.mapPointID == currentTriangle.vertexIDs[1].uuidString }),
-                  let markerC = arWorldMapStore.markers.first(where: { $0.mapPointID == currentTriangle.vertexIDs[2].uuidString }) else {
-                print("⚠️ AR markers not found for triangle vertices")
-                return
-            }
-            
-            // Extract positions from transforms
-            let transformA = markerA.worldTransform.toSimd()
-            let transformB = markerB.worldTransform.toSimd()
-            let transformC = markerC.worldTransform.toSimd()
-            
-            let triangle2D = [
-                pointA.mapPoint,
-                pointB.mapPoint,
-                pointC.mapPoint
-            ]
-            
-            let triangle3D = [
-                simd_float3(transformA.columns.3.x, transformA.columns.3.y, transformA.columns.3.z),
-                simd_float3(transformB.columns.3.x, transformB.columns.3.y, transformB.columns.3.z),
-                simd_float3(transformC.columns.3.x, transformC.columns.3.y, transformC.columns.3.z)
-            ]
-            
-            // Get REAL map scale from MetricSquareStore
-            guard let pxPerMeter = getPixelsPerMeter() else {
-                print("⚠️ Cannot generate survey markers: no metric square calibrated")
-                print("   Please create and lock a metric square first")
-                return
-            }
-            
-            print("📐 Using map scale: \(pxPerMeter) pixels per meter")
-            
-            // Generate 2D fill points
-            let fillPoints = generateTriangleFillPoints(
-                triangle: triangle2D,
-                spacingMeters: spacingMeters,
-                pxPerMeter: pxPerMeter
-            )
-            
-            print("📍 Generating \(fillPoints.count) survey markers with \(spacingMeters)m spacing")
-            
-            // Interpolate to 3D and create AR markers
-            for mapPoint in fillPoints {
-                guard let arPosition = interpolateARPosition(
-                    fromMapPoint: mapPoint,
-                    triangle2D: triangle2D,
-                    triangle3D: triangle3D
-                ) else {
-                    continue
-                }
-                
-                // Create survey marker (red sphere)
-                let markerID = UUID()
-                let markerNode = createSurveyMarkerNode(at: arPosition)
-                markerNode.name = "surveyMarker_\(markerID.uuidString)"
-                
-                sceneView?.scene.rootNode.addChildNode(markerNode)
-                surveyMarkers[markerID] = markerNode
-            }
-            
-            print("✅ Placed \(surveyMarkers.count) survey markers")
-        }
-        
-        /// Create visual node for survey marker (red sphere)
-        private func createSurveyMarkerNode(at position: simd_float3) -> SCNNode {
-            // Small red sphere
-            let sphere = SCNSphere(radius: 0.05)  // 5cm radius
-            let material = SCNMaterial()
-            material.diffuse.contents = UIColor.red.withAlphaComponent(0.8)
-            sphere.materials = [material]
-            
-            let node = SCNNode(geometry: sphere)
-            node.position = SCNVector3(position.x, position.y, position.z)
-            
-            return node
         }
         
         /// Clear all survey markers from scene
