@@ -26,6 +26,10 @@ class ARMarkerRenderer {
         markerNode.simdPosition = position
         markerNode.name = "arMarker_\(options.markerID.uuidString)"
         
+        // Disable occlusion so markers render even if below ground plane
+        markerNode.renderingOrder = 100
+        markerNode.castsShadow = false
+        
         // Floor ring
         let ring = SCNTorus(ringRadius: 0.1, pipeRadius: 0.002)
         ring.firstMaterial?.diffuse.contents = UIColor.ARPalette.markerRing
