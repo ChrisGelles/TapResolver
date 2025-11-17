@@ -248,6 +248,8 @@ struct ARViewWithOverlays: View {
                         
                         // Fill Triangle button
                         Button(action: {
+                            arCalibrationCoordinator.enterSurveyMode()
+                            
                             NotificationCenter.default.post(
                                 name: NSNotification.Name("FillTriangleWithSurveyMarkers"),
                                 object: nil,
@@ -277,8 +279,8 @@ struct ARViewWithOverlays: View {
                     .zIndex(997)
                 }
                 
-                // Reference Image View (top-left, below xmark) - only in calibration mode
-                if isCalibrationMode,
+                // Reference Image View (top-left, below xmark) - only when placing vertices
+                if case .placingVertices = arCalibrationCoordinator.calibrationState,
                    let currentVertexID = arCalibrationCoordinator.getCurrentVertexID(),
                    let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }) {
                     
@@ -405,6 +407,8 @@ struct ARViewWithOverlays: View {
                        arCalibrationCoordinator.isTriangleComplete(currentTriangleID) {
                         
                         Button(action: {
+                            arCalibrationCoordinator.enterSurveyMode()
+                            
                             // Post notification to trigger survey marker generation
                             NotificationCenter.default.post(
                                 name: NSNotification.Name("FillTriangleWithSurveyMarkers"),

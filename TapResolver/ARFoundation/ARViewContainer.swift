@@ -416,8 +416,17 @@ struct ARViewContainer: UIViewRepresentable {
             return position
         }
         
-        /// Estimate world position for a map point using calibrated triangle transform or heuristic
+        // MARK: - DEPRECATED
+        /// DO NOT USE - Legacy function with incorrect interpolation.
+        /// Use plantGhostMarkers(calibratedTriangle:, triangleStore:, filter:) instead.
         func estimateWorldPosition(for mapPoint: CGPoint, using triangle: TrianglePatch?) -> simd_float3? {
+            print("⚠️ [DEPRECATED] Function \(#function) was called. Refactor needed.")
+            if let symbol = Thread.callStackSymbols.dropFirst(1).first {
+                print("🔍 Called by: \(symbol)")
+            }
+            return nil
+            
+            /* OLD LOGIC COMMENTED OUT
             guard let sceneView = sceneView,
                   let frame = sceneView.session.currentFrame else {
                 return nil
@@ -453,10 +462,20 @@ struct ARViewContainer: UIViewRepresentable {
             let estimatedPosition = cameraPosition + forward * 1.0
             let groundY = userDeviceHeight > 0 ? -userDeviceHeight : -1.0
             return simd_float3(estimatedPosition.x, groundY, estimatedPosition.z)
+            */ // END OLD LOGIC
         }
         
-        /// Add a ghost marker for a map point
+        // MARK: - DEPRECATED
+        /// DO NOT USE - Calls deprecated estimateWorldPosition().
+        /// Use plantGhostMarkers(calibratedTriangle:, triangleStore:, filter:) instead.
         func addGhostMarker(mapPointID: UUID, mapPoint: CGPoint, using triangle: TrianglePatch?) {
+            print("⚠️ [DEPRECATED] Function \(#function) was called. Refactor needed.")
+            if let symbol = Thread.callStackSymbols.dropFirst(1).first {
+                print("🔍 Called by: \(symbol)")
+            }
+            return
+            
+            /* OLD LOGIC COMMENTED OUT
             guard let sceneView = sceneView else { return }
             
             // Don't add if already has a real marker
@@ -491,6 +510,7 @@ struct ARViewContainer: UIViewRepresentable {
             ghostMarkers[mapPointID] = ghostNode
             
             print("👻 Planted ghost marker for MapPoint \(String(mapPointID.uuidString.prefix(8))) at \(estimatedPosition)")
+            */ // END OLD LOGIC
         }
         
         func teardownSession() {
@@ -618,39 +638,11 @@ struct ARViewContainer: UIViewRepresentable {
                 // Log position BEFORE placing marker
                 print("📍 Survey Marker placed at (\(String(format: "%.2f", groundPosition.x)), \(String(format: "%.2f", groundPosition.y)), \(String(format: "%.2f", groundPosition.z)))")
                 
-                // Use placeMarker() to create the marker, then customize it for survey
-                let markerID = placeMarker(at: groundPosition)
-                
-                print("🔍 DEBUG: placeMarker returned markerID: \(String(markerID.uuidString.prefix(8)))")
-                print("🔍 DEBUG: placedMarkers count: \(placedMarkers.count)")
-                print("🔍 DEBUG: placedMarkers keys: \(placedMarkers.keys.map { String($0.uuidString.prefix(8)) })")
-                
-                // Get the marker that was just placed
-                guard let markerNode = placedMarkers[markerID] else {
-                    print("⚠️ Failed to create survey marker - markerID \(String(markerID.uuidString.prefix(8))) not found in placedMarkers")
-                    continue
+                // Use placeSurveyMarkerOnly() to create survey marker without MapPoint updates
+                if let markerID = placeSurveyMarkerOnly(at: groundPosition, mapPoint: vertexPoints.first(where: { $0.mapPoint == roundedPoint2D }) ?? vertexPoints[0]) {
+                    // Survey marker placed - no photo capture, no MapPoint updates
+                    print("📍 Survey marker placed at map(\(roundedX), \(roundedY)) → AR(\(String(format: "%.2f", groundPosition.x)), \(String(format: "%.2f", groundPosition.y)), \(String(format: "%.2f", groundPosition.z)))")
                 }
-                
-                print("✅ Found marker node, customizing for survey...")
-                
-                // Remove from placedMarkers and add to surveyMarkers
-                placedMarkers.removeValue(forKey: markerID)
-                surveyMarkers[markerID] = markerNode
-                
-                // Update marker to red color and larger radius
-                if let sphereNode = markerNode.childNode(withName: "arMarkerSphere_\(markerID.uuidString)", recursively: true),
-                   let sphere = sphereNode.geometry as? SCNSphere {
-                    sphere.radius = 0.035
-                    sphere.firstMaterial?.diffuse.contents = UIColor.red
-                    print("✅ Updated sphere to red, radius 0.035")
-                } else {
-                    print("⚠️ Could not find sphere node to update color")
-                }
-                
-                // Update name
-                markerNode.name = "surveyMarker_\(markerID.uuidString)"
-                
-                print("📍 Placed survey marker at map(\(roundedX), \(roundedY)) → AR(\(String(format: "%.2f", groundPosition.x)), \(String(format: "%.2f", groundPosition.y)), \(String(format: "%.2f", groundPosition.z)))")
             }
             
             // Log first few 3D positions
@@ -677,6 +669,38 @@ struct ARViewContainer: UIViewRepresentable {
             surveyMarkers.removeAll()
             lastHapticTriggerTime.removeAll()  // Clear collision tracking state
             print("🧹 Cleared survey markers")
+        }
+        
+        /// Places a survey marker WITHOUT calling registerMarker (no photo, no MapPoint updates)
+        func placeSurveyMarkerOnly(at position: simd_float3, mapPoint: MapPointStore.MapPoint) -> UUID? {
+            guard let sceneView = sceneView else {
+                print("⚠️ ARView not available for survey marker placement")
+                return nil
+            }
+            
+            let markerID = UUID()
+            
+            print("📍 Survey Marker placed at \(String(format: "(%.2f, %.2f, %.2f)", position.x, position.y, position.z))")
+            
+            // Create marker using centralized renderer with red color for survey
+            let options = MarkerOptions(
+                color: UIColor.red,
+                markerID: markerID,
+                userDeviceHeight: userDeviceHeight,
+                radius: 0.035,  // Larger radius for survey markers
+                animateOnAppearance: false
+            )
+            let markerNode = ARMarkerRenderer.createNode(at: position, options: options)
+            markerNode.name = "surveyMarker_\(markerID.uuidString)"
+            
+            sceneView.scene.rootNode.addChildNode(markerNode)
+            
+            // Store in surveyMarkers, NOT in placedMarkers (to avoid MapPoint updates)
+            surveyMarkers[markerID] = markerNode
+            
+            print("📍 Placed survey marker at map(\(String(format: "%.1f, %.1f", mapPoint.mapPoint.x, mapPoint.mapPoint.y))) → AR\(String(format: "(%.2f, %.2f, %.2f)", position.x, position.y, position.z))")
+            
+            return markerID
         }
         
         /// Clear all calibration AR markers from scene

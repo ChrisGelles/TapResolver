@@ -537,6 +537,53 @@ public final class MapPointStore: ObservableObject {
         // Save AR Markers
         // saveARMarkers()  // AR Markers no longer persisted
     }
+    
+    // MARK: - Photo Management
+    
+    /// Purge all photo assets for current location
+    func purgeAllPhotos() {
+        let location = PersistenceContext.shared.locationID
+        print("🗑️ PURGING ALL PHOTOS for location '\(location)'")
+        
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let mapPointsPath = documentsURL.appendingPathComponent("locations/\(location)/map-points")
+        
+        var deletedCount = 0
+        var failedCount = 0
+        
+        // Delete all .jpg files in map-points directory
+        if FileManager.default.fileExists(atPath: mapPointsPath.path) {
+            if let files = try? FileManager.default.contentsOfDirectory(at: mapPointsPath, includingPropertiesForKeys: nil) {
+                for fileURL in files where fileURL.pathExtension == "jpg" {
+                    do {
+                        try FileManager.default.removeItem(at: fileURL)
+                        deletedCount += 1
+                        print("🗑️ Deleted: \(fileURL.lastPathComponent)")
+                    } catch {
+                        failedCount += 1
+                        print("⚠️ Failed to delete \(fileURL.lastPathComponent): \(error)")
+                    }
+                }
+            }
+        } else {
+            print("⚠️ Map-points directory does not exist: \(mapPointsPath.path)")
+        }
+        
+        // Clear photoFilename from all MapPoints
+        for i in 0..<points.count {
+            points[i].photoFilename = nil
+            points[i].photoOutdated = false
+            points[i].photoCapturedAtPosition = nil
+        }
+        
+        // Save updated points
+        save()
+        
+        print("✅ Photo purge complete:")
+        print("   Deleted: \(deletedCount) files")
+        print("   Failed: \(failedCount) files")
+        print("   Cleared photo metadata from \(points.count) Map Points")
+    }
 
     private func load() {
         // ========================================================================

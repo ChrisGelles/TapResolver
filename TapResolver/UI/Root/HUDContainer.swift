@@ -50,6 +50,7 @@ struct HUDContainer: View {
 
     @State private var selectedBeaconForTxPower: String? = nil
     @State private var showingSoftResetAlert = false
+    @State private var showingPurgePhotosAlert = false
     @State private var showScanQuality = true  // Temporary: always show for testing
     @State private var activeIntervalEdit: (beaconID: String, text: String)? = nil
     @State private var showRelocalizationDebug = false  // Debug UI toggle
@@ -90,6 +91,15 @@ struct HUDContainer: View {
                 }
             } message: {
                 Text("This will clear all calibration data for '\(PersistenceContext.shared.locationID)' location.\n\nTriangle mesh structure will be preserved.\nOther locations (museum, etc.) will NOT be affected.")
+            }
+            .alert("Purge All Photos?", isPresented: $showingPurgePhotosAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Purge Photos", role: .destructive) {
+                    mapPointStore.purgeAllPhotos()
+                }
+            } message: {
+                let location = locationManager.currentLocationID
+                Text("This will delete all \(mapPointStore.points.count) photo assets for location '\(location)'. This cannot be undone.")
             }
         }
         
@@ -147,6 +157,19 @@ struct HUDContainer: View {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 20))
                                     .foregroundColor(.red)
+                                    .frame(width: 44, height: 44)
+                                    .background(Color.white.opacity(0.9))
+                                    .cornerRadius(8)
+                            }
+                            .buttonStyle(.plain)
+                            
+                            // Photo Purge button
+                            Button(action: {
+                                showingPurgePhotosAlert = true
+                            }) {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.orange)
                                     .frame(width: 44, height: 44)
                                     .background(Color.white.opacity(0.9))
                                     .cornerRadius(8)

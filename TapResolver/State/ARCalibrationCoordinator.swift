@@ -10,6 +10,14 @@ import Combine
 import simd
 import ARKit
 
+/// Represents the distinct phases of triangle calibration
+enum CalibrationState: Equatable {
+    case placingVertices(currentIndex: Int)  // Placing vertex AR markers (0, 1, or 2)
+    case readyToFill                          // All 3 vertices placed, awaiting Fill Triangle
+    case surveyMode                           // Placing survey grid markers
+    case idle                                 // No active calibration
+}
+
 final class ARCalibrationCoordinator: ObservableObject {
     @Published var activeTriangleID: UUID?
     @Published var placedMarkers: [UUID] = []  // MapPoint IDs that have been calibrated
@@ -22,6 +30,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     @Published var currentVertexIndex: Int = 0
     @Published var referencePhotoData: Data?
     @Published var completedMarkerCount: Int = 0
+    @Published var calibrationState: CalibrationState = .idle
     
     // User position tracking (updated from ARPiPMapView)
     @Published private(set) var lastKnownUserPosition: CGPoint? = nil
@@ -32,6 +41,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     }
     
     private var triangleVertices: [UUID] = []
+    private var lastPrintedVertexIndex: Int? = nil  // Track last printed vertex to prevent spam
     
     var arStore: ARWorldMapStore
     var mapStore: MapPointStore
@@ -79,6 +89,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         placedMarkers = []
         completedMarkerCount = 0
         currentVertexIndex = 0  // Start with first vertex - ensure proper photo selection
+        lastPrintedVertexIndex = nil  // Reset print tracking
+        calibrationState = .placingVertices(currentIndex: 0)
+        print("🎯 CalibrationState → \(stateDescription)")
         
         // Validate triangleVertices is set correctly
         guard triangleVertices.count == 3 else {
@@ -139,7 +152,14 @@ final class ARCalibrationCoordinator: ObservableObject {
             return triangleVertices.isEmpty ? nil : triangleVertices[0]
         }
         let vertexID = triangleVertices[currentVertexIndex]
-        print("📍 getCurrentVertexID: returning vertex[\(currentVertexIndex)] = \(String(vertexID.uuidString.prefix(8)))")
+        
+        // Only print if vertex index changed (prevent spam)
+        if lastPrintedVertexIndex != currentVertexIndex {
+            print("📍 getCurrentVertexID: returning vertex[\(currentVertexIndex)] = \(String(vertexID.uuidString.prefix(8)))")
+            lastPrintedVertexIndex = currentVertexIndex
+        }
+        
+        // Debug moved to registerMarker() to avoid spam
         return vertexID
     }
     
@@ -148,6 +168,16 @@ final class ARCalibrationCoordinator: ObservableObject {
     }
     
     func registerMarker(mapPointID: UUID, marker: ARMarker) {
+        // MARK: Photo verification on marker placement
+        print("📍 registerMarker called for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+        if let mapPoint = mapStore.points.first(where: { $0.id == mapPointID }) {
+            if let photoFilename = mapPoint.photoFilename {
+                print("🖼 Photo '\(photoFilename)' linked to MapPoint \(String(mapPoint.id.uuidString.prefix(8)))")
+            } else {
+                print("⚠️ No photo for MapPoint \(String(mapPoint.id.uuidString.prefix(8)))")
+            }
+        }
+        
         guard let triangleID = activeTriangleID,
               let triangle = triangleStore.triangle(withID: triangleID) else {
             print("❌ Cannot register marker: No active triangle")
@@ -231,6 +261,15 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         if placedMarkers.count == 3 {
             finalizeCalibration(for: triangle)
+            calibrationState = .readyToFill
+            print("🎯 CalibrationState → \(stateDescription)")
+            print("✅ Calibration complete. Triangle ready to fill.")
+        } else {
+            // Update state to reflect current vertex index
+            if let index = triangleVertices.firstIndex(of: mapPointID) {
+                calibrationState = .placingVertices(currentIndex: index)
+                print("🎯 CalibrationState → \(stateDescription)")
+            }
         }
     }
     
@@ -260,6 +299,16 @@ final class ARCalibrationCoordinator: ObservableObject {
         let quality = computeCalibrationQuality(triangle)
         triangleStore.markCalibrated(triangle.id, quality: quality)
         
+        // Verify triangle state
+        if let updatedTriangle = triangleStore.triangle(withID: triangle.id) {
+            print("🔍 Triangle \(String(triangle.id.uuidString.prefix(8))) state after marking:")
+            print("   isCalibrated: \(updatedTriangle.isCalibrated)")
+            print("   arMarkerIDs count: \(updatedTriangle.arMarkerIDs.count)")
+            print("   arMarkerIDs: \(updatedTriangle.arMarkerIDs.map { String($0.prefix(8)) })")
+        } else {
+            print("⚠️ Could not retrieve triangle after marking as calibrated")
+        }
+        
         statusText = "✅ Triangle calibrated with quality \(Int(quality * 100))%"
         
         print("🎉 ARCalibrationCoordinator: Triangle \(String(triangle.id.uuidString.prefix(8))) calibration complete (quality: \(Int(quality * 100))%)")
@@ -274,16 +323,39 @@ final class ARCalibrationCoordinator: ObservableObject {
             userInfo: ["triangleID": triangle.id]
         )
         
-        // Check if this is the first triangle calibrated (all triangles were uncalibrated before)
-        let wasFirstTriangle = triangleStore.triangles.filter { $0.isCalibrated }.count == 1
+        // Ghost markers disabled - user manually triggers via "Show Ghost Markers" button
+        // Old auto-plant removed to prevent calling deprecated plantGhostMarkers(using:)
         
-        // Plant ghost markers for all remaining map points after first triangle calibration
-        if wasFirstTriangle {
-            plantGhostMarkers(using: triangle)
-        }
+        // Reset index for next calibration
+        currentVertexIndex = 0
+        print("🔄 Reset currentVertexIndex to 0 for next calibration")
         
         // Don't auto-start next triangle - let user decide
         print("ℹ️ Calibration complete. User can now fill triangle or manually start next calibration.")
+    }
+    
+    /// Transitions from readyToFill to surveyMode when Fill Triangle is tapped
+    func enterSurveyMode() {
+        guard calibrationState == .readyToFill else {
+            print("⚠️ Cannot enter survey mode - not in readyToFill state (current: \(stateDescription))")
+            return
+        }
+        
+        calibrationState = .surveyMode
+        print("🎯 CalibrationState → \(stateDescription)")
+    }
+    
+    var stateDescription: String {
+        switch calibrationState {
+        case .idle:
+            return "Idle"
+        case .placingVertices(let index):
+            return "Placing Vertices (index: \(index))"
+        case .readyToFill:
+            return "Ready to Fill"
+        case .surveyMode:
+            return "Survey Mode"
+        }
     }
     
     /// Save ARWorldMap after successful triangle calibration
@@ -431,8 +503,17 @@ final class ARCalibrationCoordinator: ObservableObject {
         return sqrt(dx * dx + dy * dy)
     }
     
-    /// Plant ghost markers for all remaining map points that don't have AR markers yet
+    // MARK: - DEPRECATED
+    /// DO NOT USE - Calls deprecated addGhostMarker() with broken logic.
+    /// Use ARViewContainer.Coordinator.plantGhostMarkers(calibratedTriangle:, triangleStore:, filter:) instead.
     func plantGhostMarkers(using calibratedTriangle: TrianglePatch) {
+        print("⚠️ [DEPRECATED] Function \(#function) was called. Refactor needed.")
+        if let symbol = Thread.callStackSymbols.dropFirst(1).first {
+            print("🔍 Called by: \(symbol)")
+        }
+        return
+        
+        /* OLD LOGIC COMMENTED OUT
         guard let coordinator = ARViewContainer.Coordinator.current else {
             print("⚠️ Cannot plant ghost markers: No ARViewCoordinator available")
             return
@@ -461,6 +542,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
         
         print("✅ Ghost marker planting complete")
+        */ // END OLD LOGIC
     }
     
     private func computeCalibrationQuality(_ triangle: TrianglePatch) -> Float {
@@ -571,7 +653,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         triangleVertices = []
         referencePhotoData = nil
         completedMarkerCount = 0
-        
+        lastPrintedVertexIndex = nil  // Reset print tracking
+        calibrationState = .idle
+        print("🎯 CalibrationState → \(stateDescription) (reset)")
         print("🔄 ARCalibrationCoordinator: Reset complete - all markers cleared")
     }
     
