@@ -272,32 +272,6 @@ struct ARViewWithOverlays: View {
                             .cornerRadius(8)
                         }
                         .buttonStyle(.plain)
-                        
-                        // Ghost Markers button
-                        Button(action: {
-                            NotificationCenter.default.post(
-                                name: NSNotification.Name("PlantGhostMarkers"),
-                                object: nil,
-                                userInfo: [
-                                    "triangleID": triangle.id,
-                                    "triangleStore": arCalibrationCoordinator.triangleStore
-                                ]
-                            )
-                        }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "eye.trianglebadge.exclamationmark.fill")
-                                    .font(.system(size: 14))
-                                Text("Show Ghost Markers")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(Color.purple.opacity(0.8))
-                            .cornerRadius(8)
-                        }
-                        .buttonStyle(.plain)
                     }
                     .position(x: geo.size.width - 120, y: 270) // Below PiP map
                     .zIndex(997)

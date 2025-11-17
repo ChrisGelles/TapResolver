@@ -4,14 +4,6 @@ import SceneKit
 import simd
 import CoreImage
 
-/// Filter options for ghost marker generation
-enum GhostMarkerFilter {
-    case all                    // All map points
-    case adjacentTriangles      // Only vertices of adjacent triangles
-    case edgePoints             // Only points with triangleEdge role
-    case adjacentEdges          // Adjacent triangles AND edge role (recommended)
-}
-
 struct ARViewContainer: UIViewRepresentable {
     @Binding var mode: ARMode
     
@@ -182,23 +174,6 @@ struct ARViewContainer: UIViewRepresentable {
                       let triangleID = notification.userInfo?["triangleID"] as? UUID else { return }
                 print("📐 Triangle calibration complete - drawing lines for \(String(triangleID.uuidString.prefix(8)))")
                 self.drawTriangleLines(triangleID: triangleID)
-            }
-            
-            // Listen for ghost marker generation request
-            NotificationCenter.default.addObserver(
-                forName: NSNotification.Name("PlantGhostMarkers"),
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                guard let self = self,
-                      let triangleID = notification.userInfo?["triangleID"] as? UUID,
-                      let triangleStore = notification.userInfo?["triangleStore"] as? TrianglePatchStore,
-                      let triangle = triangleStore.triangle(withID: triangleID) else { return }
-                
-                print("👻 Ghost marker request received for triangle \(String(triangleID.uuidString.prefix(8)))")
-                
-                // Use adjacentEdges filter (adjacent triangles + edge designation)
-                self.plantGhostMarkers(calibratedTriangle: triangle, triangleStore: triangleStore, filter: .adjacentEdges)
             }
         }
         
