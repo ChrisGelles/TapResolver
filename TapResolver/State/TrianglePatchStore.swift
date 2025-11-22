@@ -501,69 +501,35 @@ class TrianglePatchStore: ObservableObject {
         isModifying = true
         defer { isModifying = false }
         
-        print("🔍 [ADD_MARKER_TRACE] Called with:")
-        print("   triangleID: \(String(triangleID.uuidString.prefix(8)))")
-        print("   vertexMapPointID: \(String(vertexMapPointID.uuidString.prefix(8)))")
-        print("   markerID: \(String(markerID.uuidString.prefix(8)))")
-        
         guard let index = triangles.firstIndex(where: { $0.id == triangleID }) else {
-            print("⚠️ [ADD_MARKER_TRACE] Cannot add marker: No triangle found with ID \(String(triangleID.uuidString.prefix(8)))")
+            print("⚠️ Cannot add marker: No triangle found with ID \(String(triangleID.uuidString.prefix(8)))")
             return
         }
-        
-        print("🔍 [ADD_MARKER_TRACE] Triangle found:")
-        print("   Triangle ID: \(String(triangles[index].id.uuidString.prefix(8)))")
-        print("   Current arMarkerIDs: \(triangles[index].arMarkerIDs)")
-        print("   Current arMarkerIDs.count: \(triangles[index].arMarkerIDs.count)")
         
         let markerIDString = markerID.uuidString
         if !triangles[index].arMarkerIDs.contains(markerIDString) {
             // Find the index of the vertex in the triangle
             if let vertexIndex = triangles[index].vertexIDs.firstIndex(of: vertexMapPointID) {
-                print("🔍 [ADD_MARKER_TRACE] Found vertex at index \(vertexIndex)")
-                
                 // Ensure array has exactly 3 slots, all initialized to empty string if needed
                 if triangles[index].arMarkerIDs.isEmpty {
                     triangles[index].arMarkerIDs = ["", "", ""]
-                    print("🔍 [ADD_MARKER_TRACE] Initialized arMarkerIDs array with 3 empty slots")
                 }
                 
                 // Ensure arMarkerIDs array has enough elements
                 while triangles[index].arMarkerIDs.count < 3 {
                     triangles[index].arMarkerIDs.append("")
-                    print("🔍 [ADD_MARKER_TRACE] Expanded arMarkerIDs array to \(triangles[index].arMarkerIDs.count) slots")
                 }
                 
-                print("🔍 [ADD_MARKER_TRACE] Array ready, setting index \(vertexIndex)")
-                
-                let oldValue = triangles[index].arMarkerIDs[vertexIndex]
                 triangles[index].arMarkerIDs[vertexIndex] = markerIDString
-                print("🔍 [ADD_MARKER_TRACE] Set arMarkerIDs[\(vertexIndex)]:")
-                print("   Old value: '\(oldValue)'")
-                print("   New value: '\(markerIDString)'")
-                print("   Updated arMarkerIDs: \(triangles[index].arMarkerIDs)")
-                
-                // CRITICAL: Verify update before save
-                print("🔍 [ADD_MARKER_TRACE] Verifying update BEFORE save:")
-                print("   triangles[\(index)].arMarkerIDs = \(triangles[index].arMarkerIDs)")
-                
                 save()
                 
-                // CRITICAL: Verify update after save
-                print("🔍 [ADD_MARKER_TRACE] Verifying update AFTER save:")
-                if index < triangles.count {
-                    print("   triangles[\(index)].arMarkerIDs = \(triangles[index].arMarkerIDs)")
-                } else {
-                    print("   ⚠️ Index out of bounds after save!")
-                }
-                
-                print("✅ [ADD_MARKER_TRACE] Saved triangles to storage")
-                print("✅ Added marker \(String(markerIDString.prefix(8))) to triangle vertex \(vertexIndex)")
+                // Summary log only
+                print("✅ Added marker \(String(markerIDString.prefix(8))) to triangle \(String(triangleID.uuidString.prefix(8))) vertex \(vertexIndex)")
             } else {
-                print("⚠️ [ADD_MARKER_TRACE] Could not find vertex index for vertexMapPointID \(String(vertexMapPointID.uuidString.prefix(8)))")
+                print("⚠️ Could not find vertex index for vertexMapPointID \(String(vertexMapPointID.uuidString.prefix(8)))")
             }
         } else {
-            print("⚠️ [ADD_MARKER_TRACE] Marker \(String(markerIDString.prefix(8))) already exists in triangle")
+            print("⚠️ Marker \(String(markerIDString.prefix(8))) already exists in triangle")
         }
     }
     
@@ -623,29 +589,9 @@ class TrianglePatchStore: ObservableObject {
     // MARK: - Persistence
     
     func save() {
-        print("🔍 [SAVE_TRACE] save() called")
-        print("   Thread: \(Thread.current)")
-        print("   Triangle count: \(triangles.count)")
-        
-        // Print first 3 triangles' AR markers for debugging
-        for (index, triangle) in triangles.prefix(3).enumerated() {
-            print("   Triangle[\(index)] markers: \(triangle.arMarkerIDs)")
-        }
-        
-        print("🔍 [SAVE_TRACE] Call stack:")
-        Thread.callStackSymbols.prefix(5).forEach { print("   \($0)") }
-        
         ctx.write(persistenceKey, value: triangles)
+        // Summary log only
         print("💾 Saved \(triangles.count) triangle(s)")
-        
-        // Log detailed triangle data
-        for triangle in triangles {
-            print("💾 Saving Triangle \(String(triangle.id.uuidString.prefix(8))):")
-            print("   Vertices: \(triangle.vertexIDs.map { String($0.uuidString.prefix(8)) })")
-            print("   AR Markers: \(triangle.arMarkerIDs.map { String($0.prefix(8)) })")
-            print("   Calibrated: \(triangle.isCalibrated)")
-            print("   Quality: \(Int(triangle.calibrationQuality * 100))%")
-        }
     }
     
     func load() {

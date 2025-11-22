@@ -14,6 +14,7 @@ final class HUDPanelsState: ObservableObject {
     @Published var isMorgueOpen: Bool = false
     @Published var isMapPointOpen: Bool = false
     @Published var isMapPointLogOpen = false
+    @Published var isDebugSettingsOpen = false
     @Published var isCalibratingNorth: Bool = false
     @Published var showFacingOverlay: Bool = true
     
@@ -29,5 +30,10 @@ final class HUDPanelsState: ObservableObject {
     func toggleMapPointLog() {
         isMapPointLogOpen.toggle()
         print("🗂️ Map Point Log: \(isMapPointLogOpen ? "OPEN" : "CLOSED")")
+    }
+    
+    func toggleDebugSettings() {
+        isDebugSettingsOpen.toggle()
+        print("⚙️ Debug Settings Panel: \(isDebugSettingsOpen ? "OPEN" : "CLOSED")")
     }
 }

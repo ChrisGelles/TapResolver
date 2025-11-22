@@ -1209,7 +1209,7 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
         } else {
             // Vertical planes: use actual center position, no rotation needed
             planeNode.position = SCNVector3(planeAnchor.center.x, planeAnchor.center.y, planeAnchor.center.z)
-            planeNode.eulerAngles.x = 0
+            planeNode.eulerAngles.x = -.pi / 2
         }
         
         planeNode.name = "planeVisualization"  // Tag for easy removal

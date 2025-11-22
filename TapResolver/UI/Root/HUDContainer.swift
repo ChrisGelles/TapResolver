@@ -49,8 +49,6 @@ struct HUDContainer: View {
     @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
 
     @State private var selectedBeaconForTxPower: String? = nil
-    @State private var showingSoftResetAlert = false
-    @State private var showingPurgePhotosAlert = false
     @State private var showScanQuality = true  // Temporary: always show for testing
     @State private var activeIntervalEdit: (beaconID: String, text: String)? = nil
     @State private var showRelocalizationDebug = false  // Debug UI toggle
@@ -84,23 +82,6 @@ struct HUDContainer: View {
                 // Update coordinator to use actual ARWorldMapStore
                 relocalizationCoordinator.updateARStore(arWorldMapStore)
             }
-            .alert("Soft Reset Calibration?", isPresented: $showingSoftResetAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Reset", role: .destructive) {
-                    performSoftReset()
-                }
-            } message: {
-                Text("This will clear all calibration data for '\(PersistenceContext.shared.locationID)' location.\n\nTriangle mesh structure will be preserved.\nOther locations (museum, etc.) will NOT be affected.")
-            }
-            .alert("Purge All Photos?", isPresented: $showingPurgePhotosAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Purge Photos", role: .destructive) {
-                    mapPointStore.purgeAllPhotos()
-                }
-            } message: {
-                let location = locationManager.currentLocationID
-                Text("This will delete all \(mapPointStore.points.count) photo assets for location '\(location)'. This cannot be undone.")
-            }
         }
         
     init() {
@@ -127,55 +108,11 @@ struct HUDContainer: View {
                         BeaconDrawer()
                         MorgueDrawer()
                         MapPointDrawer()
-                        MapPointLogButton()
+                        MapPointLogButton() //This log panel is a good example for the Debug/Settings panel I'd like to see.
                         ResetMapButton()
                         BluetoothScanButton()
                         RSSIMeterButton()
-                        FacingToggleButton()
-                        RelocalizationDebugToggleButton(showDebug: $showRelocalizationDebug)
-                        // MapPointDiagnosticButton()  // Hidden - diagnostic tool
-                        
-                        // Diagnostic & Maintenance Buttons
-                        HStack(spacing: 12) {
-                            // Eyeball button - Show purge diagnostic
-                            Button(action: {
-                                showPurgeDiagnostic()
-                            }) {
-                                Image(systemName: "eye.fill")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(.blue)
-                                    .frame(width: 44, height: 44)
-                                    .background(Color.white.opacity(0.9))
-                                    .cornerRadius(8)
-                            }
-                            .buttonStyle(.plain)
-                            
-                            // Red X button - Soft reset calibration
-                            Button(action: {
-                                confirmSoftReset()
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(.red)
-                                    .frame(width: 44, height: 44)
-                                    .background(Color.white.opacity(0.9))
-                                    .cornerRadius(8)
-                            }
-                            .buttonStyle(.plain)
-                            
-                            // Photo Purge button
-                            Button(action: {
-                                showingPurgePhotosAlert = true
-                            }) {
-                                Image(systemName: "photo.on.rectangle.angled")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(.orange)
-                                    .frame(width: 44, height: 44)
-                                    .background(Color.white.opacity(0.9))
-                                    .cornerRadius(8)
-                            }
-                            .buttonStyle(.plain)
-                        }
+                        DebugSettingsButton() // Opens Debug/Settings Panel with moved buttons
                         // MARK: - Initial Diagnostic Buttons (Hidden - can be restored if needed)
                         /*
                         UserDefaultsDiagnosticButton()
@@ -229,9 +166,19 @@ struct HUDContainer: View {
                 }
                 .zIndex(200)
             }
+            
+            if hud.isDebugSettingsOpen {
+                VStack {
+                    Spacer()
+                    DebugSettingsPanel(showRelocalizationDebug: $showRelocalizationDebug)
+                        .transition(.move(edge: .bottom))
+                }
+                .zIndex(200)
+            }
         }
         .zIndex(100)
         .animation(.easeInOut(duration: 0.3), value: hud.isMapPointLogOpen)
+        .animation(.easeInOut(duration: 0.3), value: hud.isDebugSettingsOpen)
     }
 
     @ViewBuilder
@@ -711,140 +658,6 @@ struct HUDContainer: View {
         )
     }
     
-    // MARK: - Diagnostic & Maintenance Functions
-    
-    /// Show diagnostic info about what would be purged
-    func showPurgeDiagnostic() {
-        let currentLocation = PersistenceContext.shared.locationID
-        
-        print("================================================================================")
-        print("👁️ PURGE DIAGNOSTIC - LOCATION ISOLATION CHECK")
-        print("================================================================================")
-        print("📍 Current Location: '\(currentLocation)'")
-        print("")
-        print("🗑️ WILL AFFECT:")
-        print("   ✓ Triangles: /Documents/locations/\(currentLocation)/dots.json")
-        print("   ✓ ARWorldMaps: /Documents/locations/\(currentLocation)/ARSpatial/")
-        print("   ✓ Triangle count: \(triangleStore.triangles.count)")
-        
-        let calibratedCount = triangleStore.triangles.filter { $0.isCalibrated }.count
-        let totalMarkers = triangleStore.triangles.reduce(0) { $0 + $1.arMarkerIDs.count }
-        
-        print("   ✓ Calibrated triangles: \(calibratedCount)")
-        print("   ✓ Total AR markers: \(totalMarkers)")
-        print("")
-        print("🛡️ WILL NOT AFFECT:")
-        
-        // List other locations
-        let locationsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("locations")
-        
-        if let locationDirs = try? FileManager.default.contentsOfDirectory(atPath: locationsURL.path) {
-            for dir in locationDirs where dir != currentLocation {
-                print("   ✓ Location '\(dir)' - UNTOUCHED")
-            }
-        }
-        
-        print("")
-        print("🎯 ACTION:")
-        print("   Soft reset will clear calibration data but keep triangle mesh structure")
-        print("   All triangles will be marked uncalibrated (isCalibrated = false)")
-        print("   AR marker associations will be cleared (arMarkerIDs = [])")
-        print("   Triangle vertices and mesh connectivity preserved")
-        print("================================================================================")
-    }
-    
-    /// Show confirmation dialog before soft reset
-    func confirmSoftReset() {
-        showingSoftResetAlert = true
-    }
-    
-    /// Perform soft reset - clear calibration but keep mesh
-    func performSoftReset() {
-        let currentLocation = PersistenceContext.shared.locationID
-        
-        print("================================================================================")
-        print("🗑️ SOFT RESET - CLEARING CALIBRATION DATA")
-        print("================================================================================")
-        print("📍 Target Location: '\(currentLocation)'")
-        print("")
-        
-        let beforeCount = triangleStore.triangles.filter { $0.isCalibrated }.count
-        let beforeMarkers = triangleStore.triangles.reduce(0) { $0 + $1.arMarkerIDs.count }
-        
-        print("📊 Before reset:")
-        print("   Calibrated triangles: \(beforeCount)")
-        print("   Total AR markers: \(beforeMarkers)")
-        print("")
-        
-        // Clear calibration data for all triangles
-        for i in 0..<triangleStore.triangles.count {
-            triangleStore.triangles[i].isCalibrated = false
-            triangleStore.triangles[i].arMarkerIDs = []
-            triangleStore.triangles[i].calibrationQuality = 0.0
-            triangleStore.triangles[i].legMeasurements = []
-            triangleStore.triangles[i].worldMapFilename = nil
-            triangleStore.triangles[i].worldMapFilesByStrategy = [:]
-            triangleStore.triangles[i].transform = nil
-            triangleStore.triangles[i].lastCalibratedAt = nil
-            triangleStore.triangles[i].userPositionWhenCalibrated = nil
-        }
-        
-        // Save changes
-        triangleStore.save()
-        
-        print("✅ Cleared calibration data:")
-        print("   - Set isCalibrated = false for all triangles")
-        print("   - Cleared arMarkerIDs arrays")
-        print("   - Reset calibrationQuality to 0.0")
-        print("   - Cleared legMeasurements")
-        print("   - Cleared ARWorldMap filenames")
-        print("   - Cleared transform data")
-        print("   - Cleared lastCalibratedAt")
-        print("   - Cleared userPositionWhenCalibrated")
-        print("")
-        print("✅ Preserved:")
-        print("   - Triangle vertices (\(triangleStore.triangles.reduce(0) { $0 + $1.vertexIDs.count }) total)")
-        print("   - Mesh connectivity")
-        print("   - Triangle structure (\(triangleStore.triangles.count) triangles)")
-        print("")
-        
-        // Delete ARWorldMap files for this location
-        let arSpatialURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("locations")
-            .appendingPathComponent(currentLocation)
-            .appendingPathComponent("ARSpatial")
-        
-        if FileManager.default.fileExists(atPath: arSpatialURL.path) {
-            do {
-                try FileManager.default.removeItem(at: arSpatialURL)
-                print("🗑️ Deleted ARWorldMap files at: \(arSpatialURL.path)")
-            } catch {
-                print("⚠️ Failed to delete ARWorldMap files: \(error)")
-            }
-        }
-        
-        print("")
-        print("🛡️ Other locations UNTOUCHED:")
-        
-        // Verify other locations still exist
-        let locationsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("locations")
-        
-        if let locationDirs = try? FileManager.default.contentsOfDirectory(atPath: locationsURL.path) {
-            for dir in locationDirs where dir != currentLocation {
-                let dotsPath = locationsURL.appendingPathComponent(dir).appendingPathComponent("dots.json").path
-                if FileManager.default.fileExists(atPath: dotsPath) {
-                    print("   ✓ Location '\(dir)' - VERIFIED INTACT")
-                }
-            }
-        }
-        
-        print("================================================================================")
-        print("✅ Soft reset complete for location '\(currentLocation)'")
-        print("================================================================================")
-    }
-
 }
 
 
@@ -889,6 +702,26 @@ private struct MapPointLogButton: View {
         }
         .shadow(radius: 4)
         .accessibilityLabel("Open Map Point Log")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+private struct DebugSettingsButton: View {
+    @EnvironmentObject private var hudPanels: HUDPanelsState
+    
+    var body: some View {
+        Button {
+            hudPanels.toggleDebugSettings()
+        } label: {
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Circle().fill(Color.gray.opacity(0.8)))
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("Open Debug Settings")
         .buttonStyle(.plain)
         .allowsHitTesting(true)
     }
@@ -1207,6 +1040,293 @@ private struct RelocalizationDebugToggleButton: View {
         .accessibilityLabel("Toggle relocalization debug")
         .buttonStyle(.plain)
         .allowsHitTesting(true)
+    }
+}
+
+// MARK: - Debug Settings Panel
+
+private struct DebugSettingsPanel: View {
+    @EnvironmentObject private var hudPanels: HUDPanelsState
+    @EnvironmentObject private var mapPointStore: MapPointStore
+    @EnvironmentObject private var triangleStore: TrianglePatchStore
+    @EnvironmentObject private var locationManager: LocationManager
+    
+    @Binding var showRelocalizationDebug: Bool
+    @State private var showingSoftResetAlert = false
+    @State private var showingPurgePhotosAlert = false
+    
+    var body: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                // Header with close button
+                HStack {
+                    Text("Debug & Settings")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Button {
+                        hudPanels.toggleDebugSettings()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 24))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                .background(Color.black.opacity(0.8))
+                
+                // Grid of buttons
+                ScrollView {
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12)
+                    ], spacing: 16) {
+                        // Facing Toggle Button
+                        Button {
+                            hudPanels.showFacingOverlay.toggle()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "location.north.fill")
+                                    .font(.system(size: 24))
+                                Text("Facing")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Relocalization Debug Toggle
+                        Button {
+                            showRelocalizationDebug.toggle()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: showRelocalizationDebug ? "location.magnifyingglass.fill" : "location.magnifyingglass")
+                                    .font(.system(size: 24))
+                                Text("Reloc Debug")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Purge Diagnostic Button (Eye)
+                        Button {
+                            showPurgeDiagnostic()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "eye.fill")
+                                    .font(.system(size: 24))
+                                Text("Diagnostic")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Soft Reset Button (Red X)
+                        Button {
+                            showingSoftResetAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 24))
+                                Text("Soft Reset")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Photo Purge Button
+                        Button {
+                            showingPurgePhotosAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 24))
+                                Text("Purge Photos")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 20)
+                }
+                .background(Color.black.opacity(0.7))
+            }
+            .frame(height: min(geometry.size.height * 0.5, 400))
+            .frame(maxWidth: .infinity)
+            .background(Color.black.opacity(0.9))
+            .cornerRadius(16, corners: [.topLeft, .topRight])
+            .shadow(color: .black.opacity(0.2), radius: 10, y: -5)
+            .frame(maxHeight: .infinity, alignment: .bottom)
+            .ignoresSafeArea(edges: .bottom)
+        }
+        .alert("Soft Reset Calibration?", isPresented: $showingSoftResetAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Reset", role: .destructive) {
+                performSoftReset()
+            }
+        } message: {
+            let location = PersistenceContext.shared.locationID
+            Text("This will clear all calibration data for '\(location)' location.\n\nTriangle mesh structure will be preserved.\nOther locations (museum, etc.) will NOT be affected.")
+        }
+        .alert("Purge All Photos?", isPresented: $showingPurgePhotosAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Purge Photos", role: .destructive) {
+                mapPointStore.purgeAllPhotos()
+            }
+        } message: {
+            let location = locationManager.currentLocationID
+            Text("This will delete all \(mapPointStore.points.count) photo assets for location '\(location)'. This cannot be undone.")
+        }
+    }
+    
+    private func showPurgeDiagnostic() {
+        let currentLocation = PersistenceContext.shared.locationID
+        
+        print("================================================================================")
+        print("👁️ PURGE DIAGNOSTIC - LOCATION ISOLATION CHECK")
+        print("================================================================================")
+        print("📍 Current Location: '\(currentLocation)'")
+        print("")
+        print("🗑️ WILL AFFECT:")
+        print("   ✓ Triangles: /Documents/locations/\(currentLocation)/dots.json")
+        print("   ✓ ARWorldMaps: /Documents/locations/\(currentLocation)/ARSpatial/")
+        print("   ✓ Triangle count: \(triangleStore.triangles.count)")
+        
+        let calibratedCount = triangleStore.triangles.filter { $0.isCalibrated }.count
+        let totalMarkers = triangleStore.triangles.reduce(0) { $0 + $1.arMarkerIDs.count }
+        
+        print("   ✓ Calibrated triangles: \(calibratedCount)")
+        print("   ✓ Total AR markers: \(totalMarkers)")
+        print("")
+        print("🛡️ WILL NOT AFFECT:")
+        
+        // List other locations
+        let locationsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("locations")
+        
+        if let locationDirs = try? FileManager.default.contentsOfDirectory(atPath: locationsURL.path) {
+            for dir in locationDirs where dir != currentLocation {
+                print("   ✓ Location '\(dir)' - UNTOUCHED")
+            }
+        }
+        
+        print("")
+        print("🎯 ACTION:")
+        print("   Soft reset will clear calibration data but keep triangle mesh structure")
+        print("   All triangles will be marked uncalibrated (isCalibrated = false)")
+        print("   AR marker associations will be cleared (arMarkerIDs = [])")
+        print("   Triangle vertices and mesh connectivity preserved")
+        print("================================================================================")
+    }
+    
+    private func performSoftReset() {
+        let currentLocation = PersistenceContext.shared.locationID
+        
+        print("================================================================================")
+        print("🗑️ SOFT RESET - CLEARING CALIBRATION DATA")
+        print("================================================================================")
+        print("📍 Target Location: '\(currentLocation)'")
+        print("")
+        
+        let beforeCount = triangleStore.triangles.filter { $0.isCalibrated }.count
+        let beforeMarkers = triangleStore.triangles.reduce(0) { $0 + $1.arMarkerIDs.count }
+        
+        print("📊 Before reset:")
+        print("   Calibrated triangles: \(beforeCount)")
+        print("   Total AR markers: \(beforeMarkers)")
+        print("")
+        
+        // Clear calibration data for all triangles
+        for i in 0..<triangleStore.triangles.count {
+            triangleStore.triangles[i].isCalibrated = false
+            triangleStore.triangles[i].arMarkerIDs = []
+            triangleStore.triangles[i].calibrationQuality = 0.0
+            triangleStore.triangles[i].legMeasurements = []
+            triangleStore.triangles[i].worldMapFilename = nil
+            triangleStore.triangles[i].worldMapFilesByStrategy = [:]
+            triangleStore.triangles[i].transform = nil
+            triangleStore.triangles[i].lastCalibratedAt = nil
+            triangleStore.triangles[i].userPositionWhenCalibrated = nil
+        }
+        
+        // Save changes
+        triangleStore.save()
+        
+        print("✅ Cleared calibration data:")
+        print("   - Set isCalibrated = false for all triangles")
+        print("   - Cleared arMarkerIDs arrays")
+        print("   - Reset calibrationQuality to 0.0")
+        print("   - Cleared legMeasurements")
+        print("   - Cleared ARWorldMap filenames")
+        print("   - Cleared transform data")
+        print("   - Cleared lastCalibratedAt")
+        print("   - Cleared userPositionWhenCalibrated")
+        print("")
+        print("✅ Preserved:")
+        print("   - Triangle vertices (\(triangleStore.triangles.reduce(0) { $0 + $1.vertexIDs.count }) total)")
+        print("   - Mesh connectivity")
+        print("   - Triangle structure (\(triangleStore.triangles.count) triangles)")
+        print("")
+        
+        // Delete ARWorldMap files for this location
+        let arSpatialURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("locations")
+            .appendingPathComponent(currentLocation)
+            .appendingPathComponent("ARSpatial")
+        
+        if FileManager.default.fileExists(atPath: arSpatialURL.path) {
+            do {
+                try FileManager.default.removeItem(at: arSpatialURL)
+                print("🗑️ Deleted ARWorldMap files at: \(arSpatialURL.path)")
+            } catch {
+                print("⚠️ Failed to delete ARWorldMap files: \(error)")
+            }
+        }
+        
+        print("")
+        print("🛡️ Other locations UNTOUCHED:")
+        
+        // Verify other locations still exist
+        let locationsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("locations")
+        
+        if let locationDirs = try? FileManager.default.contentsOfDirectory(atPath: locationsURL.path) {
+            for dir in locationDirs where dir != currentLocation {
+                let dotsPath = locationsURL.appendingPathComponent(dir).appendingPathComponent("dots.json").path
+                if FileManager.default.fileExists(atPath: dotsPath) {
+                    print("   ✓ Location '\(dir)' - VERIFIED INTACT")
+                }
+            }
+        }
+        
+        print("================================================================================")
+        print("✅ Soft reset complete for location '\(currentLocation)'")
+        print("================================================================================")
     }
 }
 

@@ -446,48 +446,22 @@ public final class MapPointStore: ObservableObject {
     }
 
     internal func save() {
-        // ========================================================================
-        // LINE-BY-LINE DATA SAVING TRACE - MapPointStore.save()
-        // ========================================================================
-        print("\n" + "=".repeating(80))
-        print("💾 DATA SAVE TRACE: MapPointStore.save()")
-        print("=".repeating(80))
-        print("   [SAVE-1] MapPointStore.save() CALLED")
-        print("   [SAVE-2] Instance ID: \(String(instanceID.prefix(8)))...")
-        print("   [SAVE-3] Current ctx.locationID = '\(ctx.locationID)'")
-        print("   [SAVE-4] points array contains \(points.count) items")
-        
         // CRITICAL: Never save during reload operations (prevents data loss)
         guard !isReloading else {
-            print("   [SAVE-5] ⚠️ BLOCKED: isReloading = true")
-            print("   [SAVE-6] MapPointStore.save() blocked during reload operation")
-            print("=".repeating(80) + "\n")
+            print("⚠️ MapPointStore.save() blocked during reload operation")
             return
         }
-        print("   [SAVE-5] ✅ isReloading = false, proceeding with save")
         
         // CRITICAL: Never save empty data if we previously had data
         if points.isEmpty {
-            print("   [SAVE-6] ⚠️ points array is EMPTY - checking for existing data")
             // Check if UserDefaults has existing data
             if let existingDTO: [MapPointDTO] = ctx.read(pointsKey, as: [MapPointDTO].self),
                !existingDTO.isEmpty {
-                print("   [SAVE-7] 🛑 CRITICAL: Blocked save of empty array")
-                print("   [SAVE-8] UserDefaults key 'locations.\(ctx.locationID).MapPoints_v1' has \(existingDTO.count) points")
-                print("   [SAVE-9] This prevents accidental data loss. Use clearAllPoints() explicitly to delete.")
-                print("=".repeating(80) + "\n")
+                print("🛑 CRITICAL: Blocked save of empty array (prevents data loss)")
                 return
-            }
-            print("   [SAVE-7] ✅ No existing data found - allowing empty save")
-        } else {
-            print("   [SAVE-6] ✅ points array has \(points.count) items - proceeding")
-            print("   [SAVE-7] First 3 point IDs to be saved:")
-            for (index, point) in points.prefix(3).enumerated() {
-                print("       Point[\(index+1)]: ID=\(String(point.id.uuidString.prefix(8)))... Pos=(\(Int(point.mapPoint.x)), \(Int(point.mapPoint.y)))")
             }
         }
         
-        print("   [SAVE-8] Converting \(points.count) MapPoint objects to MapPointDTO")
         let dto = points.map { point -> MapPointDTO in
             // Only include locationPhotoData if there's no filename (legacy data)
             let photoData: Data?
@@ -518,21 +492,15 @@ public final class MapPointStore: ObservableObject {
                 isLocked: point.isLocked
             )
         }
-        print("   [SAVE-9] Calling ctx.write('\(pointsKey)', value: dto)")
-        print("   [SAVE-10] This will write to key: 'locations.\(ctx.locationID).\(pointsKey)'")
-        print("   [SAVE-11] Full UserDefaults key: 'locations.\(ctx.locationID).MapPoints_v1'")
+        
         ctx.write(pointsKey, value: dto)
-        print("   [SAVE-12] ✅ Data written to UserDefaults")
         
         if let activeID = activePointID {
-            print("   [SAVE-13] Saving activePointID: \(String(activeID.uuidString.prefix(8)))...")
             ctx.write(activePointKey, value: activeID)
-        } else {
-            print("   [SAVE-13] No activePointID to save")
         }
         
-        print("   [SAVE-14] ✅ Save complete: \(points.count) Map Point(s) saved for location '\(ctx.locationID)'")
-        print("=".repeating(80) + "\n")
+        // Summary log only
+        print("💾 Saved \(points.count) Map Point(s)")
         
         // Save AR Markers
         // saveARMarkers()  // AR Markers no longer persisted
@@ -586,37 +554,10 @@ public final class MapPointStore: ObservableObject {
     }
 
     private func load() {
-        // ========================================================================
-        // LINE-BY-LINE DATA LOADING TRACE - MapPointStore.load()
-        // ========================================================================
-        print("\n" + "=".repeating(80))
-        print("🔄 DATA LOAD TRACE: MapPointStore.load()")
-        print("=".repeating(80))
-        print("   [LOAD-1] MapPointStore.load() CALLED")
-        print("   [LOAD-2] Instance ID: \(String(instanceID.prefix(8)))...")
-        print("   [LOAD-3] Accessing ctx.locationID (PersistenceContext.shared.locationID)")
-        print("   [LOAD-4] Current ctx.locationID = '\(ctx.locationID)'")
-        print("   [LOAD-5] pointsKey constant = '\(pointsKey)'")
-        print("   [LOAD-6] Calling ctx.read('\(pointsKey)', as: [MapPointDTO].self)")
-        print("   [LOAD-7] This will generate key: 'locations.\(ctx.locationID).\(pointsKey)'")
-        print("   [LOAD-8] Expected UserDefaults key: 'locations.\(ctx.locationID).MapPoints_v1'")
-        
+        // Load map points from persistence
         if let dto: [MapPointDTO] = ctx.read(pointsKey, as: [MapPointDTO].self) {
-            print("   [LOAD-9] ✅ ctx.read() returned \(dto.count) MapPointDTO items")
-            print("   [LOAD-10] First 3 point IDs from loaded data:")
-            for (index, point) in dto.prefix(3).enumerated() {
-                print("       DTO[\(index+1)]: ID=\(String(point.id.uuidString.prefix(8)))... Pos=(\(Int(point.x)), \(Int(point.y)))")
-            }
-            print("   [LOAD-11] Starting conversion from MapPointDTO to MapPoint")
-            print("   [LOAD-12] Processing \(dto.count) DTO items")
-            
             var needsSave = false
-            var processedCount = 0
             self.points = dto.map { dtoItem -> MapPoint in
-                processedCount += 1
-                if processedCount <= 3 {
-                    print("   [LOAD-13] Converting DTO[\(processedCount)]: ID=\(String(dtoItem.id.uuidString.prefix(8)))...")
-                }
                 // Load photo from disk if filename exists, otherwise use legacy data
                 var photoData: Data? = nil
                 if let filename = dtoItem.photoFilename {
@@ -676,30 +617,16 @@ public final class MapPointStore: ObservableObject {
                 point.arMarkerID = dtoItem.arMarkerID
                 return point
             }
-            // STEP 7: Log final results
-            print("   [LOAD-14] ✅ Conversion complete: \(points.count) MapPoint objects created")
-            if !points.isEmpty {
-                print("   [LOAD-15] Final points array contains \(points.count) items")
-                print("   [LOAD-16] First 3 MapPoint IDs in memory:")
-                for (index, point) in points.prefix(3).enumerated() {
-                    print("       MapPoint[\(index+1)]: ID=\(String(point.id.uuidString.prefix(8)))... Pos=(\(Int(point.mapPoint.x)), \(Int(point.mapPoint.y)))")
-                }
-                print("   [LOAD-17] Total sessions: \(points.reduce(0) { $0 + $1.sessions.count })")
-            } else {
-                print("   [LOAD-15] ⚠️ No points loaded - array is empty")
-            }
+            
+            // Summary log only
             if needsSave {
-                print("   [LOAD-18] Migration needed - calling save()")
                 print("📦 Migrated \(points.count) MapPoint(s) to include role metadata")
                 save()
             }
-            print("=".repeating(80) + "\n")
+            print("✅ MapPointStore: Reload complete - \(points.count) points loaded")
         } else {
-            print("   [LOAD-9] ❌ ctx.read() returned nil - no data found")
-            print("   [LOAD-10] This means UserDefaults key 'locations.\(ctx.locationID).MapPoints_v1' does not exist")
-            print("   [LOAD-11] points array will remain empty")
             self.points = []
-            print("=".repeating(80) + "\n")
+            print("✅ MapPointStore: No saved data found - starting fresh")
         }
         
         selectedPointID = nil

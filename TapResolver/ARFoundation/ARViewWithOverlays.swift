@@ -725,14 +725,22 @@ struct ARPiPMapView: View {
         
         // When calibration is complete (readyToFill state), return nil to trigger triangle framing
         if case .readyToFill = arCalibrationCoordinator.calibrationState {
-            print("🔍 [FOCUSED_POINT] readyToFill state - returning nil to frame triangle")
+            // Only log on state change
+            if lastLoggedFocusedPointID != nil {
+                print("🔍 [FOCUSED_POINT] readyToFill state - returning nil to frame triangle")
+                lastLoggedFocusedPointID = nil
+            }
             return nil
         }
         
         // During vertex placement, focus on current vertex
         if case .placingVertices = arCalibrationCoordinator.calibrationState {
             let vertexID = arCalibrationCoordinator.getCurrentVertexID()
-            print("🔍 [FOCUSED_POINT] placingVertices state - focusing on \(vertexID.map { String($0.uuidString.prefix(8)) } ?? "none")")
+            // Only log when focused point changes
+            if vertexID != lastLoggedFocusedPointID {
+                print("🔍 [FOCUSED_POINT] placingVertices state - focusing on \(vertexID.map { String($0.uuidString.prefix(8)) } ?? "none")")
+                lastLoggedFocusedPointID = vertexID
+            }
             return vertexID
         }
         
@@ -747,6 +755,12 @@ struct ARPiPMapView: View {
     // Separate transform stores for PiP (independent from main map)
     @StateObject private var pipTransform = MapTransformStore()
     @StateObject private var pipProcessor = TransformProcessor()
+    
+    // Track last logged focused point to prevent spam
+    @State private var lastLoggedFocusedPointID: UUID?
+    
+    // Track last logged transform calculation to prevent spam
+    @State private var lastLoggedTransformState: CalibrationState?
     
     @State private var mapImage: UIImage?
     @State private var currentScale: CGFloat = 1.0
@@ -1024,7 +1038,13 @@ struct ARPiPMapView: View {
            let triangle = selectedTriangle,
            triangle.vertexIDs.count == 3 {
             
-            print("🎯 [PIP_TRANSFORM] readyToFill state - calculating triangle bounds")
+            // Only log on state change
+            let currentState = arCalibrationCoordinator.calibrationState
+            let shouldLog = lastLoggedTransformState != currentState
+            if shouldLog {
+                print("🎯 [PIP_TRANSFORM] readyToFill state - calculating triangle bounds")
+                lastLoggedTransformState = currentState
+            }
             
             let vertexPoints = triangle.vertexIDs.compactMap { vertexID in
                 mapPointStore.points.first(where: { $0.id == vertexID })?.mapPoint
@@ -1045,14 +1065,18 @@ struct ARPiPMapView: View {
             let cornerA = CGPoint(x: minX - padding, y: minY - padding)
             let cornerB = CGPoint(x: maxX + padding, y: maxY + padding)
             
-            print("📐 [PIP_TRANSFORM] Triangle bounds:")
-            print("   Corner A: (\(Int(cornerA.x)), \(Int(cornerA.y)))")
-            print("   Corner B: (\(Int(cornerB.x)), \(Int(cornerB.y)))")
+            // Only log bounds on first calculation
+            if shouldLog {
+                print("📐 [PIP_TRANSFORM] Triangle bounds: A(\(Int(cornerA.x)), \(Int(cornerA.y))) B(\(Int(cornerB.x)), \(Int(cornerB.y)))")
+            }
             
             let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
             let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
             
-            print("✅ [PIP_TRANSFORM] Calculated triangle frame - scale: \(String(format: "%.3f", scale)), offset: (\(String(format: "%.1f", offset.width)), \(String(format: "%.1f", offset.height)))")
+            // Only log result on first calculation
+            if shouldLog {
+                print("✅ [PIP_TRANSFORM] Calculated triangle frame - scale: \(String(format: "%.3f", scale)), offset: (\(String(format: "%.1f", offset.width)), \(String(format: "%.1f", offset.height)))")
+            }
             return (scale, offset)
         }
         
