@@ -289,6 +289,158 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
     }
     
+    /// Calculate 3D AR position for a MapPoint using barycentric interpolation from a calibrated triangle
+    private func calculateGhostPosition(
+        mapPoint: MapPointStore.MapPoint,
+        calibratedTriangle: TrianglePatch,
+        mapPointStore: MapPointStore,
+        arWorldMapStore: ARWorldMapStore
+    ) -> simd_float3? {
+        
+        // STEP 1: Get triangle's 3 vertex MapPoints (2D positions)
+        guard calibratedTriangle.vertexIDs.count == 3 else {
+            print("⚠️ [GHOST_CALC] Triangle has invalid vertex count: \(calibratedTriangle.vertexIDs.count)")
+            return nil
+        }
+        
+        let vertexMapPoints = calibratedTriangle.vertexIDs.compactMap { vertexID in
+            mapPointStore.points.first { $0.id == vertexID }
+        }
+        
+        guard vertexMapPoints.count == 3 else {
+            print("⚠️ [GHOST_CALC] Could not find all 3 vertex MapPoints")
+            return nil
+        }
+        
+        let p1_2D = vertexMapPoints[0].position
+        let p2_2D = vertexMapPoints[1].position
+        let p3_2D = vertexMapPoints[2].position
+        let p_target_2D = mapPoint.position
+        
+        // STEP 2: Calculate barycentric weights in 2D map space
+        // Using the formula: P = w1*P1 + w2*P2 + w3*P3 where w1+w2+w3=1
+        let v0 = CGPoint(x: p2_2D.x - p1_2D.x, y: p2_2D.y - p1_2D.y)
+        let v1 = CGPoint(x: p3_2D.x - p1_2D.x, y: p3_2D.y - p1_2D.y)
+        let v2 = CGPoint(x: p_target_2D.x - p1_2D.x, y: p_target_2D.y - p1_2D.y)
+        
+        let denom = v0.x * v1.y - v1.x * v0.y
+        guard abs(denom) > 0.001 else {
+            print("⚠️ [GHOST_CALC] Degenerate triangle - vertices are collinear")
+            return nil
+        }
+        
+        let w2 = (v2.x * v1.y - v1.x * v2.y) / denom
+        let w3 = (v0.x * v2.y - v2.x * v0.y) / denom
+        let w1 = 1.0 - w2 - w3
+        
+        print("📐 [GHOST_CALC] Barycentric weights: w1=\(String(format: "%.3f", w1)), w2=\(String(format: "%.3f", w2)), w3=\(String(format: "%.3f", w3))")
+        
+        // STEP 3: Get triangle's 3 vertex AR marker positions (3D positions)
+        guard calibratedTriangle.arMarkerIDs.count == 3 else {
+            print("⚠️ [GHOST_CALC] Triangle does not have 3 AR markers yet")
+            return nil
+        }
+        
+        var arPositions: [simd_float3] = []
+        for markerIDString in calibratedTriangle.arMarkerIDs {
+            guard !markerIDString.isEmpty,
+                  let marker = arWorldMapStore.markers.first(where: { $0.id == markerIDString }) else {
+                print("⚠️ [GHOST_CALC] Could not find AR marker: \(markerIDString)")
+                return nil
+            }
+            
+            arPositions.append(marker.positionInSession)
+        }
+        
+        guard arPositions.count == 3 else {
+            print("⚠️ [GHOST_CALC] Could not get all 3 AR marker positions")
+            return nil
+        }
+        
+        // STEP 4: Apply barycentric weights to 3D AR positions
+        let m1_3D = arPositions[0]
+        let m2_3D = arPositions[1]
+        let m3_3D = arPositions[2]
+        
+        let ghostPosition = simd_float3(
+            Float(w1) * m1_3D.x + Float(w2) * m2_3D.x + Float(w3) * m3_3D.x,
+            Float(w1) * m1_3D.y + Float(w2) * m2_3D.y + Float(w3) * m3_3D.y,
+            Float(w1) * m1_3D.z + Float(w2) * m2_3D.z + Float(w3) * m3_3D.z
+        )
+        
+        print("👻 [GHOST_CALC] Calculated ghost position: (\(String(format: "%.2f", ghostPosition.x)), \(String(format: "%.2f", ghostPosition.y)), \(String(format: "%.2f", ghostPosition.z)))")
+        
+        return ghostPosition
+    }
+    
+    /// Plant ghost markers for far vertices of triangles adjacent to the calibrated triangle
+    private func plantGhostsForAdjacentTriangles(
+        calibratedTriangle: TrianglePatch,
+        triangleStore: TrianglePatchStore,
+        mapPointStore: MapPointStore,
+        arWorldMapStore: ARWorldMapStore
+    ) {
+        print("🔍 [GHOST_PLANT] Finding adjacent triangles to \(String(calibratedTriangle.id.uuidString.prefix(8)))")
+        
+        // STEP 1: Find triangles sharing an edge with calibrated triangle (REUSE existing function)
+        let adjacentTriangles = triangleStore.findAdjacentTriangles(calibratedTriangle.id)
+        
+        print("🔍 [GHOST_PLANT] Found \(adjacentTriangles.count) adjacent triangle(s)")
+        
+        guard !adjacentTriangles.isEmpty else {
+            print("ℹ️ [GHOST_PLANT] No adjacent triangles found - calibrated triangle may be isolated")
+            return
+        }
+        
+        // STEP 2: For each adjacent triangle, plant ghost at far vertex
+        var ghostsPlanted = 0
+        for adjacentTriangle in adjacentTriangles {
+            // Skip if triangle is already calibrated
+            guard !adjacentTriangle.isCalibrated else {
+                print("⏭️ [GHOST_PLANT] Skipping adjacent triangle \(String(adjacentTriangle.id.uuidString.prefix(8))) - already calibrated")
+                continue
+            }
+            
+            // Get the far vertex (REUSE existing function)
+            guard let farVertexID = triangleStore.getFarVertex(adjacentTriangle: adjacentTriangle, sourceTriangle: calibratedTriangle) else {
+                print("⚠️ [GHOST_PLANT] Could not find far vertex for triangle \(String(adjacentTriangle.id.uuidString.prefix(8)))")
+                continue
+            }
+            
+            // Get MapPoint for far vertex
+            guard let farVertexMapPoint = mapPointStore.points.first(where: { $0.id == farVertexID }) else {
+                print("⚠️ [GHOST_PLANT] Could not find MapPoint for far vertex \(String(farVertexID.uuidString.prefix(8)))")
+                continue
+            }
+            
+            // Calculate ghost position using barycentric interpolation
+            guard let ghostPosition = calculateGhostPosition(
+                mapPoint: farVertexMapPoint,
+                calibratedTriangle: calibratedTriangle,
+                mapPointStore: mapPointStore,
+                arWorldMapStore: arWorldMapStore
+            ) else {
+                print("⚠️ [GHOST_PLANT] Could not calculate ghost position for MapPoint \(String(farVertexID.uuidString.prefix(8)))")
+                continue
+            }
+            
+            // Post notification to coordinator to render ghost
+            NotificationCenter.default.post(
+                name: NSNotification.Name("PlaceGhostMarker"),
+                object: nil,
+                userInfo: [
+                    "mapPointID": farVertexID,
+                    "position": ghostPosition
+                ]
+            )
+            
+            ghostsPlanted += 1
+            print("👻 [GHOST_PLANT] Planted ghost for MapPoint \(String(farVertexID.uuidString.prefix(8))) at position \(ghostPosition)")
+        }
+        
+        print("✅ [GHOST_PLANT] Planted \(ghostsPlanted) ghost marker(s)")
+    }
+    
     /// Check if the active triangle has all 3 markers placed (calibration complete)
     func isTriangleComplete(_ triangleID: UUID) -> Bool {
         guard let triangle = triangleStore.triangle(withID: triangleID) else { return false }
@@ -339,15 +491,20 @@ final class ARCalibrationCoordinator: ObservableObject {
             userInfo: ["triangleID": triangle.id]
         )
         
-        // Ghost markers disabled - user manually triggers via "Show Ghost Markers" button
-        // Old auto-plant removed to prevent calling deprecated plantGhostMarkers(using:)
+        // Plant ghost markers for adjacent triangles
+        plantGhostsForAdjacentTriangles(
+            calibratedTriangle: triangle,
+            triangleStore: triangleStore,
+            mapPointStore: mapStore,
+            arWorldMapStore: arStore
+        )
         
         // Reset index for next calibration
         currentVertexIndex = 0
         print("🔄 Reset currentVertexIndex to 0 for next calibration")
         
         // Don't auto-start next triangle - let user decide
-        print("ℹ️ Calibration complete. User can now fill triangle or manually start next calibration.")
+        print("✅ Calibration complete. Ghost markers planted for adjacent triangles.")
     }
     
     /// Transitions from readyToFill to surveyMode when Fill Triangle is tapped

@@ -248,6 +248,47 @@ struct ARViewContainer: UIViewRepresentable {
             
             generateSurveyMarkers(for: triangle, spacing: spacing, arWorldMapStore: arWorldMapStore)
         }
+        
+        @objc func handlePlaceGhostMarker(notification: Notification) {
+            guard let mapPointID = notification.userInfo?["mapPointID"] as? UUID,
+                  let position = notification.userInfo?["position"] as? simd_float3 else {
+                print("⚠️ [GHOST_RENDER] Invalid PlaceGhostMarker notification data")
+                return
+            }
+            
+            print("👻 [GHOST_RENDER] Placing ghost marker for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            
+            // Check if ghost already exists for this MapPoint
+            if ghostMarkers[mapPointID] != nil {
+                print("⚠️ [GHOST_RENDER] Ghost already exists for MapPoint \(String(mapPointID.uuidString.prefix(8))) - skipping")
+                return
+            }
+            
+            // Create ghost marker node (REUSE existing ARMarkerRenderer)
+            let ghostNode = ARMarkerRenderer.createNode(
+                at: position,
+                options: MarkerOptions(
+                    color: .orange,  // User-specified color for ghosts
+                    markerID: UUID(),  // Temporary ID for ghost
+                    userDeviceHeight: userDeviceHeight,
+                    badgeColor: nil,
+                    radius: 0.03,
+                    animateOnAppearance: true,  // Smooth appearance animation
+                    animationOvershoot: 0.04,
+                    isGhost: true  // CRITICAL: Enables pulsing animation and transparency
+                )
+            )
+            
+            ghostNode.name = "ghostMarker_\(mapPointID.uuidString)"
+            
+            // Store in ghostMarkers dictionary (REUSE existing storage)
+            ghostMarkers[mapPointID] = ghostNode
+            
+            // Add to scene
+            sceneView?.scene.rootNode.addChildNode(ghostNode)
+            
+            print("✅ [GHOST_RENDER] Ghost marker rendered for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+        }
 
         @objc func handleTapGesture(_ sender: UITapGestureRecognizer) {
             print("🔍 [TAP_TRACE] Tap detected")
@@ -355,6 +396,15 @@ struct ARViewContainer: UIViewRepresentable {
             crosshairUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
                 self?.updateCrosshair()
             }
+            
+            // Listen for PlaceGhostMarker notification
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handlePlaceGhostMarker),
+                name: NSNotification.Name("PlaceGhostMarker"),
+                object: nil
+            )
+            print("👻 Ghost marker notification listener registered")
             
             print("➕ Ground crosshair configured")
         }
