@@ -21,6 +21,11 @@ enum CalibrationState: Equatable {
 final class ARCalibrationCoordinator: ObservableObject {
     @Published var activeTriangleID: UUID?
     @Published var placedMarkers: [UUID] = []  // MapPoint IDs that have been calibrated
+    
+    /// Maps marker ID strings to their AR positions for the current session
+    /// (mirrors placedMarkers in ARViewContainer.Coordinator for ghost planting)
+    private var sessionMarkerPositions: [String: simd_float3] = [:]
+    
     @Published var statusText: String = ""
     @Published var progressDots: (Bool, Bool, Bool) = (false, false, false)
     
@@ -220,6 +225,10 @@ final class ARCalibrationCoordinator: ObservableObject {
             print("   Session ID: \(arStore.currentSessionID)")
             print("   Session Time: \(arStore.currentSessionStartTime)")
             print("   Storage Key: ARWorldMapStore (saved successfully)")
+            
+            // Track this marker's position for current session (used by ghost planting)
+            sessionMarkerPositions[marker.id.uuidString] = marker.arPosition
+            print("📍 [SESSION_MARKERS] Stored position for \(String(marker.id.uuidString.prefix(8)))")
         } catch {
             print("❌ Failed to save marker to ARWorldMapStore: \(error)")
             return
@@ -292,10 +301,25 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Calculate 3D AR position for a MapPoint using barycentric interpolation from a calibrated triangle
     private func calculateGhostPosition(
         mapPoint: MapPointStore.MapPoint,
-        calibratedTriangle: TrianglePatch,
+        calibratedTriangleID: UUID,
+        triangleStore: TrianglePatchStore,
         mapPointStore: MapPointStore,
         arWorldMapStore: ARWorldMapStore
     ) -> simd_float3? {
+        
+        // Re-fetch triangle to ensure we have the latest arMarkerIDs (fixes stale struct issue)
+        guard let calibratedTriangle = triangleStore.triangles.first(where: { $0.id == calibratedTriangleID }) else {
+            print("⚠️ [GHOST_CALC] Could not find triangle \(String(calibratedTriangleID.uuidString.prefix(8)))")
+            return nil
+        }
+        
+        print("🔍 [GHOST_CALC] Fresh triangle fetch - arMarkerIDs: \(calibratedTriangle.arMarkerIDs)")
+        
+        // Validate all marker IDs are populated
+        guard calibratedTriangle.arMarkerIDs.allSatisfy({ !$0.isEmpty }) else {
+            print("⚠️ [GHOST_CALC] Incomplete marker ID list: \(calibratedTriangle.arMarkerIDs)")
+            return nil
+        }
         
         // STEP 1: Get triangle's 3 vertex MapPoints (2D positions)
         guard calibratedTriangle.vertexIDs.count == 3 else {
@@ -343,13 +367,41 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         var arPositions: [simd_float3] = []
         for markerIDString in calibratedTriangle.arMarkerIDs {
-            guard !markerIDString.isEmpty,
-                  let marker = arWorldMapStore.markers.first(where: { $0.id == markerIDString }) else {
-                print("⚠️ [GHOST_CALC] Could not find AR marker: \(markerIDString)")
+            guard !markerIDString.isEmpty else {
+                print("⚠️ [GHOST_CALC] Empty marker ID string in triangle's arMarkerIDs")
                 return nil
             }
             
-            arPositions.append(marker.positionInSession)
+            var foundPosition: simd_float3?
+            var foundSource: String = ""
+            
+            // PRIORITY 1: Check current session's marker positions (just placed markers)
+            if let sessionPosition = sessionMarkerPositions[markerIDString] {
+                foundPosition = sessionPosition
+                foundSource = "current session"
+                print("✅ [GHOST_CALC] Found marker \(String(markerIDString.prefix(8))) in session cache at position (\(String(format: "%.2f", sessionPosition.x)), \(String(format: "%.2f", sessionPosition.y)), \(String(format: "%.2f", sessionPosition.z)))")
+            }
+            // PRIORITY 2: Check by prefix in case arMarkerIDs has short 8-char versions
+            else if let sessionPosition = sessionMarkerPositions.first(where: { $0.key.hasPrefix(markerIDString) || markerIDString.hasPrefix($0.key) })?.value {
+                foundPosition = sessionPosition
+                foundSource = "current session (prefix match)"
+                print("✅ [GHOST_CALC] Found marker \(String(markerIDString.prefix(8))) via prefix in session cache")
+            }
+            // PRIORITY 3: Fall back to ARWorldMapStore
+            else if let marker = arWorldMapStore.markers.first(where: { $0.id.hasPrefix(markerIDString) || markerIDString.hasPrefix($0.id) }) {
+                foundPosition = marker.positionInSession
+                foundSource = "ARWorldMapStore"
+                print("✅ [GHOST_CALC] Found marker \(String(marker.id.prefix(8))) in store at position (\(String(format: "%.2f", marker.positionInSession.x)), \(String(format: "%.2f", marker.positionInSession.y)), \(String(format: "%.2f", marker.positionInSession.z)))")
+            }
+            
+            guard let position = foundPosition else {
+                print("⚠️ [GHOST_CALC] Could not find AR marker with ID: \(markerIDString)")
+                print("   Session markers: \(sessionMarkerPositions.keys.map { String($0.prefix(8)) }.joined(separator: ", "))")
+                print("   Store markers: \(arWorldMapStore.markers.map { String($0.id.prefix(8)) }.joined(separator: ", "))")
+                return nil
+            }
+            
+            arPositions.append(position)
         }
         
         guard arPositions.count == 3 else {
@@ -395,12 +447,6 @@ final class ARCalibrationCoordinator: ObservableObject {
         // STEP 2: For each adjacent triangle, plant ghost at far vertex
         var ghostsPlanted = 0
         for adjacentTriangle in adjacentTriangles {
-            // Skip if triangle is already calibrated
-            guard !adjacentTriangle.isCalibrated else {
-                print("⏭️ [GHOST_PLANT] Skipping adjacent triangle \(String(adjacentTriangle.id.uuidString.prefix(8))) - already calibrated")
-                continue
-            }
-            
             // Get the far vertex (REUSE existing function)
             guard let farVertexID = triangleStore.getFarVertex(adjacentTriangle: adjacentTriangle, sourceTriangle: calibratedTriangle) else {
                 print("⚠️ [GHOST_PLANT] Could not find far vertex for triangle \(String(adjacentTriangle.id.uuidString.prefix(8)))")
@@ -413,10 +459,21 @@ final class ARCalibrationCoordinator: ObservableObject {
                 continue
             }
             
+            // Skip if this MapPoint already has a real marker in the current session
+            let hasMarkerInCurrentSession = arWorldMapStore.markers.contains { marker in
+                marker.mapPointID == farVertexID.uuidString &&
+                marker.sessionID == arWorldMapStore.currentSessionID
+            }
+            if hasMarkerInCurrentSession {
+                print("⏭️ [GHOST_PLANT] Skipping MapPoint \(String(farVertexID.uuidString.prefix(8))) - already has real marker in current session")
+                continue
+            }
+            
             // Calculate ghost position using barycentric interpolation
             guard let ghostPosition = calculateGhostPosition(
                 mapPoint: farVertexMapPoint,
-                calibratedTriangle: calibratedTriangle,
+                calibratedTriangleID: calibratedTriangle.id,
+                triangleStore: triangleStore,
                 mapPointStore: mapPointStore,
                 arWorldMapStore: arWorldMapStore
             ) else {
@@ -438,7 +495,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             print("👻 [GHOST_PLANT] Planted ghost for MapPoint \(String(farVertexID.uuidString.prefix(8))) at position \(ghostPosition)")
         }
         
-        print("✅ [GHOST_PLANT] Planted \(ghostsPlanted) ghost marker(s)")
+        print("✅ [GHOST_PLANT] Planted \(ghostsPlanted) ghost marker(s) for adjacent triangle vertices (including previously-calibrated triangles)")
     }
     
     /// Check if the active triangle has all 3 markers placed (calibration complete)
@@ -491,9 +548,17 @@ final class ARCalibrationCoordinator: ObservableObject {
             userInfo: ["triangleID": triangle.id]
         )
         
+        // Re-fetch triangle to get absolutely latest state with all 3 marker IDs
+        guard let freshTriangle = triangleStore.triangles.first(where: { $0.id == triangle.id }) else {
+            print("⚠️ [FINALIZE] Could not re-fetch triangle for ghost planting")
+            currentVertexIndex = 0
+            return
+        }
+        print("🔍 [FINALIZE] Fresh triangle for ghost planting - arMarkerIDs: \(freshTriangle.arMarkerIDs)")
+        
         // Plant ghost markers for adjacent triangles
         plantGhostsForAdjacentTriangles(
-            calibratedTriangle: triangle,
+            calibratedTriangle: freshTriangle,
             triangleStore: triangleStore,
             mapPointStore: mapStore,
             arWorldMapStore: arStore
@@ -819,6 +884,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         activeTriangleID = nil
         currentTriangleID = nil
         placedMarkers = []
+        sessionMarkerPositions = [:]  // Clear current session marker positions
         statusText = ""
         progressDots = (false, false, false)
         isActive = false
