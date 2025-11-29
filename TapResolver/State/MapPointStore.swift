@@ -11,6 +11,84 @@ import Combine
 import simd
 import UIKit
 
+// MARK: - Position History Types (Milestone 2)
+
+/// Categorizes how an AR position was recorded
+public enum SourceType: String, Codable {
+    case calibration      // Manual placement during triangle calibration
+    case ghostConfirm     // User confirmed ghost position was accurate
+    case ghostAdjust      // User adjusted ghost to correct position
+    case relocalized      // Position derived from session transform
+}
+
+/// Records a single AR position measurement for a MapPoint
+public struct ARPositionRecord: Codable, Identifiable {
+    public let id: UUID
+    let position: SIMD3<Float>      // 3D AR position (simd_float3)
+    let sessionID: UUID              // Which AR session created this
+    let timestamp: Date              // When recorded
+    let sourceType: SourceType       // How it was recorded
+    let distortionVector: SIMD3<Float>?  // Difference from estimated (nil if no adjustment)
+    let confidenceScore: Float       // 0.0 - 1.0, used for weighted averaging
+    
+    public init(
+        id: UUID = UUID(),
+        position: SIMD3<Float>,
+        sessionID: UUID,
+        timestamp: Date = Date(),
+        sourceType: SourceType,
+        distortionVector: SIMD3<Float>? = nil,
+        confidenceScore: Float
+    ) {
+        self.id = id
+        self.position = position
+        self.sessionID = sessionID
+        self.timestamp = timestamp
+        self.sourceType = sourceType
+        self.distortionVector = distortionVector
+        self.confidenceScore = confidenceScore
+    }
+    
+    // MARK: - Codable (encode simd_float3 as [Float])
+    
+    enum CodingKeys: String, CodingKey {
+        case id, sessionID, timestamp, sourceType, confidenceScore
+        case positionArray, distortionArray
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        sessionID = try container.decode(UUID.self, forKey: .sessionID)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        sourceType = try container.decode(SourceType.self, forKey: .sourceType)
+        confidenceScore = try container.decode(Float.self, forKey: .confidenceScore)
+        
+        let posArray = try container.decode([Float].self, forKey: .positionArray)
+        position = SIMD3<Float>(posArray[0], posArray[1], posArray[2])
+        
+        if let distArray = try container.decodeIfPresent([Float].self, forKey: .distortionArray) {
+            distortionVector = SIMD3<Float>(distArray[0], distArray[1], distArray[2])
+        } else {
+            distortionVector = nil
+        }
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(sourceType, forKey: .sourceType)
+        try container.encode(confidenceScore, forKey: .confidenceScore)
+        try container.encode([position.x, position.y, position.z], forKey: .positionArray)
+        
+        if let dist = distortionVector {
+            try container.encode([dist.x, dist.y, dist.z], forKey: .distortionArray)
+        }
+    }
+}
+
 public enum MapPointRole: String, Codable, CaseIterable, Identifiable {
     case triangleEdge = "triangle_edge"
     case featureMarker = "feature_marker"
@@ -80,6 +158,9 @@ public final class MapPointStore: ObservableObject {
         public var triangleMemberships: [UUID] = []
         public var isLocked: Bool = true  // ✅ New points default to locked
         
+        // MARK: - Position History (Milestone 2)
+        public var arPositionHistory: [ARPositionRecord] = []
+        
         public var mapPoint: CGPoint {
             get { position }
             set { position = newValue }
@@ -96,7 +177,8 @@ public final class MapPointStore: ObservableObject {
             locationPhotoData: Data? = nil,
             photoFilename: String? = nil,  // NEW
             triangleMemberships: [UUID] = [],
-            isLocked: Bool = true  // ✅ ADD THIS PARAMETER
+            isLocked: Bool = true,  // ✅ ADD THIS PARAMETER
+            arPositionHistory: [ARPositionRecord] = []  // NEW
         ) {
             self.id = id ?? UUID()
             self.position = mapPoint
@@ -110,6 +192,49 @@ public final class MapPointStore: ObservableObject {
             self.photoFilename = photoFilename  // NEW
             self.triangleMemberships = triangleMemberships
             self.isLocked = isLocked  // ✅ ADD THIS ASSIGNMENT
+            self.arPositionHistory = arPositionHistory  // NEW
+        }
+        
+        // MARK: - Consensus Position (Milestone 2)
+        
+        private static let outlierThresholdMeters: Float = 0.15
+        
+        /// Calculates weighted average position with outlier rejection
+        var consensusPosition: SIMD3<Float>? {
+            guard !arPositionHistory.isEmpty else { return nil }
+            
+            // Single record - return it directly
+            if arPositionHistory.count == 1 {
+                return arPositionHistory[0].position
+            }
+            
+            // Calculate initial centroid (unweighted)
+            var sum = SIMD3<Float>(0, 0, 0)
+            for record in arPositionHistory {
+                sum += record.position
+            }
+            let centroid = sum / Float(arPositionHistory.count)
+            
+            // Filter outliers (distance > threshold from centroid)
+            let inliers = arPositionHistory.filter { record in
+                let dist = simd_distance(record.position, centroid)
+                return dist <= Self.outlierThresholdMeters
+            }
+            
+            // If all filtered out, fall back to all records
+            let recordsToUse = inliers.isEmpty ? arPositionHistory : inliers
+            
+            // Weighted average using confidence scores
+            var weightedSum = SIMD3<Float>(0, 0, 0)
+            var totalWeight: Float = 0
+            
+            for record in recordsToUse {
+                weightedSum += record.position * record.confidenceScore
+                totalWeight += record.confidenceScore
+            }
+            
+            guard totalWeight > 0 else { return nil }
+            return weightedSum / totalWeight
         }
     }
     
@@ -418,6 +543,30 @@ public final class MapPointStore: ObservableObject {
     public func isLocked(_ id: UUID) -> Bool {
         return points.first(where: { $0.id == id })?.isLocked ?? true
     }
+    
+    // MARK: - Position History (Milestone 2)
+    
+    private let maxHistoryRecords = 20
+    
+    /// Adds a position record to a MapPoint's history with FIFO eviction
+    func addPositionRecord(mapPointID: UUID, record: ARPositionRecord) {
+        guard let index = points.firstIndex(where: { $0.id == mapPointID }) else {
+            print("⚠️ [POSITION_HISTORY] MapPoint not found: \(mapPointID.uuidString.prefix(8))")
+            return
+        }
+        
+        points[index].arPositionHistory.append(record)
+        
+        // FIFO eviction if over limit
+        if points[index].arPositionHistory.count > maxHistoryRecords {
+            let removed = points[index].arPositionHistory.removeFirst()
+            print("🗑️ [POSITION_HISTORY] Evicted oldest record from \(mapPointID.uuidString.prefix(8)) (session: \(removed.sessionID.uuidString.prefix(8)))")
+        }
+        
+        print("📍 [POSITION_HISTORY] Added \(record.sourceType.rawValue) record to MapPoint \(mapPointID.uuidString.prefix(8)) (total: \(points[index].arPositionHistory.count))")
+        
+        save()
+    }
 
     /// Get coordinate string for display in drawer
     public func coordinateString(for point: MapPoint) -> String {
@@ -443,6 +592,7 @@ public final class MapPointStore: ObservableObject {
         let photoCapturedAtPositionY: CGFloat?  // Optional for backward compatibility
         let triangleMemberships: [UUID]?
         let isLocked: Bool?  // ✅ Optional for backward compatibility
+        let arPositionHistory: [ARPositionRecord]?  // Optional for migration from old data
     }
 
     internal func save() {
@@ -489,7 +639,8 @@ public final class MapPointStore: ObservableObject {
                 photoCapturedAtPositionX: point.photoCapturedAtPosition?.x,
                 photoCapturedAtPositionY: point.photoCapturedAtPosition?.y,
                 triangleMemberships: point.triangleMemberships.isEmpty ? nil : point.triangleMemberships,
-                isLocked: point.isLocked
+                isLocked: point.isLocked,
+                arPositionHistory: point.arPositionHistory.isEmpty ? nil : point.arPositionHistory
             )
         }
         
@@ -595,7 +746,8 @@ public final class MapPointStore: ObservableObject {
                     locationPhotoData: photoData,
                     photoFilename: dtoItem.photoFilename,  // NEW
                     triangleMemberships: dtoItem.triangleMemberships ?? [],
-                    isLocked: dtoItem.isLocked ?? true  // Default to locked for backward compatibility
+                    isLocked: dtoItem.isLocked ?? true,  // Default to locked for backward compatibility
+                    arPositionHistory: dtoItem.arPositionHistory ?? []
                 )
                 
                 // Set photo tracking fields
@@ -624,6 +776,14 @@ public final class MapPointStore: ObservableObject {
                 save()
             }
             print("✅ MapPointStore: Reload complete - \(points.count) points loaded")
+            
+            // Diagnostic: Log position history after loading
+            for point in points where !point.arPositionHistory.isEmpty {
+                print("📊 [DIAG] MapPoint \(point.id.uuidString.prefix(8)) has \(point.arPositionHistory.count) position records")
+                if let consensus = point.consensusPosition {
+                    print("   Consensus: (\(String(format: "%.2f", consensus.x)), \(String(format: "%.2f", consensus.y)), \(String(format: "%.2f", consensus.z)))")
+                }
+            }
         } else {
             self.points = []
             print("✅ MapPointStore: No saved data found - starting fresh")

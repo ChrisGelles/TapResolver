@@ -229,6 +229,15 @@ final class ARCalibrationCoordinator: ObservableObject {
             // Track this marker's position for current session (used by ghost planting)
             sessionMarkerPositions[marker.id.uuidString] = marker.arPosition
             print("📍 [SESSION_MARKERS] Stored position for \(String(marker.id.uuidString.prefix(8)))")
+            
+            // MARK: - Record position in history (Milestone 2)
+            let record = ARPositionRecord(
+                position: marker.arPosition,
+                sessionID: arStore.currentSessionID,
+                sourceType: .calibration,
+                confidenceScore: 0.95
+            )
+            mapStore.addPositionRecord(mapPointID: mapPointID, record: record)
         } catch {
             print("❌ Failed to save marker to ARWorldMapStore: \(error)")
             return
