@@ -31,6 +31,10 @@ final class ARCalibrationCoordinator: ObservableObject {
     @Published var activeTriangleID: UUID?
     @Published var placedMarkers: [UUID] = []  // MapPoint IDs that have been calibrated
     
+    /// Triangles that have achieved full calibration (3 vertices) this session
+    /// These remain "ready to fill" even when user moves on to calibrate adjacent triangles
+    @Published var sessionCalibratedTriangles: Set<UUID> = []
+    
     /// Maps marker ID strings to their AR positions for the current session
     /// (mirrors placedMarkers in ARViewContainer.Coordinator for ghost planting)
     private var sessionMarkerPositions: [String: simd_float3] = [:]
@@ -1325,6 +1329,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         activeTriangleID = nil
         currentTriangleID = nil
         placedMarkers = []
+        sessionCalibratedTriangles = []
         sessionMarkerPositions = [:]  // Clear current session marker positions
         mapPointARPositions = [:]  // Clear MapPoint position cache
         statusText = ""
@@ -1340,6 +1345,125 @@ final class ARCalibrationCoordinator: ObservableObject {
         selectedGhostEstimatedPosition = nil
         print("🎯 CalibrationState → \(stateDescription) (reset)")
         print("🔄 ARCalibrationCoordinator: Reset complete - all markers cleared")
+    }
+    
+    /// Activates calibration for an adjacent triangle when user confirms a ghost marker
+    /// Pre-populates shared edge vertices from session cache and registers the ghost position
+    /// - Parameters:
+    ///   - ghostMapPointID: The MapPoint ID of the confirmed ghost
+    ///   - ghostPosition: The AR position where the ghost was confirmed/placed
+    ///   - currentTriangleID: The triangle we just finished calibrating
+    /// - Returns: The ID of the newly activated adjacent triangle, or nil if activation failed
+    func activateAdjacentTriangle(
+        ghostMapPointID: UUID,
+        ghostPosition: simd_float3,
+        currentTriangleID: UUID
+    ) -> UUID? {
+        print("🔗 [ADJACENT_ACTIVATE] Starting adjacent triangle activation")
+        print("   Ghost MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
+        print("   Current Triangle: \(String(currentTriangleID.uuidString.prefix(8)))")
+        
+        // Find all triangles containing this ghost MapPoint
+        let trianglesWithGhost = triangleStore.triangles.filter { triangle in
+            triangle.vertexIDs.contains(ghostMapPointID)
+        }
+        
+        print("   Triangles containing ghost: \(trianglesWithGhost.map { String($0.id.uuidString.prefix(8)) })")
+        
+        // Find the adjacent triangle (not the current one)
+        guard let adjacentTriangle = trianglesWithGhost.first(where: { $0.id != currentTriangleID }) else {
+            print("⚠️ [ADJACENT_ACTIVATE] No adjacent triangle found for ghost")
+            return nil
+        }
+        
+        print("   Adjacent Triangle: \(String(adjacentTriangle.id.uuidString.prefix(8)))")
+        print("   Adjacent vertices: \(adjacentTriangle.vertexIDs.map { String($0.uuidString.prefix(8)) })")
+        
+        // Identify shared edge vertices (vertices in both triangles)
+        guard let currentTriangle = triangleStore.triangles.first(where: { $0.id == currentTriangleID }) else {
+            print("⚠️ [ADJACENT_ACTIVATE] Current triangle not found")
+            return nil
+        }
+        
+        let sharedVertexIDs = adjacentTriangle.vertexIDs.filter { currentTriangle.vertexIDs.contains($0) }
+        print("   Shared vertices: \(sharedVertexIDs.map { String($0.uuidString.prefix(8)) })")
+        
+        guard sharedVertexIDs.count == 2 else {
+            print("⚠️ [ADJACENT_ACTIVATE] Expected 2 shared vertices, found \(sharedVertexIDs.count)")
+            return nil
+        }
+        
+        // Verify we have AR positions for both shared vertices in session cache
+        var sharedPositions: [(UUID, simd_float3)] = []
+        for vertexID in sharedVertexIDs {
+            guard let position = mapPointARPositions[vertexID] else {
+                print("⚠️ [ADJACENT_ACTIVATE] Missing AR position for shared vertex \(String(vertexID.uuidString.prefix(8)))")
+                return nil
+            }
+            sharedPositions.append((vertexID, position))
+            print("   Shared vertex \(String(vertexID.uuidString.prefix(8))) at AR(\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
+        }
+        
+        // Order vertices: shared edge first (indices 0, 1), then ghost (index 2)
+        // Match the order in adjacentTriangle.vertexIDs
+        var orderedVertexIDs: [UUID] = []
+        var orderedPositions: [simd_float3] = []
+        
+        for vertexID in adjacentTriangle.vertexIDs {
+            if vertexID == ghostMapPointID {
+                orderedVertexIDs.append(vertexID)
+                orderedPositions.append(ghostPosition)
+            } else if let sharedPos = sharedPositions.first(where: { $0.0 == vertexID }) {
+                orderedVertexIDs.append(vertexID)
+                orderedPositions.append(sharedPos.1)
+            }
+        }
+        
+        guard orderedVertexIDs.count == 3 else {
+            print("⚠️ [ADJACENT_ACTIVATE] Failed to order all 3 vertices")
+            return nil
+        }
+        
+        print("🔗 [ADJACENT_ACTIVATE] Ordered vertices for adjacent triangle:")
+        for (i, (id, pos)) in zip(orderedVertexIDs, orderedPositions).enumerated() {
+            print("   [\(i)] \(String(id.uuidString.prefix(8))) at AR(\(String(format: "%.2f", pos.x)), \(String(format: "%.2f", pos.y)), \(String(format: "%.2f", pos.z)))")
+        }
+        
+        // Add current triangle to session calibrated set before switching
+        sessionCalibratedTriangles.insert(currentTriangleID)
+        print("✅ [ADJACENT_ACTIVATE] Added \(String(currentTriangleID.uuidString.prefix(8))) to sessionCalibratedTriangles (now \(sessionCalibratedTriangles.count) triangles)")
+        
+        // Start calibration on adjacent triangle
+        activeTriangleID = adjacentTriangle.id
+        self.currentTriangleID = adjacentTriangle.id
+        triangleVertices = orderedVertexIDs
+        
+        // Register all three vertices with their positions
+        for (vertexID, position) in zip(orderedVertexIDs, orderedPositions) {
+            mapPointARPositions[vertexID] = position
+            if !placedMarkers.contains(vertexID) {
+                placedMarkers.append(vertexID)
+            }
+        }
+        
+        // Set state to readyToFill since all 3 vertices are now calibrated
+        calibrationState = .readyToFill
+        
+        // Add adjacent triangle to session calibrated set
+        sessionCalibratedTriangles.insert(adjacentTriangle.id)
+        print("✅ [ADJACENT_ACTIVATE] Added \(String(adjacentTriangle.id.uuidString.prefix(8))) to sessionCalibratedTriangles (now \(sessionCalibratedTriangles.count) triangles)")
+        
+        // Update status
+        statusText = "Triangle calibrated via crawl"
+        progressDots = (true, true, true)
+        
+        // Clear ghost selection
+        selectedGhostMapPointID = nil
+        selectedGhostEstimatedPosition = nil
+        
+        print("✅ [ADJACENT_ACTIVATE] Adjacent triangle \(String(adjacentTriangle.id.uuidString.prefix(8))) now calibrated and ready to fill")
+        
+        return adjacentTriangle.id
     }
     
     /// Updates ghost selection based on user proximity

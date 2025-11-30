@@ -581,22 +581,89 @@ struct ARViewWithOverlays: View {
                         .padding(.bottom, 8)
                     
                     // Place Marker / Ghost Interaction buttons
+                    // Show during vertex placement OR when in readyToFill with a ghost selected (crawl mode)
                     if case .placingVertices = arCalibrationCoordinator.calibrationState {
                         GhostInteractionButtons(
                             arCalibrationCoordinator: arCalibrationCoordinator,
                             onConfirmGhost: {
-                                // Confirm ghost - promote to real marker at ghost's position
-                                guard let selectedGhostID = arCalibrationCoordinator.selectedGhostMapPointID else {
-                                    print("⚠️ [GHOST_CONFIRM] No ghost selected")
+                                print("🎯 [GHOST_UI] Confirm Placement tapped")
+                                print("   Current state: \(arCalibrationCoordinator.stateDescription)")
+                                
+                                // Normal ghost confirmation during placingVertices
+                                guard let ghostPosition = arCalibrationCoordinator.selectedGhostEstimatedPosition,
+                                      let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID else {
+                                    print("⚠️ [GHOST_UI] No ghost position/ID available for confirmation")
                                     return
                                 }
+                                
+                                print("🎯 [GHOST_UI] Confirming ghost at estimated position")
+                                
                                 NotificationCenter.default.post(
                                     name: NSNotification.Name("ConfirmGhostMarker"),
                                     object: nil,
                                     userInfo: [
-                                        "ghostMapPointID": selectedGhostID
+                                        "position": [ghostPosition.x, ghostPosition.y, ghostPosition.z],
+                                        "mapPointID": ghostMapPointID,
+                                        "isGhostConfirm": true,
+                                        "ghostMapPointID": ghostMapPointID
                                     ]
                                 )
+                            },
+                            onPlaceMarker: {
+                                // Standard marker placement (may be adjustment if ghost selected)
+                                guard let coordinator = ARViewContainer.Coordinator.current else {
+                                    print("❌ [PLACE_MARKER] No coordinator reference")
+                                    return
+                                }
+                                guard coordinator.currentCursorPosition != nil else {
+                                    print("⚠️ [PLACE_MARKER] No valid ground plane detected - move device to find flat surface")
+                                    return
+                                }
+                                NotificationCenter.default.post(
+                                    name: NSNotification.Name("PlaceMarkerAtCursor"),
+                                    object: nil
+                                )
+                            }
+                        )
+                        .padding(.bottom, 12)
+                    } else if arCalibrationCoordinator.calibrationState == .readyToFill && arCalibrationCoordinator.selectedGhostMapPointID != nil {
+                        GhostInteractionButtons(
+                            arCalibrationCoordinator: arCalibrationCoordinator,
+                            onConfirmGhost: {
+                                print("🎯 [GHOST_UI] Confirm Placement tapped")
+                                print("   Current state: \(arCalibrationCoordinator.stateDescription)")
+                                
+                                // Crawl mode: activate adjacent triangle from ghost confirmation
+                                guard let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID,
+                                      let ghostPosition = arCalibrationCoordinator.selectedGhostEstimatedPosition,
+                                      let currentTriangleID = arCalibrationCoordinator.activeTriangleID else {
+                                    print("⚠️ [CRAWL_MODE] Missing required data for adjacent triangle activation")
+                                    return
+                                }
+                                
+                                print("🔗 [CRAWL_MODE] Activating adjacent triangle from ghost confirmation")
+                                
+                                // Use the ghost's estimated position (or place at crosshair for adjustment)
+                                if let newTriangleID = arCalibrationCoordinator.activateAdjacentTriangle(
+                                    ghostMapPointID: ghostMapPointID,
+                                    ghostPosition: ghostPosition,
+                                    currentTriangleID: currentTriangleID
+                                ) {
+                                    print("✅ [CRAWL_MODE] Successfully activated adjacent triangle \(String(newTriangleID.uuidString.prefix(8)))")
+                                    
+                                    // Post notification to place visual marker at ghost position
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("PlaceGhostMarker"),
+                                        object: nil,
+                                        userInfo: [
+                                            "position": [ghostPosition.x, ghostPosition.y, ghostPosition.z],
+                                            "mapPointID": ghostMapPointID,
+                                            "isConfirmation": true
+                                        ]
+                                    )
+                                } else {
+                                    print("⚠️ [CRAWL_MODE] Failed to activate adjacent triangle")
+                                }
                             },
                             onPlaceMarker: {
                                 // Standard marker placement (may be adjustment if ghost selected)
