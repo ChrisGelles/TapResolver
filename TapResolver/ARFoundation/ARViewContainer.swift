@@ -289,6 +289,18 @@ struct ARViewContainer: UIViewRepresentable {
             
             print("✅ [GHOST_RENDER] Ghost marker rendered for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
         }
+        
+        /// Remove a ghost marker from the scene
+        func removeGhostMarker(mapPointID: UUID) {
+            guard let ghostNode = ghostMarkers[mapPointID] else {
+                print("⚠️ [GHOST_REMOVE] No ghost found for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+                return
+            }
+            
+            ghostNode.removeFromParentNode()
+            ghostMarkers.removeValue(forKey: mapPointID)
+            print("🗑️ [GHOST_REMOVE] Removed ghost for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+        }
 
         @objc func handleTapGesture(_ sender: UITapGestureRecognizer) {
             print("🔍 [TAP_TRACE] Tap detected")

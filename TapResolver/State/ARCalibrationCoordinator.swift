@@ -18,6 +18,15 @@ enum CalibrationState: Equatable {
     case idle                                 // No active calibration
 }
 
+/// Information about a blocked marker placement (too far from ghost)
+struct BlockedPlacementInfo {
+    let mapPointID: UUID
+    let attemptedPosition: simd_float3
+    let ghostPosition: simd_float3
+    let distance: Float
+    let marker: ARMarker  // The marker that was blocked, for override recording
+}
+
 final class ARCalibrationCoordinator: ObservableObject {
     @Published var activeTriangleID: UUID?
     @Published var placedMarkers: [UUID] = []  // MapPoint IDs that have been calibrated
@@ -26,8 +35,14 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// (mirrors placedMarkers in ARViewContainer.Coordinator for ghost planting)
     private var sessionMarkerPositions: [String: simd_float3] = [:]
     
+    /// Maps MapPoint ID to AR position for current session (for ghost calculation)
+    private var mapPointARPositions: [UUID: simd_float3] = [:]
+    
     @Published var statusText: String = ""
     @Published var progressDots: (Bool, Bool, Bool) = (false, false, false)
+    
+    // MILESTONE 3: Blocked placement state
+    @Published var blockedPlacement: BlockedPlacementInfo? = nil
     
     // Legacy compatibility properties
     @Published var isActive: Bool = false
@@ -228,7 +243,44 @@ final class ARCalibrationCoordinator: ObservableObject {
             
             // Track this marker's position for current session (used by ghost planting)
             sessionMarkerPositions[marker.id.uuidString] = marker.arPosition
-            print("📍 [SESSION_MARKERS] Stored position for \(String(marker.id.uuidString.prefix(8)))")
+            mapPointARPositions[mapPointID] = marker.arPosition  // Key by MapPoint ID for easy lookup
+            print("📍 [SESSION_MARKERS] Stored position for \(String(marker.id.uuidString.prefix(8))) → MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            
+            // MILESTONE 3: Validate placement against ghost (if exists)
+            if let coordinator = ARViewContainer.Coordinator.current,
+               let ghostNode = coordinator.ghostMarkers[mapPointID] {
+                let ghostPosition = ghostNode.simdPosition
+                let distance = simd_distance(marker.arPosition, ghostPosition)
+                
+                print("📏 [PLACEMENT_CHECK] Distance from ghost: \(String(format: "%.2f", distance))m")
+                
+                if distance > 0.5 {
+                    // BLOCK placement - too far from expected position
+                    print("🚫 [PLACEMENT_BLOCKED] Marker is \(String(format: "%.2f", distance))m from ghost (threshold: 0.5m)")
+                    
+                    blockedPlacement = BlockedPlacementInfo(
+                        mapPointID: mapPointID,
+                        attemptedPosition: marker.arPosition,
+                        ghostPosition: ghostPosition,
+                        distance: distance,
+                        marker: marker
+                    )
+                    
+                    // Post notification for AR warning UI
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("PlacementBlocked"),
+                        object: nil,
+                        userInfo: [
+                            "mapPointID": mapPointID,
+                            "attemptedPosition": marker.arPosition,
+                            "ghostPosition": ghostPosition,
+                            "distance": distance
+                        ]
+                    )
+                    
+                    return  // Do not record marker
+                }
+            }
             
             // MARK: - Record position in history (Milestone 2)
             let record = ARPositionRecord(
@@ -253,6 +305,43 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Track placed marker
         placedMarkers.append(mapPointID)
         updateProgressDots()
+        
+        // MILESTONE 3: After 2nd marker, plant ghost for 3rd vertex
+        if placedMarkers.count == 2 {
+            // Find the unplaced vertex
+            let unplacedVertices = triangleVertices.filter { !placedMarkers.contains($0) }
+            if let thirdVertexID = unplacedVertices.first {
+                // Get AR positions of placed markers using MapPoint-keyed dictionary
+                let orderedPositions: [simd_float3] = placedMarkers.compactMap { mapPointARPositions[$0] }
+                
+                if orderedPositions.count == 2 {
+                    print("📍 [GHOST_3RD] Found AR positions for 2 placed markers")
+                    print("   Marker 1 (\(String(placedMarkers[0].uuidString.prefix(8)))): \(orderedPositions[0])")
+                    print("   Marker 2 (\(String(placedMarkers[1].uuidString.prefix(8)))): \(orderedPositions[1])")
+                    
+                    if let ghostPosition = calculateGhostPositionForThirdVertex(
+                        thirdVertexID: thirdVertexID,
+                        placedVertexIDs: Array(placedMarkers),
+                        placedARPositions: orderedPositions
+                    ) {
+                        // Post notification to render ghost
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("PlaceGhostMarker"),
+                            object: nil,
+                            userInfo: [
+                                "mapPointID": thirdVertexID,
+                                "position": ghostPosition
+                            ]
+                        )
+                        print("👻 [GHOST_3RD] Planted ghost for 3rd vertex \(String(thirdVertexID.uuidString.prefix(8)))")
+                    }
+                } else {
+                    print("⚠️ [GHOST_3RD] Could not get AR positions for placed markers")
+                    print("   placedMarkers: \(placedMarkers.map { String($0.uuidString.prefix(8)) })")
+                    print("   mapPointARPositions keys: \(mapPointARPositions.keys.map { String($0.uuidString.prefix(8)) })")
+                }
+            }
+        }
         
         // Advance to next vertex if not all placed
         if placedMarkers.count < 3 {
@@ -430,6 +519,120 @@ final class ARCalibrationCoordinator: ObservableObject {
         )
         
         print("👻 [GHOST_CALC] Calculated ghost position: (\(String(format: "%.2f", ghostPosition.x)), \(String(format: "%.2f", ghostPosition.y)), \(String(format: "%.2f", ghostPosition.z)))")
+        
+        return ghostPosition
+    }
+    
+    /// Calculate ghost position for 3rd vertex when only 2 markers are placed
+    /// Uses hierarchical approach: consensus history first, then 2D map geometry
+    private func calculateGhostPositionForThirdVertex(
+        thirdVertexID: UUID,
+        placedVertexIDs: [UUID],
+        placedARPositions: [simd_float3]
+    ) -> simd_float3? {
+        guard placedVertexIDs.count == 2, placedARPositions.count == 2 else {
+            print("⚠️ [GHOST_3RD] Need exactly 2 placed markers")
+            return nil
+        }
+        
+        // Get MapPoints for all 3 vertices
+        guard let thirdMapPoint = mapStore.points.first(where: { $0.id == thirdVertexID }),
+              let firstMapPoint = mapStore.points.first(where: { $0.id == placedVertexIDs[0] }),
+              let secondMapPoint = mapStore.points.first(where: { $0.id == placedVertexIDs[1] }) else {
+            print("⚠️ [GHOST_3RD] Could not find MapPoints for vertices")
+            return nil
+        }
+        
+        // PRIORITY 1: Check if 3rd vertex has consensus position from history
+        if let consensus = thirdMapPoint.consensusPosition {
+            print("📍 [GHOST_3RD] Using consensus position for \(String(thirdVertexID.uuidString.prefix(8)))")
+            
+            // Translate consensus to current session using average offset from placed markers
+            // Compare where markers WERE (their consensus) vs where they ARE NOW (placedARPositions)
+            var totalOffset = simd_float3(0, 0, 0)
+            var offsetCount: Float = 0
+            
+            if let firstConsensus = firstMapPoint.consensusPosition {
+                totalOffset += placedARPositions[0] - firstConsensus
+                offsetCount += 1
+                print("   Offset from marker 1: \(placedARPositions[0] - firstConsensus)")
+            }
+            
+            if let secondConsensus = secondMapPoint.consensusPosition {
+                totalOffset += placedARPositions[1] - secondConsensus
+                offsetCount += 1
+                print("   Offset from marker 2: \(placedARPositions[1] - secondConsensus)")
+            }
+            
+            if offsetCount > 0 {
+                let averageOffset = totalOffset / offsetCount
+                let translatedPosition = consensus + averageOffset
+                print("👻 [GHOST_3RD] Translated consensus: (\(String(format: "%.2f", translatedPosition.x)), \(String(format: "%.2f", translatedPosition.y)), \(String(format: "%.2f", translatedPosition.z)))")
+                return translatedPosition
+            } else {
+                // No consensus for placed markers - just use raw consensus
+                print("👻 [GHOST_3RD] Using raw consensus (no offset data)")
+                return consensus
+            }
+        }
+        
+        // PRIORITY 2: Calculate from 2D map geometry using 2-point affine transformation
+        print("📐 [GHOST_3RD] No consensus - calculating from 2D map geometry")
+        
+        // Get 2D map positions
+        let map1 = simd_float2(Float(firstMapPoint.position.x), Float(firstMapPoint.position.y))
+        let map2 = simd_float2(Float(secondMapPoint.position.x), Float(secondMapPoint.position.y))
+        let map3 = simd_float2(Float(thirdMapPoint.position.x), Float(thirdMapPoint.position.y))
+        
+        // Get AR positions (XZ plane, Y is height)
+        let ar1 = simd_float2(placedARPositions[0].x, placedARPositions[0].z)
+        let ar2 = simd_float2(placedARPositions[1].x, placedARPositions[1].z)
+        
+        // Calculate map edge vector and AR edge vector
+        let mapEdge = map2 - map1
+        let arEdge = ar2 - ar1
+        
+        let mapEdgeLength = simd_length(mapEdge)
+        let arEdgeLength = simd_length(arEdge)
+        
+        guard mapEdgeLength > 0.001, arEdgeLength > 0.001 else {
+            print("⚠️ [GHOST_3RD] Degenerate edge - markers too close")
+            return nil
+        }
+        
+        // Calculate scale factor (AR meters per map pixel)
+        let scale = arEdgeLength / mapEdgeLength
+        
+        // Calculate rotation angle between map and AR coordinate systems
+        let mapAngle = atan2(mapEdge.y, mapEdge.x)
+        let arAngle = atan2(arEdge.y, arEdge.x)
+        let rotation = arAngle - mapAngle
+        
+        // Transform 3rd point: translate to origin, scale, rotate, translate to AR space
+        let map3Relative = map3 - map1  // Relative to first point
+        
+        // Apply scale
+        let scaled = map3Relative * scale
+        
+        // Apply rotation
+        let cosR = cos(rotation)
+        let sinR = sin(rotation)
+        let rotated = simd_float2(
+            scaled.x * cosR - scaled.y * sinR,
+            scaled.x * sinR + scaled.y * cosR
+        )
+        
+        // Translate to AR space (add first AR position)
+        let ar3_2D = rotated + ar1
+        
+        // Use average Y height from placed markers
+        let averageY = (placedARPositions[0].y + placedARPositions[1].y) / 2
+        
+        let ghostPosition = simd_float3(ar3_2D.x, averageY, ar3_2D.y)
+        
+        print("👻 [GHOST_3RD] Calculated from map: (\(String(format: "%.2f", ghostPosition.x)), \(String(format: "%.2f", ghostPosition.y)), \(String(format: "%.2f", ghostPosition.z)))")
+        print("   Scale: \(String(format: "%.4f", scale)) AR meters per map pixel")
+        print("   Rotation: \(String(format: "%.1f", rotation * 180 / .pi))°")
         
         return ghostPosition
     }
@@ -883,6 +1086,88 @@ final class ARCalibrationCoordinator: ObservableObject {
         return quality
     }
     
+    /// Override a blocked placement - records with low confidence
+    func overrideBlockedPlacement() {
+        guard let blocked = blockedPlacement else {
+            print("⚠️ [OVERRIDE] No blocked placement to override")
+            return
+        }
+        
+        print("⚠️ [OVERRIDE] User overriding blocked placement for \(String(blocked.mapPointID.uuidString.prefix(8)))")
+        print("   Distance from ghost: \(String(format: "%.2f", blocked.distance))m")
+        
+        // Clear blocked state
+        let marker = blocked.marker
+        let mapPointID = blocked.mapPointID
+        blockedPlacement = nil
+        
+        // Remove ghost marker from scene
+        if let coordinator = ARViewContainer.Coordinator.current {
+            coordinator.removeGhostMarker(mapPointID: mapPointID)
+        }
+        
+        // Save marker to ARWorldMapStore
+        do {
+            let worldMapMarker = convertToWorldMapMarker(marker)
+            try arStore.saveMarker(worldMapMarker)
+            
+            sessionMarkerPositions[marker.id.uuidString] = marker.arPosition
+            
+            // Record with LOW confidence (0.1) so consensus ignores this outlier
+            let record = ARPositionRecord(
+                position: marker.arPosition,
+                sessionID: arStore.currentSessionID,
+                sourceType: .calibration,
+                distortionVector: marker.arPosition - blocked.ghostPosition,
+                confidenceScore: 0.1  // LOW confidence for override
+            )
+            mapStore.addPositionRecord(mapPointID: mapPointID, record: record)
+            print("📍 [OVERRIDE] Recorded with confidence 0.1 (outlier)")
+            
+        } catch {
+            print("❌ [OVERRIDE] Failed to save marker: \(error)")
+            return
+        }
+        
+        // Update triangle with marker ID
+        guard let triangleID = activeTriangleID else { return }
+        triangleStore.addMarkerToTriangle(
+            triangleID: triangleID,
+            vertexMapPointID: mapPointID,
+            markerID: marker.id
+        )
+        
+        // Continue normal flow
+        placedMarkers.append(mapPointID)
+        updateProgressDots()
+        
+        let count = placedMarkers.count
+        statusText = "Place AR markers for triangle (\(count)/3)"
+        
+        print("✅ [OVERRIDE] Marker registered for MapPoint \(String(mapPointID.uuidString.prefix(8))) (\(count)/3)")
+        
+        if placedMarkers.count == 3 {
+            if let triangle = triangleStore.triangle(withID: triangleID) {
+                finalizeCalibration(for: triangle)
+            }
+            calibrationState = .readyToFill
+            print("🎯 CalibrationState → \(stateDescription)")
+        }
+    }
+    
+    /// Cancel blocked placement - user will re-place marker
+    func cancelBlockedPlacement() {
+        guard blockedPlacement != nil else { return }
+        print("🔄 [CANCEL] User cancelling blocked placement - will re-place")
+        blockedPlacement = nil
+        
+        // Dismiss warning UI via notification
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PlacementBlockedDismissed"),
+            object: nil
+        )
+    }
+    
     func reset() {
         // Clear any existing survey markers and calibration markers
         if let coordinator = ARViewContainer.Coordinator.current {
@@ -894,6 +1179,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         currentTriangleID = nil
         placedMarkers = []
         sessionMarkerPositions = [:]  // Clear current session marker positions
+        mapPointARPositions = [:]  // Clear MapPoint position cache
         statusText = ""
         progressDots = (false, false, false)
         isActive = false

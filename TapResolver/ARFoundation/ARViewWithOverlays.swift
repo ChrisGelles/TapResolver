@@ -31,6 +31,11 @@ struct ARViewWithOverlays: View {
     // Track last logged PIP_MAP state to prevent spam
     @State private var lastLoggedPipMapState: CalibrationState? = nil
     
+    // MILESTONE 3: Blocked placement warning state
+    @State private var showPlacementWarning: Bool = false
+    @State private var warningDistance: Float = 0
+    @State private var warningMapPointID: UUID? = nil
+    
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
@@ -91,6 +96,18 @@ struct ARViewWithOverlays: View {
                 
                 print("🧪 ARView ID: triangle viewing mode for \(selectedTriangle.map { String($0.id.uuidString.prefix(8)) } ?? "none")")
                 print("🧪 ARViewWithOverlays instance: \(instanceAddress)")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PlacementBlocked"))) { notification in
+                if let distance = notification.userInfo?["distance"] as? Float,
+                   let mapPointID = notification.userInfo?["mapPointID"] as? UUID {
+                    warningDistance = distance
+                    warningMapPointID = mapPointID
+                    showPlacementWarning = true
+                    print("🚫 [WARNING_UI] Showing placement blocked warning - \(String(format: "%.2f", distance))m from ghost")
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PlacementBlockedDismissed"))) { _ in
+                showPlacementWarning = false
             }
             .onDisappear {
                 // Clean up on dismiss - defer to avoid view update conflicts
@@ -272,6 +289,70 @@ struct ARViewWithOverlays: View {
                     .cornerRadius(12)
                     .position(x: geo.size.width - 120, y: 130) // Adjusted for larger size
                     .zIndex(998)
+                
+                // MILESTONE 3: Placement blocked warning overlay
+                if showPlacementWarning, arCalibrationCoordinator.blockedPlacement != nil {
+                    VStack(spacing: 16) {
+                        // Warning icon and message
+                        HStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 32))
+                                .foregroundColor(.yellow)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Marker Too Far")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                Text("\(String(format: "%.1f", warningDistance))m from expected")
+                                    .font(.subheadline)
+                                    .foregroundColor(.white.opacity(0.8))
+                            }
+                            
+                            // Arrow pointing toward ghost
+                            Image(systemName: "chevron.right.2")
+                                .font(.system(size: 28, weight: .bold))
+                                .foregroundColor(.orange)
+                        }
+                        
+                        // Action buttons
+                        HStack(spacing: 20) {
+                            Button(action: {
+                                arCalibrationCoordinator.cancelBlockedPlacement()
+                                showPlacementWarning = false
+                            }) {
+                                HStack {
+                                    Image(systemName: "arrow.counterclockwise")
+                                    Text("Re-place")
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(Color.blue)
+                                .foregroundColor(.white)
+                                .cornerRadius(8)
+                            }
+                            
+                            Button(action: {
+                                arCalibrationCoordinator.overrideBlockedPlacement()
+                                showPlacementWarning = false
+                            }) {
+                                HStack {
+                                    Image(systemName: "exclamationmark.circle")
+                                    Text("Override")
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(Color.red.opacity(0.8))
+                                .foregroundColor(.white)
+                                .cornerRadius(8)
+                            }
+                        }
+                    }
+                    .padding(24)
+                    .background(Color.black.opacity(0.85))
+                    .cornerRadius(16)
+                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                    .zIndex(1000)
+                }
                 
                 // Survey Marker Controls (below PiP map) - only when triangle is calibrated
                 if let triangle = selectedTriangle,
