@@ -67,7 +67,8 @@ struct ARViewWithOverlays: View {
                 },
                 showPlaneVisualization: $showPlaneVisualization,
                 metricSquareStore: metricSquares,
-                mapPointStore: mapPointStore
+                mapPointStore: mapPointStore,
+                arCalibrationCoordinator: arCalibrationCoordinator
             )
             .edgesIgnoringSafeArea(.all)
             .onAppear {
@@ -109,6 +110,15 @@ struct ARViewWithOverlays: View {
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PlacementBlockedDismissed"))) { _ in
                 showPlacementWarning = false
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UpdateGhostSelection"))) { notification in
+                if let cameraPosition = notification.userInfo?["cameraPosition"] as? simd_float3,
+                   let ghostPositions = notification.userInfo?["ghostPositions"] as? [UUID: simd_float3] {
+                    arCalibrationCoordinator.updateGhostSelection(
+                        cameraPosition: cameraPosition,
+                        ghostPositions: ghostPositions
+                    )
+                }
+            }
             .onDisappear {
                 // Clean up on dismiss - defer to avoid view update conflicts
                 DispatchQueue.main.async {
@@ -124,6 +134,17 @@ struct ARViewWithOverlays: View {
                 print("   Calibration state: \(arCalibrationCoordinator.stateDescription)")
                 print("   Call stack trace:")
                 Thread.callStackSymbols.prefix(5).forEach { print("      \($0)") }
+                
+                // Check if this is a ghost confirmation
+                let isGhostConfirm = notification.userInfo?["isGhostConfirm"] as? Bool ?? false
+                let ghostMapPointID = notification.userInfo?["ghostMapPointID"] as? UUID
+                
+                if isGhostConfirm, let ghostID = ghostMapPointID {
+                    print("🎯 [REGISTER_MARKER_TRACE] Ghost confirm for MapPoint \(String(ghostID.uuidString.prefix(8)))")
+                    // Clear selection state
+                    arCalibrationCoordinator.selectedGhostMapPointID = nil
+                    arCalibrationCoordinator.selectedGhostEstimatedPosition = nil
+                }
                 
                 // Block marker registration during survey mode
                 if case .surveyMode = arCalibrationCoordinator.calibrationState {
@@ -141,32 +162,41 @@ struct ARViewWithOverlays: View {
                     return
                 }
                 
-                // Get current vertex being calibrated
-                guard let currentVertexID = arCalibrationCoordinator.getCurrentVertexID() else {
-                    print("⚠️ [REGISTER_MARKER_TRACE] No current vertex ID for marker placement")
-                    return
+                // For ghost confirm, use the ghost's MapPoint ID; otherwise use current vertex
+                let targetMapPointID: UUID
+                if isGhostConfirm, let ghostID = ghostMapPointID {
+                    targetMapPointID = ghostID
+                } else {
+                    guard let currentVertexID = arCalibrationCoordinator.getCurrentVertexID() else {
+                        print("⚠️ [REGISTER_MARKER_TRACE] No current vertex ID for marker placement")
+                        return
+                    }
+                    targetMapPointID = currentVertexID
                 }
                 
                 print("🔍 [REGISTER_MARKER_TRACE] Processing marker:")
                 print("   markerID: \(String(markerID.uuidString.prefix(8)))")
-                print("   currentVertexID: \(String(currentVertexID.uuidString.prefix(8)))")
+                print("   targetMapPointID: \(String(targetMapPointID.uuidString.prefix(8)))")
+                print("   isGhostConfirm: \(isGhostConfirm)")
                 
-                // CRITICAL SAFETY CHECK: Block if not in placing vertices state
-                guard case .placingVertices = arCalibrationCoordinator.calibrationState else {
-                    print("⚠️ [REGISTER_MARKER_TRACE] CRITICAL: registerMarker called outside placingVertices state!")
-                    print("   Current state: \(arCalibrationCoordinator.stateDescription)")
-                    print("   This should never happen - investigating caller")
-                    return
+                // CRITICAL SAFETY CHECK: Block if not in placing vertices state (unless ghost confirm)
+                if !isGhostConfirm {
+                    guard case .placingVertices = arCalibrationCoordinator.calibrationState else {
+                        print("⚠️ [REGISTER_MARKER_TRACE] CRITICAL: registerMarker called outside placingVertices state!")
+                        print("   Current state: \(arCalibrationCoordinator.stateDescription)")
+                        print("   This should never happen - investigating caller")
+                        return
+                    }
                 }
                 
-                // Only capture photo when placing vertices (not in survey mode)
-                if case .placingVertices = arCalibrationCoordinator.calibrationState {
+                // Only capture photo when placing vertices (not in survey mode, not ghost confirm)
+                if !isGhostConfirm, case .placingVertices = arCalibrationCoordinator.calibrationState {
                     print("🔍 [PHOTO_TRACE] Photo capture requested (placing vertices)")
-                    print("   mapPoint.id: \(String(currentVertexID.uuidString.prefix(8)))")
+                    print("   mapPoint.id: \(String(targetMapPointID.uuidString.prefix(8)))")
                     print("   Calibration state: \(arCalibrationCoordinator.stateDescription)")
                     
                     // Capture photo from AR camera feed when marker is placed
-                    if let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID }) {
+                    if let mapPoint = mapPointStore.points.first(where: { $0.id == targetMapPointID }) {
                         // Auto-capture new photo from AR camera feed
                         if let coordinator = ARViewContainer.Coordinator.current {
                             coordinator.captureARFrame { image in
@@ -178,14 +208,14 @@ struct ARViewWithOverlays: View {
                                 // Convert UIImage to Data
                                 if let imageData = image.jpegData(compressionQuality: 0.8) {
                                     // Save photo and update metadata
-                                    if mapPointStore.savePhotoToDisk(for: currentVertexID, photoData: imageData) {
+                                    if mapPointStore.savePhotoToDisk(for: targetMapPointID, photoData: imageData) {
                                         // Update capture position to current position
-                                        if let index = mapPointStore.points.firstIndex(where: { $0.id == currentVertexID }) {
+                                        if let index = mapPointStore.points.firstIndex(where: { $0.id == targetMapPointID }) {
                                             mapPointStore.points[index].photoCapturedAtPosition = mapPoint.mapPoint
                                             mapPointStore.points[index].photoOutdated = false
                                             mapPointStore.save()
                                         }
-                                        print("📸 [PHOTO_TRACE] Captured photo for MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
+                                        print("📸 [PHOTO_TRACE] Captured photo for MapPoint \(String(targetMapPointID.uuidString.prefix(8)))")
                                     }
                                 }
                             }
@@ -197,7 +227,7 @@ struct ARViewWithOverlays: View {
                 
                 // Create ARMarker
                 let arPosition = simd_float3(positionArray[0], positionArray[1], positionArray[2])
-                let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID })
+                let mapPoint = mapPointStore.points.first(where: { $0.id == targetMapPointID })
                 let mapCoordinates = mapPoint?.mapPoint ?? CGPoint.zero
                 
                 // Log AR position and map position correlation
@@ -205,16 +235,24 @@ struct ARViewWithOverlays: View {
                 
                 let marker = ARMarker(
                     id: markerID,
-                    linkedMapPointID: currentVertexID,
+                    linkedMapPointID: targetMapPointID,
                     arPosition: arPosition,
                     mapCoordinates: mapCoordinates,
                     isAnchor: false
                 )
                 
-                // Register with coordinator
-                arCalibrationCoordinator.registerMarker(mapPointID: currentVertexID, marker: marker)
+                // Determine source type based on ghost interaction
+                let sourceType: SourceType = isGhostConfirm ? .ghostConfirm : .calibration
                 
-                print("✅ Registered marker \(String(markerID.uuidString.prefix(8))) for vertex \(String(currentVertexID.uuidString.prefix(8)))")
+                // Register with coordinator
+                arCalibrationCoordinator.registerMarker(
+                    mapPointID: targetMapPointID,
+                    marker: marker,
+                    sourceType: sourceType,
+                    distortionVector: nil
+                )
+                
+                print("✅ Registered marker \(String(markerID.uuidString.prefix(8))) for MapPoint \(String(targetMapPointID.uuidString.prefix(8)))")
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UpdateMapPointPhoto"))) { notification in
                 // Handle photo update request
@@ -542,31 +580,40 @@ struct ARViewWithOverlays: View {
                         .foregroundColor(.white)
                         .padding(.bottom, 8)
                     
-                    // Place Marker button - only visible during vertex placement
+                    // Place Marker / Ghost Interaction buttons
                     if case .placingVertices = arCalibrationCoordinator.calibrationState {
-                        Button(action: {
-                            print("🔍 [PLACE_MARKER_BTN] Button tapped")
-                            print("   Calibration state: \(arCalibrationCoordinator.stateDescription)")
-                            
-                            guard case .placingVertices = arCalibrationCoordinator.calibrationState else {
-                                print("⚠️ [PLACE_MARKER_BTN] Blocked - not in placingVertices state")
-                                return
+                        GhostInteractionButtons(
+                            arCalibrationCoordinator: arCalibrationCoordinator,
+                            onConfirmGhost: {
+                                // Confirm ghost - promote to real marker at ghost's position
+                                guard let selectedGhostID = arCalibrationCoordinator.selectedGhostMapPointID else {
+                                    print("⚠️ [GHOST_CONFIRM] No ghost selected")
+                                    return
+                                }
+                                NotificationCenter.default.post(
+                                    name: NSNotification.Name("ConfirmGhostMarker"),
+                                    object: nil,
+                                    userInfo: [
+                                        "ghostMapPointID": selectedGhostID
+                                    ]
+                                )
+                            },
+                            onPlaceMarker: {
+                                // Standard marker placement (may be adjustment if ghost selected)
+                                guard let coordinator = ARViewContainer.Coordinator.current else {
+                                    print("❌ [PLACE_MARKER] No coordinator reference")
+                                    return
+                                }
+                                guard coordinator.currentCursorPosition != nil else {
+                                    print("⚠️ [PLACE_MARKER] No valid ground plane detected - move device to find flat surface")
+                                    return
+                                }
+                                NotificationCenter.default.post(
+                                    name: NSNotification.Name("PlaceMarkerAtCursor"),
+                                    object: nil
+                                )
                             }
-                            
-                            NotificationCenter.default.post(
-                                name: NSNotification.Name("PlaceMarkerAtCursor"),
-                                object: nil
-                            )
-                        }) {
-                            Text("Place Marker")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .padding()
-                                .frame(maxWidth: .infinity)
-                                .background(.ultraThickMaterial)
-                                .cornerRadius(12)
-                        }
-                        .padding(.horizontal, 40)
+                        )
                         .padding(.bottom, 12)
                     }
                     

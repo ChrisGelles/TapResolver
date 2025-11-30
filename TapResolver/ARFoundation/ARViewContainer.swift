@@ -20,6 +20,9 @@ struct ARViewContainer: UIViewRepresentable {
     
     // Map point store for survey markers
     var mapPointStore: MapPointStore?
+    
+    // AR calibration coordinator for ghost selection
+    var arCalibrationCoordinator: ARCalibrationCoordinator?
 
         func makeCoordinator() -> ARViewCoordinator {
         let coordinator = ARViewCoordinator()
@@ -33,6 +36,7 @@ struct ARViewContainer: UIViewRepresentable {
         coordinator.showPlaneVisualization = showPlaneVisualization
         coordinator.metricSquareStore = metricSquareStore
         coordinator.mapPointStore = mapPointStore
+        coordinator.arCalibrationCoordinator = arCalibrationCoordinator
         return coordinator
     }
 
@@ -94,6 +98,7 @@ struct ARViewContainer: UIViewRepresentable {
         context.coordinator.showPlaneVisualization = showPlaneVisualization
         context.coordinator.metricSquareStore = metricSquareStore
         context.coordinator.mapPointStore = mapPointStore
+        context.coordinator.arCalibrationCoordinator = arCalibrationCoordinator
         
         // Store coordinator reference for world map access
         ARViewContainer.Coordinator.current = context.coordinator
@@ -106,9 +111,14 @@ struct ARViewContainer: UIViewRepresentable {
         var currentMode: ARMode = .idle
         var placedMarkers: [UUID: SCNNode] = [:] // Track placed markers by ID
         var ghostMarkers: [UUID: SCNNode] = [:] // Track ghost markers by MapPoint ID
+        /// Stores estimated AR positions for ghost markers (mapPointID → estimated position)
+        /// Used for distortion calculation when user adjusts a ghost
+        var ghostMarkerPositions: [UUID: simd_float3] = [:]
         var surveyMarkers: [UUID: SCNNode] = [:]  // markerID -> node
         weak var metricSquareStore: MetricSquareStore?
         weak var mapPointStore: MapPointStore?
+        /// Reference to calibration coordinator for ghost selection updates
+        weak var arCalibrationCoordinator: ARCalibrationCoordinator?
         private var crosshairNode: GroundCrosshairNode?
         var currentCursorPosition: simd_float3?
         
@@ -283,6 +293,7 @@ struct ARViewContainer: UIViewRepresentable {
             
             // Store in ghostMarkers dictionary (REUSE existing storage)
             ghostMarkers[mapPointID] = ghostNode
+            ghostMarkerPositions[mapPointID] = position
             
             // Add to scene
             sceneView?.scene.rootNode.addChildNode(ghostNode)
@@ -299,7 +310,73 @@ struct ARViewContainer: UIViewRepresentable {
             
             ghostNode.removeFromParentNode()
             ghostMarkers.removeValue(forKey: mapPointID)
+            ghostMarkerPositions.removeValue(forKey: mapPointID)
             print("🗑️ [GHOST_REMOVE] Removed ghost for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+        }
+        
+        @objc func handleConfirmGhostMarker(_ notification: Notification) {
+            print("🎯 [GHOST_CONFIRM] Confirm ghost marker notification received")
+            
+            guard let ghostMapPointID = notification.userInfo?["ghostMapPointID"] as? UUID,
+                  let estimatedPosition = ghostMarkerPositions[ghostMapPointID] else {
+                print("⚠️ [GHOST_CONFIRM] No ghost selected or missing position")
+                return
+            }
+            
+            print("🎯 [GHOST_CONFIRM] Confirming ghost for MapPoint \(String(ghostMapPointID.uuidString.prefix(8)))")
+            print("   Estimated position: (\(String(format: "%.2f", estimatedPosition.x)), \(String(format: "%.2f", estimatedPosition.y)), \(String(format: "%.2f", estimatedPosition.z)))")
+            
+            // Create marker at the ghost's estimated position
+            let markerID = UUID()
+            
+            // Get map coordinates for the MapPoint
+            guard let mapPoint = mapPointStore?.points.first(where: { $0.id == ghostMapPointID }) else {
+                print("⚠️ [GHOST_CONFIRM] Could not find MapPoint for ghost")
+                return
+            }
+            
+            // Create visual marker at ghost position
+            let markerNode = ARMarkerRenderer.createNode(
+                at: estimatedPosition,
+                options: MarkerOptions(
+                    color: .cyan,  // Standard calibration marker color
+                    markerID: markerID,
+                    userDeviceHeight: userDeviceHeight,
+                    badgeColor: nil,
+                    radius: 0.03,
+                    animateOnAppearance: true,
+                    animationOvershoot: 0.04,
+                    isGhost: false
+                )
+            )
+            
+            markerNode.name = "arMarker_\(markerID.uuidString)"
+            sceneView?.scene.rootNode.addChildNode(markerNode)
+            placedMarkers[markerID] = markerNode
+            
+            print("🎯 [GHOST_CONFIRM] Created marker \(String(markerID.uuidString.prefix(8))) at ghost position")
+            
+            // Remove the ghost marker node from scene
+            if let ghostNode = ghostMarkers[ghostMapPointID] {
+                ghostNode.removeFromParentNode()
+                ghostMarkers.removeValue(forKey: ghostMapPointID)
+                ghostMarkerPositions.removeValue(forKey: ghostMapPointID)
+                print("🎯 [GHOST_CONFIRM] Removed ghost node from scene")
+            }
+            
+            // Post ARMarkerPlaced notification with ghost confirm flag
+            NotificationCenter.default.post(
+                name: NSNotification.Name("ARMarkerPlaced"),
+                object: nil,
+                userInfo: [
+                    "markerID": markerID,
+                    "position": [estimatedPosition.x, estimatedPosition.y, estimatedPosition.z],
+                    "isGhostConfirm": true,
+                    "ghostMapPointID": ghostMapPointID
+                ]
+            )
+            
+            print("✅ [GHOST_CONFIRM] Posted ARMarkerPlaced notification with ghost confirm flag")
         }
 
         @objc func handleTapGesture(_ sender: UITapGestureRecognizer) {
@@ -416,6 +493,15 @@ struct ARViewContainer: UIViewRepresentable {
                 name: NSNotification.Name("PlaceGhostMarker"),
                 object: nil
             )
+            
+            // Listen for ConfirmGhostMarker notification
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleConfirmGhostMarker),
+                name: NSNotification.Name("ConfirmGhostMarker"),
+                object: nil
+            )
+            
             print("👻 Ghost marker notification listener registered")
             
             print("➕ Ground crosshair configured")
@@ -1239,6 +1325,74 @@ struct ARViewContainer: UIViewRepresentable {
 
 // MARK: - ARSCNViewDelegate for Plane Visualization
 extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
+    
+    // MARK: - Ghost Proximity Selection (per-frame updates)
+    
+    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        // MARK: - Ghost Proximity Selection
+        
+        // Throttle logging to once per second to avoid spam
+        let now = Date().timeIntervalSince1970
+        let shouldLog = (Int(now) % 5 == 0) && (Int(now * 10) % 10 == 0)  // Log roughly every 5 seconds
+        
+        if ghostMarkerPositions.isEmpty {
+            if shouldLog {
+                print("👻 [GHOST_PROXIMITY] No ghost positions tracked (ghostMarkerPositions is empty)")
+            }
+            return
+        }
+        
+        guard let sceneView = sceneView else {
+            if shouldLog {
+                print("👻 [GHOST_PROXIMITY] sceneView is nil")
+            }
+            return
+        }
+        
+        guard let cameraTransform = sceneView.session.currentFrame?.camera.transform else {
+            if shouldLog {
+                print("👻 [GHOST_PROXIMITY] No camera transform available")
+            }
+            return
+        }
+        
+        let cameraPosition = simd_float3(
+            cameraTransform.columns.3.x,
+            cameraTransform.columns.3.y,
+            cameraTransform.columns.3.z
+        )
+        
+        // Log ghost check status periodically
+        if shouldLog {
+            print("👻 [GHOST_PROXIMITY] Checking \(ghostMarkerPositions.count) ghost(s), camera at (\(String(format: "%.2f", cameraPosition.x)), \(String(format: "%.2f", cameraPosition.y)), \(String(format: "%.2f", cameraPosition.z)))")
+            for (mapPointID, ghostPos) in ghostMarkerPositions {
+                let horizontalDistance = simd_distance(
+                    simd_float2(cameraPosition.x, cameraPosition.z),
+                    simd_float2(ghostPos.x, ghostPos.z)
+                )
+                print("   Ghost \(String(mapPointID.uuidString.prefix(8))): \(String(format: "%.2f", horizontalDistance))m away (horizontal)")
+            }
+        }
+        
+        // Update ghost selection on main thread (touches @Published properties)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else {
+                print("👻 [GHOST_PROXIMITY] self is nil in async block")
+                return
+            }
+            guard let coordinator = self.arCalibrationCoordinator else {
+                if shouldLog {
+                    print("👻 [GHOST_PROXIMITY] arCalibrationCoordinator is nil!")
+                }
+                return
+            }
+            coordinator.updateGhostSelection(
+                cameraPosition: cameraPosition,
+                ghostPositions: self.ghostMarkerPositions
+            )
+        }
+    }
+    
     // MARK: - Plane Visualization
     
     func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {

@@ -44,6 +44,12 @@ final class ARCalibrationCoordinator: ObservableObject {
     // MILESTONE 3: Blocked placement state
     @Published var blockedPlacement: BlockedPlacementInfo? = nil
     
+    /// Currently selected ghost marker (user is within proximity range)
+    @Published var selectedGhostMapPointID: UUID? = nil
+    
+    /// Estimated position of the selected ghost (for distortion calculation)
+    @Published var selectedGhostEstimatedPosition: simd_float3? = nil
+    
     // Legacy compatibility properties
     @Published var isActive: Bool = false
     @Published var currentTriangleID: UUID?
@@ -305,7 +311,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         referencePhotoData = photoData
     }
     
-    func registerMarker(mapPointID: UUID, marker: ARMarker) {
+    func registerMarker(mapPointID: UUID, marker: ARMarker, sourceType: SourceType = .calibration, distortionVector: simd_float3? = nil) {
         // MARK: Photo verification on marker placement
         print("📍 registerMarker called for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
         if let mapPoint = mapStore.points.first(where: { $0.id == mapPointID }) {
@@ -399,8 +405,9 @@ final class ARCalibrationCoordinator: ObservableObject {
             let record = ARPositionRecord(
                 position: marker.arPosition,
                 sessionID: arStore.currentSessionID,
-                sourceType: .calibration,
-                confidenceScore: 0.95
+                sourceType: sourceType,
+                distortionVector: distortionVector,
+                confidenceScore: sourceType == .ghostConfirm ? 1.0 : (sourceType == .ghostAdjust ? 0.8 : 0.95)
             )
             mapStore.addPositionRecord(mapPointID: mapPointID, record: record)
         } catch {
@@ -1329,8 +1336,72 @@ final class ARCalibrationCoordinator: ObservableObject {
         completedMarkerCount = 0
         lastPrintedVertexIndex = nil  // Reset print tracking
         calibrationState = .idle
+        selectedGhostMapPointID = nil
+        selectedGhostEstimatedPosition = nil
         print("🎯 CalibrationState → \(stateDescription) (reset)")
         print("🔄 ARCalibrationCoordinator: Reset complete - all markers cleared")
+    }
+    
+    /// Updates ghost selection based on user proximity
+    /// - Parameters:
+    ///   - cameraPosition: Current AR camera position
+    ///   - ghostPositions: Dictionary of mapPointID → estimated ghost position
+    ///   - proximityThreshold: Distance in meters to trigger selection (default 2.0m, horizontal distance only)
+    func updateGhostSelection(
+        cameraPosition: simd_float3,
+        ghostPositions: [UUID: simd_float3],
+        proximityThreshold: Float = 2.0  // meters (horizontal distance only)
+    ) {
+        // Only process during active calibration states where ghosts may be visible
+        let isValidState: Bool
+        switch calibrationState {
+        case .placingVertices:
+            isValidState = true  // Ghost for 3rd vertex appears during placement
+        case .readyToFill:
+            isValidState = true  // Ghosts for adjacent triangles after completion
+        default:
+            isValidState = false
+        }
+        
+        guard isValidState else {
+            // Clear selection if not in correct state
+            if selectedGhostMapPointID != nil {
+                print("👻 [GHOST_SELECT] Cleared selection - not in valid calibration state")
+                selectedGhostMapPointID = nil
+                selectedGhostEstimatedPosition = nil
+            }
+            return
+        }
+        
+        // Find nearest ghost within threshold
+        var nearestGhostID: UUID? = nil
+        var nearestDistance: Float = Float.greatestFiniteMagnitude
+        var nearestPosition: simd_float3? = nil
+        
+        for (mapPointID, ghostPosition) in ghostPositions {
+            let distance = simd_distance(
+                simd_float2(cameraPosition.x, cameraPosition.z),
+                simd_float2(ghostPosition.x, ghostPosition.z)
+            )
+            if distance < proximityThreshold && distance < nearestDistance {
+                nearestGhostID = mapPointID
+                nearestDistance = distance
+                nearestPosition = ghostPosition
+            }
+        }
+        
+        // Update selection if changed
+        if nearestGhostID != selectedGhostMapPointID {
+            if let ghostID = nearestGhostID, let position = nearestPosition {
+                print("👻 [GHOST_SELECT] Selected ghost \(String(ghostID.uuidString.prefix(8))) at \(String(format: "%.2f", nearestDistance))m")
+                selectedGhostMapPointID = ghostID
+                selectedGhostEstimatedPosition = position
+            } else if selectedGhostMapPointID != nil {
+                print("👻 [GHOST_SELECT] Deselected ghost - moved out of range")
+                selectedGhostMapPointID = nil
+                selectedGhostEstimatedPosition = nil
+            }
+        }
     }
     
     // MARK: - Helper: Convert ARMarker to ARWorldMapStore.ARMarker
