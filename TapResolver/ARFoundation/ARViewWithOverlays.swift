@@ -725,23 +725,12 @@ struct ARPiPMapView: View {
         
         // When calibration is complete (readyToFill state), return nil to trigger triangle framing
         if case .readyToFill = arCalibrationCoordinator.calibrationState {
-            // Only log on state change
-            if lastLoggedFocusedPointID != nil {
-                print("🔍 [FOCUSED_POINT] readyToFill state - returning nil to frame triangle")
-                lastLoggedFocusedPointID = nil
-            }
             return nil
         }
         
         // During vertex placement, focus on current vertex
         if case .placingVertices = arCalibrationCoordinator.calibrationState {
-            let vertexID = arCalibrationCoordinator.getCurrentVertexID()
-            // Only log when focused point changes
-            if vertexID != lastLoggedFocusedPointID {
-                print("🔍 [FOCUSED_POINT] placingVertices state - focusing on \(vertexID.map { String($0.uuidString.prefix(8)) } ?? "none")")
-                lastLoggedFocusedPointID = vertexID
-            }
-            return vertexID
+            return arCalibrationCoordinator.getCurrentVertexID()
         }
         
         return nil
@@ -765,6 +754,13 @@ struct ARPiPMapView: View {
     // Track last logged calibration state for PIP_ONCHANGE debouncing
     @State private var lastLoggedCalibrationState: CalibrationState? = nil
     
+    // Track last state and focused point for FOCUSED_POINT logging
+    @State private var lastState: CalibrationState? = nil
+    @State private var lastFocusedPointID: UUID? = nil
+    
+    // Track last debug info string for PiP Map spam prevention
+    @State private var lastDebugInfo: String? = nil
+    
     @State private var mapImage: UIImage?
     @State private var currentScale: CGFloat = 1.0
     @State private var currentOffset: CGSize = .zero
@@ -779,211 +775,10 @@ struct ARPiPMapView: View {
         Group {
             if let mapImage = mapImage {
                 GeometryReader { geo in
-                    // Calculate target transform based on focused point
-                    let targets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
-                    
-                    ZStack {
-                        // Use MapContainer (same as main map view)
-                        MapContainer(mapImage: mapImage)
-                            .environmentObject(pipTransform)
-                            .environmentObject(pipProcessor)
-                            .frame(width: mapImage.size.width, height: mapImage.size.height)
-                            .allowsHitTesting(false) // Disable gestures in PiP
-                        
-                        // User position dot overlay (only in calibration mode)
-                        if isCalibrationMode, let userPos = userMapPosition {
-                            // User position is in map coordinates, position directly
-                            // Note: This will be transformed by the scaleEffect/offset applied to the ZStack
-                            ZStack {
-                                // Base dot
-                                Circle()
-                                    .fill(Color(red: 103/255, green: 31/255, blue: 121/255))
-                                    .frame(width: 15, height: 15)
-                                
-                                // Pulse animation ring
-                                Circle()
-                                    .stroke(Color(red: 73/255, green: 206/255, blue: 248/255), lineWidth: 2)
-                                    .frame(width: 15, height: 15)
-                                    .scaleEffect(isAnimating ? 22.0/15.0 : 1.0) // Grow from 15px to 22px
-                                    .opacity(isAnimating ? 0.0 : 0.5) // Fade from 0.5 to 0
-                                    .onAppear {
-                                        // Start repeating animation
-                                        withAnimation(Animation.easeOut(duration: 1.0).repeatForever(autoreverses: false)) {
-                                            isAnimating = true
-                                        }
-                                    }
-                            }
-                            .position(userPos)
-                        }
-                        
-                        // Focused point indicator (if any) - must be after MapContainer to render on top
-                        if let pointID = focusedPointID,
-                           let point = mapPointStore.points.first(where: { $0.id == pointID }) {
-                            ZStack {
-                                // Outer ring for visibility
-                                Circle()
-                                    .fill(Color.cyan.opacity(0.3))
-                                    .frame(width: 20, height: 20)
-                                
-                                // Inner circle
-                                Circle()
-                                    .fill(Color.cyan)
-                                    .frame(width: 12, height: 12)
-                                
-                                // White border
-                                Circle()
-                                    .stroke(Color.white, lineWidth: 2)
-                                    .frame(width: 12, height: 12)
-                            }
-                            .position(point.mapPoint)
-                            .onAppear {
-                                print("📍 PiP Map: Displaying focused point \(String(pointID.uuidString.prefix(8))) at (\(Int(point.mapPoint.x)), \(Int(point.mapPoint.y)))")
-                            }
-                        } else if isCalibrationMode {
-                            // Debug: Log when focused point should be shown but isn't
-                            let _ = print("⚠️ PiP Map: isCalibrationMode=\(isCalibrationMode), focusedPointID=\(focusedPointID?.uuidString.prefix(8) ?? "nil"), currentVertexIndex=\(arCalibrationCoordinator.currentVertexIndex)")
-                        }
-                    }
-                    .scaleEffect(currentScale)
-                    .offset(currentOffset)
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .clipped()
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
-                    )
-                    .onAppear {
-                        setupPiPTransform(image: mapImage, frameSize: geo.size)
-                        currentScale = targets.scale
-                        currentOffset = targets.offset
-                    }
-                    .onChange(of: focusedPointID) { _ in
-                        // Recalculate when focused point changes
-                        DispatchQueue.main.async {
-                            let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
-                            withAnimation(.easeInOut(duration: 0.5)) {
-                                currentScale = newTargets.scale
-                                currentOffset = newTargets.offset
-                            }
-                        }
-                    }
-                    .onChange(of: arCalibrationCoordinator.currentVertexIndex) { _ in
-                        // Recalculate when calibration advances to next vertex
-                        DispatchQueue.main.async {
-                            let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
-                            withAnimation(.easeInOut(duration: 0.5)) {
-                                currentScale = newTargets.scale
-                                currentOffset = newTargets.offset
-                            }
-                        }
-                    }
-                    .onChange(of: arCalibrationCoordinator.calibrationState) { oldState, newState in
-                        // Only log on state TRANSITIONS, not every frame
-                        if newState != lastLoggedCalibrationState {
-                            switch newState {
-                            case .placingVertices(let index):
-                                print("🔍 [PIP_ONCHANGE] State → placingVertices(index: \(index))")
-                            case .readyToFill:
-                                print("🔍 [PIP_ONCHANGE] State → readyToFill")
-                                print("🎯 [PIP_ONCHANGE] Triggering triangle frame calculation")
-                            case .idle:
-                                print("🔍 [PIP_ONCHANGE] State → idle")
-                            default:
-                                print("🔍 [PIP_ONCHANGE] State → \(newState)")
-                            }
-                            lastLoggedCalibrationState = newState
-                        }
-                        
-                        if case .readyToFill = newState {
-                            // Recalculate transform to frame the entire triangle
-                            DispatchQueue.main.async {
-                                let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
-                                withAnimation(.easeInOut(duration: 0.5)) {
-                                    currentScale = newTargets.scale
-                                    currentOffset = newTargets.offset
-                                }
-                                print("✅ [PIP_ONCHANGE] Applied triangle framing transform")
-                            }
-                        }
-                    }
-                    .onChange(of: arCalibrationCoordinator.placedMarkers.count) { _ in
-                        // Recalculate when marker count changes
-                        // When triangle is complete (3 markers), PiP map will zoom to fit all vertices
-                        DispatchQueue.main.async {
-                            if let triangle = selectedTriangle,
-                               arCalibrationCoordinator.isTriangleComplete(triangle.id) {
-                                print("🎯 PiP Map: Triangle complete - fitting all 3 vertices")
-                                
-                                // Draw triangle lines on ground
-                                if let coordinator = ARViewContainer.Coordinator.current {
-                                    var vertices: [simd_float3] = []
-                                    for markerIDString in triangle.arMarkerIDs {
-                                        if let markerUUID = UUID(uuidString: markerIDString),
-                                           let markerNode = coordinator.placedMarkers[markerUUID] {
-                                            vertices.append(markerNode.simdPosition)
-                                        }
-                                    }
-                                    if vertices.count == 3 {
-                                        coordinator.drawTriangleLines(vertices: vertices)
-                                    }
-                                }
-                            }
-                            let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
-                            withAnimation(.easeInOut(duration: 0.5)) {
-                                currentScale = newTargets.scale
-                                currentOffset = newTargets.offset
-                            }
-                        }
-                    }
-                    .onChange(of: selectedTriangle?.id) { _ in
-                        // Recalculate when triangle selection changes (for auto-zoom)
-                        if autoZoomToTriangle {
-                            DispatchQueue.main.async {
-                                let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
-                                withAnimation(.easeInOut(duration: 0.6)) {
-                                    currentScale = newTargets.scale
-                                    currentOffset = newTargets.offset
-                                }
-                            }
-                        }
-                    }
-                    .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CenterPiPOnTriangle"))) { notification in
-                        guard let triangleID = notification.userInfo?["triangleID"] as? UUID,
-                              let triangle = arCalibrationCoordinator.triangleStore.triangle(withID: triangleID) else {
-                            return
-                        }
-                        
-                        // Get triangle vertices' map positions
-                        let vertexPositions = triangle.vertexIDs.compactMap { vertexID -> CGPoint? in
-                            mapPointStore.points.first(where: { $0.id == vertexID })?.mapPoint
-                        }
-                        
-                        guard vertexPositions.count == 3 else { return }
-                        
-                        let frameSize = CGSize(width: 180, height: 180)
-                        let newTransform = calculateFittingTransform(
-                            points: vertexPositions,
-                            frameSize: frameSize,
-                            imageSize: mapImage.size,
-                            padding: 40
-                        )
-                        
-                        withAnimation(.easeInOut(duration: 0.6)) {
-                            currentScale = newTransform.scale
-                            currentOffset = newTransform.offset
-                        }
-                        
-                        print("🎯 PiP centered on triangle \(String(triangleID.uuidString.prefix(8)))")
-                    }
+                    pipMapContent(mapImage: mapImage, frameSize: geo.size)
                 }
             } else {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.gray.opacity(0.3))
-                    .overlay(
-                        Text("Loading Map...")
-                            .foregroundColor(.white.opacity(0.7))
-                            .font(.caption)
-                    )
+                loadingMapView()
             }
         }
         .onAppear {
@@ -1005,6 +800,45 @@ struct ARPiPMapView: View {
                 stopUserPositionTracking()
             }
         }
+    }
+    
+    @ViewBuilder
+    private func pipMapContent(mapImage: UIImage, frameSize: CGSize) -> some View {
+        // Calculate target transform based on focused point
+        let targets = calculateTargetTransform(image: mapImage, frameSize: frameSize)
+        
+        pipMapZStack(mapImage: mapImage)
+            .scaleEffect(currentScale)
+            .offset(currentOffset)
+            .frame(width: frameSize.width, height: frameSize.height)
+            .clipped()
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.white.opacity(0.3), lineWidth: 2)
+            )
+            .onAppear {
+                setupPiPTransform(image: mapImage, frameSize: frameSize)
+                currentScale = targets.scale
+                currentOffset = targets.offset
+            }
+            .onChange(of: focusedPointID) { newFocusedID in
+                handleFocusedPointChange(newFocusedID: newFocusedID, mapImage: mapImage, frameSize: frameSize)
+            }
+            .onChange(of: arCalibrationCoordinator.currentVertexIndex) { _ in
+                handleVertexIndexChange(mapImage: mapImage, frameSize: frameSize)
+            }
+            .onChange(of: arCalibrationCoordinator.calibrationState) { oldState, newState in
+                handleCalibrationStateChange(oldState: oldState, newState: newState, mapImage: mapImage, frameSize: frameSize)
+            }
+            .onChange(of: arCalibrationCoordinator.placedMarkers.count) { _ in
+                handlePlacedMarkersChange(mapImage: mapImage, frameSize: frameSize)
+            }
+            .onChange(of: selectedTriangle?.id) { _ in
+                handleSelectedTriangleChange(mapImage: mapImage, frameSize: frameSize)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CenterPiPOnTriangle"))) { notification in
+                handleCenterPiPNotification(notification: notification, mapImage: mapImage)
+            }
     }
     
     private func loadMapImage() {
@@ -1143,6 +977,259 @@ struct ARPiPMapView: View {
         let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
         let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
         return (scale, offset)
+    }
+    
+    // MARK: - Helper Methods for onChange Handlers
+    
+    private func handleFocusedPointChange(newFocusedID: UUID?, mapImage: UIImage, frameSize: CGSize) {
+        DispatchQueue.main.async {
+            let newTargets = calculateTargetTransform(image: mapImage, frameSize: frameSize)
+            withAnimation(.easeInOut(duration: 0.5)) {
+                currentScale = newTargets.scale
+                currentOffset = newTargets.offset
+            }
+            
+            // Debug: Log when focused point should be shown but isn't (gated behind change detection)
+            if isCalibrationMode && newFocusedID == nil {
+                let debugString = "⚠️ PiP Map: isCalibrationMode=\(isCalibrationMode), focusedPointID=nil, currentVertexIndex=\(arCalibrationCoordinator.currentVertexIndex)"
+                if debugString != lastDebugInfo {
+                    print(debugString)
+                    lastDebugInfo = debugString
+                }
+            } else {
+                // Clear debug info when focused point exists
+                lastDebugInfo = nil
+            }
+        }
+    }
+    
+    private func handleVertexIndexChange(mapImage: UIImage, frameSize: CGSize) {
+        DispatchQueue.main.async {
+            let newTargets = calculateTargetTransform(image: mapImage, frameSize: frameSize)
+            withAnimation(.easeInOut(duration: 0.5)) {
+                currentScale = newTargets.scale
+                currentOffset = newTargets.offset
+            }
+            
+            // Update debug info when vertex index changes
+            if isCalibrationMode && focusedPointID == nil {
+                let debugString = "⚠️ PiP Map: isCalibrationMode=\(isCalibrationMode), focusedPointID=nil, currentVertexIndex=\(arCalibrationCoordinator.currentVertexIndex)"
+                if debugString != lastDebugInfo {
+                    print(debugString)
+                    lastDebugInfo = debugString
+                }
+            }
+        }
+    }
+    
+    private func handlePlacedMarkersChange(mapImage: UIImage, frameSize: CGSize) {
+        DispatchQueue.main.async {
+            if let triangle = selectedTriangle,
+               arCalibrationCoordinator.isTriangleComplete(triangle.id) {
+                print("🎯 PiP Map: Triangle complete - fitting all 3 vertices")
+                
+                // Draw triangle lines on ground
+                if let coordinator = ARViewContainer.Coordinator.current {
+                    var vertices: [simd_float3] = []
+                    for markerIDString in triangle.arMarkerIDs {
+                        if let markerUUID = UUID(uuidString: markerIDString),
+                           let markerNode = coordinator.placedMarkers[markerUUID] {
+                            vertices.append(markerNode.simdPosition)
+                        }
+                    }
+                    if vertices.count == 3 {
+                        coordinator.drawTriangleLines(vertices: vertices)
+                    }
+                }
+            }
+            let newTargets = calculateTargetTransform(image: mapImage, frameSize: frameSize)
+            withAnimation(.easeInOut(duration: 0.5)) {
+                currentScale = newTargets.scale
+                currentOffset = newTargets.offset
+            }
+        }
+    }
+    
+    private func handleSelectedTriangleChange(mapImage: UIImage, frameSize: CGSize) {
+        if autoZoomToTriangle {
+            DispatchQueue.main.async {
+                let newTargets = calculateTargetTransform(image: mapImage, frameSize: frameSize)
+                withAnimation(.easeInOut(duration: 0.6)) {
+                    currentScale = newTargets.scale
+                    currentOffset = newTargets.offset
+                }
+            }
+        }
+    }
+    
+    private func handleCalibrationStateChange(oldState: CalibrationState, newState: CalibrationState, mapImage: UIImage, frameSize: CGSize) {
+        // FOCUSED_POINT logging - only on state transitions
+        DispatchQueue.main.async {
+            let currentFocusedID = focusedPointID
+            
+            let wasPlacingVertices: Bool = {
+                if case .placingVertices = lastState { return true }
+                return false
+            }()
+            
+            let isPlacingVertices: Bool = {
+                if case .placingVertices = newState { return true }
+                return false
+            }()
+            
+            if isPlacingVertices && !wasPlacingVertices {
+                // Entering placingVertices state
+                print("🔍 [FOCUSED_POINT] entered placingVertices state - focusing on \(currentFocusedID.map { String($0.uuidString.prefix(8)) } ?? "nil")")
+            } else if !isPlacingVertices && wasPlacingVertices {
+                // Exiting placingVertices state
+                print("🔍 [FOCUSED_POINT] exited placingVertices state - was focusing on \(lastFocusedPointID.map { String($0.uuidString.prefix(8)) } ?? "nil")")
+            } else if case .readyToFill = newState, lastState != .readyToFill {
+                // Entering readyToFill state
+                print("🔍 [FOCUSED_POINT] readyToFill state - returning nil to frame triangle")
+            }
+            
+            lastState = newState
+            lastFocusedPointID = currentFocusedID
+        }
+        
+        // PIP_ONCHANGE logging - only on state TRANSITIONS, not every frame
+        if newState != lastLoggedCalibrationState {
+            switch newState {
+            case .placingVertices(let index):
+                print("🔍 [PIP_ONCHANGE] State → placingVertices(index: \(index))")
+            case .readyToFill:
+                print("🔍 [PIP_ONCHANGE] State → readyToFill")
+                print("🎯 [PIP_ONCHANGE] Triggering triangle frame calculation")
+            case .idle:
+                print("🔍 [PIP_ONCHANGE] State → idle")
+            default:
+                print("🔍 [PIP_ONCHANGE] State → \(newState)")
+            }
+            lastLoggedCalibrationState = newState
+        }
+        
+        if case .readyToFill = newState {
+            // Recalculate transform to frame the entire triangle
+            DispatchQueue.main.async {
+                let newTargets = calculateTargetTransform(image: mapImage, frameSize: frameSize)
+                withAnimation(.easeInOut(duration: 0.5)) {
+                    currentScale = newTargets.scale
+                    currentOffset = newTargets.offset
+                }
+                print("✅ [PIP_ONCHANGE] Applied triangle framing transform")
+            }
+        }
+    }
+    
+    private func handleCenterPiPNotification(notification: Notification, mapImage: UIImage) {
+        guard let triangleID = notification.userInfo?["triangleID"] as? UUID,
+              let triangle = arCalibrationCoordinator.triangleStore.triangle(withID: triangleID) else {
+            return
+        }
+        
+        // Get triangle vertices' map positions
+        let vertexPositions = triangle.vertexIDs.compactMap { vertexID -> CGPoint? in
+            mapPointStore.points.first(where: { $0.id == vertexID })?.mapPoint
+        }
+        
+        guard vertexPositions.count == 3 else { return }
+        
+        let frameSize = CGSize(width: 180, height: 180)
+        let newTransform = calculateFittingTransform(
+            points: vertexPositions,
+            frameSize: frameSize,
+            imageSize: mapImage.size,
+            padding: 40
+        )
+        
+        withAnimation(.easeInOut(duration: 0.6)) {
+            currentScale = newTransform.scale
+            currentOffset = newTransform.offset
+        }
+        
+        print("🎯 PiP centered on triangle \(String(triangleID.uuidString.prefix(8)))")
+    }
+    
+    @ViewBuilder
+    private func pipMapZStack(mapImage: UIImage) -> some View {
+        ZStack {
+            // Use MapContainer (same as main map view)
+            MapContainer(mapImage: mapImage)
+                .environmentObject(pipTransform)
+                .environmentObject(pipProcessor)
+                .frame(width: mapImage.size.width, height: mapImage.size.height)
+                .allowsHitTesting(false) // Disable gestures in PiP
+            
+            // User position dot overlay (only in calibration mode)
+            if isCalibrationMode, let userPos = userMapPosition {
+                userPositionDot(userPos: userPos)
+            }
+            
+            // Focused point indicator (if any) - must be after MapContainer to render on top
+            if let pointID = focusedPointID,
+               let point = mapPointStore.points.first(where: { $0.id == pointID }) {
+                focusedPointIndicator(pointID: pointID, point: point)
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func userPositionDot(userPos: CGPoint) -> some View {
+        ZStack {
+            // Base dot
+            Circle()
+                .fill(Color(red: 103/255, green: 31/255, blue: 121/255))
+                .frame(width: 15, height: 15)
+            
+            // Pulse animation ring
+            Circle()
+                .stroke(Color(red: 73/255, green: 206/255, blue: 248/255), lineWidth: 2)
+                .frame(width: 15, height: 15)
+                .scaleEffect(isAnimating ? 22.0/15.0 : 1.0) // Grow from 15px to 22px
+                .opacity(isAnimating ? 0.0 : 0.5) // Fade from 0.5 to 0
+                .onAppear {
+                    // Start repeating animation
+                    withAnimation(Animation.easeOut(duration: 1.0).repeatForever(autoreverses: false)) {
+                        isAnimating = true
+                    }
+                }
+        }
+        .position(userPos)
+    }
+    
+    @ViewBuilder
+    private func focusedPointIndicator(pointID: UUID, point: MapPointStore.MapPoint) -> some View {
+        ZStack {
+            // Outer ring for visibility
+            Circle()
+                .fill(Color.cyan.opacity(0.3))
+                .frame(width: 20, height: 20)
+            
+            // Inner circle
+            Circle()
+                .fill(Color.cyan)
+                .frame(width: 12, height: 12)
+            
+            // White border
+            Circle()
+                .stroke(Color.white, lineWidth: 2)
+                .frame(width: 12, height: 12)
+        }
+        .position(point.mapPoint)
+        .onAppear {
+            print("📍 PiP Map: Displaying focused point \(String(pointID.uuidString.prefix(8))) at (\(Int(point.mapPoint.x)), \(Int(point.mapPoint.y)))")
+        }
+    }
+    
+    @ViewBuilder
+    private func loadingMapView() -> some View {
+        RoundedRectangle(cornerRadius: 12)
+            .fill(Color.gray.opacity(0.3))
+            .overlay(
+                Text("Loading Map...")
+                    .foregroundColor(.white.opacity(0.7))
+                    .font(.caption)
+            )
     }
     
     /// Calculate transform to fit multiple points (for triangle view)
