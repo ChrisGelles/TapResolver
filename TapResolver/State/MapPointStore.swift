@@ -89,6 +89,13 @@ public struct ARPositionRecord: Codable, Identifiable {
     }
 }
 
+extension ARPositionRecord: CustomDebugStringConvertible {
+    public var debugDescription: String {
+        let ts = timestamp.formatted(date: .omitted, time: .standard)
+        return "[\(sourceType.rawValue)] (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z))) • \(ts) • conf: \(String(format: "%.2f", confidenceScore))"
+    }
+}
+
 public enum MapPointRole: String, Codable, CaseIterable, Identifiable {
     case triangleEdge = "triangle_edge"
     case featureMarker = "feature_marker"
@@ -235,6 +242,21 @@ public final class MapPointStore: ObservableObject {
             
             guard totalWeight > 0 else { return nil }
             return weightedSum / totalWeight
+        }
+        
+        /// Prints position history for debugging
+        public func debugHistory() {
+            print("🧠 History for MapPoint \(id.uuidString.prefix(8)) (\(arPositionHistory.count) records):")
+            if arPositionHistory.isEmpty {
+                print("   (empty)")
+            } else {
+                for record in arPositionHistory {
+                    print("   • \(record.debugDescription)")
+                }
+            }
+            if let consensus = consensusPosition {
+                print("   📍 Consensus: (\(String(format: "%.2f", consensus.x)), \(String(format: "%.2f", consensus.y)), \(String(format: "%.2f", consensus.z)))")
+            }
         }
     }
     
@@ -563,9 +585,41 @@ public final class MapPointStore: ObservableObject {
             print("🗑️ [POSITION_HISTORY] Evicted oldest record from \(mapPointID.uuidString.prefix(8)) (session: \(removed.sessionID.uuidString.prefix(8)))")
         }
         
-        print("📍 [POSITION_HISTORY] Added \(record.sourceType.rawValue) record to MapPoint \(mapPointID.uuidString.prefix(8)) (total: \(points[index].arPositionHistory.count))")
+        print("📍 [POSITION_HISTORY] \(record.sourceType.rawValue) → MapPoint \(mapPointID.uuidString.prefix(8)) (#\(points[index].arPositionHistory.count))")
+        print("   ↳ pos: (\(String(format: "%.2f", record.position.x)), \(String(format: "%.2f", record.position.y)), \(String(format: "%.2f", record.position.z))) @ \(record.timestamp.formatted(date: .omitted, time: .standard))")
         
         save()
+    }
+    
+    /// Prints position history for all MapPoints that have history
+    func debugAllHistories() {
+        let pointsWithHistory = points.filter { !$0.arPositionHistory.isEmpty }
+        
+        if pointsWithHistory.isEmpty {
+            print("📊 [DEBUG] No MapPoints have position history yet")
+            return
+        }
+        
+        print("📊 [DEBUG] Position histories for \(pointsWithHistory.count) MapPoint(s):")
+        for point in pointsWithHistory {
+            point.debugHistory()
+            print("")  // Blank line between entries
+        }
+    }
+    
+    /// Prints a compact summary of consensus positions
+    func debugConsensusSummary() {
+        print("📍 [CONSENSUS SUMMARY]")
+        var count = 0
+        for point in points {
+            if let consensus = point.consensusPosition {
+                print("   MP \(point.id.uuidString.prefix(8)) → (\(String(format: "%.2f", consensus.x)), \(String(format: "%.2f", consensus.y)), \(String(format: "%.2f", consensus.z)))")
+                count += 1
+            }
+        }
+        if count == 0 {
+            print("   (no consensus positions available)")
+        }
     }
 
     /// Get coordinate string for display in drawer

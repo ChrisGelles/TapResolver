@@ -762,6 +762,9 @@ struct ARPiPMapView: View {
     // Track last logged transform calculation to prevent spam
     @State private var lastLoggedTransformState: CalibrationState?
     
+    // Track last logged calibration state for PIP_ONCHANGE debouncing
+    @State private var lastLoggedCalibrationState: CalibrationState? = nil
+    
     @State private var mapImage: UIImage?
     @State private var currentScale: CGFloat = 1.0
     @State private var currentOffset: CGSize = .zero
@@ -856,70 +859,91 @@ struct ARPiPMapView: View {
                     }
                     .onChange(of: focusedPointID) { _ in
                         // Recalculate when focused point changes
-                        let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
-                        withAnimation(.easeInOut(duration: 0.5)) {
-                            currentScale = newTargets.scale
-                            currentOffset = newTargets.offset
-                        }
-                    }
-                    .onChange(of: arCalibrationCoordinator.currentVertexIndex) { _ in
-                        // Recalculate when calibration advances to next vertex
-                        let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
-                        withAnimation(.easeInOut(duration: 0.5)) {
-                            currentScale = newTargets.scale
-                            currentOffset = newTargets.offset
-                        }
-                    }
-                    .onChange(of: arCalibrationCoordinator.calibrationState) { oldState, newState in
-                        print("🔍 [PIP_ONCHANGE] Calibration state changed: \(arCalibrationCoordinator.stateDescription)")
-                        
-                        if case .readyToFill = newState {
-                            print("🎯 [PIP_ONCHANGE] Triggering triangle frame calculation")
-                            
-                            // Recalculate transform to frame the entire triangle
+                        DispatchQueue.main.async {
                             let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
                             withAnimation(.easeInOut(duration: 0.5)) {
                                 currentScale = newTargets.scale
                                 currentOffset = newTargets.offset
                             }
-                            
-                            print("✅ [PIP_ONCHANGE] Applied triangle framing transform")
+                        }
+                    }
+                    .onChange(of: arCalibrationCoordinator.currentVertexIndex) { _ in
+                        // Recalculate when calibration advances to next vertex
+                        DispatchQueue.main.async {
+                            let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
+                            withAnimation(.easeInOut(duration: 0.5)) {
+                                currentScale = newTargets.scale
+                                currentOffset = newTargets.offset
+                            }
+                        }
+                    }
+                    .onChange(of: arCalibrationCoordinator.calibrationState) { oldState, newState in
+                        // Only log on state TRANSITIONS, not every frame
+                        if newState != lastLoggedCalibrationState {
+                            switch newState {
+                            case .placingVertices(let index):
+                                print("🔍 [PIP_ONCHANGE] State → placingVertices(index: \(index))")
+                            case .readyToFill:
+                                print("🔍 [PIP_ONCHANGE] State → readyToFill")
+                                print("🎯 [PIP_ONCHANGE] Triggering triangle frame calculation")
+                            case .idle:
+                                print("🔍 [PIP_ONCHANGE] State → idle")
+                            default:
+                                print("🔍 [PIP_ONCHANGE] State → \(newState)")
+                            }
+                            lastLoggedCalibrationState = newState
+                        }
+                        
+                        if case .readyToFill = newState {
+                            // Recalculate transform to frame the entire triangle
+                            DispatchQueue.main.async {
+                                let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
+                                withAnimation(.easeInOut(duration: 0.5)) {
+                                    currentScale = newTargets.scale
+                                    currentOffset = newTargets.offset
+                                }
+                                print("✅ [PIP_ONCHANGE] Applied triangle framing transform")
+                            }
                         }
                     }
                     .onChange(of: arCalibrationCoordinator.placedMarkers.count) { _ in
                         // Recalculate when marker count changes
                         // When triangle is complete (3 markers), PiP map will zoom to fit all vertices
-                        if let triangle = selectedTriangle,
-                           arCalibrationCoordinator.isTriangleComplete(triangle.id) {
-                            print("🎯 PiP Map: Triangle complete - fitting all 3 vertices")
-                            
-                            // Draw triangle lines on ground
-                            if let coordinator = ARViewContainer.Coordinator.current {
-                                var vertices: [simd_float3] = []
-                                for markerIDString in triangle.arMarkerIDs {
-                                    if let markerUUID = UUID(uuidString: markerIDString),
-                                       let markerNode = coordinator.placedMarkers[markerUUID] {
-                                        vertices.append(markerNode.simdPosition)
+                        DispatchQueue.main.async {
+                            if let triangle = selectedTriangle,
+                               arCalibrationCoordinator.isTriangleComplete(triangle.id) {
+                                print("🎯 PiP Map: Triangle complete - fitting all 3 vertices")
+                                
+                                // Draw triangle lines on ground
+                                if let coordinator = ARViewContainer.Coordinator.current {
+                                    var vertices: [simd_float3] = []
+                                    for markerIDString in triangle.arMarkerIDs {
+                                        if let markerUUID = UUID(uuidString: markerIDString),
+                                           let markerNode = coordinator.placedMarkers[markerUUID] {
+                                            vertices.append(markerNode.simdPosition)
+                                        }
+                                    }
+                                    if vertices.count == 3 {
+                                        coordinator.drawTriangleLines(vertices: vertices)
                                     }
                                 }
-                                if vertices.count == 3 {
-                                    coordinator.drawTriangleLines(vertices: vertices)
-                                }
                             }
-                        }
-                        let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
-                        withAnimation(.easeInOut(duration: 0.5)) {
-                            currentScale = newTargets.scale
-                            currentOffset = newTargets.offset
+                            let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
+                            withAnimation(.easeInOut(duration: 0.5)) {
+                                currentScale = newTargets.scale
+                                currentOffset = newTargets.offset
+                            }
                         }
                     }
                     .onChange(of: selectedTriangle?.id) { _ in
                         // Recalculate when triangle selection changes (for auto-zoom)
                         if autoZoomToTriangle {
-                            let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
-                            withAnimation(.easeInOut(duration: 0.6)) {
-                                currentScale = newTargets.scale
-                                currentOffset = newTargets.offset
+                            DispatchQueue.main.async {
+                                let newTargets = calculateTargetTransform(image: mapImage, frameSize: geo.size)
+                                withAnimation(.easeInOut(duration: 0.6)) {
+                                    currentScale = newTargets.scale
+                                    currentOffset = newTargets.offset
+                                }
                             }
                         }
                     }
