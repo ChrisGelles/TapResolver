@@ -28,6 +28,9 @@ struct ARViewWithOverlays: View {
     // Track last printed vertex ID to prevent spam
     @State private var lastPrintedPhotoRefVertexID: UUID? = nil
     
+    // Track last logged PIP_MAP state to prevent spam
+    @State private var lastLoggedPipMapState: CalibrationState? = nil
+    
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
@@ -75,10 +78,12 @@ struct ARViewWithOverlays: View {
                 
                 // If in calibration mode with a selected triangle, initialize calibration state
                 if isCalibrationMode, let triangle = selectedTriangle {
-                    arCalibrationCoordinator.startCalibration(for: triangle.id)
-                    arCalibrationCoordinator.setVertices(triangle.vertexIDs)
-                    currentMode = .triangleCalibration(triangleID: triangle.id)
-                    print("🎯 ARViewWithOverlays: Auto-initialized calibration for triangle \(String(triangle.id.uuidString.prefix(8)))")
+                    DispatchQueue.main.async {
+                        arCalibrationCoordinator.startCalibration(for: triangle.id)
+                        arCalibrationCoordinator.setVertices(triangle.vertexIDs)
+                        currentMode = .triangleCalibration(triangleID: triangle.id)
+                        print("🎯 ARViewWithOverlays: Auto-initialized calibration for triangle \(String(triangle.id.uuidString.prefix(8)))")
+                    }
                 } else {
                     // Set mode to idle - user will choose Calibrate or Relocalize
                     currentMode = .idle
@@ -88,11 +93,14 @@ struct ARViewWithOverlays: View {
                 print("🧪 ARViewWithOverlays instance: \(instanceAddress)")
             }
             .onDisappear {
-                // Clean up on dismiss
-                currentMode = .idle
-                arCalibrationCoordinator.reset()
-                lastPrintedPhotoRefVertexID = nil  // Reset photo ref tracking
-                print("🧹 ARViewWithOverlays: Cleaned up on disappear")
+                // Clean up on dismiss - defer to avoid view update conflicts
+                DispatchQueue.main.async {
+                    currentMode = .idle
+                    arCalibrationCoordinator.reset()
+                    lastPrintedPhotoRefVertexID = nil
+                    lastLoggedPipMapState = nil
+                    print("🧹 ARViewWithOverlays: Cleaned up on disappear")
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ARMarkerPlaced"))) { notification in
                 print("🔍 [REGISTER_MARKER_TRACE] ARMarkerPlaced notification received")
@@ -252,12 +260,13 @@ struct ARViewWithOverlays: View {
                     .environmentObject(arCalibrationCoordinator)
                     .frame(width: 280, height: 220)
                     .onChange(of: arCalibrationCoordinator.calibrationState) { oldState, newState in
+                        // Only log on actual state CHANGES, not every recomputation
+                        guard oldState != newState else { return }
+                        
                         print("🔍 [PIP_MAP] State changed: \(arCalibrationCoordinator.stateDescription)")
                         
                         if case .readyToFill = newState {
                             print("🎯 [PIP_MAP] Triangle complete - should frame entire triangle")
-                            // TODO: Call fitToTriangle() on PiP map
-                            // This will need to be implemented based on your PiP map architecture
                         }
                     }
                     .cornerRadius(12)

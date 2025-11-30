@@ -11,6 +11,9 @@ import Combine
 
 @main
 struct TapResolverApp: App {
+    // Static flag to ensure launch timestamp prints only once
+    private static var hasLoggedLaunchTime = false
+    
     // Global app state objects used across views
     @StateObject private var mapTransform = MapTransformStore()
     @StateObject private var beaconDotStore = BeaconDotStore()   // dots (map-local)
@@ -46,6 +49,19 @@ struct TapResolverApp: App {
     @State private var showAuthorNamePrompt = AppSettings.needsAuthorName
     
     init() {
+        // Print app launch timestamp (once per app launch)
+        if !Self.hasLoggedLaunchTime {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .medium
+            let launchTime = formatter.string(from: Date())
+            print("\n" + String(repeating: "=", count: 80))
+            print("🚀 TapResolver App Launch")
+            print("   Date & Time: \(launchTime)")
+            print(String(repeating: "=", count: 80) + "\n")
+            Self.hasLoggedLaunchTime = true
+        }
+        
         // Initialize coordinator with temporary stores
         // These will be updated to reference the actual @StateObject instances in onAppear
         // Note: triangleStore will be set to the shared trianglePatchStore instance in onAppear
