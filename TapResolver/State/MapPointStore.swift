@@ -762,7 +762,7 @@ public final class MapPointStore: ObservableObject {
         // Load map points from persistence
         if let dto: [MapPointDTO] = ctx.read(pointsKey, as: [MapPointDTO].self) {
             var needsSave = false
-            self.points = dto.map { dtoItem -> MapPoint in
+            var loadedPoints = dto.map { dtoItem -> MapPoint in
                 // Load photo from disk if filename exists, otherwise use legacy data
                 var photoData: Data? = nil
                 if let filename = dtoItem.photoFilename {
@@ -823,6 +823,11 @@ public final class MapPointStore: ObservableObject {
                 point.arMarkerID = dtoItem.arMarkerID
                 return point
             }
+            
+            // One-time migration: purge legacy AR position history (pre-rigid-transform data)
+            MapPointStore.purgeLegacyARPositionHistoryIfNeeded(from: &loadedPoints)
+            
+            self.points = loadedPoints
             
             // Summary log only
             if needsSave {
@@ -1398,6 +1403,92 @@ public final class MapPointStore: ObservableObject {
             .appendingPathComponent(filename)
         
         return try? Data(contentsOf: fileURL)
+    }
+    
+    // MARK: - Legacy Data Migration
+    
+    /// One-time migration to purge legacy AR position history data
+    /// Legacy data was collected without session origin tracking, making it geometrically inconsistent
+    /// This runs once per installation, gated by UserDefaults flag
+    static func purgeLegacyARPositionHistoryIfNeeded(from points: inout [MapPoint]) {
+        let flagKey = "hasPurgedLegacyARPositionHistory"
+        
+        // Check if already run
+        guard !UserDefaults.standard.bool(forKey: flagKey) else {
+            print("🧹 [PURGE] Skipped - legacy AR position history already purged")
+            return
+        }
+        
+        print("🧹 [PURGE] Starting one-time legacy AR position history migration...")
+        
+        // Step 1: Archive existing data before deletion
+        var archiveData: [[String: Any]] = []
+        var totalRecords = 0
+        var affectedPoints = 0
+        
+        for point in points {
+            if !point.arPositionHistory.isEmpty {
+                affectedPoints += 1
+                totalRecords += point.arPositionHistory.count
+                
+                // Build archive entry for this MapPoint
+                let records: [[String: Any]] = point.arPositionHistory.map { record in
+                    [
+                        "id": record.id.uuidString,
+                        "sessionID": record.sessionID.uuidString,
+                        "timestamp": record.timestamp.timeIntervalSinceReferenceDate,
+                        "sourceType": record.sourceType.rawValue,
+                        "confidenceScore": record.confidenceScore,
+                        "position": [record.position.x, record.position.y, record.position.z],
+                        "distortionVector": record.distortionVector.map { [$0.x, $0.y, $0.z] } as Any
+                    ]
+                }
+                
+                archiveData.append([
+                    "mapPointID": point.id.uuidString,
+                    "mapPosition": ["x": point.position.x, "y": point.position.y],
+                    "recordCount": point.arPositionHistory.count,
+                    "records": records
+                ])
+            }
+        }
+        
+        // Step 2: Export archive to Documents directory
+        if !archiveData.isEmpty {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+            let timestamp = formatter.string(from: Date())
+            let filename = "TapResolver-LegacyPositionHistory-\(timestamp).json"
+            
+            if let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                let archiveURL = documentsURL.appendingPathComponent(filename)
+                
+                do {
+                    let jsonData = try JSONSerialization.data(withJSONObject: archiveData, options: .prettyPrinted)
+                    try jsonData.write(to: archiveURL)
+                    print("📦 [PURGE] Archived \(totalRecords) record(s) from \(affectedPoints) MapPoint(s)")
+                    print("   Archive path: \(archiveURL.path)")
+                } catch {
+                    print("⚠️ [PURGE] Failed to archive data: \(error.localizedDescription)")
+                    print("   Proceeding with purge anyway...")
+                }
+            }
+        }
+        
+        // Step 3: Purge position history from all MapPoints
+        for i in points.indices {
+            if !points[i].arPositionHistory.isEmpty {
+                points[i].arPositionHistory = []
+            }
+        }
+        
+        // Step 4: Set flag to prevent re-running
+        UserDefaults.standard.set(true, forKey: flagKey)
+        
+        print("✅ [PURGE] Migration complete!")
+        print("   Purged \(totalRecords) legacy AR position record(s)")
+        print("   Affected \(affectedPoints) MapPoint(s)")
+        print("   Ghost placement will use 2D map geometry until fresh data accumulates")
     }
     
 }

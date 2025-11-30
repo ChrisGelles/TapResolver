@@ -90,6 +90,116 @@ final class ARCalibrationCoordinator: ObservableObject {
         return pixelsPerMeter > 0 ? pixelsPerMeter : nil
     }
     
+    // MARK: - 2-Point Rigid Body Transformation
+    
+    /// Calculates a rigid body transformation (rotation + translation) between two coordinate frames
+    /// using two corresponding point pairs. Rotation is constrained to Y-axis (horizontal plane).
+    ///
+    /// - Parameters:
+    ///   - oldPoints: Two positions from the historical/consensus coordinate frame
+    ///   - newPoints: Two positions from the current session coordinate frame
+    /// - Returns: A tuple of (rotationAngle, translation) or nil if calculation fails
+    ///
+    /// The transform converts old positions to new positions via:
+    ///   newPosition = rotate(oldPosition - oldCentroid, angle) + newCentroid
+    private func calculate2PointRigidTransform(
+        oldPoints: (simd_float3, simd_float3),
+        newPoints: (simd_float3, simd_float3)
+    ) -> (rotationY: Float, translation: simd_float3)? {
+        
+        // Extract XZ plane vectors (Y is up, we rotate around Y)
+        let oldEdge2D = simd_float2(
+            oldPoints.1.x - oldPoints.0.x,
+            oldPoints.1.z - oldPoints.0.z
+        )
+        let newEdge2D = simd_float2(
+            newPoints.1.x - newPoints.0.x,
+            newPoints.1.z - newPoints.0.z
+        )
+        
+        // Check for degenerate edges
+        let oldLength = simd_length(oldEdge2D)
+        let newLength = simd_length(newEdge2D)
+        
+        guard oldLength > 0.01, newLength > 0.01 else {
+            print("⚠️ [RIGID_TRANSFORM] Degenerate edge - points too close")
+            return nil
+        }
+        
+        // Calculate rotation angle around Y-axis
+        let oldAngle = atan2(oldEdge2D.y, oldEdge2D.x)
+        let newAngle = atan2(newEdge2D.y, newEdge2D.x)
+        let rotationY = newAngle - oldAngle
+        
+        // Validate rotation is reasonable (not NaN or infinite)
+        guard rotationY.isFinite else {
+            print("⚠️ [RIGID_TRANSFORM] Invalid rotation angle: \(rotationY)")
+            return nil
+        }
+        
+        // Calculate translation:
+        // After rotating oldPoints.0 around origin by rotationY, where does it need to move to reach newPoints.0?
+        let cosR = cos(rotationY)
+        let sinR = sin(rotationY)
+        
+        // Rotate old point 0 around origin (in XZ plane)
+        let rotatedOld0 = simd_float3(
+            oldPoints.0.x * cosR - oldPoints.0.z * sinR,
+            oldPoints.0.y,  // Y unchanged
+            oldPoints.0.x * sinR + oldPoints.0.z * cosR
+        )
+        
+        // Translation is difference between new position and rotated old position
+        let translation = newPoints.0 - rotatedOld0
+        
+        // Validate translation is reasonable
+        guard translation.x.isFinite, translation.y.isFinite, translation.z.isFinite else {
+            print("⚠️ [RIGID_TRANSFORM] Invalid translation: \(translation)")
+            return nil
+        }
+        
+        // Sanity check: transformed oldPoints.1 should be close to newPoints.1
+        let rotatedOld1 = simd_float3(
+            oldPoints.1.x * cosR - oldPoints.1.z * sinR,
+            oldPoints.1.y,
+            oldPoints.1.x * sinR + oldPoints.1.z * cosR
+        )
+        let transformedOld1 = rotatedOld1 + translation
+        let verificationError = simd_distance(transformedOld1, newPoints.1)
+        
+        if verificationError > 0.5 {
+            print("⚠️ [RIGID_TRANSFORM] High verification error: \(String(format: "%.2f", verificationError))m")
+            print("   This may indicate scale difference between sessions")
+        }
+        
+        print("📐 [RIGID_TRANSFORM] Calculated transform:")
+        print("   Rotation: \(String(format: "%.1f", rotationY * 180 / .pi))°")
+        print("   Translation: (\(String(format: "%.2f", translation.x)), \(String(format: "%.2f", translation.y)), \(String(format: "%.2f", translation.z)))")
+        print("   Verification error: \(String(format: "%.3f", verificationError))m")
+        
+        return (rotationY: rotationY, translation: translation)
+    }
+    
+    /// Applies a Y-axis rotation + translation transform to a 3D position
+    private func applyRigidTransform(
+        position: simd_float3,
+        rotationY: Float,
+        translation: simd_float3
+    ) -> simd_float3 {
+        let cosR = cos(rotationY)
+        let sinR = sin(rotationY)
+        
+        // Rotate around Y-axis (in XZ plane)
+        let rotated = simd_float3(
+            position.x * cosR - position.z * sinR,
+            position.y,
+            position.x * sinR + position.z * cosR
+        )
+        
+        // Apply translation
+        return rotated + translation
+    }
+    
     func startCalibration(for triangleID: UUID) {
         guard let triangle = triangleStore.triangle(withID: triangleID) else {
             print("❌ Cannot start calibration: Triangle \(triangleID) not found")
@@ -253,6 +363,9 @@ final class ARCalibrationCoordinator: ObservableObject {
                 let distance = simd_distance(marker.arPosition, ghostPosition)
                 
                 print("📏 [PLACEMENT_CHECK] Distance from ghost: \(String(format: "%.2f", distance))m")
+                // Log expected vs actual for debugging transform accuracy
+                print("   Ghost position: (\(String(format: "%.2f", ghostPosition.x)), \(String(format: "%.2f", ghostPosition.y)), \(String(format: "%.2f", ghostPosition.z)))")
+                print("   Actual position: (\(String(format: "%.2f", marker.arPosition.x)), \(String(format: "%.2f", marker.arPosition.y)), \(String(format: "%.2f", marker.arPosition.z)))")
                 
                 if distance > 0.5 {
                     // BLOCK placement - too far from expected position
@@ -544,36 +657,63 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
         
         // PRIORITY 1: Check if 3rd vertex has consensus position from history
-        if let consensus = thirdMapPoint.consensusPosition {
-            print("📍 [GHOST_3RD] Using consensus position for \(String(thirdVertexID.uuidString.prefix(8)))")
+        // AND both placed markers have consensus positions (required for rigid transform)
+        if let consensus = thirdMapPoint.consensusPosition,
+           let firstConsensus = firstMapPoint.consensusPosition,
+           let secondConsensus = secondMapPoint.consensusPosition {
             
-            // Translate consensus to current session using average offset from placed markers
-            // Compare where markers WERE (their consensus) vs where they ARE NOW (placedARPositions)
-            var totalOffset = simd_float3(0, 0, 0)
-            var offsetCount: Float = 0
+            print("📍 [GHOST_3RD] Attempting rigid transform for \(String(thirdVertexID.uuidString.prefix(8)))")
+            print("   Historical positions: P1=(\(String(format: "%.2f, %.2f, %.2f", firstConsensus.x, firstConsensus.y, firstConsensus.z))), P2=(\(String(format: "%.2f, %.2f, %.2f", secondConsensus.x, secondConsensus.y, secondConsensus.z)))")
+            print("   Current positions: P1=(\(String(format: "%.2f, %.2f, %.2f", placedARPositions[0].x, placedARPositions[0].y, placedARPositions[0].z))), P2=(\(String(format: "%.2f, %.2f, %.2f", placedARPositions[1].x, placedARPositions[1].y, placedARPositions[1].z)))")
             
-            if let firstConsensus = firstMapPoint.consensusPosition {
-                totalOffset += placedARPositions[0] - firstConsensus
-                offsetCount += 1
-                print("   Offset from marker 1: \(placedARPositions[0] - firstConsensus)")
-            }
-            
-            if let secondConsensus = secondMapPoint.consensusPosition {
-                totalOffset += placedARPositions[1] - secondConsensus
-                offsetCount += 1
-                print("   Offset from marker 2: \(placedARPositions[1] - secondConsensus)")
-            }
-            
-            if offsetCount > 0 {
-                let averageOffset = totalOffset / offsetCount
-                let translatedPosition = consensus + averageOffset
-                print("👻 [GHOST_3RD] Translated consensus: (\(String(format: "%.2f", translatedPosition.x)), \(String(format: "%.2f", translatedPosition.y)), \(String(format: "%.2f", translatedPosition.z)))")
-                return translatedPosition
+            // Calculate rigid body transform from historical to current coordinate frame
+            if let transform = calculate2PointRigidTransform(
+                oldPoints: (firstConsensus, secondConsensus),
+                newPoints: (placedARPositions[0], placedARPositions[1])
+            ) {
+                // Verify transform quality before using it
+                // Re-calculate verification error here to check threshold
+                let cosR = cos(transform.rotationY)
+                let sinR = sin(transform.rotationY)
+                let rotatedOld1 = simd_float3(
+                    secondConsensus.x * cosR - secondConsensus.z * sinR,
+                    secondConsensus.y,
+                    secondConsensus.x * sinR + secondConsensus.z * cosR
+                )
+                let transformedOld1 = rotatedOld1 + transform.translation
+                let verificationError = simd_distance(transformedOld1, placedARPositions[1])
+                
+                // If verification error > 1.0m, consensus data is unreliable - fall back to map geometry
+                if verificationError > 1.0 {
+                    print("⚠️ [GHOST_3RD] Verification error \(String(format: "%.2f", verificationError))m exceeds 1.0m threshold")
+                    print("   Historical consensus is unreliable - falling back to map geometry")
+                    // Fall through to PRIORITY 2
+                } else {
+                    // Apply transform to third vertex's consensus position
+                    let transformedPosition = applyRigidTransform(
+                        position: consensus,
+                        rotationY: transform.rotationY,
+                        translation: transform.translation
+                    )
+                    
+                    print("👻 [GHOST_3RD] Transformed consensus: (\(String(format: "%.2f", transformedPosition.x)), \(String(format: "%.2f", transformedPosition.y)), \(String(format: "%.2f", transformedPosition.z)))")
+                    print("   Original consensus was: (\(String(format: "%.2f", consensus.x)), \(String(format: "%.2f", consensus.y)), \(String(format: "%.2f", consensus.z)))")
+                    print("   Verification error: \(String(format: "%.3f", verificationError))m ✓")
+                    
+                    return transformedPosition
+                }
             } else {
-                // No consensus for placed markers - just use raw consensus
-                print("👻 [GHOST_3RD] Using raw consensus (no offset data)")
-                return consensus
+                print("⚠️ [GHOST_3RD] Rigid transform failed - falling back to map geometry")
+                // Fall through to PRIORITY 2
             }
+        } else {
+            // Log which consensus positions are missing
+            if thirdMapPoint.consensusPosition == nil {
+                print("📐 [GHOST_3RD] No consensus for 3rd vertex - using map geometry")
+            } else if firstMapPoint.consensusPosition == nil || secondMapPoint.consensusPosition == nil {
+                print("📐 [GHOST_3RD] Missing consensus for placed markers - using map geometry")
+            }
+            // Fall through to PRIORITY 2
         }
         
         // PRIORITY 2: Calculate from 2D map geometry using 2-point affine transformation
