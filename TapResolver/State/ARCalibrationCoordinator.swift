@@ -581,60 +581,88 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         print("📐 [GHOST_CALC] Barycentric weights: w1=\(String(format: "%.3f", w1)), w2=\(String(format: "%.3f", w2)), w3=\(String(format: "%.3f", w3))")
         
-        // STEP 3: Get triangle's 3 vertex AR marker positions (3D positions)
-        guard calibratedTriangle.arMarkerIDs.count == 3 else {
-            print("⚠️ [GHOST_CALC] Triangle does not have 3 AR markers yet")
-            return nil
+        // STEP 3: Get triangle's 3 vertex AR positions (3D positions)
+        // Attempt to gather 3 vertex positions from available sources
+        var vertexPositions: [simd_float3] = []
+        
+        // FIRST: Try to use arMarkerIDs if they exist AND are all available in current session
+        var foundAllMarkers = false
+        if calibratedTriangle.arMarkerIDs.count == 3 && calibratedTriangle.arMarkerIDs.allSatisfy({ !$0.isEmpty }) {
+            var markerPositions: [simd_float3] = []
+            var allMarkersFound = true
+            
+            for markerIDString in calibratedTriangle.arMarkerIDs {
+                guard !markerIDString.isEmpty else {
+                    print("⚠️ [GHOST_CALC] Empty marker ID string in triangle's arMarkerIDs")
+                    allMarkersFound = false
+                    break
+                }
+                
+                var foundPosition: simd_float3?
+                
+                // PRIORITY 1: Check current session's marker positions (just placed markers)
+                if let sessionPosition = sessionMarkerPositions[markerIDString] {
+                    foundPosition = sessionPosition
+                    print("✅ [GHOST_CALC] Found marker \(String(markerIDString.prefix(8))) in session cache at position (\(String(format: "%.2f", sessionPosition.x)), \(String(format: "%.2f", sessionPosition.y)), \(String(format: "%.2f", sessionPosition.z)))")
+                }
+                // PRIORITY 2: Check by prefix in case arMarkerIDs has short 8-char versions
+                else if let sessionPosition = sessionMarkerPositions.first(where: { $0.key.hasPrefix(markerIDString) || markerIDString.hasPrefix($0.key) })?.value {
+                    foundPosition = sessionPosition
+                    print("✅ [GHOST_CALC] Found marker \(String(markerIDString.prefix(8))) via prefix in session cache")
+                }
+                // PRIORITY 3: Fall back to ARWorldMapStore
+                else if let marker = arWorldMapStore.markers.first(where: { $0.id.hasPrefix(markerIDString) || markerIDString.hasPrefix($0.id) }) {
+                    foundPosition = marker.positionInSession
+                    print("✅ [GHOST_CALC] Found marker \(String(marker.id.prefix(8))) in store at position (\(String(format: "%.2f", marker.positionInSession.x)), \(String(format: "%.2f", marker.positionInSession.y)), \(String(format: "%.2f", marker.positionInSession.z)))")
+                }
+                
+                if let position = foundPosition {
+                    markerPositions.append(position)
+                } else {
+                    print("📐 [GHOST_CALC] Marker \(String(markerIDString.prefix(8))) not in current session cache - will try vertex positions")
+                    allMarkersFound = false
+                    break
+                }
+            }
+            
+            if allMarkersFound && markerPositions.count == 3 {
+                vertexPositions = markerPositions
+                foundAllMarkers = true
+            }
         }
         
-        var arPositions: [simd_float3] = []
-        for markerIDString in calibratedTriangle.arMarkerIDs {
-            guard !markerIDString.isEmpty else {
-                print("⚠️ [GHOST_CALC] Empty marker ID string in triangle's arMarkerIDs")
-                return nil
+        // SECOND: If markers weren't available, try mapPointARPositions (keyed by MapPoint ID)
+        if !foundAllMarkers {
+            print("📐 [GHOST_CALC] Checking mapPointARPositions for triangle vertices")
+            var vertexPosFromActivation: [simd_float3] = []
+            var allVerticesFound = true
+            
+            for vertexID in calibratedTriangle.vertexIDs {
+                if let position = mapPointARPositions[vertexID] {
+                    print("✅ [GHOST_CALC] Found vertex \(String(vertexID.uuidString.prefix(8))) in mapPointARPositions at (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
+                    vertexPosFromActivation.append(position)
+                } else {
+                    print("⚠️ [GHOST_CALC] Vertex \(String(vertexID.uuidString.prefix(8))) not in mapPointARPositions")
+                    allVerticesFound = false
+                    break
+                }
             }
             
-            var foundPosition: simd_float3?
-            var foundSource: String = ""
-            
-            // PRIORITY 1: Check current session's marker positions (just placed markers)
-            if let sessionPosition = sessionMarkerPositions[markerIDString] {
-                foundPosition = sessionPosition
-                foundSource = "current session"
-                print("✅ [GHOST_CALC] Found marker \(String(markerIDString.prefix(8))) in session cache at position (\(String(format: "%.2f", sessionPosition.x)), \(String(format: "%.2f", sessionPosition.y)), \(String(format: "%.2f", sessionPosition.z)))")
+            if allVerticesFound && vertexPosFromActivation.count == 3 {
+                vertexPositions = vertexPosFromActivation
             }
-            // PRIORITY 2: Check by prefix in case arMarkerIDs has short 8-char versions
-            else if let sessionPosition = sessionMarkerPositions.first(where: { $0.key.hasPrefix(markerIDString) || markerIDString.hasPrefix($0.key) })?.value {
-                foundPosition = sessionPosition
-                foundSource = "current session (prefix match)"
-                print("✅ [GHOST_CALC] Found marker \(String(markerIDString.prefix(8))) via prefix in session cache")
-            }
-            // PRIORITY 3: Fall back to ARWorldMapStore
-            else if let marker = arWorldMapStore.markers.first(where: { $0.id.hasPrefix(markerIDString) || markerIDString.hasPrefix($0.id) }) {
-                foundPosition = marker.positionInSession
-                foundSource = "ARWorldMapStore"
-                print("✅ [GHOST_CALC] Found marker \(String(marker.id.prefix(8))) in store at position (\(String(format: "%.2f", marker.positionInSession.x)), \(String(format: "%.2f", marker.positionInSession.y)), \(String(format: "%.2f", marker.positionInSession.z)))")
-            }
-            
-            guard let position = foundPosition else {
-                print("⚠️ [GHOST_CALC] Could not find AR marker with ID: \(markerIDString)")
-                print("   Session markers: \(sessionMarkerPositions.keys.map { String($0.prefix(8)) }.joined(separator: ", "))")
-                print("   Store markers: \(arWorldMapStore.markers.map { String($0.id.prefix(8)) }.joined(separator: ", "))")
-                return nil
-            }
-            
-            arPositions.append(position)
         }
         
-        guard arPositions.count == 3 else {
-            print("⚠️ [GHOST_CALC] Could not get all 3 AR marker positions")
+        // Final check: do we have 3 positions?
+        guard vertexPositions.count == 3 else {
+            print("⚠️ [GHOST_CALC] Could not find all 3 vertex positions from any source")
             return nil
         }
         
         // STEP 4: Apply barycentric weights to 3D AR positions
-        let m1_3D = arPositions[0]
-        let m2_3D = arPositions[1]
-        let m3_3D = arPositions[2]
+        let m1_3D = vertexPositions[0]
+        let m2_3D = vertexPositions[1]
+        let m3_3D = vertexPositions[2]
         
         let ghostPosition = simd_float3(
             Float(w1) * m1_3D.x + Float(w2) * m2_3D.x + Float(w3) * m3_3D.x,
@@ -1494,6 +1522,13 @@ final class ARCalibrationCoordinator: ObservableObject {
             if !placedMarkers.contains(vertexID) {
                 placedMarkers.append(vertexID)
             }
+        }
+        
+        // Store all 3 vertex positions in mapPointARPositions for future ghost calculations
+        // (This is already done above, but adding explicit logging for clarity)
+        print("📍 [ADJACENT_ACTIVATE] Stored all 3 vertex positions in mapPointARPositions:")
+        for (index, vertexID) in orderedVertexIDs.enumerated() {
+            print("   [\(index)] Vertex \(String(vertexID.uuidString.prefix(8))) at position (\(String(format: "%.2f", orderedPositions[index].x)), \(String(format: "%.2f", orderedPositions[index].y)), \(String(format: "%.2f", orderedPositions[index].z)))")
         }
         
         // Set state to readyToFill since all 3 vertices are now calibrated
