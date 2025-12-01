@@ -597,6 +597,28 @@ struct ARViewContainer: UIViewRepresentable {
             print("➕ Ground crosshair configured")
         }
         
+        /// Check if a 3D position is visible in the camera's field of view
+        /// - Parameters:
+        ///   - position: The 3D world position to check
+        ///   - margin: Screen margin in points (default 50) - positions near edges are considered not visible
+        /// - Returns: true if the position projects to a point within the screen bounds
+        func isPositionInCameraView(_ position: simd_float3, margin: CGFloat = 50) -> Bool {
+            guard let sceneView = sceneView else { return false }
+            
+            let screenPoint = sceneView.projectPoint(SCNVector3(position))
+            
+            // Check if point is behind camera (z > 1.0 means behind)
+            if screenPoint.z > 1.0 {
+                return false
+            }
+            
+            let screenBounds = sceneView.bounds
+            let insetBounds = screenBounds.insetBy(dx: margin, dy: margin)
+            let point2D = CGPoint(x: CGFloat(screenPoint.x), y: CGFloat(screenPoint.y))
+            
+            return insetBounds.contains(point2D)
+        }
+        
         func updateCrosshair() {
             guard let sceneView = sceneView,
                   let crosshair = crosshairNode else { return }
@@ -1464,6 +1486,14 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
             }
         }
         
+        // Calculate which ghosts are visible in camera view
+        var visibleGhostIDs = Set<UUID>()
+        for (ghostID, ghostPosition) in ghostMarkerPositions {
+            if isPositionInCameraView(ghostPosition) {
+                visibleGhostIDs.insert(ghostID)
+            }
+        }
+        
         // Update ghost selection on main thread (touches @Published properties)
         DispatchQueue.main.async { [weak self] in
             guard let self = self else {
@@ -1478,7 +1508,8 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
             }
             coordinator.updateGhostSelection(
                 cameraPosition: cameraPosition,
-                ghostPositions: self.ghostMarkerPositions
+                ghostPositions: self.ghostMarkerPositions,
+                visibleGhostIDs: visibleGhostIDs
             )
         }
     }

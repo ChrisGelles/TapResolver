@@ -54,6 +54,10 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Estimated position of the selected ghost (for distortion calculation)
     @Published var selectedGhostEstimatedPosition: simd_float3? = nil
     
+    /// Ghost marker that is nearby (<2m) but not visible in camera view
+    /// When set, UI should show "Unconfirmed Marker Nearby" instead of action buttons
+    @Published var nearbyButNotVisibleGhostID: UUID? = nil
+    
     // Legacy compatibility properties
     @Published var isActive: Bool = false
     @Published var currentTriangleID: UUID?
@@ -850,13 +854,11 @@ final class ARCalibrationCoordinator: ObservableObject {
                 continue
             }
             
-            // Skip if this MapPoint already has a real marker in the current session
-            let hasMarkerInCurrentSession = arWorldMapStore.markers.contains { marker in
-                marker.mapPointID == farVertexID.uuidString &&
-                marker.sessionID == arWorldMapStore.currentSessionID
-            }
-            if hasMarkerInCurrentSession {
-                print("⏭️ [GHOST_PLANT] Skipping MapPoint \(String(farVertexID.uuidString.prefix(8))) - already has real marker in current session")
+            // Skip if this MapPoint already has an AR position established in the current session
+            // Uses mapPointARPositions which is updated by BOTH calibration and crawl mode
+            let hasPositionInCurrentSession = mapPointARPositions[farVertexID] != nil
+            if hasPositionInCurrentSession {
+                print("⏭️ [GHOST_PLANT] Skipping MapPoint \(String(farVertexID.uuidString.prefix(8))) - already has AR position in current session")
                 continue
             }
             
@@ -1376,6 +1378,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         calibrationState = .idle
         selectedGhostMapPointID = nil
         selectedGhostEstimatedPosition = nil
+        nearbyButNotVisibleGhostID = nil
         print("🎯 CalibrationState → \(stateDescription) (reset)")
         print("🔄 ARCalibrationCoordinator: Reset complete - all markers cleared")
     }
@@ -1568,11 +1571,18 @@ final class ARCalibrationCoordinator: ObservableObject {
     ///   - cameraPosition: Current AR camera position
     ///   - ghostPositions: Dictionary of mapPointID → estimated ghost position
     ///   - proximityThreshold: Distance in meters to trigger selection (default 2.0m, horizontal distance only)
+    /// Update ghost selection based on proximity and visibility
+    /// - Parameters:
+    ///   - cameraPosition: Current camera position in AR world
+    ///   - ghostPositions: Dictionary of ghost MapPoint IDs to their AR positions
+    ///   - visibleGhostIDs: Set of ghost IDs that are currently visible in camera view (optional, defaults to all visible)
     func updateGhostSelection(
         cameraPosition: simd_float3,
         ghostPositions: [UUID: simd_float3],
-        proximityThreshold: Float = 2.0  // meters (horizontal distance only)
+        visibleGhostIDs: Set<UUID>? = nil
     ) {
+        let proximityThreshold: Float = 2.0
+        
         // Only process during active calibration states where ghosts may be visible
         let isValidState: Bool
         switch calibrationState {
@@ -1591,45 +1601,75 @@ final class ARCalibrationCoordinator: ObservableObject {
                 selectedGhostMapPointID = nil
                 selectedGhostEstimatedPosition = nil
             }
+            if nearbyButNotVisibleGhostID != nil {
+                nearbyButNotVisibleGhostID = nil
+            }
             return
         }
         
-        // Find nearest ghost within threshold
-        var nearestGhostID: UUID? = nil
-        var nearestDistance: Float = Float.greatestFiniteMagnitude
-        var nearestPosition: simd_float3? = nil
+        // Find closest ghost within threshold
+        var closestID: UUID? = nil
+        var closestDistance: Float = Float.greatestFiniteMagnitude
         
-        for (mapPointID, ghostPosition) in ghostPositions {
-            let distance = simd_distance(
-                simd_float2(cameraPosition.x, cameraPosition.z),
-                simd_float2(ghostPosition.x, ghostPosition.z)
-            )
-            if distance < proximityThreshold && distance < nearestDistance {
-                nearestGhostID = mapPointID
-                nearestDistance = distance
-                nearestPosition = ghostPosition
+        for (ghostID, ghostPosition) in ghostPositions {
+            // Use horizontal distance only (ignore Y)
+            let dx = ghostPosition.x - cameraPosition.x
+            let dz = ghostPosition.z - cameraPosition.z
+            let horizontalDistance = sqrt(dx * dx + dz * dz)
+            
+            if horizontalDistance < proximityThreshold && horizontalDistance < closestDistance {
+                closestDistance = horizontalDistance
+                closestID = ghostID
             }
         }
         
-        // Update selection if changed
-        if nearestGhostID != selectedGhostMapPointID {
-            if let ghostID = nearestGhostID, let position = nearestPosition {
-                print("👻 [GHOST_SELECT] Selected ghost \(String(ghostID.uuidString.prefix(8))) at \(String(format: "%.2f", nearestDistance))m")
-                selectedGhostMapPointID = ghostID
-                selectedGhostEstimatedPosition = position
-                
-                // Notify PiP map to center on selected ghost's MapPoint
-                print("📍 [GHOST_SELECT] Notifying PiP to center on MapPoint \(String(ghostID.uuidString.prefix(8)))")
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("CenterPiPOnMapPoint"),
-                    object: nil,
-                    userInfo: ["mapPointID": ghostID]
-                )
-            } else if selectedGhostMapPointID != nil {
-                print("👻 [GHOST_SELECT] Deselected ghost - moved out of range")
+        // Determine if closest ghost is visible
+        let isVisible: Bool
+        if let closestID = closestID {
+            // If visibleGhostIDs is provided, check if ghost is in set
+            // If nil (legacy behavior), assume visible
+            isVisible = visibleGhostIDs?.contains(closestID) ?? true
+        } else {
+            isVisible = false
+        }
+        
+        // Update state based on proximity and visibility
+        if let closestID = closestID {
+            if isVisible {
+                // Ghost is nearby AND visible → select it
+                if selectedGhostMapPointID != closestID {
+                    print("👻 [GHOST_SELECT] Selected ghost \(String(closestID.uuidString.prefix(8))) at \(String(format: "%.2f", closestDistance))m")
+                    
+                    // Notify PiP map to center on this ghost
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("CenterPiPOnMapPoint"),
+                        object: nil,
+                        userInfo: ["mapPointID": closestID]
+                    )
+                }
+                selectedGhostMapPointID = closestID
+                selectedGhostEstimatedPosition = ghostPositions[closestID]
+                nearbyButNotVisibleGhostID = nil
+            } else {
+                // Ghost is nearby but NOT visible → show message instead
+                if nearbyButNotVisibleGhostID != closestID {
+                    print("👻 [GHOST_NEARBY] Ghost \(String(closestID.uuidString.prefix(8))) is \(String(format: "%.2f", closestDistance))m away but not in camera view")
+                }
                 selectedGhostMapPointID = nil
                 selectedGhostEstimatedPosition = nil
+                nearbyButNotVisibleGhostID = closestID
             }
+        } else {
+            // No ghost nearby
+            if selectedGhostMapPointID != nil {
+                print("👻 [GHOST_SELECT] Deselected ghost - moved out of range")
+            }
+            if nearbyButNotVisibleGhostID != nil {
+                print("👻 [GHOST_NEARBY] No longer near any ghost")
+            }
+            selectedGhostMapPointID = nil
+            selectedGhostEstimatedPosition = nil
+            nearbyButNotVisibleGhostID = nil
         }
     }
     
@@ -1662,3 +1702,4 @@ final class ARCalibrationCoordinator: ObservableObject {
         )
     }
 }
+

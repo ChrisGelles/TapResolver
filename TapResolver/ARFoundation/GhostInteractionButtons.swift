@@ -24,7 +24,7 @@ struct GhostInteractionButtons: View {
     
     var body: some View {
         if arCalibrationCoordinator.selectedGhostMapPointID != nil {
-            // Ghost selected - show dual buttons
+            // Ghost selected AND visible - show dual buttons
             HStack(spacing: 12) {
                 // Confirm button (left, green)
                 Button(action: {
@@ -40,23 +40,36 @@ struct GhostInteractionButtons: View {
                         .cornerRadius(12)
                 }
                 
-                // Adjust button (right, standard material)
+                // Adjust button (right, orange)
                 Button(action: {
                     print("🎯 [GHOST_UI] Place Marker to Adjust tapped")
                     onPlaceMarker()
                 }) {
-                    Text("Place Marker")
+                    Text("Place Marker to Adjust")
                         .font(.headline)
                         .foregroundColor(.white)
                         .padding()
                         .frame(maxWidth: .infinity)
-                        .background(.ultraThickMaterial)
+                        .background(Color.orange)
                         .cornerRadius(12)
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal)
+        } else if arCalibrationCoordinator.nearbyButNotVisibleGhostID != nil {
+            // Ghost nearby but NOT visible - show message
+            HStack {
+                Image(systemName: "location.circle")
+                    .foregroundColor(.yellow)
+                Text("Unconfirmed Marker Nearby")
+                    .font(.headline)
+                    .foregroundColor(.white)
+            }
+            .padding()
+            .background(Color.black.opacity(0.7))
+            .cornerRadius(12)
+            .padding(.horizontal)
         } else {
-            // No ghost selected - show standard button
+            // No ghost nearby - show standard Place Marker button
             Button(action: {
                 print("🔍 [PLACE_MARKER_BTN] Button tapped")
                 onPlaceMarker()
@@ -66,10 +79,10 @@ struct GhostInteractionButtons: View {
                     .foregroundColor(.white)
                     .padding()
                     .frame(maxWidth: .infinity)
-                    .background(.ultraThickMaterial)
+                    .background(Color.blue)
                     .cornerRadius(12)
             }
-            .padding(.horizontal, 40)
+            .padding(.horizontal)
         }
     }
 }

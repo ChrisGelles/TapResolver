@@ -113,9 +113,11 @@ struct ARViewWithOverlays: View {
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UpdateGhostSelection"))) { notification in
                 if let cameraPosition = notification.userInfo?["cameraPosition"] as? simd_float3,
                    let ghostPositions = notification.userInfo?["ghostPositions"] as? [UUID: simd_float3] {
+                    let visibleGhostIDs = notification.userInfo?["visibleGhostIDs"] as? Set<UUID>
                     arCalibrationCoordinator.updateGhostSelection(
                         cameraPosition: cameraPosition,
-                        ghostPositions: ghostPositions
+                        ghostPositions: ghostPositions,
+                        visibleGhostIDs: visibleGhostIDs
                     )
                 }
             }
