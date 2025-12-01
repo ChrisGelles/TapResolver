@@ -608,5 +608,43 @@ class TrianglePatchStore: ObservableObject {
         triangles = decoded
         print("📂 Loaded \(triangles.count) triangle(s)")
     }
+    
+    // MARK: - Data Cleanup
+    
+    /// Removes triangles that reference MapPoints which no longer exist
+    /// Returns the count of triangles removed
+    func purgeOrphanedTriangles(validMapPointIDs: Set<UUID>) -> Int {
+        let beforeCount = triangles.count
+        
+        let orphanedTriangles = triangles.filter { triangle in
+            // Check if ANY vertex references a non-existent MapPoint
+            let hasOrphanedVertex = triangle.vertexIDs.contains { vertexID in
+                !validMapPointIDs.contains(vertexID)
+            }
+            
+            if hasOrphanedVertex {
+                let missingIDs = triangle.vertexIDs.filter { !validMapPointIDs.contains($0) }
+                print("🧹 [ORPHAN_PURGE] Triangle \(String(triangle.id.uuidString.prefix(8))) has missing vertices: \(missingIDs.map { String($0.uuidString.prefix(8)) })")
+            }
+            
+            return hasOrphanedVertex
+        }
+        
+        if orphanedTriangles.isEmpty {
+            print("✅ [ORPHAN_PURGE] No orphaned triangles found")
+            return 0
+        }
+        
+        // Remove orphaned triangles
+        let orphanIDs = Set(orphanedTriangles.map { $0.id })
+        triangles.removeAll { orphanIDs.contains($0.id) }
+        
+        save()
+        
+        let removedCount = beforeCount - triangles.count
+        print("🧹 [ORPHAN_PURGE] Removed \(removedCount) orphaned triangle(s)")
+        
+        return removedCount
+    }
 }
 

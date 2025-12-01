@@ -1054,6 +1054,9 @@ private struct DebugSettingsPanel: View {
     @Binding var showRelocalizationDebug: Bool
     @State private var showingSoftResetAlert = false
     @State private var showingPurgePhotosAlert = false
+    @State private var showOrphanPurgeConfirmation = false
+    @State private var showOrphanPurgeResult = false
+    @State private var orphanPurgeResultMessage = ""
     
     var body: some View {
         GeometryReader { geometry in
@@ -1170,6 +1173,23 @@ private struct DebugSettingsPanel: View {
                             .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
                         }
                         .buttonStyle(.plain)
+                        
+                        // Orphan Triangle Purge Button
+                        Button(role: .destructive) {
+                            showOrphanPurgeConfirmation = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "trash.slash")
+                                    .font(.system(size: 24))
+                                Text("Purge Orphaned Triangles")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 20)
@@ -1201,6 +1221,24 @@ private struct DebugSettingsPanel: View {
         } message: {
             let location = locationManager.currentLocationID
             Text("This will delete all \(mapPointStore.points.count) photo assets for location '\(location)'. This cannot be undone.")
+        }
+        .alert("Purge Orphaned Triangles?", isPresented: $showOrphanPurgeConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Purge", role: .destructive) {
+                let validIDs = Set(mapPointStore.points.map { $0.id })
+                let removed = triangleStore.purgeOrphanedTriangles(validMapPointIDs: validIDs)
+                orphanPurgeResultMessage = removed > 0 
+                    ? "Removed \(removed) orphaned triangle(s)" 
+                    : "No orphaned triangles found"
+                showOrphanPurgeResult = true
+            }
+        } message: {
+            Text("This will delete triangles that reference MapPoints which no longer exist. This cannot be undone.")
+        }
+        .alert("Purge Complete", isPresented: $showOrphanPurgeResult) {
+            Button("OK") { }
+        } message: {
+            Text(orphanPurgeResultMessage)
         }
     }
     

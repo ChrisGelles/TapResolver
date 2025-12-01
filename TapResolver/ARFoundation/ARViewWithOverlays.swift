@@ -85,10 +85,10 @@ struct ARViewWithOverlays: View {
                 // If in calibration mode with a selected triangle, initialize calibration state
                 if isCalibrationMode, let triangle = selectedTriangle {
                     DispatchQueue.main.async {
-                        arCalibrationCoordinator.startCalibration(for: triangle.id)
-                        arCalibrationCoordinator.setVertices(triangle.vertexIDs)
-                        currentMode = .triangleCalibration(triangleID: triangle.id)
-                        print("🎯 ARViewWithOverlays: Auto-initialized calibration for triangle \(String(triangle.id.uuidString.prefix(8)))")
+                    arCalibrationCoordinator.startCalibration(for: triangle.id)
+                    arCalibrationCoordinator.setVertices(triangle.vertexIDs)
+                    currentMode = .triangleCalibration(triangleID: triangle.id)
+                    print("🎯 ARViewWithOverlays: Auto-initialized calibration for triangle \(String(triangle.id.uuidString.prefix(8)))")
                     }
                 } else {
                     // Set mode to idle - user will choose Calibrate or Relocalize
@@ -122,11 +122,11 @@ struct ARViewWithOverlays: View {
             .onDisappear {
                 // Clean up on dismiss - defer to avoid view update conflicts
                 DispatchQueue.main.async {
-                    currentMode = .idle
-                    arCalibrationCoordinator.reset()
+                currentMode = .idle
+                arCalibrationCoordinator.reset()
                     lastPrintedPhotoRefVertexID = nil
                     lastLoggedPipMapState = nil
-                    print("🧹 ARViewWithOverlays: Cleaned up on disappear")
+                print("🧹 ARViewWithOverlays: Cleaned up on disappear")
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ARMarkerPlaced"))) { notification in
@@ -167,9 +167,9 @@ struct ARViewWithOverlays: View {
                 if isGhostConfirm, let ghostID = ghostMapPointID {
                     targetMapPointID = ghostID
                 } else {
-                    guard let currentVertexID = arCalibrationCoordinator.getCurrentVertexID() else {
-                        print("⚠️ [REGISTER_MARKER_TRACE] No current vertex ID for marker placement")
-                        return
+                guard let currentVertexID = arCalibrationCoordinator.getCurrentVertexID() else {
+                    print("⚠️ [REGISTER_MARKER_TRACE] No current vertex ID for marker placement")
+                    return
                     }
                     targetMapPointID = currentVertexID
                 }
@@ -181,11 +181,11 @@ struct ARViewWithOverlays: View {
                 
                 // CRITICAL SAFETY CHECK: Block if not in placing vertices state (unless ghost confirm)
                 if !isGhostConfirm {
-                    guard case .placingVertices = arCalibrationCoordinator.calibrationState else {
-                        print("⚠️ [REGISTER_MARKER_TRACE] CRITICAL: registerMarker called outside placingVertices state!")
-                        print("   Current state: \(arCalibrationCoordinator.stateDescription)")
-                        print("   This should never happen - investigating caller")
-                        return
+                guard case .placingVertices = arCalibrationCoordinator.calibrationState else {
+                    print("⚠️ [REGISTER_MARKER_TRACE] CRITICAL: registerMarker called outside placingVertices state!")
+                    print("   Current state: \(arCalibrationCoordinator.stateDescription)")
+                    print("   This should never happen - investigating caller")
+                    return
                     }
                 }
                 
@@ -582,106 +582,132 @@ struct ARViewWithOverlays: View {
                     
                     // Place Marker / Ghost Interaction buttons
                     // Show during vertex placement OR when in readyToFill with a ghost selected (crawl mode)
-                    if case .placingVertices = arCalibrationCoordinator.calibrationState {
+                    let shouldShowGhostButtons: Bool = {
+                        if case .placingVertices = arCalibrationCoordinator.calibrationState {
+                            return true
+                        }
+                        if arCalibrationCoordinator.calibrationState == .readyToFill && arCalibrationCoordinator.selectedGhostMapPointID != nil {
+                            return true
+                        }
+                        return false
+                    }()
+                    
+                    if shouldShowGhostButtons {
                         GhostInteractionButtons(
                             arCalibrationCoordinator: arCalibrationCoordinator,
                             onConfirmGhost: {
                                 print("🎯 [GHOST_UI] Confirm Placement tapped")
                                 print("   Current state: \(arCalibrationCoordinator.stateDescription)")
                                 
-                                // Normal ghost confirmation during placingVertices
-                                guard let ghostPosition = arCalibrationCoordinator.selectedGhostEstimatedPosition,
-                                      let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID else {
-                                    print("⚠️ [GHOST_UI] No ghost position/ID available for confirmation")
-                                    return
-                                }
-                                
-                                print("🎯 [GHOST_UI] Confirming ghost at estimated position")
-                                
-                                NotificationCenter.default.post(
-                                    name: NSNotification.Name("ConfirmGhostMarker"),
-                                    object: nil,
-                                    userInfo: [
-                                        "position": [ghostPosition.x, ghostPosition.y, ghostPosition.z],
-                                        "mapPointID": ghostMapPointID,
-                                        "isGhostConfirm": true,
-                                        "ghostMapPointID": ghostMapPointID
-                                    ]
-                                )
-                            },
-                            onPlaceMarker: {
-                                // Standard marker placement (may be adjustment if ghost selected)
-                                guard let coordinator = ARViewContainer.Coordinator.current else {
-                                    print("❌ [PLACE_MARKER] No coordinator reference")
-                                    return
-                                }
-                                guard coordinator.currentCursorPosition != nil else {
-                                    print("⚠️ [PLACE_MARKER] No valid ground plane detected - move device to find flat surface")
-                                    return
-                                }
-                                NotificationCenter.default.post(
-                                    name: NSNotification.Name("PlaceMarkerAtCursor"),
-                                    object: nil
-                                )
-                            }
-                        )
-                        .padding(.bottom, 12)
-                    } else if arCalibrationCoordinator.calibrationState == .readyToFill && arCalibrationCoordinator.selectedGhostMapPointID != nil {
-                        GhostInteractionButtons(
-                            arCalibrationCoordinator: arCalibrationCoordinator,
-                            onConfirmGhost: {
-                                print("🎯 [GHOST_UI] Confirm Placement tapped")
-                                print("   Current state: \(arCalibrationCoordinator.stateDescription)")
-                                
-                                // Crawl mode: activate adjacent triangle from ghost confirmation
                                 guard let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID,
-                                      let ghostPosition = arCalibrationCoordinator.selectedGhostEstimatedPosition,
-                                      let currentTriangleID = arCalibrationCoordinator.activeTriangleID else {
-                                    print("⚠️ [CRAWL_MODE] Missing required data for adjacent triangle activation")
-                                    return
-                                }
-                                
-                                print("🔗 [CRAWL_MODE] Activating adjacent triangle from ghost confirmation")
-                                
-                                // Use the ghost's estimated position (or place at crosshair for adjustment)
-                                if let newTriangleID = arCalibrationCoordinator.activateAdjacentTriangle(
-                                    ghostMapPointID: ghostMapPointID,
-                                    ghostPosition: ghostPosition,
-                                    currentTriangleID: currentTriangleID
-                                ) {
-                                    print("✅ [CRAWL_MODE] Successfully activated adjacent triangle \(String(newTriangleID.uuidString.prefix(8)))")
+                                      let ghostPosition = arCalibrationCoordinator.selectedGhostEstimatedPosition else {
+                                    print("⚠️ [GHOST_UI] No ghost position/ID available for confirmation")
+                                return
+                            }
+                            
+                                // Check if we're in crawl mode (readyToFill + ghost selected)
+                                if case .readyToFill = arCalibrationCoordinator.calibrationState,
+                                   let currentTriangleID = arCalibrationCoordinator.activeTriangleID {
                                     
-                                    // Post notification to place visual marker at ghost position
+                                    print("🔗 [CRAWL_CONFIRM] Confirming ghost at estimated position for crawl")
+                                    
+                                    // Activate the adjacent triangle (wasAdjusted: false = confirmed at ghost position)
+                                    if let newTriangleID = arCalibrationCoordinator.activateAdjacentTriangle(
+                                        ghostMapPointID: ghostMapPointID,
+                                        ghostPosition: ghostPosition,
+                                        currentTriangleID: currentTriangleID,
+                                        wasAdjusted: false
+                                    ) {
+                                        print("✅ [CRAWL_CONFIRM] Successfully activated adjacent triangle \(String(newTriangleID.uuidString.prefix(8)))")
+                                        
+                                        // Remove the ghost marker and place real marker
+                            NotificationCenter.default.post(
+                                            name: NSNotification.Name("RemoveGhostMarker"),
+                                            object: nil,
+                                            userInfo: ["mapPointID": ghostMapPointID]
+                                        )
+                                        
+                                        NotificationCenter.default.post(
+                                            name: NSNotification.Name("ConfirmGhostMarker"),
+                                            object: nil,
+                                            userInfo: [
+                                                "position": [ghostPosition.x, ghostPosition.y, ghostPosition.z],
+                                                "mapPointID": ghostMapPointID,
+                                                "isGhostConfirm": true,
+                                                "isCrawlMode": true
+                                            ]
+                                        )
+                                    } else {
+                                        print("⚠️ [CRAWL_CONFIRM] Failed to activate adjacent triangle")
+                                    }
+                                } else {
+                                    // Normal ghost confirmation during placingVertices (3rd vertex)
+                                    print("🎯 [GHOST_UI] Confirming ghost at estimated position (normal mode)")
+                                    
                                     NotificationCenter.default.post(
-                                        name: NSNotification.Name("PlaceGhostMarker"),
+                                        name: NSNotification.Name("ConfirmGhostMarker"),
                                         object: nil,
                                         userInfo: [
                                             "position": [ghostPosition.x, ghostPosition.y, ghostPosition.z],
                                             "mapPointID": ghostMapPointID,
-                                            "isConfirmation": true
+                                            "isGhostConfirm": true,
+                                            "ghostMapPointID": ghostMapPointID
                                         ]
                                     )
-                                } else {
-                                    print("⚠️ [CRAWL_MODE] Failed to activate adjacent triangle")
                                 }
                             },
                             onPlaceMarker: {
-                                // Standard marker placement (may be adjustment if ghost selected)
-                                guard let coordinator = ARViewContainer.Coordinator.current else {
-                                    print("❌ [PLACE_MARKER] No coordinator reference")
-                                    return
+                                print("🔍 [PLACE_MARKER_BTN] Button tapped")
+                                print("   Current state: \(arCalibrationCoordinator.stateDescription)")
+                                
+                                // Check if we're in crawl mode (.readyToFill + ghost selected)
+                                if case .readyToFill = arCalibrationCoordinator.calibrationState,
+                                   let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID,
+                                   let currentTriangleID = arCalibrationCoordinator.activeTriangleID {
+                                    
+                                    print("🔗 [CRAWL_ADJUST] Adjusting ghost position via crosshair")
+                                    
+                                    // Post crosshair placement with crawl mode info
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("PlaceMarkerAtCursor"),
+                                        object: nil,
+                                        userInfo: [
+                                            "isCrawlMode": true,
+                                            "ghostMapPointID": ghostMapPointID,
+                                            "currentTriangleID": currentTriangleID
+                                        ]
+                                    )
+                                } else if case .placingVertices = arCalibrationCoordinator.calibrationState,
+                                          let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID {
+                                    // 3rd vertex ghost adjustment - if ANY ghost is selected during vertex placement, remove it
+                                    print("🔗 [3RD_VERTEX_ADJUST] Adjusting vertex ghost position via crosshair")
+                                    print("   Ghost MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
+                                    
+                                    // Remove the ghost marker first
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("RemoveGhostMarker"),
+                                        object: nil,
+                                        userInfo: ["mapPointID": ghostMapPointID]
+                                    )
+                                    
+                                    // Clear ghost selection
+                                    arCalibrationCoordinator.selectedGhostMapPointID = nil
+                                    
+                                    // Then place marker at crosshair (normal placement, not crawl mode)
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("PlaceMarkerAtCursor"),
+                                        object: nil
+                                    )
+                                } else {
+                                    // Normal crosshair placement (not crawl mode, not 3rd vertex adjust)
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("PlaceMarkerAtCursor"),
+                                        object: nil
+                                    )
                                 }
-                                guard coordinator.currentCursorPosition != nil else {
-                                    print("⚠️ [PLACE_MARKER] No valid ground plane detected - move device to find flat surface")
-                                    return
-                                }
-                                NotificationCenter.default.post(
-                                    name: NSNotification.Name("PlaceMarkerAtCursor"),
-                                    object: nil
-                                )
                             }
                         )
-                        .padding(.bottom, 12)
+                        .padding(.bottom, 40)
                     }
                     
                     // Survey Marker Generation Button
@@ -1012,37 +1038,37 @@ struct ARPiPMapView: View {
         let targets = calculateTargetTransform(image: mapImage, frameSize: frameSize)
         
         pipMapZStack(mapImage: mapImage)
-            .scaleEffect(currentScale)
-            .offset(currentOffset)
+                    .scaleEffect(currentScale)
+                    .offset(currentOffset)
             .frame(width: frameSize.width, height: frameSize.height)
-            .clipped()
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.white.opacity(0.3), lineWidth: 2)
-            )
-            .onAppear {
+                    .clipped()
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                    )
+                    .onAppear {
                 setupPiPTransform(image: mapImage, frameSize: frameSize)
-                currentScale = targets.scale
-                currentOffset = targets.offset
-            }
+                        currentScale = targets.scale
+                        currentOffset = targets.offset
+                    }
             .onChange(of: focusedPointID) { newFocusedID in
                 handleFocusedPointChange(newFocusedID: newFocusedID, mapImage: mapImage, frameSize: frameSize)
-            }
-            .onChange(of: arCalibrationCoordinator.currentVertexIndex) { _ in
+                    }
+                    .onChange(of: arCalibrationCoordinator.currentVertexIndex) { _ in
                 handleVertexIndexChange(mapImage: mapImage, frameSize: frameSize)
-            }
-            .onChange(of: arCalibrationCoordinator.calibrationState) { oldState, newState in
+                    }
+                    .onChange(of: arCalibrationCoordinator.calibrationState) { oldState, newState in
                 handleCalibrationStateChange(oldState: oldState, newState: newState, mapImage: mapImage, frameSize: frameSize)
-            }
-            .onChange(of: arCalibrationCoordinator.placedMarkers.count) { _ in
+                    }
+                    .onChange(of: arCalibrationCoordinator.placedMarkers.count) { _ in
                 handlePlacedMarkersChange(mapImage: mapImage, frameSize: frameSize)
-            }
-            .onChange(of: selectedTriangle?.id) { _ in
+                    }
+                    .onChange(of: selectedTriangle?.id) { _ in
                 handleSelectedTriangleChange(mapImage: mapImage, frameSize: frameSize)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CenterPiPOnTriangle"))) { notification in
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CenterPiPOnTriangle"))) { notification in
                 handleCenterPiPNotification(notification: notification, mapImage: mapImage)
-            }
+        }
     }
     
     private func loadMapImage() {
@@ -1104,7 +1130,7 @@ struct ARPiPMapView: View {
             let currentState = arCalibrationCoordinator.calibrationState
             let shouldLog = lastLoggedTransformState != currentState
             if shouldLog {
-                print("🎯 [PIP_TRANSFORM] readyToFill state - calculating triangle bounds")
+            print("🎯 [PIP_TRANSFORM] readyToFill state - calculating triangle bounds")
                 lastLoggedTransformState = currentState
             }
             
@@ -1137,7 +1163,7 @@ struct ARPiPMapView: View {
             
             // Only log result on first calculation
             if shouldLog {
-                print("✅ [PIP_TRANSFORM] Calculated triangle frame - scale: \(String(format: "%.3f", scale)), offset: (\(String(format: "%.1f", offset.width)), \(String(format: "%.1f", offset.height)))")
+            print("✅ [PIP_TRANSFORM] Calculated triangle frame - scale: \(String(format: "%.3f", scale)), offset: (\(String(format: "%.1f", offset.width)), \(String(format: "%.1f", offset.height)))")
             }
             return (scale, offset)
         }

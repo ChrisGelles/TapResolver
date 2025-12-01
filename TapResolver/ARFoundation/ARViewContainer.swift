@@ -20,11 +20,11 @@ struct ARViewContainer: UIViewRepresentable {
     
     // Map point store for survey markers
     var mapPointStore: MapPointStore?
-    
+
     // AR calibration coordinator for ghost selection
     var arCalibrationCoordinator: ARCalibrationCoordinator?
 
-        func makeCoordinator() -> ARViewCoordinator {
+    func makeCoordinator() -> ARViewCoordinator {
         let coordinator = ARViewCoordinator()
         coordinator.selectedTriangle = selectedTriangle
         if let triangle = selectedTriangle {
@@ -214,16 +214,56 @@ struct ARViewContainer: UIViewRepresentable {
             }
         }
         
-        @objc func handlePlaceMarkerAtCursor() {
+        @objc func handlePlaceMarkerAtCursor(_ notification: Notification) {
             print("🔍 [PLACE_MARKER_CROSSHAIR] Called")
             
-            // Note: Calibration state check should be done before posting notification
-            // This is a fallback guard in case notification is posted incorrectly
             guard let position = currentCursorPosition else {
-                print("⚠️ [PLACE_MARKER_CROSSHAIR] No cursor position available for marker placement")
+                print("⚠️ [PLACE_MARKER_CROSSHAIR] No cursor position available")
                 return
             }
-            placeMarker(at: position)
+            
+            // Check if this is crawl mode (adjusting ghost position)
+            let isCrawlMode = notification.userInfo?["isCrawlMode"] as? Bool ?? false
+            
+            if isCrawlMode,
+               let ghostMapPointID = notification.userInfo?["ghostMapPointID"] as? UUID,
+               let currentTriangleID = notification.userInfo?["currentTriangleID"] as? UUID {
+                
+                print("🔗 [CRAWL_CROSSHAIR] Crawl mode adjustment detected")
+                print("   Ghost MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
+                print("   Current Triangle: \(String(currentTriangleID.uuidString.prefix(8)))")
+                print("   Crosshair Position: (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
+                
+                // Remove the ghost marker from scene
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("RemoveGhostMarker"),
+                    object: nil,
+                    userInfo: ["mapPointID": ghostMapPointID]
+                )
+                
+                // Place the real marker at crosshair position
+                let markerID = placeMarker(at: position)
+                print("📍 [CRAWL_CROSSHAIR] Placed adjustment marker \(String(markerID.uuidString.prefix(8)))")
+                
+                // Activate the adjacent triangle (wasAdjusted: true = placed at crosshair, not ghost position)
+                if let coordinator = arCalibrationCoordinator {
+                    if let newTriangleID = coordinator.activateAdjacentTriangle(
+                        ghostMapPointID: ghostMapPointID,
+                        ghostPosition: position,
+                        currentTriangleID: currentTriangleID,
+                        wasAdjusted: true
+                    ) {
+                        print("✅ [CRAWL_CROSSHAIR] Successfully activated adjacent triangle \(String(newTriangleID.uuidString.prefix(8)))")
+                    } else {
+                        print("⚠️ [CRAWL_CROSSHAIR] Failed to activate adjacent triangle")
+                    }
+                } else {
+                    print("⚠️ [CRAWL_CROSSHAIR] No arCalibrationCoordinator reference available")
+                }
+            } else {
+                // Normal marker placement
+                let _ = placeMarker(at: position)
+            }
         }
         
         @objc func handleFillTriangleWithSurveyMarkers(notification: Notification) {
@@ -314,6 +354,34 @@ struct ARViewContainer: UIViewRepresentable {
             print("🗑️ [GHOST_REMOVE] Removed ghost for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
         }
         
+        @objc func handleRemoveGhostMarker(_ notification: Notification) {
+            guard let mapPointID = notification.userInfo?["mapPointID"] as? UUID else {
+                print("⚠️ [GHOST_REMOVE] No mapPointID in notification")
+                return
+            }
+            
+            print("👻 [GHOST_REMOVE] Removing ghost marker for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            
+            // Remove from tracking dictionary
+            ghostMarkerPositions.removeValue(forKey: mapPointID)
+            
+            // Find and remove the ghost node from scene
+            let nodeName = "ghostMarker_\(mapPointID.uuidString)"
+            if let ghostNode = ghostMarkers[mapPointID] {
+                ghostNode.removeFromParentNode()
+                ghostMarkers.removeValue(forKey: mapPointID)
+                print("✅ [GHOST_REMOVE] Removed ghost node '\(nodeName)' from scene")
+            } else {
+                // Try finding by name as fallback
+                if let ghostNode = sceneView?.scene.rootNode.childNode(withName: nodeName, recursively: true) {
+                    ghostNode.removeFromParentNode()
+                    print("✅ [GHOST_REMOVE] Removed ghost node '\(nodeName)' from scene (found by name)")
+                } else {
+                    print("⚠️ [GHOST_REMOVE] Could not find ghost node '\(nodeName)' in scene")
+                }
+            }
+        }
+        
         @objc func handleConfirmGhostMarker(_ notification: Notification) {
             print("🎯 [GHOST_CONFIRM] Confirm ghost marker notification received")
             
@@ -339,7 +407,7 @@ struct ARViewContainer: UIViewRepresentable {
             let markerNode = ARMarkerRenderer.createNode(
                 at: estimatedPosition,
                 options: MarkerOptions(
-                    color: .cyan,  // Standard calibration marker color
+                    color: .orange,  // Standard calibration marker color
                     markerID: markerID,
                     userDeviceHeight: userDeviceHeight,
                     badgeColor: nil,
@@ -499,6 +567,14 @@ struct ARViewContainer: UIViewRepresentable {
                 self,
                 selector: #selector(handleConfirmGhostMarker),
                 name: NSNotification.Name("ConfirmGhostMarker"),
+                object: nil
+            )
+            
+            // Listen for RemoveGhostMarker notification (crawl mode cleanup)
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleRemoveGhostMarker),
+                name: NSNotification.Name("RemoveGhostMarker"),
                 object: nil
             )
             
@@ -780,7 +856,7 @@ struct ARViewContainer: UIViewRepresentable {
                 }
                 
                 guard index < triangle.arMarkerIDs.count,
-                      let markerIDString = triangle.arMarkerIDs[index].isEmpty ? nil : triangle.arMarkerIDs[index],
+                   let markerIDString = triangle.arMarkerIDs[index].isEmpty ? nil : triangle.arMarkerIDs[index],
                       let markerUUID = UUID(uuidString: markerIDString) else {
                     print("❌ [SURVEY_VALIDATION] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): No marker ID in triangle")
                     if index >= triangle.arMarkerIDs.count {
@@ -809,7 +885,7 @@ struct ARViewContainer: UIViewRepresentable {
                         markersFromCurrentSession.append((vertexID, markerUUID, position, "ARWorldMapStore"))
                         print("✅ [SURVEY_VALIDATION] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): Found in storage (current session)")
                         foundMarker = true
-                    } else {
+                } else {
                         // Marker is from a different session
                         markersFromOtherSessions.append((vertexID, storedMarker.sessionID, storedMarker.id))
                         print("⚠️ [SURVEY_VALIDATION] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): From different session")
@@ -880,7 +956,7 @@ struct ARViewContainer: UIViewRepresentable {
                 
                 // Get marker ID from triangle
                 guard index < triangle.arMarkerIDs.count,
-                      let markerIDString = triangle.arMarkerIDs[index].isEmpty ? nil : triangle.arMarkerIDs[index],
+                   let markerIDString = triangle.arMarkerIDs[index].isEmpty ? nil : triangle.arMarkerIDs[index],
                       let markerUUID = UUID(uuidString: markerIDString) else {
                     print("❌ [SURVEY_3D] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): No marker ID")
                     continue
@@ -904,7 +980,7 @@ struct ARViewContainer: UIViewRepresentable {
                         print("✅ [SURVEY_3D] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): \(foundSource)")
                     } else {
                         foundSource = "DIFFERENT session (ARWorldMapStore)"
-                        print("⚠️ [SURVEY_3D] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): \(foundSource)")
+                    print("⚠️ [SURVEY_3D] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): \(foundSource)")
                         print("   Marker session: \(String(storedMarker.sessionID.uuidString.prefix(8)))")
                         print("   Current session: \(String(arWorldMapStore.currentSessionID.uuidString.prefix(8)))")
                         print("   ⚠️ COORDINATE SYSTEM MISMATCH!")
@@ -932,7 +1008,7 @@ struct ARViewContainer: UIViewRepresentable {
             var markersFromCurrentSessionCount = 0
             for (index, vertexID) in triangle.vertexIDs.enumerated() {
                 guard index < triangle.arMarkerIDs.count,
-                      let markerIDString = triangle.arMarkerIDs[index].isEmpty ? nil : triangle.arMarkerIDs[index],
+                   let markerIDString = triangle.arMarkerIDs[index].isEmpty ? nil : triangle.arMarkerIDs[index],
                       let markerUUID = UUID(uuidString: markerIDString) else {
                     continue
                 }
