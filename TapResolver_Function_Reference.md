@@ -1103,3 +1103,4 @@ This reference covers the major functions and methods across the TapResolver cod
 
 The codebase follows SwiftUI and Combine patterns, with extensive use of `ObservableObject` for state management and dependency injection via environment objects.
 
+
