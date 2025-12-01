@@ -21,37 +21,57 @@ struct GhostInteractionButtons: View {
     @ObservedObject var arCalibrationCoordinator: ARCalibrationCoordinator
     let onConfirmGhost: () -> Void
     let onPlaceMarker: () -> Void
+    let onReposition: () -> Void
     
     var body: some View {
         if arCalibrationCoordinator.selectedGhostMapPointID != nil {
-            // Ghost selected AND visible - show dual buttons
-            HStack(spacing: 12) {
-                // Confirm button (left, green)
-                Button(action: {
-                    print("🎯 [GHOST_UI] Confirm Placement tapped")
-                    onConfirmGhost()
-                }) {
-                    Text("Confirm Placement")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color.green)
-                        .cornerRadius(12)
+            // Ghost selected AND visible - show three buttons
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    // Confirm button (left, green)
+                    Button(action: {
+                        print("🎯 [GHOST_UI] Confirm Placement tapped")
+                        onConfirmGhost()
+                    }) {
+                        Text("Confirm Placement")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                            .background(Color.green)
+                            .cornerRadius(12)
+                    }
+                    
+                    // Adjust button (right, orange)
+                    Button(action: {
+                        print("🎯 [GHOST_UI] Place Marker to Adjust tapped")
+                        onPlaceMarker()
+                    }) {
+                        Text("Place Marker to Adjust")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                            .background(Color.orange)
+                            .cornerRadius(12)
+                    }
                 }
                 
-                // Adjust button (right, orange)
+                // Reposition Marker button - for large spaces where ghost is far from correct position
                 Button(action: {
-                    print("🎯 [GHOST_UI] Place Marker to Adjust tapped")
-                    onPlaceMarker()
+                    print("🎯 [GHOST_UI] Reposition Marker tapped")
+                    onReposition()
                 }) {
-                    Text("Place Marker to Adjust")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color.orange)
-                        .cornerRadius(12)
+                    HStack {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text("Reposition Marker")
+                    }
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.purple.opacity(0.9))
+                    .cornerRadius(25)
                 }
             }
             .padding(.horizontal)

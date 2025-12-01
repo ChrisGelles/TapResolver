@@ -36,6 +36,9 @@ struct ARViewWithOverlays: View {
     @State private var warningDistance: Float = 0
     @State private var warningMapPointID: UUID? = nil
     
+    // Track MapPoint ID when user taps "Reposition Marker" - next placed marker targets this MapPoint
+    @State private var pendingRepositionMapPointID: UUID? = nil
+    
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
@@ -164,9 +167,14 @@ struct ARViewWithOverlays: View {
                     return
                 }
                 
-                // For ghost confirm, use the ghost's MapPoint ID; otherwise use current vertex
+                // Determine target MapPoint - reposition takes priority
                 let targetMapPointID: UUID
-                if isGhostConfirm, let ghostID = ghostMapPointID {
+                if let repositionID = pendingRepositionMapPointID {
+                    // User tapped "Reposition Marker" - this marker replaces that ghost
+                    print("🔄 [GHOST_REPOSITION] Marker placed for repositioned MapPoint \(String(repositionID.uuidString.prefix(8)))")
+                    targetMapPointID = repositionID
+                    pendingRepositionMapPointID = nil  // Clear the pending state
+                } else if isGhostConfirm, let ghostID = ghostMapPointID {
                     targetMapPointID = ghostID
                 } else {
                 guard let currentVertexID = arCalibrationCoordinator.getCurrentVertexID() else {
@@ -584,8 +592,9 @@ struct ARViewWithOverlays: View {
                     
                     // Place Marker / Ghost Interaction buttons
                     // Show during vertex placement OR when in readyToFill with a ghost selected (crawl mode)
+                    // BUT NOT when reposition is pending (user tapped "Reposition Marker")
                     let shouldShowGhostButtons: Bool = {
-                        if case .placingVertices = arCalibrationCoordinator.calibrationState {
+                    if case .placingVertices = arCalibrationCoordinator.calibrationState {
                             return true
                         }
                         if arCalibrationCoordinator.calibrationState == .readyToFill && arCalibrationCoordinator.selectedGhostMapPointID != nil {
@@ -594,7 +603,10 @@ struct ARViewWithOverlays: View {
                         return false
                     }()
                     
-                    if shouldShowGhostButtons {
+                    // Show ghost interaction buttons only when:
+                    // - A ghost is selected AND
+                    // - We're not in reposition mode (waiting for free placement)
+                    if shouldShowGhostButtons && pendingRepositionMapPointID == nil {
                         GhostInteractionButtons(
                             arCalibrationCoordinator: arCalibrationCoordinator,
                             onConfirmGhost: {
@@ -604,9 +616,9 @@ struct ARViewWithOverlays: View {
                                 guard let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID,
                                       let ghostPosition = arCalibrationCoordinator.selectedGhostEstimatedPosition else {
                                     print("⚠️ [GHOST_UI] No ghost position/ID available for confirmation")
-                                return
-                            }
-                            
+                                    return
+                                }
+                                
                                 // Check if we're in crawl mode (readyToFill + ghost selected)
                                 if case .readyToFill = arCalibrationCoordinator.calibrationState,
                                    let currentTriangleID = arCalibrationCoordinator.activeTriangleID {
@@ -623,7 +635,7 @@ struct ARViewWithOverlays: View {
                                         print("✅ [CRAWL_CONFIRM] Successfully activated adjacent triangle \(String(newTriangleID.uuidString.prefix(8)))")
                                         
                                         // Remove the ghost marker and place real marker
-                            NotificationCenter.default.post(
+                                        NotificationCenter.default.post(
                                             name: NSNotification.Name("RemoveGhostMarker"),
                                             object: nil,
                                             userInfo: ["mapPointID": ghostMapPointID]
@@ -707,8 +719,50 @@ struct ARViewWithOverlays: View {
                                         object: nil
                                     )
                                 }
+                            },
+                            onReposition: {
+                                // Remove ghost and enter standard placement mode for this MapPoint
+                                guard let ghostID = arCalibrationCoordinator.selectedGhostMapPointID else {
+                                    print("⚠️ [GHOST_REPOSITION] No ghost selected for reposition")
+                                    return
+                                }
+                                
+                                print("🔄 [GHOST_REPOSITION] Starting reposition for MapPoint \(String(ghostID.uuidString.prefix(8)))")
+                                
+                                // Store the target MapPoint ID for the upcoming marker placement
+                                pendingRepositionMapPointID = ghostID
+                                
+                                // Remove the ghost marker from the scene
+                                NotificationCenter.default.post(
+                                    name: NSNotification.Name("RemoveGhostMarker"),
+                                    object: nil,
+                                    userInfo: ["mapPointID": ghostID]
+                                )
+                                
+                                // Clear ghost selection to hide the interaction buttons
+                                arCalibrationCoordinator.selectedGhostMapPointID = nil
                             }
                         )
+                        .padding(.bottom, 40)
+                    } else if shouldShowGhostButtons || pendingRepositionMapPointID != nil {
+                        // Show standard "Place Marker" button when reposition is pending
+                        // or when we should show buttons but ghost interaction buttons are hidden
+                        Button(action: {
+                            print("🔍 [PLACE_MARKER_BTN] Button tapped")
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("PlaceMarkerAtCursor"),
+                                object: nil
+                            )
+                        }) {
+                            Text("Place Marker")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.blue)
+                                .cornerRadius(12)
+                        }
+                        .padding(.horizontal)
                         .padding(.bottom, 40)
                     }
                     
@@ -1003,6 +1057,10 @@ struct ARPiPMapView: View {
     @State private var isAnimating: Bool = false
     @State private var positionSamples: [simd_float3] = [] // Ring buffer for smoothing
     
+    // Debug toggle: Center PiP on user position during crawl mode (.readyToFill)
+    // TODO: Move to DebugSettingsManager once validated
+    @State private var followUserInPiPMap: Bool = true
+    
     var body: some View {
         Group {
             if let mapImage = mapImage {
@@ -1073,6 +1131,20 @@ struct ARPiPMapView: View {
                     }
                     .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CenterPiPOnMapPoint"))) { notification in
                 handleCenterPiPOnMapPoint(notification: notification, mapImage: mapImage, frameSize: frameSize)
+                    }
+                    .onChange(of: userMapPosition) { oldPos, newPos in
+                        // Only update during readyToFill state when following user
+                        guard followUserInPiPMap,
+                              case .readyToFill = arCalibrationCoordinator.calibrationState,
+                              newPos != nil else { return }
+                        
+                        let frameSize = CGSize(width: 280, height: 220)
+                        let (scale, offset) = calculateTargetTransform(image: mapImage, frameSize: frameSize)
+                        
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            currentScale = scale
+                            currentOffset = offset
+            }
         }
     }
     
@@ -1127,17 +1199,23 @@ struct ARPiPMapView: View {
         }
         
         // CASE 2: Frame entire triangle when calibration complete (readyToFill state)
-        if case .readyToFill = arCalibrationCoordinator.calibrationState,
-           let triangle = selectedTriangle,
+        if case .readyToFill = arCalibrationCoordinator.calibrationState {
+            // Triangle complete - either follow user or frame triangle
+            if followUserInPiPMap, let userPos = userMapPosition {
+                // Follow user position during crawl mode
+                print("📍 [PIP_TRANSFORM] Following user at (\(String(format: "%.0f", userPos.x)), \(String(format: "%.0f", userPos.y)))")
+                let focused = PiPMapTransform.focused(on: userPos, imageSize: imageSize, frameSize: frameSize, targetZoom: 12.0)
+                return (focused.scale, focused.offset)
+            } else if let triangle = selectedTriangle,
            triangle.vertexIDs.count == 3 {
-            
-            // Only log on state change
-            let currentState = arCalibrationCoordinator.calibrationState
-            let shouldLog = lastLoggedTransformState != currentState
-            if shouldLog {
+                // Fallback: frame the entire triangle
+                // Only log on state change
+                let currentState = arCalibrationCoordinator.calibrationState
+                let shouldLog = lastLoggedTransformState != currentState
+                if shouldLog {
             print("🎯 [PIP_TRANSFORM] readyToFill state - calculating triangle bounds")
-                lastLoggedTransformState = currentState
-            }
+                    lastLoggedTransformState = currentState
+                }
             
             let vertexPoints = triangle.vertexIDs.compactMap { vertexID in
                 mapPointStore.points.first(where: { $0.id == vertexID })?.mapPoint
@@ -1158,19 +1236,20 @@ struct ARPiPMapView: View {
             let cornerA = CGPoint(x: minX - padding, y: minY - padding)
             let cornerB = CGPoint(x: maxX + padding, y: maxY + padding)
             
-            // Only log bounds on first calculation
-            if shouldLog {
-                print("📐 [PIP_TRANSFORM] Triangle bounds: A(\(Int(cornerA.x)), \(Int(cornerA.y))) B(\(Int(cornerB.x)), \(Int(cornerB.y)))")
-            }
+                // Only log bounds on first calculation
+                if shouldLog {
+                    print("📐 [PIP_TRANSFORM] Triangle bounds: A(\(Int(cornerA.x)), \(Int(cornerA.y))) B(\(Int(cornerB.x)), \(Int(cornerB.y)))")
+                }
             
             let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
             let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
             
-            // Only log result on first calculation
-            if shouldLog {
+                // Only log result on first calculation
+                if shouldLog {
             print("✅ [PIP_TRANSFORM] Calculated triangle frame - scale: \(String(format: "%.3f", scale)), offset: (\(String(format: "%.1f", offset.width)), \(String(format: "%.1f", offset.height)))")
-            }
+                }
             return (scale, offset)
+            }
         }
         
         // CASE 0: Auto-zoom to triangle if enabled and triangle is selected
