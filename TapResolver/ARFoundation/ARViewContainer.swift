@@ -385,9 +385,23 @@ struct ARViewContainer: UIViewRepresentable {
         @objc func handleConfirmGhostMarker(_ notification: Notification) {
             print("🎯 [GHOST_CONFIRM] Confirm ghost marker notification received")
             
-            guard let ghostMapPointID = notification.userInfo?["ghostMapPointID"] as? UUID,
-                  let estimatedPosition = ghostMarkerPositions[ghostMapPointID] else {
-                print("⚠️ [GHOST_CONFIRM] No ghost selected or missing position")
+            // Accept either "ghostMapPointID" or "mapPointID" key (crawl mode uses mapPointID)
+            guard let ghostMapPointID = (notification.userInfo?["ghostMapPointID"] as? UUID) 
+                    ?? (notification.userInfo?["mapPointID"] as? UUID) else {
+                print("⚠️ [GHOST_CONFIRM] No mapPointID in notification")
+                return
+            }
+            
+            // Get position from ghostMarkerPositions OR from notification payload (crawl mode)
+            let estimatedPosition: simd_float3
+            if let cachedPosition = ghostMarkerPositions[ghostMapPointID] {
+                estimatedPosition = cachedPosition
+            } else if let positionArray = notification.userInfo?["position"] as? [Float],
+                      positionArray.count == 3 {
+                estimatedPosition = simd_float3(positionArray[0], positionArray[1], positionArray[2])
+                print("📍 [GHOST_CONFIRM] Using position from notification payload (crawl mode)")
+            } else {
+                print("⚠️ [GHOST_CONFIRM] No position available for ghost")
                 return
             }
             
