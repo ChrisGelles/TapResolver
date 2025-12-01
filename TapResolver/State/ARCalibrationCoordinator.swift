@@ -1513,6 +1513,18 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         print("✅ [ADJACENT_ACTIVATE] Adjacent triangle \(String(adjacentTriangle.id.uuidString.prefix(8))) now calibrated and ready to fill")
         
+        // Plant ghost markers for the newly activated triangle's uncalibrated adjacent triangles
+        // This enables continuous crawling across the mesh
+        print("🔗 [ADJACENT_ACTIVATE] Planting ghosts for newly activated triangle's neighbors")
+        if let freshTriangle = triangleStore.triangle(withID: adjacentTriangle.id) {
+            plantGhostsForAdjacentTriangles(
+                calibratedTriangle: freshTriangle,
+                triangleStore: triangleStore,
+                mapPointStore: mapStore,
+                arWorldMapStore: arStore
+            )
+        }
+        
         return adjacentTriangle.id
     }
     
@@ -1570,6 +1582,14 @@ final class ARCalibrationCoordinator: ObservableObject {
                 print("👻 [GHOST_SELECT] Selected ghost \(String(ghostID.uuidString.prefix(8))) at \(String(format: "%.2f", nearestDistance))m")
                 selectedGhostMapPointID = ghostID
                 selectedGhostEstimatedPosition = position
+                
+                // Notify PiP map to center on selected ghost's MapPoint
+                print("📍 [GHOST_SELECT] Notifying PiP to center on MapPoint \(String(ghostID.uuidString.prefix(8)))")
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("CenterPiPOnMapPoint"),
+                    object: nil,
+                    userInfo: ["mapPointID": ghostID]
+                )
             } else if selectedGhostMapPointID != nil {
                 print("👻 [GHOST_SELECT] Deselected ghost - moved out of range")
                 selectedGhostMapPointID = nil

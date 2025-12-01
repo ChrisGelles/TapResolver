@@ -1068,6 +1068,9 @@ struct ARPiPMapView: View {
                     }
                     .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CenterPiPOnTriangle"))) { notification in
                 handleCenterPiPNotification(notification: notification, mapImage: mapImage)
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CenterPiPOnMapPoint"))) { notification in
+                handleCenterPiPOnMapPoint(notification: notification, mapImage: mapImage, frameSize: frameSize)
         }
     }
     
@@ -1348,6 +1351,31 @@ struct ARPiPMapView: View {
                 }
                 print("✅ [PIP_ONCHANGE] Applied triangle framing transform")
             }
+        }
+    }
+    
+    private func handleCenterPiPOnMapPoint(notification: Notification, mapImage: UIImage, frameSize: CGSize) {
+        guard let mapPointID = notification.userInfo?["mapPointID"] as? UUID,
+              let mapPoint = mapPointStore.points.first(where: { $0.id == mapPointID }) else {
+            print("⚠️ [PIP_CENTER] Invalid MapPoint ID in notification")
+            return
+        }
+        
+        print("📍 [PIP_CENTER] Centering on ghost MapPoint \(String(mapPointID.uuidString.prefix(8))) at (\(Int(mapPoint.mapPoint.x)), \(Int(mapPoint.mapPoint.y)))")
+        
+        // Center the map on this point using the same logic as focusedPointID
+        let regionSize: CGFloat = 250
+        let cornerA = CGPoint(x: mapPoint.mapPoint.x - regionSize/2, y: mapPoint.mapPoint.y - regionSize/2)
+        let cornerB = CGPoint(x: mapPoint.mapPoint.x + regionSize/2, y: mapPoint.mapPoint.y + regionSize/2)
+        
+        let imageSize = mapImage.size
+        let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+        let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+        
+        // Animate to the new transform
+        withAnimation(.easeInOut(duration: 0.3)) {
+            currentScale = scale
+            currentOffset = offset
         }
     }
     
