@@ -585,6 +585,81 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         print("📐 [GHOST_CALC] Barycentric weights: w1=\(String(format: "%.3f", w1)), w2=\(String(format: "%.3f", w2)), w3=\(String(format: "%.3f", w3))")
         
+        // PRIORITY 1: Attempt consensus + rigid transform (mirrors calculateGhostPositionForThirdVertex)
+        // Check if target MapPoint AND at least 2 triangle vertices have consensus positions
+        if let targetConsensus = mapPoint.consensusPosition {
+            print("📍 [GHOST_CALC] Target has consensus position - attempting rigid transform")
+            
+            // Gather vertices that have BOTH consensus AND current session position
+            var correspondences: [(consensus: simd_float3, current: simd_float3)] = []
+            
+            for (index, vertexMapPoint) in vertexMapPoints.enumerated() {
+                if let vertexConsensus = vertexMapPoint.consensusPosition,
+                   let vertexCurrent = mapPointARPositions[vertexMapPoint.id] {
+                    correspondences.append((consensus: vertexConsensus, current: vertexCurrent))
+                    print("   ✅ Vertex[\(index)] \(String(vertexMapPoint.id.uuidString.prefix(8))): consensus + current available")
+                } else {
+                    let hasConsensus = vertexMapPoint.consensusPosition != nil
+                    let hasCurrent = mapPointARPositions[vertexMapPoint.id] != nil
+                    print("   ⚠️ Vertex[\(index)] \(String(vertexMapPoint.id.uuidString.prefix(8))): consensus=\(hasConsensus), current=\(hasCurrent)")
+                }
+            }
+            
+            // Need at least 2 correspondences for rigid transform
+            if correspondences.count >= 2 {
+                print("📍 [GHOST_CALC] Found \(correspondences.count) correspondences - computing rigid transform")
+                print("   Historical: P1=(\(String(format: "%.2f, %.2f, %.2f", correspondences[0].consensus.x, correspondences[0].consensus.y, correspondences[0].consensus.z))), P2=(\(String(format: "%.2f, %.2f, %.2f", correspondences[1].consensus.x, correspondences[1].consensus.y, correspondences[1].consensus.z)))")
+                print("   Current:    P1=(\(String(format: "%.2f, %.2f, %.2f", correspondences[0].current.x, correspondences[0].current.y, correspondences[0].current.z))), P2=(\(String(format: "%.2f, %.2f, %.2f", correspondences[1].current.x, correspondences[1].current.y, correspondences[1].current.z)))")
+                
+                // Calculate rigid transform from consensus coordinate frame to current session frame
+                if let transform = calculate2PointRigidTransform(
+                    oldPoints: (correspondences[0].consensus, correspondences[1].consensus),
+                    newPoints: (correspondences[0].current, correspondences[1].current)
+                ) {
+                    // Verify transform quality
+                    let cosR = cos(transform.rotationY)
+                    let sinR = sin(transform.rotationY)
+                    let rotatedOld1 = simd_float3(
+                        correspondences[1].consensus.x * cosR - correspondences[1].consensus.z * sinR,
+                        correspondences[1].consensus.y,
+                        correspondences[1].consensus.x * sinR + correspondences[1].consensus.z * cosR
+                    )
+                    let transformedOld1 = rotatedOld1 + transform.translation
+                    let verificationError = simd_distance(transformedOld1, correspondences[1].current)
+                    
+                    if verificationError > 1.0 {
+                        print("⚠️ [GHOST_CALC] Verification error \(String(format: "%.2f", verificationError))m exceeds 1.0m threshold")
+                        print("   Historical consensus unreliable for this session - falling back to barycentric")
+                        // Fall through to PRIORITY 2 (existing barycentric code below)
+                    } else {
+                        // Apply transform to target's consensus position
+                        let transformedPosition = applyRigidTransform(
+                            position: targetConsensus,
+                            rotationY: transform.rotationY,
+                            translation: transform.translation
+                        )
+                        
+                        print("👻 [GHOST_CALC] Transformed consensus position: (\(String(format: "%.2f", transformedPosition.x)), \(String(format: "%.2f", transformedPosition.y)), \(String(format: "%.2f", transformedPosition.z)))")
+                        print("   Original consensus: (\(String(format: "%.2f", targetConsensus.x)), \(String(format: "%.2f", targetConsensus.y)), \(String(format: "%.2f", targetConsensus.z)))")
+                        print("   Verification error: \(String(format: "%.3f", verificationError))m ✓")
+                        
+                        return transformedPosition
+                    }
+                } else {
+                    print("⚠️ [GHOST_CALC] Rigid transform calculation failed - falling back to barycentric")
+                    // Fall through to PRIORITY 2
+                }
+            } else {
+                print("📐 [GHOST_CALC] Only \(correspondences.count) correspondence(s) - need 2 for transform, using barycentric")
+                // Fall through to PRIORITY 2
+            }
+        } else {
+            print("📐 [GHOST_CALC] No consensus for target MapPoint \(String(mapPoint.id.uuidString.prefix(8))) - using barycentric")
+            // Fall through to PRIORITY 2
+        }
+        
+        // PRIORITY 2: Barycentric interpolation from current session data (existing code follows)
+        
         // STEP 3: Get triangle's 3 vertex AR positions (3D positions)
         // Attempt to gather 3 vertex positions from available sources
         var vertexPositions: [simd_float3] = []
