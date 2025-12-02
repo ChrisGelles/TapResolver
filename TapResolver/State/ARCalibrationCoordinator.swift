@@ -9,6 +9,7 @@ import SwiftUI
 import Combine
 import simd
 import ARKit
+import SceneKit
 
 /// Represents the distinct phases of triangle calibration
 enum CalibrationState: Equatable {
@@ -41,6 +42,16 @@ final class ARCalibrationCoordinator: ObservableObject {
     
     /// Maps MapPoint ID to AR position for current session (for ghost calculation)
     private var mapPointARPositions: [UUID: simd_float3] = [:]
+    
+    // MARK: - Preloaded Historical Position Index
+    
+    // Structure: [sessionID: [mapPointID: position]]
+    // Built at AR session start to avoid iteration during ghost calculation
+    private var historicalPositionsBySession: [UUID: [UUID: simd_float3]] = [:]
+    private var historicalSessionIDs: Set<UUID> = []
+    
+    // Session origin markers (white spheres showing where historical sessions originated)
+    private var sessionOriginNodes: [UUID: SCNNode] = [:]
     
     @Published var statusText: String = ""
     @Published var progressDots: (Bool, Bool, Bool) = (false, false, false)
@@ -282,6 +293,105 @@ final class ARCalibrationCoordinator: ObservableObject {
         isActive = true
         
         print("🎯 ARCalibrationCoordinator: Starting calibration for triangle \(String(triangleID.uuidString.prefix(8)))")
+        
+        // Preload historical position data for fast ghost calculations
+        preloadHistoricalPositions(mapPointStore: mapStore)
+    }
+    
+    /// Builds an indexed lookup of historical positions by session
+    /// Called at AR session start to avoid iteration during ghost calculation
+    private func preloadHistoricalPositions(mapPointStore: MapPointStore) {
+        historicalPositionsBySession.removeAll()
+        historicalSessionIDs.removeAll()
+        
+        var totalRecords = 0
+        
+        for point in mapPointStore.points {
+            for record in point.arPositionHistory {
+                historicalPositionsBySession[record.sessionID, default: [:]][point.id] = record.position
+                historicalSessionIDs.insert(record.sessionID)
+                totalRecords += 1
+            }
+        }
+        
+        print("📦 [PRELOAD] Built position index:")
+        print("   Sessions: \(historicalSessionIDs.count)")
+        print("   Total position records: \(totalRecords)")
+        
+        // Log per-session summary
+        for sessionID in historicalSessionIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            let pointCount = historicalPositionsBySession[sessionID]?.count ?? 0
+            print("   📍 Session \(String(sessionID.uuidString.prefix(8))): \(pointCount) MapPoint(s)")
+        }
+    }
+    
+    /// Renders white sphere markers at historical session origins in current coordinate frame
+    /// Called after computing rigid transforms to show where past sessions' (0,0,0) maps to
+    func renderSessionOrigin(
+        sessionID: UUID,
+        translation: simd_float3,
+        rotationY: Float,
+        in sceneView: ARSCNView
+    ) {
+        // Remove existing marker for this session if any
+        sessionOriginNodes[sessionID]?.removeFromParentNode()
+        
+        // The translation component of a rigid transform IS the historical origin
+        // in current coordinates (since rotate(0,0,0) + translation = translation)
+        let originPosition = SCNVector3(translation.x, translation.y, translation.z)
+        
+        // Create white sphere
+        let sphere = SCNSphere(radius: 0.03)
+        sphere.firstMaterial?.diffuse.contents = UIColor.white.withAlphaComponent(0.8)
+        sphere.firstMaterial?.emission.contents = UIColor.white.withAlphaComponent(0.3)
+        
+        let originNode = SCNNode(geometry: sphere)
+        originNode.position = originPosition
+        originNode.name = "sessionOrigin_\(sessionID.uuidString)"
+        
+        // Add floating label with session ID
+        let labelNode = createSessionLabel(sessionID: sessionID)
+        labelNode.position = SCNVector3(0, 0.06, 0) // Above the sphere
+        originNode.addChildNode(labelNode)
+        
+        sceneView.scene.rootNode.addChildNode(originNode)
+        sessionOriginNodes[sessionID] = originNode
+        
+        print("🔮 [SESSION_ORIGIN] Rendered origin for session \(String(sessionID.uuidString.prefix(8))) at (\(String(format: "%.2f", translation.x)), \(String(format: "%.2f", translation.y)), \(String(format: "%.2f", translation.z)))")
+    }
+    
+    private func createSessionLabel(sessionID: UUID) -> SCNNode {
+        let text = SCNText(string: String(sessionID.uuidString.prefix(8)), extrusionDepth: 0.5)
+        text.font = UIFont.systemFont(ofSize: 3, weight: .medium)
+        text.firstMaterial?.diffuse.contents = UIColor.white
+        text.flatness = 0.1
+        
+        let textNode = SCNNode(geometry: text)
+        textNode.scale = SCNVector3(0.005, 0.005, 0.005)
+        
+        // Center the text
+        let (min, max) = text.boundingBox
+        textNode.pivot = SCNMatrix4MakeTranslation(
+            (max.x - min.x) / 2 + min.x,
+            (max.y - min.y) / 2 + min.y,
+            0
+        )
+        
+        // Make text face camera (billboard constraint)
+        let billboardConstraint = SCNBillboardConstraint()
+        billboardConstraint.freeAxes = .all
+        textNode.constraints = [billboardConstraint]
+        
+        return textNode
+    }
+    
+    /// Clears all session origin markers from the scene
+    func clearSessionOriginMarkers() {
+        for (_, node) in sessionOriginNodes {
+            node.removeFromParentNode()
+        }
+        sessionOriginNodes.removeAll()
+        print("🧹 [SESSION_ORIGIN] Cleared all session origin markers")
     }
     
     // MARK: - Legacy Compatibility Methods
@@ -522,6 +632,17 @@ final class ARCalibrationCoordinator: ObservableObject {
                 print("🎯 CalibrationState → \(stateDescription)")
             }
         }
+        
+        // DIAGNOSTIC: Log placement accuracy
+        if let coordinator = ARViewContainer.Coordinator.current,
+           let ghostNode = coordinator.ghostMarkers[mapPointID] {
+            let expectedPosition = ghostNode.simdPosition
+            let actualPosition = marker.arPosition
+            let delta = simd_distance(expectedPosition, actualPosition)
+            print("📏 [PLACEMENT_ACCURACY] Marker \(String(mapPointID.uuidString.prefix(8))) placed \(String(format: "%.2f", delta))m from expected ghost location")
+            print("   Expected: (\(String(format: "%.2f", expectedPosition.x)), \(String(format: "%.2f", expectedPosition.y)), \(String(format: "%.2f", expectedPosition.z)))")
+            print("   Actual:   (\(String(format: "%.2f", actualPosition.x)), \(String(format: "%.2f", actualPosition.y)), \(String(format: "%.2f", actualPosition.z)))")
+        }
     }
     
     /// Calculate 3D AR position for a MapPoint using barycentric interpolation from a calibrated triangle
@@ -661,6 +782,11 @@ final class ARCalibrationCoordinator: ObservableObject {
                     print("   ⚠️ Session \(String(sessionID.uuidString.prefix(8))): verification error \(String(format: "%.2f", verificationError))m > 0.5m threshold, skipping")
                     continue
                 }
+                
+                // Render this session's origin in AR for debugging
+                // Note: We need a reference to sceneView - this will be added via parameter
+                // For now, just log the origin position
+                print("   🔮 Session \(String(sessionID.uuidString.prefix(8))) origin in current frame: (\(String(format: "%.2f", transform.translation.x)), \(String(format: "%.2f", transform.translation.y)), \(String(format: "%.2f", transform.translation.z)))")
                 
                 // Apply transform to target's position from this session
                 let transformedPosition = applyRigidTransform(
