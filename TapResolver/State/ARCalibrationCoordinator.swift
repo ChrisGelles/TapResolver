@@ -585,77 +585,114 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         print("📐 [GHOST_CALC] Barycentric weights: w1=\(String(format: "%.3f", w1)), w2=\(String(format: "%.3f", w2)), w3=\(String(format: "%.3f", w3))")
         
-        // PRIORITY 1: Attempt consensus + rigid transform (mirrors calculateGhostPositionForThirdVertex)
-        // Check if target MapPoint AND at least 2 triangle vertices have consensus positions
-        if let targetConsensus = mapPoint.consensusPosition {
-            print("📍 [GHOST_CALC] Target has consensus position - attempting rigid transform")
+        // PRIORITY 1: Session-level rigid transform
+        // Instead of using naive consensus (which mixes coordinate frames),
+        // we transform each historical session's position individually
+        
+        let targetHistory = mapPoint.arPositionHistory
+        if !targetHistory.isEmpty {
+            print("📍 [GHOST_CALC] Target has \(targetHistory.count) historical position(s) - attempting session-level transform")
             
-            // Gather vertices that have BOTH consensus AND current session position
-            var correspondences: [(consensus: simd_float3, current: simd_float3)] = []
+            // Group target positions by session
+            let targetSessionIDs = Set(targetHistory.map { $0.sessionID })
             
+            // Also collect vertex historical positions indexed by sessionID
+            var vertexHistoryBySession: [UUID: [(vertexIndex: Int, position: simd_float3)]] = [:]
             for (index, vertexMapPoint) in vertexMapPoints.enumerated() {
-                if let vertexConsensus = vertexMapPoint.consensusPosition,
-                   let vertexCurrent = mapPointARPositions[vertexMapPoint.id] {
-                    correspondences.append((consensus: vertexConsensus, current: vertexCurrent))
-                    print("   ✅ Vertex[\(index)] \(String(vertexMapPoint.id.uuidString.prefix(8))): consensus + current available")
-                } else {
-                    let hasConsensus = vertexMapPoint.consensusPosition != nil
-                    let hasCurrent = mapPointARPositions[vertexMapPoint.id] != nil
-                    print("   ⚠️ Vertex[\(index)] \(String(vertexMapPoint.id.uuidString.prefix(8))): consensus=\(hasConsensus), current=\(hasCurrent)")
+                for record in vertexMapPoint.arPositionHistory {
+                    vertexHistoryBySession[record.sessionID, default: []].append((vertexIndex: index, position: record.position))
                 }
             }
             
-            // Need at least 2 correspondences for rigid transform
-            if correspondences.count >= 2 {
-                print("📍 [GHOST_CALC] Found \(correspondences.count) correspondences - computing rigid transform")
-                print("   Historical: P1=(\(String(format: "%.2f, %.2f, %.2f", correspondences[0].consensus.x, correspondences[0].consensus.y, correspondences[0].consensus.z))), P2=(\(String(format: "%.2f, %.2f, %.2f", correspondences[1].consensus.x, correspondences[1].consensus.y, correspondences[1].consensus.z)))")
-                print("   Current:    P1=(\(String(format: "%.2f, %.2f, %.2f", correspondences[0].current.x, correspondences[0].current.y, correspondences[0].current.z))), P2=(\(String(format: "%.2f, %.2f, %.2f", correspondences[1].current.x, correspondences[1].current.y, correspondences[1].current.z)))")
-                
-                // Calculate rigid transform from consensus coordinate frame to current session frame
-                if let transform = calculate2PointRigidTransform(
-                    oldPoints: (correspondences[0].consensus, correspondences[1].consensus),
-                    newPoints: (correspondences[0].current, correspondences[1].current)
-                ) {
-                    // Verify transform quality
-                    let cosR = cos(transform.rotationY)
-                    let sinR = sin(transform.rotationY)
-                    let rotatedOld1 = simd_float3(
-                        correspondences[1].consensus.x * cosR - correspondences[1].consensus.z * sinR,
-                        correspondences[1].consensus.y,
-                        correspondences[1].consensus.x * sinR + correspondences[1].consensus.z * cosR
-                    )
-                    let transformedOld1 = rotatedOld1 + transform.translation
-                    let verificationError = simd_distance(transformedOld1, correspondences[1].current)
-                    
-                    if verificationError > 1.0 {
-                        print("⚠️ [GHOST_CALC] Verification error \(String(format: "%.2f", verificationError))m exceeds 1.0m threshold")
-                        print("   Historical consensus unreliable for this session - falling back to barycentric")
-                        // Fall through to PRIORITY 2 (existing barycentric code below)
-                    } else {
-                        // Apply transform to target's consensus position
-                        let transformedPosition = applyRigidTransform(
-                            position: targetConsensus,
-                            rotationY: transform.rotationY,
-                            translation: transform.translation
-                        )
-                        
-                        print("👻 [GHOST_CALC] Transformed consensus position: (\(String(format: "%.2f", transformedPosition.x)), \(String(format: "%.2f", transformedPosition.y)), \(String(format: "%.2f", transformedPosition.z)))")
-                        print("   Original consensus: (\(String(format: "%.2f", targetConsensus.x)), \(String(format: "%.2f", targetConsensus.y)), \(String(format: "%.2f", targetConsensus.z)))")
-                        print("   Verification error: \(String(format: "%.3f", verificationError))m ✓")
-                        
-                        return transformedPosition
-                    }
-                } else {
-                    print("⚠️ [GHOST_CALC] Rigid transform calculation failed - falling back to barycentric")
-                    // Fall through to PRIORITY 2
+            // Get current session positions for vertices (these are our "anchor points")
+            var currentVertexPositions: [Int: simd_float3] = [:]
+            for (index, vertexMapPoint) in vertexMapPoints.enumerated() {
+                if let currentPos = mapPointARPositions[vertexMapPoint.id] {
+                    currentVertexPositions[index] = currentPos
                 }
+            }
+            
+            // For each session where target has a position, attempt to build a transform
+            var alignedCandidates: [(position: simd_float3, confidence: Float)] = []
+            
+            for targetRecord in targetHistory {
+                let sessionID = targetRecord.sessionID
+                
+                // Check if this session has positions for 2+ vertices that we also have in current session
+                guard let vertexRecords = vertexHistoryBySession[sessionID] else {
+                    print("   ⏭️ Session \(String(sessionID.uuidString.prefix(8))): no vertex positions")
+                    continue
+                }
+                
+                // Find vertices that have BOTH historical (this session) AND current positions
+                var correspondences: [(historical: simd_float3, current: simd_float3)] = []
+                for vertexRecord in vertexRecords {
+                    if let currentPos = currentVertexPositions[vertexRecord.vertexIndex] {
+                        correspondences.append((historical: vertexRecord.position, current: currentPos))
+                    }
+                }
+                
+                guard correspondences.count >= 2 else {
+                    print("   ⏭️ Session \(String(sessionID.uuidString.prefix(8))): only \(correspondences.count) correspondence(s), need 2")
+                    continue
+                }
+                
+                // Compute rigid transform from historical session to current session
+                guard let transform = calculate2PointRigidTransform(
+                    oldPoints: (correspondences[0].historical, correspondences[1].historical),
+                    newPoints: (correspondences[0].current, correspondences[1].current)
+                ) else {
+                    print("   ⚠️ Session \(String(sessionID.uuidString.prefix(8))): transform calculation failed")
+                    continue
+                }
+                
+                // Verify transform quality
+                let cosR = cos(transform.rotationY)
+                let sinR = sin(transform.rotationY)
+                let rotatedHistorical1 = simd_float3(
+                    correspondences[1].historical.x * cosR - correspondences[1].historical.z * sinR,
+                    correspondences[1].historical.y,
+                    correspondences[1].historical.x * sinR + correspondences[1].historical.z * cosR
+                )
+                let transformedHistorical1 = rotatedHistorical1 + transform.translation
+                let verificationError = simd_distance(transformedHistorical1, correspondences[1].current)
+                
+                if verificationError > 0.5 {
+                    print("   ⚠️ Session \(String(sessionID.uuidString.prefix(8))): verification error \(String(format: "%.2f", verificationError))m > 0.5m threshold, skipping")
+                    continue
+                }
+                
+                // Apply transform to target's position from this session
+                let transformedPosition = applyRigidTransform(
+                    position: targetRecord.position,
+                    rotationY: transform.rotationY,
+                    translation: transform.translation
+                )
+                
+                print("   ✅ Session \(String(sessionID.uuidString.prefix(8))): transformed to (\(String(format: "%.2f", transformedPosition.x)), \(String(format: "%.2f", transformedPosition.y)), \(String(format: "%.2f", transformedPosition.z))) [error: \(String(format: "%.2f", verificationError))m]")
+                
+                alignedCandidates.append((position: transformedPosition, confidence: targetRecord.confidenceScore))
+            }
+            
+            // If we have aligned candidates, compute weighted average
+            if !alignedCandidates.isEmpty {
+                var weightedSum = simd_float3(0, 0, 0)
+                var totalWeight: Float = 0
+                
+                for candidate in alignedCandidates {
+                    weightedSum += candidate.position * candidate.confidence
+                    totalWeight += candidate.confidence
+                }
+                
+                let alignedConsensus = weightedSum / totalWeight
+                print("👻 [GHOST_CALC] Session-aligned consensus from \(alignedCandidates.count) session(s): (\(String(format: "%.2f", alignedConsensus.x)), \(String(format: "%.2f", alignedConsensus.y)), \(String(format: "%.2f", alignedConsensus.z)))")
+                
+                return alignedConsensus
             } else {
-                print("📐 [GHOST_CALC] Only \(correspondences.count) correspondence(s) - need 2 for transform, using barycentric")
-                // Fall through to PRIORITY 2
+                print("📐 [GHOST_CALC] No sessions could be aligned - falling back to barycentric")
             }
         } else {
-            print("📐 [GHOST_CALC] No consensus for target MapPoint \(String(mapPoint.id.uuidString.prefix(8))) - using barycentric")
-            // Fall through to PRIORITY 2
+            print("📐 [GHOST_CALC] No history for target MapPoint \(String(mapPoint.id.uuidString.prefix(8))) - using barycentric")
         }
         
         // PRIORITY 2: Barycentric interpolation from current session data (existing code follows)
