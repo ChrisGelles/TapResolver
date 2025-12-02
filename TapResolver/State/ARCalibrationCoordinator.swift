@@ -1541,6 +1541,10 @@ final class ARCalibrationCoordinator: ObservableObject {
         sessionCalibratedTriangles.insert(adjacentTriangle.id)
         print("✅ [ADJACENT_ACTIVATE] Added \(String(adjacentTriangle.id.uuidString.prefix(8))) to sessionCalibratedTriangles (now \(sessionCalibratedTriangles.count) triangle(s))")
         
+        // CRITICAL: Persist calibration to storage (mirrors finalizeCalibration behavior)
+        triangleStore.markCalibrated(adjacentTriangle.id, quality: 1.0)
+        print("💾 [ADJACENT_ACTIVATE] Persisted calibration for triangle \(String(adjacentTriangle.id.uuidString.prefix(8)))")
+        
         // Update status
         statusText = "Triangle calibrated via crawl"
         progressDots = (true, true, true)
