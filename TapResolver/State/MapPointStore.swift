@@ -711,6 +711,36 @@ public final class MapPointStore: ObservableObject {
         // saveARMarkers()  // AR Markers no longer persisted
     }
     
+    /// Purges all AR position history from MapPoints for the current location
+    /// This resets the consensus position calculations while preserving 2D map coordinates
+    func purgeARPositionHistory() {
+        print("================================================================================")
+        print("🧹 PURGE AR POSITION HISTORY")
+        print("================================================================================")
+        print("📍 Location: '\(ctx.locationID)'")
+        print("📊 MapPoints to purge: \(points.count)")
+        
+        var totalRecordsPurged = 0
+        
+        for i in points.indices {
+            let recordCount = points[i].arPositionHistory.count
+            if recordCount > 0 {
+                print("   🗑️ \(String(points[i].id.uuidString.prefix(8))): purging \(recordCount) position record(s)")
+                totalRecordsPurged += recordCount
+                points[i].arPositionHistory = []
+            }
+        }
+        
+        save()
+        
+        print("================================================================================")
+        print("✅ Purged \(totalRecordsPurged) AR position record(s) from \(points.count) MapPoint(s)")
+        print("   2D map coordinates preserved")
+        print("   Triangle structure preserved")
+        print("   Ready for fresh calibration")
+        print("================================================================================")
+    }
+    
     // MARK: - Photo Management
     
     /// Purge all photo assets for current location

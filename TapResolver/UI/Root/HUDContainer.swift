@@ -1056,6 +1056,8 @@ private struct DebugSettingsPanel: View {
     @State private var showingPurgePhotosAlert = false
     @State private var showOrphanPurgeConfirmation = false
     @State private var showOrphanPurgeResult = false
+    @State private var showingPurgeARHistoryAlert = false
+    @State private var showingFullResetAlert = false
     @State private var orphanPurgeResultMessage = ""
     
     var body: some View {
@@ -1157,6 +1159,40 @@ private struct DebugSettingsPanel: View {
                         }
                         .buttonStyle(.plain)
                         
+                        // Purge AR Position History Button
+                        Button {
+                            showingPurgeARHistoryAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "trash.circle")
+                                    .font(.system(size: 24))
+                                Text("Purge AR History")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Full Reset Button (Soft Reset + Purge History)
+                        Button {
+                            showingFullResetAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "arrow.counterclockwise.circle.fill")
+                                    .font(.system(size: 24))
+                                Text("Full Reset")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
                         // Photo Purge Button
                         Button {
                             showingPurgePhotosAlert = true
@@ -1221,6 +1257,29 @@ private struct DebugSettingsPanel: View {
         } message: {
             let location = locationManager.currentLocationID
             Text("This will delete all \(mapPointStore.points.count) photo assets for location '\(location)'. This cannot be undone.")
+        }
+        .alert("Purge AR Position History?", isPresented: $showingPurgeARHistoryAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Purge History", role: .destructive) {
+                mapPointStore.purgeARPositionHistory()
+            }
+        } message: {
+            let location = locationManager.currentLocationID ?? "unknown"
+            let totalRecords = mapPointStore.points.reduce(0) { $0 + $1.arPositionHistory.count }
+            Text("This will purge all \(totalRecords) AR position record(s) from \(mapPointStore.points.count) MapPoint(s) for location '\(location)'.\n\n2D map coordinates and triangle structure will be preserved.\nConsensus positions will be reset.")
+        }
+        .alert("Full Reset (Calibration + History)?", isPresented: $showingFullResetAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Full Reset", role: .destructive) {
+                // First do soft reset
+                performSoftReset()
+                // Then purge position history
+                mapPointStore.purgeARPositionHistory()
+                print("🔄 Full Reset Complete: Calibration data cleared + AR history purged")
+            }
+        } message: {
+            let location = locationManager.currentLocationID ?? "unknown"
+            Text("This will:\n1. Clear all calibration data (Soft Reset)\n2. Purge all AR position history\n\nFor location '\(location)'.\n\n2D map coordinates and triangle structure will be preserved.\nThis cannot be undone.")
         }
         .alert("Purge Orphaned Triangles?", isPresented: $showOrphanPurgeConfirmation) {
             Button("Cancel", role: .cancel) { }
