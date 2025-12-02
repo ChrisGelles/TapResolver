@@ -226,6 +226,10 @@ final class ARCalibrationCoordinator: ObservableObject {
     }
     
     func startCalibration(for triangleID: UUID) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        print("🚀 [CALIBRATION] startCalibration() BEGIN: \(formatter.string(from: Date()))")
+        
         guard let triangle = triangleStore.triangle(withID: triangleID) else {
             print("❌ Cannot start calibration: Triangle \(triangleID) not found")
             return
@@ -294,80 +298,110 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         print("🎯 ARCalibrationCoordinator: Starting calibration for triangle \(String(triangleID.uuidString.prefix(8)))")
         
+        print("🚀 [CALIBRATION] startCalibration() ready for markers: \(formatter.string(from: Date()))")
+        
         // Preload historical position data for fast ghost calculations
-        preloadHistoricalPositions(mapPointStore: mapStore)
+        preloadHistoricalPositions()
     }
     
     /// Builds an indexed lookup of historical positions by session
     /// Called at AR session start to avoid iteration during ghost calculation
-    private func preloadHistoricalPositions(mapPointStore: MapPointStore) {
+    private func preloadHistoricalPositions() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        let startTime = Date()
+        print("📦 [PRELOAD] Position History Start: \(formatter.string(from: startTime))")
+        
         historicalPositionsBySession.removeAll()
         historicalSessionIDs.removeAll()
         
         var totalRecords = 0
         
-        for point in mapPointStore.points {
-            for record in point.arPositionHistory {
-                historicalPositionsBySession[record.sessionID, default: [:]][point.id] = record.position
-                historicalSessionIDs.insert(record.sessionID)
+        for mapPoint in mapStore.points {
+            for record in mapPoint.arPositionHistory {
+                let sessionID = record.sessionID
+                historicalSessionIDs.insert(sessionID)
+                
+                if historicalPositionsBySession[sessionID] == nil {
+                    historicalPositionsBySession[sessionID] = [:]
+                }
+                historicalPositionsBySession[sessionID]![mapPoint.id] = record.position
                 totalRecords += 1
             }
         }
         
-        print("📦 [PRELOAD] Built position index:")
+        let endTime = Date()
+        let duration = endTime.timeIntervalSince(startTime) * 1000 // milliseconds
+        print("📦 [PRELOAD] Position History Complete: \(formatter.string(from: endTime))")
+        print("📦 [PRELOAD] Duration: \(String(format: "%.1f", duration))ms")
+        print("📦 [PRELOAD] Summary:")
         print("   Sessions: \(historicalSessionIDs.count)")
         print("   Total position records: \(totalRecords)")
-        
-        // Log per-session summary
-        for sessionID in historicalSessionIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
-            let pointCount = historicalPositionsBySession[sessionID]?.count ?? 0
-            print("   📍 Session \(String(sessionID.uuidString.prefix(8))): \(pointCount) MapPoint(s)")
+        for (sessionID, mapPoints) in historicalPositionsBySession {
+            print("   📍 Session \(String(sessionID.uuidString.prefix(8))): \(mapPoints.count) MapPoint(s)")
         }
     }
     
-    /// Renders white sphere markers at historical session origins in current coordinate frame
-    /// Called after computing rigid transforms to show where past sessions' (0,0,0) maps to
-    func renderSessionOrigin(
-        sessionID: UUID,
-        translation: simd_float3,
-        rotationY: Float,
-        in sceneView: ARSCNView
-    ) {
-        // Remove existing marker for this session if any
-        sessionOriginNodes[sessionID]?.removeFromParentNode()
+    // MARK: - Session Origin Visualization
+    
+    private func renderSessionOrigin(sessionID: UUID, origin: simd_float3, in sceneView: ARSCNView) {
+        // Skip if already rendered
+        guard sessionOriginNodes[sessionID] == nil else { return }
         
-        // The translation component of a rigid transform IS the historical origin
-        // in current coordinates (since rotate(0,0,0) + translation = translation)
-        let originPosition = SCNVector3(translation.x, translation.y, translation.z)
+        let axisLength: Float = 0.15  // 0.15m in each direction = 0.3m total
+        let axisThickness: CGFloat = 0.005
+        let opacity: CGFloat = 0.8
         
-        // Create white sphere
-        let sphere = SCNSphere(radius: 0.03)
-        sphere.firstMaterial?.diffuse.contents = UIColor.white.withAlphaComponent(0.8)
-        sphere.firstMaterial?.emission.contents = UIColor.white.withAlphaComponent(0.3)
+        let parentNode = SCNNode()
+        parentNode.position = SCNVector3(origin.x, origin.y, origin.z)
         
-        let originNode = SCNNode(geometry: sphere)
-        originNode.position = originPosition
-        originNode.name = "sessionOrigin_\(sessionID.uuidString)"
+        // White material
+        let material = SCNMaterial()
+        material.diffuse.contents = UIColor.white.withAlphaComponent(opacity)
+        material.lightingModel = .constant
         
-        // Add floating label with session ID
+        // X axis line
+        let xGeometry = SCNBox(width: CGFloat(axisLength * 2), height: axisThickness, length: axisThickness, chamferRadius: 0)
+        xGeometry.materials = [material]
+        let xNode = SCNNode(geometry: xGeometry)
+        parentNode.addChildNode(xNode)
+        
+        // Y axis line
+        let yGeometry = SCNBox(width: axisThickness, height: CGFloat(axisLength * 2), length: axisThickness, chamferRadius: 0)
+        yGeometry.materials = [material]
+        let yNode = SCNNode(geometry: yGeometry)
+        parentNode.addChildNode(yNode)
+        
+        // Z axis line
+        let zGeometry = SCNBox(width: axisThickness, height: axisThickness, length: CGFloat(axisLength * 2), chamferRadius: 0)
+        zGeometry.materials = [material]
+        let zNode = SCNNode(geometry: zGeometry)
+        parentNode.addChildNode(zNode)
+        
+        // Session ID label above Y axis
         let labelNode = createSessionLabel(sessionID: sessionID)
-        labelNode.position = SCNVector3(0, 0.06, 0) // Above the sphere
-        originNode.addChildNode(labelNode)
+        labelNode.position = SCNVector3(0, axisLength + 0.03, 0)  // Above the Y axis
+        parentNode.addChildNode(labelNode)
         
-        sceneView.scene.rootNode.addChildNode(originNode)
-        sessionOriginNodes[sessionID] = originNode
+        sceneView.scene.rootNode.addChildNode(parentNode)
+        sessionOriginNodes[sessionID] = parentNode
         
-        print("🔮 [SESSION_ORIGIN] Rendered origin for session \(String(sessionID.uuidString.prefix(8))) at (\(String(format: "%.2f", translation.x)), \(String(format: "%.2f", translation.y)), \(String(format: "%.2f", translation.z)))")
+        print("🎯 [SESSION_ORIGIN] Rendered origin for session \(String(sessionID.uuidString.prefix(6))) at (\(String(format: "%.2f", origin.x)), \(String(format: "%.2f", origin.y)), \(String(format: "%.2f", origin.z)))")
     }
     
     private func createSessionLabel(sessionID: UUID) -> SCNNode {
-        let text = SCNText(string: String(sessionID.uuidString.prefix(8)), extrusionDepth: 0.5)
-        text.font = UIFont.systemFont(ofSize: 3, weight: .medium)
-        text.firstMaterial?.diffuse.contents = UIColor.white
+        let labelText = String(sessionID.uuidString.prefix(6))
+        
+        let text = SCNText(string: labelText, extrusionDepth: 0.001)
+        text.font = UIFont.monospacedSystemFont(ofSize: 0.02, weight: .medium)
         text.flatness = 0.1
         
+        let material = SCNMaterial()
+        material.diffuse.contents = UIColor.white.withAlphaComponent(0.8)
+        material.lightingModel = .constant
+        text.materials = [material]
+        
         let textNode = SCNNode(geometry: text)
-        textNode.scale = SCNVector3(0.005, 0.005, 0.005)
         
         // Center the text
         let (min, max) = text.boundingBox
@@ -377,7 +411,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             0
         )
         
-        // Make text face camera (billboard constraint)
+        // Billboard constraint - always face camera
         let billboardConstraint = SCNBillboardConstraint()
         billboardConstraint.freeAxes = .all
         textNode.constraints = [billboardConstraint]
@@ -385,13 +419,12 @@ final class ARCalibrationCoordinator: ObservableObject {
         return textNode
     }
     
-    /// Clears all session origin markers from the scene
     func clearSessionOriginMarkers() {
-        for (_, node) in sessionOriginNodes {
+        for (sessionID, node) in sessionOriginNodes {
             node.removeFromParentNode()
+            print("🧹 [SESSION_ORIGIN] Cleared origin marker for session \(String(sessionID.uuidString.prefix(6)))")
         }
         sessionOriginNodes.removeAll()
-        print("🧹 [SESSION_ORIGIN] Cleared all session origin markers")
     }
     
     // MARK: - Legacy Compatibility Methods
@@ -430,6 +463,11 @@ final class ARCalibrationCoordinator: ObservableObject {
     }
     
     func registerMarker(mapPointID: UUID, marker: ARMarker, sourceType: SourceType = .calibration, distortionVector: simd_float3? = nil) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        let registerStartTime = Date()
+        print("📍 [REGISTER] BEGIN: \(formatter.string(from: registerStartTime)) - MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+        
         // MARK: Photo verification on marker placement
         print("📍 registerMarker called for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
         if let mapPoint = mapStore.points.first(where: { $0.id == mapPointID }) {
@@ -633,7 +671,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             }
         }
         
-        // DIAGNOSTIC: Log placement accuracy
+        // Placement accuracy diagnostic
         if let coordinator = ARViewContainer.Coordinator.current,
            let ghostNode = coordinator.ghostMarkers[mapPointID] {
             let expectedPosition = ghostNode.simdPosition
@@ -643,6 +681,10 @@ final class ARCalibrationCoordinator: ObservableObject {
             print("   Expected: (\(String(format: "%.2f", expectedPosition.x)), \(String(format: "%.2f", expectedPosition.y)), \(String(format: "%.2f", expectedPosition.z)))")
             print("   Actual:   (\(String(format: "%.2f", actualPosition.x)), \(String(format: "%.2f", actualPosition.y)), \(String(format: "%.2f", actualPosition.z)))")
         }
+        
+        let registerEndTime = Date()
+        let registerDuration = registerEndTime.timeIntervalSince(registerStartTime) * 1000
+        print("📍 [REGISTER] END: \(formatter.string(from: registerEndTime)) (duration: \(String(format: "%.1f", registerDuration))ms)")
     }
     
     /// Calculate 3D AR position for a MapPoint using barycentric interpolation from a calibrated triangle
@@ -653,10 +695,17 @@ final class ARCalibrationCoordinator: ObservableObject {
         mapPointStore: MapPointStore,
         arWorldMapStore: ARWorldMapStore
     ) -> simd_float3? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        let calcStartTime = Date()
+        print("👻 [GHOST_CALC] BEGIN: \(formatter.string(from: calcStartTime))")
         
         // Re-fetch triangle to ensure we have the latest arMarkerIDs (fixes stale struct issue)
         guard let calibratedTriangle = triangleStore.triangles.first(where: { $0.id == calibratedTriangleID }) else {
             print("⚠️ [GHOST_CALC] Could not find triangle \(String(calibratedTriangleID.uuidString.prefix(8)))")
+            let calcEndTime = Date()
+            let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
+            print("👻 [GHOST_CALC] END: \(formatter.string(from: calcEndTime)) (duration: \(String(format: "%.1f", calcDuration))ms) - FAILED")
             return nil
         }
         
@@ -665,12 +714,18 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Validate all marker IDs are populated
         guard calibratedTriangle.arMarkerIDs.allSatisfy({ !$0.isEmpty }) else {
             print("⚠️ [GHOST_CALC] Incomplete marker ID list: \(calibratedTriangle.arMarkerIDs)")
+            let calcEndTime = Date()
+            let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
+            print("👻 [GHOST_CALC] END: \(formatter.string(from: calcEndTime)) (duration: \(String(format: "%.1f", calcDuration))ms) - FAILED")
             return nil
         }
         
         // STEP 1: Get triangle's 3 vertex MapPoints (2D positions)
         guard calibratedTriangle.vertexIDs.count == 3 else {
             print("⚠️ [GHOST_CALC] Triangle has invalid vertex count: \(calibratedTriangle.vertexIDs.count)")
+            let calcEndTime = Date()
+            let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
+            print("👻 [GHOST_CALC] END: \(formatter.string(from: calcEndTime)) (duration: \(String(format: "%.1f", calcDuration))ms) - FAILED")
             return nil
         }
         
@@ -680,6 +735,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         guard vertexMapPoints.count == 3 else {
             print("⚠️ [GHOST_CALC] Could not find all 3 vertex MapPoints")
+            let calcEndTime = Date()
+            let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
+            print("👻 [GHOST_CALC] END: \(formatter.string(from: calcEndTime)) (duration: \(String(format: "%.1f", calcDuration))ms) - FAILED")
             return nil
         }
         
@@ -697,6 +755,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         let denom = v0.x * v1.y - v1.x * v0.y
         guard abs(denom) > 0.001 else {
             print("⚠️ [GHOST_CALC] Degenerate triangle - vertices are collinear")
+            let calcEndTime = Date()
+            let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
+            print("👻 [GHOST_CALC] END: \(formatter.string(from: calcEndTime)) (duration: \(String(format: "%.1f", calcDuration))ms) - FAILED")
             return nil
         }
         
@@ -783,10 +844,10 @@ final class ARCalibrationCoordinator: ObservableObject {
                     continue
                 }
                 
-                // Render this session's origin in AR for debugging
-                // Note: We need a reference to sceneView - this will be added via parameter
-                // For now, just log the origin position
-                print("   🔮 Session \(String(sessionID.uuidString.prefix(8))) origin in current frame: (\(String(format: "%.2f", transform.translation.x)), \(String(format: "%.2f", transform.translation.y)), \(String(format: "%.2f", transform.translation.z)))")
+                // Render session origin in AR (translation = historical origin in current coordinates)
+                // TODO: Render session origin - needs ARSCNView reference
+                // renderSessionOrigin(sessionID: sessionID, origin: transform.translation, in: sceneView)
+                print("🎯 [SESSION_ORIGIN] Session \(String(sessionID.uuidString.prefix(6))) origin at (\(String(format: "%.2f", transform.translation.x)), \(String(format: "%.2f", transform.translation.y)), \(String(format: "%.2f", transform.translation.z)))")
                 
                 // Apply transform to target's position from this session
                 let transformedPosition = applyRigidTransform(
@@ -812,6 +873,10 @@ final class ARCalibrationCoordinator: ObservableObject {
                 
                 let alignedConsensus = weightedSum / totalWeight
                 print("👻 [GHOST_CALC] Session-aligned consensus from \(alignedCandidates.count) session(s): (\(String(format: "%.2f", alignedConsensus.x)), \(String(format: "%.2f", alignedConsensus.y)), \(String(format: "%.2f", alignedConsensus.z)))")
+                
+                let calcEndTime = Date()
+                let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
+                print("👻 [GHOST_CALC] END: \(formatter.string(from: calcEndTime)) (duration: \(String(format: "%.1f", calcDuration))ms)")
                 
                 return alignedConsensus
             } else {
@@ -898,6 +963,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Final check: do we have 3 positions?
         guard vertexPositions.count == 3 else {
             print("⚠️ [GHOST_CALC] Could not find all 3 vertex positions from any source")
+            let calcEndTime = Date()
+            let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
+            print("👻 [GHOST_CALC] END: \(formatter.string(from: calcEndTime)) (duration: \(String(format: "%.1f", calcDuration))ms) - FAILED")
             return nil
         }
         
@@ -913,6 +981,10 @@ final class ARCalibrationCoordinator: ObservableObject {
         )
         
         print("👻 [GHOST_CALC] Calculated ghost position: (\(String(format: "%.2f", ghostPosition.x)), \(String(format: "%.2f", ghostPosition.y)), \(String(format: "%.2f", ghostPosition.z)))")
+        
+        let calcEndTime = Date()
+        let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
+        print("👻 [GHOST_CALC] END: \(formatter.string(from: calcEndTime)) (duration: \(String(format: "%.1f", calcDuration))ms)")
         
         return ghostPosition
     }
