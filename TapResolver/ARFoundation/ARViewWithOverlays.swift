@@ -189,8 +189,11 @@ struct ARViewWithOverlays: View {
                 print("   targetMapPointID: \(String(targetMapPointID.uuidString.prefix(8)))")
                 print("   isGhostConfirm: \(isGhostConfirm)")
                 
-                // CRITICAL SAFETY CHECK: Block if not in placing vertices state (unless ghost confirm)
-                if !isGhostConfirm {
+                // Check if this is a reposition operation
+                let isRepositioning = pendingRepositionMapPointID != nil || arCalibrationCoordinator.activeRepositionMapPointID == targetMapPointID
+                
+                // CRITICAL SAFETY CHECK: Block if not in placing vertices state (unless ghost confirm or repositioning)
+                if !isGhostConfirm && !isRepositioning {
                 guard case .placingVertices = arCalibrationCoordinator.calibrationState else {
                     print("⚠️ [REGISTER_MARKER_TRACE] CRITICAL: registerMarker called outside placingVertices state!")
                     print("   Current state: \(arCalibrationCoordinator.stateDescription)")
@@ -252,7 +255,16 @@ struct ARViewWithOverlays: View {
                 )
                 
                 // Determine source type based on ghost interaction
-                let sourceType: SourceType = isGhostConfirm ? .ghostConfirm : .calibration
+                // Determine source type: ghostConfirm, reposition (ghostAdjust), or normal calibration
+                let sourceType: SourceType
+                if isGhostConfirm {
+                    sourceType = .ghostConfirm
+                } else if isRepositioning {
+                    sourceType = .ghostAdjust  // Reposition is a manual adjustment of ghost position
+                    print("📍 [REGISTER] Accepting repositioned marker for MapPoint \(String(targetMapPointID.uuidString.prefix(8)))")
+                } else {
+                    sourceType = .calibration
+                }
                 
                 // Register with coordinator
                 arCalibrationCoordinator.registerMarker(
@@ -731,6 +743,7 @@ struct ARViewWithOverlays: View {
                                 
                                 // Store the target MapPoint ID for the upcoming marker placement
                                 pendingRepositionMapPointID = ghostID
+                                arCalibrationCoordinator.activeRepositionMapPointID = ghostID
                                 
                                 // Remove the ghost marker from the scene
                                 NotificationCenter.default.post(

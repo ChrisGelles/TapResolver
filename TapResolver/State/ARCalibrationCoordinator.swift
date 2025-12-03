@@ -65,6 +65,9 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Estimated position of the selected ghost (for distortion calculation)
     @Published var selectedGhostEstimatedPosition: simd_float3? = nil
     
+    /// MapPoint ID currently being repositioned (ghost was removed, awaiting new placement)
+    var activeRepositionMapPointID: UUID? = nil
+    
     /// Ghost marker that is nearby (<2m) but not visible in camera view
     /// When set, UI should show "Unconfirmed Marker Nearby" instead of action buttons
     @Published var nearbyButNotVisibleGhostID: UUID? = nil
@@ -478,15 +481,40 @@ final class ARCalibrationCoordinator: ObservableObject {
             }
         }
         
-        guard let triangleID = activeTriangleID,
-              let triangle = triangleStore.triangle(withID: triangleID) else {
-            print("❌ Cannot register marker: No active triangle")
-            return
+        // For reposition, we might not have an active triangle (placing marker for adjacent triangle vertex)
+        // In that case, we'll find which triangle contains this MapPoint
+        let triangleID: UUID?
+        let triangle: TrianglePatch?
+        
+        if let repositionID = activeRepositionMapPointID, repositionID == mapPointID {
+            // Reposition mode - find triangle containing this MapPoint
+            triangleID = triangleStore.triangles.first(where: { $0.vertexIDs.contains(mapPointID) })?.id
+            triangle = triangleID != nil ? triangleStore.triangle(withID: triangleID!) : nil
+            if triangleID == nil {
+                print("⚠️ [REGISTER] Reposition mode - MapPoint \(String(mapPointID.uuidString.prefix(8))) not found in any triangle")
+            } else {
+                print("📍 [REGISTER] Reposition mode - MapPoint \(String(mapPointID.uuidString.prefix(8))) found in triangle \(String(triangleID!.uuidString.prefix(8)))")
+            }
+        } else {
+            // Normal mode - require active triangle
+            guard let activeID = activeTriangleID,
+                  let activeTriangle = triangleStore.triangle(withID: activeID) else {
+                print("❌ Cannot register marker: No active triangle")
+                return
+            }
+            triangleID = activeID
+            triangle = activeTriangle
+            
+            // Validate this mapPointID is a vertex of the active triangle
+            guard triangle!.vertexIDs.contains(mapPointID) else {
+                print("❌ MapPoint \(String(mapPointID.uuidString.prefix(8))) is not a vertex of triangle \(String(triangleID!.uuidString.prefix(8)))")
+                return
+            }
         }
         
-        // Validate this mapPointID is a vertex of the active triangle
-        guard triangle.vertexIDs.contains(mapPointID) else {
-            print("❌ MapPoint \(String(mapPointID.uuidString.prefix(8))) is not a vertex of triangle \(String(triangleID.uuidString.prefix(8)))")
+        // Ensure we have a valid triangle for marker storage
+        guard let finalTriangleID = triangleID, let finalTriangle = triangle else {
+            print("❌ Cannot register marker: No valid triangle found")
             return
         }
         
@@ -573,7 +601,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // Update triangle with marker ID
         triangleStore.addMarkerToTriangle(
-            triangleID: triangleID,
+            triangleID: finalTriangleID,
             vertexMapPointID: mapPointID,
             markerID: marker.id
         )
@@ -659,7 +687,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("✅ ARCalibrationCoordinator: Registered marker for MapPoint \(String(mapPointID.uuidString.prefix(8))) (\(count)/3)")
         
         if placedMarkers.count == 3 {
-            finalizeCalibration(for: triangle)
+            finalizeCalibration(for: finalTriangle)
             calibrationState = .readyToFill
             print("🎯 CalibrationState → \(stateDescription)")
             print("✅ Calibration complete. Triangle ready to fill.")
@@ -680,6 +708,49 @@ final class ARCalibrationCoordinator: ObservableObject {
             print("📏 [PLACEMENT_ACCURACY] Marker \(String(mapPointID.uuidString.prefix(8))) placed \(String(format: "%.2f", delta))m from expected ghost location")
             print("   Expected: (\(String(format: "%.2f", expectedPosition.x)), \(String(format: "%.2f", expectedPosition.y)), \(String(format: "%.2f", expectedPosition.z)))")
             print("   Actual:   (\(String(format: "%.2f", actualPosition.x)), \(String(format: "%.2f", actualPosition.y)), \(String(format: "%.2f", actualPosition.z)))")
+        }
+        
+        // Clear reposition flag if this was a reposition
+        if activeRepositionMapPointID == mapPointID {
+            print("✅ [REPOSITION] Completed reposition for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            activeRepositionMapPointID = nil
+            
+            // Store position in session cache so it can be used for ghost calculations
+            mapPointARPositions[mapPointID] = marker.arPosition
+            print("📍 [REPOSITION] Stored position in mapPointARPositions for \(String(mapPointID.uuidString.prefix(8)))")
+            
+            // Continue the crawl by activating adjacent triangles
+            // Find which triangle this MapPoint belongs to that could be activated
+            let trianglesContainingPoint = triangleStore.triangles.filter { $0.vertexIDs.contains(mapPointID) }
+            
+            for candidateTriangle in trianglesContainingPoint {
+                // Skip if already calibrated in this session
+                if sessionCalibratedTriangles.contains(candidateTriangle.id) {
+                    continue
+                }
+                
+                // Check if this triangle now has all 3 vertices with AR positions
+                let verticesWithPositions = candidateTriangle.vertexIDs.filter { mapPointARPositions[$0] != nil }
+                if verticesWithPositions.count == 3 {
+                    print("🔗 [REPOSITION_ACTIVATE] Triangle \(String(candidateTriangle.id.uuidString.prefix(8))) now has all 3 vertices - activating")
+                    
+                    // Add to session calibrated set
+                    sessionCalibratedTriangles.insert(candidateTriangle.id)
+                    
+                    // Mark as calibrated
+                    triangleStore.markCalibrated(candidateTriangle.id, quality: 1.0)
+                    
+                    // Plant ghosts for adjacent triangles
+                    plantGhostsForAdjacentTriangles(
+                        calibratedTriangle: candidateTriangle,
+                        triangleStore: triangleStore,
+                        mapPointStore: mapStore,
+                        arWorldMapStore: arStore
+                    )
+                    
+                    print("✅ [REPOSITION_ACTIVATE] Activated triangle \(String(candidateTriangle.id.uuidString.prefix(8))) and planted adjacent ghosts")
+                }
+            }
         }
         
         let registerEndTime = Date()

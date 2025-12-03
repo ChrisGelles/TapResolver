@@ -113,8 +113,6 @@ private struct MapCanvas: View {
                 )
             }
             
-            print("MapCanvas mapTransform:", ObjectIdentifier(mapTransform),
-                  "mapSize:", mapTransform.mapSize)
         }
 
         // Apply transforms (scale → rotate → translate)
@@ -165,6 +163,12 @@ private struct MapCanvas: View {
             .onChange(of: mapSize)               {
                 transformProcessor.setMapSize(mapSize)
                 pushTransformTotals()
+                
+                // Only print when we have a valid size
+                if mapSize.width > 0 && mapSize.height > 0 {
+                    print("MapCanvas mapTransform:", ObjectIdentifier(mapTransform),
+                          "mapSize:", mapTransform.mapSize)
+                }
             }
     }
 
