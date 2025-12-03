@@ -745,6 +745,20 @@ struct ARViewWithOverlays: View {
                                 pendingRepositionMapPointID = ghostID
                                 arCalibrationCoordinator.activeRepositionMapPointID = ghostID
                                 
+                                // CRAWL CONTEXT PRESERVATION: Check if we're in crawl mode
+                                // Same conditions as onPlaceMarker uses for crawl detection
+                                if case .readyToFill = arCalibrationCoordinator.calibrationState,
+                                   let currentTriangleID = arCalibrationCoordinator.activeTriangleID {
+                                    print("🔄 [GHOST_REPOSITION] Crawl mode detected - preserving context")
+                                    print("   Source Triangle: \(String(currentTriangleID.uuidString.prefix(8)))")
+                                    arCalibrationCoordinator.repositionSourceTriangleID = currentTriangleID
+                                    arCalibrationCoordinator.isRepositionInCrawlMode = true
+                                } else {
+                                    print("🔄 [GHOST_REPOSITION] Not in crawl mode - standard reposition")
+                                    arCalibrationCoordinator.repositionSourceTriangleID = nil
+                                    arCalibrationCoordinator.isRepositionInCrawlMode = false
+                                }
+                                
                                 // Remove the ghost marker from the scene
                                 NotificationCenter.default.post(
                                     name: NSNotification.Name("RemoveGhostMarker"),

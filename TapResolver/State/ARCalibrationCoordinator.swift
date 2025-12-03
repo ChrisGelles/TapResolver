@@ -68,6 +68,12 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// MapPoint ID currently being repositioned (ghost was removed, awaiting new placement)
     var activeRepositionMapPointID: UUID? = nil
     
+    /// Source triangle ID for reposition in crawl mode (the triangle we just finished calibrating)
+    var repositionSourceTriangleID: UUID? = nil
+    
+    /// Whether the current reposition operation is part of a calibration crawl
+    var isRepositionInCrawlMode: Bool = false
+    
     /// Ghost marker that is nearby (<2m) but not visible in camera view
     /// When set, UI should show "Unconfirmed Marker Nearby" instead of action buttons
     @Published var nearbyButNotVisibleGhostID: UUID? = nil
@@ -713,44 +719,35 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Clear reposition flag if this was a reposition
         if activeRepositionMapPointID == mapPointID {
             print("✅ [REPOSITION] Completed reposition for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
-            activeRepositionMapPointID = nil
             
             // Store position in session cache so it can be used for ghost calculations
             mapPointARPositions[mapPointID] = marker.arPosition
             print("📍 [REPOSITION] Stored position in mapPointARPositions for \(String(mapPointID.uuidString.prefix(8)))")
             
-            // Continue the crawl by activating adjacent triangles
-            // Find which triangle this MapPoint belongs to that could be activated
-            let trianglesContainingPoint = triangleStore.triangles.filter { $0.vertexIDs.contains(mapPointID) }
-            
-            for candidateTriangle in trianglesContainingPoint {
-                // Skip if already calibrated in this session
-                if sessionCalibratedTriangles.contains(candidateTriangle.id) {
-                    continue
-                }
+            // Check if this reposition was part of a crawl - use preserved context
+            if isRepositionInCrawlMode, let sourceTriangleID = repositionSourceTriangleID {
+                print("🔗 [REPOSITION_CRAWL] Continuing crawl from source triangle \(String(sourceTriangleID.uuidString.prefix(8)))")
                 
-                // Check if this triangle now has all 3 vertices with AR positions
-                let verticesWithPositions = candidateTriangle.vertexIDs.filter { mapPointARPositions[$0] != nil }
-                if verticesWithPositions.count == 3 {
-                    print("🔗 [REPOSITION_ACTIVATE] Triangle \(String(candidateTriangle.id.uuidString.prefix(8))) now has all 3 vertices - activating")
-                    
-                    // Add to session calibrated set
-                    sessionCalibratedTriangles.insert(candidateTriangle.id)
-                    
-                    // Mark as calibrated
-                    triangleStore.markCalibrated(candidateTriangle.id, quality: 1.0)
-                    
-                    // Plant ghosts for adjacent triangles
-                    plantGhostsForAdjacentTriangles(
-                        calibratedTriangle: candidateTriangle,
-                        triangleStore: triangleStore,
-                        mapPointStore: mapStore,
-                        arWorldMapStore: arStore
-                    )
-                    
-                    print("✅ [REPOSITION_ACTIVATE] Activated triangle \(String(candidateTriangle.id.uuidString.prefix(8))) and planted adjacent ghosts")
+                // Use the existing activateAdjacentTriangle function with preserved context
+                // This is the same function that works correctly for Button 1 and Button 2
+                if let activatedID = activateAdjacentTriangle(
+                    ghostMapPointID: mapPointID,
+                    ghostPosition: marker.arPosition,
+                    currentTriangleID: sourceTriangleID,
+                    wasAdjusted: true  // Reposition is always an adjustment
+                ) {
+                    print("✅ [REPOSITION_CRAWL] Successfully activated adjacent triangle \(String(activatedID.uuidString.prefix(8)))")
+                } else {
+                    print("⚠️ [REPOSITION_CRAWL] Could not find adjacent triangle to activate")
                 }
+            } else {
+                print("📍 [REPOSITION] Standard reposition complete (not in crawl mode)")
             }
+            
+            // Clear all reposition flags
+            activeRepositionMapPointID = nil
+            repositionSourceTriangleID = nil
+            isRepositionInCrawlMode = false
         }
         
         let registerEndTime = Date()
@@ -1757,6 +1754,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         completedMarkerCount = 0
         lastPrintedVertexIndex = nil  // Reset print tracking
         calibrationState = .idle
+        activeRepositionMapPointID = nil
+        repositionSourceTriangleID = nil
+        isRepositionInCrawlMode = false
         selectedGhostMapPointID = nil
         selectedGhostEstimatedPosition = nil
         nearbyButNotVisibleGhostID = nil
