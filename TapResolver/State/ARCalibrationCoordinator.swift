@@ -493,14 +493,14 @@ final class ARCalibrationCoordinator: ObservableObject {
         let triangle: TrianglePatch?
         
         if let repositionID = activeRepositionMapPointID, repositionID == mapPointID {
-            // Reposition mode - find triangle containing this MapPoint
+            // Reposition mode - find any triangle containing this MapPoint (for guard check only)
+            // The actual update will be handled by updateAllTrianglesContainingVertex() with preferred triangle logic
             triangleID = triangleStore.triangles.first(where: { $0.vertexIDs.contains(mapPointID) })?.id
             triangle = triangleID != nil ? triangleStore.triangle(withID: triangleID!) : nil
             if triangleID == nil {
                 print("⚠️ [REGISTER] Reposition mode - MapPoint \(String(mapPointID.uuidString.prefix(8))) not found in any triangle")
-            } else {
-                print("📍 [REGISTER] Reposition mode - MapPoint \(String(mapPointID.uuidString.prefix(8))) found in triangle \(String(triangleID!.uuidString.prefix(8)))")
             }
+            // Note: Preferred triangle determination happens later in the update section
         } else {
             // Normal mode - require active triangle
             guard let activeID = activeTriangleID,
@@ -605,12 +605,41 @@ final class ARCalibrationCoordinator: ObservableObject {
             return
         }
         
-        // Update triangle with marker ID
-        triangleStore.addMarkerToTriangle(
-            triangleID: finalTriangleID,
-            vertexMapPointID: mapPointID,
-            markerID: marker.id
+        // Update ALL triangles containing this MapPoint (handles shared vertices)
+        // Determine preferred triangle based on context
+        let preferredTriangleID: UUID?
+        if activeRepositionMapPointID == mapPointID {
+            // Reposition mode - determine preferred triangle
+            if case .placingVertices = calibrationState {
+                preferredTriangleID = activeTriangleID
+                print("📍 [REGISTER] Reposition during placingVertices - primary triangle: \(String(activeTriangleID?.uuidString.prefix(8) ?? "nil"))")
+            } else if isRepositionInCrawlMode, let sourceTriangle = repositionSourceTriangleID {
+                preferredTriangleID = sourceTriangle
+                print("📍 [REGISTER] Reposition during crawl - primary triangle: \(String(sourceTriangle.uuidString.prefix(8)))")
+            } else {
+                preferredTriangleID = nil
+                print("📍 [REGISTER] Reposition with no preferred triangle - will use first match")
+            }
+        } else {
+            // Normal placement - use activeTriangleID as preferred
+            preferredTriangleID = activeTriangleID
+        }
+        
+        // Update all triangles and get primary triangle
+        let updatedPrimaryTriangle = updateAllTrianglesContainingVertex(
+            mapPointID: mapPointID,
+            markerID: marker.id,
+            preferredTriangleID: preferredTriangleID
         )
+        
+        // Update finalTriangle reference to primary triangle for completion checks
+        if let primary = updatedPrimaryTriangle {
+            // Update finalTriangleID and finalTriangle for subsequent code
+            // Note: We can't reassign finalTriangleID/finalTriangle directly, but we'll use primary.id where needed
+            if let index = primary.vertexIDs.firstIndex(of: mapPointID) {
+                print("✅ Added marker \(String(marker.id.uuidString.prefix(8))) to triangle \(String(primary.id.uuidString.prefix(8))) vertex \(index)")
+            }
+        }
         
         // Track placed marker
         placedMarkers.append(mapPointID)
@@ -693,7 +722,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("✅ ARCalibrationCoordinator: Registered marker for MapPoint \(String(mapPointID.uuidString.prefix(8))) (\(count)/3)")
         
         if placedMarkers.count == 3 {
-            finalizeCalibration(for: finalTriangle)
+            // Use primary triangle for completion check (handles shared vertices correctly)
+            let triangleForCompletion = updatedPrimaryTriangle ?? finalTriangle
+            finalizeCalibration(for: triangleForCompletion)
             calibrationState = .readyToFill
             print("🎯 CalibrationState → \(stateDescription)")
             print("✅ Calibration complete. Triangle ready to fill.")
@@ -718,6 +749,11 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // Clear reposition flag if this was a reposition
         if activeRepositionMapPointID == mapPointID {
+            print("🔍 [REPOSITION_COMPLETE_DEBUG] Reposition completed for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            print("   isRepositionInCrawlMode: \(isRepositionInCrawlMode)")
+            print("   repositionSourceTriangleID: \(String(describing: repositionSourceTriangleID?.uuidString.prefix(8)))")
+            print("   Will attempt crawl continuation: \(isRepositionInCrawlMode && repositionSourceTriangleID != nil)")
+            
             print("✅ [REPOSITION] Completed reposition for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
             
             // Store position in session cache so it can be used for ghost calculations
@@ -755,6 +791,62 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("📍 [REGISTER] END: \(formatter.string(from: registerEndTime)) (duration: \(String(format: "%.1f", registerDuration))ms)")
     }
     
+    // MARK: - Shared Vertex Helper
+    
+    /// Updates arMarkerIDs for ALL triangles containing the specified MapPoint.
+    /// Returns the primary triangle (preferredTriangleID if found, otherwise first match).
+    /// - Parameters:
+    ///   - mapPointID: The MapPoint that was marked
+    ///   - markerID: The AR marker ID to record
+    ///   - preferredTriangleID: Optional triangle ID to prioritize (e.g., activeTriangleID)
+    /// - Returns: The primary triangle that was updated, or nil if no triangle contains this MapPoint
+    private func updateAllTrianglesContainingVertex(
+        mapPointID: UUID,
+        markerID: UUID,
+        preferredTriangleID: UUID?
+    ) -> TrianglePatch? {
+        // Find ALL triangles containing this MapPoint
+        let matchingTriangles = triangleStore.triangles.filter { $0.vertexIDs.contains(mapPointID) }
+        
+        guard !matchingTriangles.isEmpty else {
+            print("⚠️ [SHARED_VERTEX] No triangles contain MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            return nil
+        }
+        
+        // Determine which triangle is "primary" (for calibration completion checks)
+        let primaryTriangle: TrianglePatch
+        if let preferredID = preferredTriangleID,
+           let preferred = matchingTriangles.first(where: { $0.id == preferredID }) {
+            primaryTriangle = preferred
+        } else {
+            primaryTriangle = matchingTriangles[0]
+        }
+        
+        print("📐 [SHARED_VERTEX] Updating \(matchingTriangles.count) triangle(s) for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+        print("   Primary triangle: \(String(primaryTriangle.id.uuidString.prefix(8)))")
+        
+        // Update ALL matching triangles
+        for triangle in matchingTriangles {
+            guard let vertexIndex = triangle.vertexIDs.firstIndex(of: mapPointID) else { continue }
+            
+            // Use the existing addMarkerToTriangle method which handles array sizing
+            triangleStore.addMarkerToTriangle(
+                triangleID: triangle.id,
+                vertexMapPointID: mapPointID,
+                markerID: markerID
+            )
+            
+            let isPrimary = triangle.id == primaryTriangle.id
+            print("   \(isPrimary ? "★" : "○") Triangle \(String(triangle.id.uuidString.prefix(8))) vertex \(vertexIndex) → marker \(String(markerID.uuidString.prefix(8)))")
+        }
+        
+        // Note: save() is already called by addMarkerToTriangle() for each triangle
+        // No need to call save() again here
+        
+        // Return fresh copy of primary triangle
+        return triangleStore.triangles.first(where: { $0.id == primaryTriangle.id })
+    }
+    
     /// Calculate 3D AR position for a MapPoint using barycentric interpolation from a calibrated triangle
     private func calculateGhostPosition(
         mapPoint: MapPointStore.MapPoint,
@@ -779,13 +871,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         print("🔍 [GHOST_CALC] Fresh triangle fetch - arMarkerIDs: \(calibratedTriangle.arMarkerIDs)")
         
-        // Validate all marker IDs are populated
-        guard calibratedTriangle.arMarkerIDs.allSatisfy({ !$0.isEmpty }) else {
-            print("⚠️ [GHOST_CALC] Incomplete marker ID list: \(calibratedTriangle.arMarkerIDs)")
-            let calcEndTime = Date()
-            let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
-            print("👻 [GHOST_CALC] END: \(formatter.string(from: calcEndTime)) (duration: \(String(format: "%.1f", calcDuration))ms) - FAILED")
-            return nil
+        // Validate all marker IDs are populated - log warning but don't block (will fall back to mapPointARPositions)
+        if !calibratedTriangle.arMarkerIDs.allSatisfy({ !$0.isEmpty }) {
+            print("⚠️ [GHOST_CALC] Incomplete marker ID list: \(calibratedTriangle.arMarkerIDs) - will attempt fallback to mapPointARPositions")
         }
         
         // STEP 1: Get triangle's 3 vertex MapPoints (2D positions)
@@ -1205,6 +1293,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         mapPointStore: MapPointStore,
         arWorldMapStore: ARWorldMapStore
     ) {
+        print("🔍 [PLANT_GHOSTS_DEBUG] Function called for triangle \(String(calibratedTriangle.id.uuidString.prefix(8)))")
+        print("   Triangle vertices: \(calibratedTriangle.vertexIDs.map { String($0.uuidString.prefix(8)) })")
+        
         print("🔍 [GHOST_PLANT] Finding adjacent triangles to \(String(calibratedTriangle.id.uuidString.prefix(8)))")
         
         // STEP 1: Find triangles sharing an edge with calibrated triangle (REUSE existing function)
@@ -1786,6 +1877,11 @@ final class ARCalibrationCoordinator: ObservableObject {
         currentTriangleID: UUID,
         wasAdjusted: Bool = false
     ) -> UUID? {
+        print("🔍 [ACTIVATE_ADJACENT_DEBUG] Function called with:")
+        print("   ghostMapPointID: \(String(ghostMapPointID.uuidString.prefix(8)))")
+        print("   currentTriangleID: \(String(currentTriangleID.uuidString.prefix(8)))")
+        print("   wasAdjusted: \(wasAdjusted)")
+        
         print("🔗 [ADJACENT_ACTIVATE] Starting adjacent triangle activation")
         print("   Ghost MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
         print("   Ghost Position: (\(String(format: "%.2f", ghostPosition.x)), \(String(format: "%.2f", ghostPosition.y)), \(String(format: "%.2f", ghostPosition.z)))")

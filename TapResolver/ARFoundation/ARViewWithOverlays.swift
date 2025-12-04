@@ -768,6 +768,11 @@ struct ARViewWithOverlays: View {
                                 
                                 // Clear ghost selection to hide the interaction buttons
                                 arCalibrationCoordinator.selectedGhostMapPointID = nil
+                                
+                                print("🔍 [REPOSITION_DEBUG] Context captured:")
+                                print("   repositionSourceTriangleID: \(String(describing: arCalibrationCoordinator.repositionSourceTriangleID?.uuidString.prefix(8)))")
+                                print("   isRepositionInCrawlMode: \(arCalibrationCoordinator.isRepositionInCrawlMode)")
+                                print("   activeRepositionMapPointID: \(String(describing: arCalibrationCoordinator.activeRepositionMapPointID?.uuidString.prefix(8)))")
                             }
                         )
                         .padding(.bottom, 40)
