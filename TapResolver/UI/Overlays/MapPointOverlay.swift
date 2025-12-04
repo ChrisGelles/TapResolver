@@ -17,8 +17,8 @@ struct MapPointOverlay: View {
 
     var body: some View {
         ZStack {
-            // Only show map points when the drawer is open
-            if hud.isMapPointOpen {
+            // Show map points when the drawer is open OR when creating triangles
+            if hud.isMapPointOpen || triangleStore.isCreatingTriangle {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)  // Never intercept taps - let points handle everything
@@ -29,6 +29,7 @@ struct MapPointOverlay: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: hud.isMapPointOpen)
+        .animation(.easeInOut(duration: 0.25), value: triangleStore.isCreatingTriangle)
     }
     
     // MARK: - Single draggable map point subview

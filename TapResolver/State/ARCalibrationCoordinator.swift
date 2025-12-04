@@ -65,18 +65,13 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Estimated position of the selected ghost (for distortion calculation)
     @Published var selectedGhostEstimatedPosition: simd_float3? = nil
     
-    /// MapPoint ID currently being repositioned (ghost was removed, awaiting new placement)
-    var activeRepositionMapPointID: UUID? = nil
-    
-    /// Source triangle ID for reposition in crawl mode (the triangle we just finished calibrating)
-    var repositionSourceTriangleID: UUID? = nil
-    
-    /// Whether the current reposition operation is part of a calibration crawl
-    var isRepositionInCrawlMode: Bool = false
-    
     /// Ghost marker that is nearby (<2m) but not visible in camera view
     /// When set, UI should show "Unconfirmed Marker Nearby" instead of action buttons
     @Published var nearbyButNotVisibleGhostID: UUID? = nil
+    
+    /// When true, ghost selection is preserved even when user walks away from the ghost
+    /// This allows the user to reposition a marker at any distance from the original ghost location
+    @Published var repositionModeActive: Bool = false
     
     // Legacy compatibility properties
     @Published var isActive: Bool = false
@@ -487,35 +482,23 @@ final class ARCalibrationCoordinator: ObservableObject {
             }
         }
         
-        // For reposition, we might not have an active triangle (placing marker for adjacent triangle vertex)
-        // In that case, we'll find which triangle contains this MapPoint
+        // Find which triangle contains this MapPoint
         let triangleID: UUID?
         let triangle: TrianglePatch?
         
-        if let repositionID = activeRepositionMapPointID, repositionID == mapPointID {
-            // Reposition mode - find any triangle containing this MapPoint (for guard check only)
-            // The actual update will be handled by updateAllTrianglesContainingVertex() with preferred triangle logic
-            triangleID = triangleStore.triangles.first(where: { $0.vertexIDs.contains(mapPointID) })?.id
-            triangle = triangleID != nil ? triangleStore.triangle(withID: triangleID!) : nil
-            if triangleID == nil {
-                print("⚠️ [REGISTER] Reposition mode - MapPoint \(String(mapPointID.uuidString.prefix(8))) not found in any triangle")
-            }
-            // Note: Preferred triangle determination happens later in the update section
-        } else {
-            // Normal mode - require active triangle
-            guard let activeID = activeTriangleID,
-                  let activeTriangle = triangleStore.triangle(withID: activeID) else {
-                print("❌ Cannot register marker: No active triangle")
-                return
-            }
-            triangleID = activeID
-            triangle = activeTriangle
-            
-            // Validate this mapPointID is a vertex of the active triangle
-            guard triangle!.vertexIDs.contains(mapPointID) else {
-                print("❌ MapPoint \(String(mapPointID.uuidString.prefix(8))) is not a vertex of triangle \(String(triangleID!.uuidString.prefix(8)))")
-                return
-            }
+        // Normal mode - require active triangle
+        guard let activeID = activeTriangleID,
+              let activeTriangle = triangleStore.triangle(withID: activeID) else {
+            print("❌ Cannot register marker: No active triangle")
+            return
+        }
+        triangleID = activeID
+        triangle = activeTriangle
+        
+        // Validate this mapPointID is a vertex of the active triangle
+        guard triangle!.vertexIDs.contains(mapPointID) else {
+            print("❌ MapPoint \(String(mapPointID.uuidString.prefix(8))) is not a vertex of triangle \(String(triangleID!.uuidString.prefix(8)))")
+            return
         }
         
         // Ensure we have a valid triangle for marker storage
@@ -607,23 +590,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // Update ALL triangles containing this MapPoint (handles shared vertices)
         // Determine preferred triangle based on context
-        let preferredTriangleID: UUID?
-        if activeRepositionMapPointID == mapPointID {
-            // Reposition mode - determine preferred triangle
-            if case .placingVertices = calibrationState {
-                preferredTriangleID = activeTriangleID
-                print("📍 [REGISTER] Reposition during placingVertices - primary triangle: \(String(activeTriangleID?.uuidString.prefix(8) ?? "nil"))")
-            } else if isRepositionInCrawlMode, let sourceTriangle = repositionSourceTriangleID {
-                preferredTriangleID = sourceTriangle
-                print("📍 [REGISTER] Reposition during crawl - primary triangle: \(String(sourceTriangle.uuidString.prefix(8)))")
-            } else {
-                preferredTriangleID = nil
-                print("📍 [REGISTER] Reposition with no preferred triangle - will use first match")
-            }
-        } else {
-            // Normal placement - use activeTriangleID as preferred
-            preferredTriangleID = activeTriangleID
-        }
+        // Normal placement - use activeTriangleID as preferred
+        var preferredTriangleID: UUID? = activeTriangleID
         
         // Update all triangles and get primary triangle
         let updatedPrimaryTriangle = updateAllTrianglesContainingVertex(
@@ -745,45 +713,6 @@ final class ARCalibrationCoordinator: ObservableObject {
             print("📏 [PLACEMENT_ACCURACY] Marker \(String(mapPointID.uuidString.prefix(8))) placed \(String(format: "%.2f", delta))m from expected ghost location")
             print("   Expected: (\(String(format: "%.2f", expectedPosition.x)), \(String(format: "%.2f", expectedPosition.y)), \(String(format: "%.2f", expectedPosition.z)))")
             print("   Actual:   (\(String(format: "%.2f", actualPosition.x)), \(String(format: "%.2f", actualPosition.y)), \(String(format: "%.2f", actualPosition.z)))")
-        }
-        
-        // Clear reposition flag if this was a reposition
-        if activeRepositionMapPointID == mapPointID {
-            print("🔍 [REPOSITION_COMPLETE_DEBUG] Reposition completed for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
-            print("   isRepositionInCrawlMode: \(isRepositionInCrawlMode)")
-            print("   repositionSourceTriangleID: \(String(describing: repositionSourceTriangleID?.uuidString.prefix(8)))")
-            print("   Will attempt crawl continuation: \(isRepositionInCrawlMode && repositionSourceTriangleID != nil)")
-            
-            print("✅ [REPOSITION] Completed reposition for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
-            
-            // Store position in session cache so it can be used for ghost calculations
-            mapPointARPositions[mapPointID] = marker.arPosition
-            print("📍 [REPOSITION] Stored position in mapPointARPositions for \(String(mapPointID.uuidString.prefix(8)))")
-            
-            // Check if this reposition was part of a crawl - use preserved context
-            if isRepositionInCrawlMode, let sourceTriangleID = repositionSourceTriangleID {
-                print("🔗 [REPOSITION_CRAWL] Continuing crawl from source triangle \(String(sourceTriangleID.uuidString.prefix(8)))")
-                
-                // Use the existing activateAdjacentTriangle function with preserved context
-                // This is the same function that works correctly for Button 1 and Button 2
-                if let activatedID = activateAdjacentTriangle(
-                    ghostMapPointID: mapPointID,
-                    ghostPosition: marker.arPosition,
-                    currentTriangleID: sourceTriangleID,
-                    wasAdjusted: true  // Reposition is always an adjustment
-                ) {
-                    print("✅ [REPOSITION_CRAWL] Successfully activated adjacent triangle \(String(activatedID.uuidString.prefix(8)))")
-                } else {
-                    print("⚠️ [REPOSITION_CRAWL] Could not find adjacent triangle to activate")
-                }
-            } else {
-                print("📍 [REPOSITION] Standard reposition complete (not in crawl mode)")
-            }
-            
-            // Clear all reposition flags
-            activeRepositionMapPointID = nil
-            repositionSourceTriangleID = nil
-            isRepositionInCrawlMode = false
         }
         
         let registerEndTime = Date()
@@ -1845,12 +1774,10 @@ final class ARCalibrationCoordinator: ObservableObject {
         completedMarkerCount = 0
         lastPrintedVertexIndex = nil  // Reset print tracking
         calibrationState = .idle
-        activeRepositionMapPointID = nil
-        repositionSourceTriangleID = nil
-        isRepositionInCrawlMode = false
         selectedGhostMapPointID = nil
         selectedGhostEstimatedPosition = nil
         nearbyButNotVisibleGhostID = nil
+        repositionModeActive = false
         print("🎯 CalibrationState → \(stateDescription) (reset)")
         print("🔄 ARCalibrationCoordinator: Reset complete - all markers cleared")
     }
@@ -2062,6 +1989,12 @@ final class ARCalibrationCoordinator: ObservableObject {
         ghostPositions: [UUID: simd_float3],
         visibleGhostIDs: Set<UUID>? = nil
     ) {
+        // If in reposition mode, preserve the current selection
+        // User can walk away from ghost but it stays "selected" until they place a marker
+        if repositionModeActive {
+            return
+        }
+        
         let proximityThreshold: Float = 2.0
         
         // Only process during active calibration states where ghosts may be visible

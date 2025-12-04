@@ -118,7 +118,7 @@ public enum MapPointRole: String, Codable, CaseIterable, Identifiable {
         case .triangleEdge: return "triangle"
         case .featureMarker: return "mappin.circle"
         case .directionalNorth: return "location.north.fill"
-        case .directionalSouth: return "location.south.fill"
+        case .directionalSouth: return "s.circle.fill"
         }
     }
     

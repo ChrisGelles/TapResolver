@@ -36,8 +36,6 @@ struct ARViewWithOverlays: View {
     @State private var warningDistance: Float = 0
     @State private var warningMapPointID: UUID? = nil
     
-    // Track MapPoint ID when user taps "Reposition Marker" - next placed marker targets this MapPoint
-    @State private var pendingRepositionMapPointID: UUID? = nil
     
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
@@ -167,14 +165,9 @@ struct ARViewWithOverlays: View {
                     return
                 }
                 
-                // Determine target MapPoint - reposition takes priority
+                // Determine target MapPoint
                 let targetMapPointID: UUID
-                if let repositionID = pendingRepositionMapPointID {
-                    // User tapped "Reposition Marker" - this marker replaces that ghost
-                    print("🔄 [GHOST_REPOSITION] Marker placed for repositioned MapPoint \(String(repositionID.uuidString.prefix(8)))")
-                    targetMapPointID = repositionID
-                    pendingRepositionMapPointID = nil  // Clear the pending state
-                } else if isGhostConfirm, let ghostID = ghostMapPointID {
+                if isGhostConfirm, let ghostID = ghostMapPointID {
                     targetMapPointID = ghostID
                 } else {
                 guard let currentVertexID = arCalibrationCoordinator.getCurrentVertexID() else {
@@ -189,11 +182,8 @@ struct ARViewWithOverlays: View {
                 print("   targetMapPointID: \(String(targetMapPointID.uuidString.prefix(8)))")
                 print("   isGhostConfirm: \(isGhostConfirm)")
                 
-                // Check if this is a reposition operation
-                let isRepositioning = pendingRepositionMapPointID != nil || arCalibrationCoordinator.activeRepositionMapPointID == targetMapPointID
-                
-                // CRITICAL SAFETY CHECK: Block if not in placing vertices state (unless ghost confirm or repositioning)
-                if !isGhostConfirm && !isRepositioning {
+                // CRITICAL SAFETY CHECK: Block if not in placing vertices state (unless ghost confirm)
+                if !isGhostConfirm {
                 guard case .placingVertices = arCalibrationCoordinator.calibrationState else {
                     print("⚠️ [REGISTER_MARKER_TRACE] CRITICAL: registerMarker called outside placingVertices state!")
                     print("   Current state: \(arCalibrationCoordinator.stateDescription)")
@@ -254,17 +244,10 @@ struct ARViewWithOverlays: View {
                     isAnchor: false
                 )
                 
-                // Determine source type based on ghost interaction
-                // Determine source type: ghostConfirm, reposition (ghostAdjust), or normal calibration
-                let sourceType: SourceType
-                if isGhostConfirm {
-                    sourceType = .ghostConfirm
-                } else if isRepositioning {
-                    sourceType = .ghostAdjust  // Reposition is a manual adjustment of ghost position
-                    print("📍 [REGISTER] Accepting repositioned marker for MapPoint \(String(targetMapPointID.uuidString.prefix(8)))")
-                } else {
-                    sourceType = .calibration
-                }
+                // Determine source type: ghostConfirm or normal calibration
+                // Ghost adjustments (including reposition) go through the same path as normal calibration
+                // because they use getCurrentVertexID() which returns the correct MapPoint
+                let sourceType: SourceType = isGhostConfirm ? .ghostConfirm : .calibration
                 
                 // Register with coordinator
                 arCalibrationCoordinator.registerMarker(
@@ -618,7 +601,7 @@ struct ARViewWithOverlays: View {
                     // Show ghost interaction buttons only when:
                     // - A ghost is selected AND
                     // - We're not in reposition mode (waiting for free placement)
-                    if shouldShowGhostButtons && pendingRepositionMapPointID == nil {
+                    if shouldShowGhostButtons {
                         GhostInteractionButtons(
                             arCalibrationCoordinator: arCalibrationCoordinator,
                             onConfirmGhost: {
@@ -703,6 +686,9 @@ struct ARViewWithOverlays: View {
                                             "currentTriangleID": currentTriangleID
                                         ]
                                     )
+                                    
+                                    // Clear reposition mode if it was active
+                                    arCalibrationCoordinator.repositionModeActive = false
                                 } else if case .placingVertices = arCalibrationCoordinator.calibrationState,
                                           let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID {
                                     // 3rd vertex ghost adjustment - if ANY ghost is selected during vertex placement, remove it
@@ -724,6 +710,9 @@ struct ARViewWithOverlays: View {
                                         name: NSNotification.Name("PlaceMarkerAtCursor"),
                                         object: nil
                                     )
+                                    
+                                    // Clear reposition mode if it was active
+                                    arCalibrationCoordinator.repositionModeActive = false
                                 } else {
                                     // Normal crosshair placement (not crawl mode, not 3rd vertex adjust)
                                     NotificationCenter.default.post(
@@ -733,52 +722,23 @@ struct ARViewWithOverlays: View {
                                 }
                             },
                             onReposition: {
-                                // Remove ghost and enter standard placement mode for this MapPoint
                                 guard let ghostID = arCalibrationCoordinator.selectedGhostMapPointID else {
                                     print("⚠️ [GHOST_REPOSITION] No ghost selected for reposition")
                                     return
                                 }
                                 
-                                print("🔄 [GHOST_REPOSITION] Starting reposition for MapPoint \(String(ghostID.uuidString.prefix(8)))")
+                                print("🔄 [GHOST_REPOSITION] Entering reposition mode for MapPoint \(String(ghostID.uuidString.prefix(8)))")
+                                print("   Ghost stays in scene, selection stays active")
+                                print("   User can walk to correct position and tap 'Place Marker to Adjust'")
                                 
-                                // Store the target MapPoint ID for the upcoming marker placement
-                                pendingRepositionMapPointID = ghostID
-                                arCalibrationCoordinator.activeRepositionMapPointID = ghostID
-                                
-                                // CRAWL CONTEXT PRESERVATION: Check if we're in crawl mode
-                                // Same conditions as onPlaceMarker uses for crawl detection
-                                if case .readyToFill = arCalibrationCoordinator.calibrationState,
-                                   let currentTriangleID = arCalibrationCoordinator.activeTriangleID {
-                                    print("🔄 [GHOST_REPOSITION] Crawl mode detected - preserving context")
-                                    print("   Source Triangle: \(String(currentTriangleID.uuidString.prefix(8)))")
-                                    arCalibrationCoordinator.repositionSourceTriangleID = currentTriangleID
-                                    arCalibrationCoordinator.isRepositionInCrawlMode = true
-                                } else {
-                                    print("🔄 [GHOST_REPOSITION] Not in crawl mode - standard reposition")
-                                    arCalibrationCoordinator.repositionSourceTriangleID = nil
-                                    arCalibrationCoordinator.isRepositionInCrawlMode = false
-                                }
-                                
-                                // Remove the ghost marker from the scene
-                                NotificationCenter.default.post(
-                                    name: NSNotification.Name("RemoveGhostMarker"),
-                                    object: nil,
-                                    userInfo: ["mapPointID": ghostID]
-                                )
-                                
-                                // Clear ghost selection to hide the interaction buttons
-                                arCalibrationCoordinator.selectedGhostMapPointID = nil
-                                
-                                print("🔍 [REPOSITION_DEBUG] Context captured:")
-                                print("   repositionSourceTriangleID: \(String(describing: arCalibrationCoordinator.repositionSourceTriangleID?.uuidString.prefix(8)))")
-                                print("   isRepositionInCrawlMode: \(arCalibrationCoordinator.isRepositionInCrawlMode)")
-                                print("   activeRepositionMapPointID: \(String(describing: arCalibrationCoordinator.activeRepositionMapPointID?.uuidString.prefix(8)))")
+                                // Simply enable reposition mode - keep ghost in scene, keep selection
+                                // This bypasses the proximity/in-frame requirement in updateGhostSelection()
+                                arCalibrationCoordinator.repositionModeActive = true
                             }
                         )
                         .padding(.bottom, 40)
-                    } else if shouldShowGhostButtons || pendingRepositionMapPointID != nil {
-                        // Show standard "Place Marker" button when reposition is pending
-                        // or when we should show buttons but ghost interaction buttons are hidden
+                    } else if shouldShowGhostButtons {
+                        // Show standard "Place Marker" button when we should show buttons but ghost interaction buttons are hidden
                         Button(action: {
                             print("🔍 [PLACE_MARKER_BTN] Button tapped")
                             NotificationCenter.default.post(
