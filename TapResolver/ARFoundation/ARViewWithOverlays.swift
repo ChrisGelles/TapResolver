@@ -1196,7 +1196,7 @@ struct ARPiPMapView: View {
             if followUserInPiPMap, let userPos = userMapPosition {
                 // Follow user position during crawl mode
                 print("📍 [PIP_TRANSFORM] Following user at (\(String(format: "%.0f", userPos.x)), \(String(format: "%.0f", userPos.y)))")
-                let focused = PiPMapTransform.focused(on: userPos, imageSize: imageSize, frameSize: frameSize, targetZoom: 12.0)
+                let focused = PiPMapTransform.focused(on: userPos, imageSize: imageSize, frameSize: frameSize, targetZoom: 8.0)
                 return (focused.scale, focused.offset)
             } else if let triangle = selectedTriangle,
            triangle.vertexIDs.count == 3 {
@@ -1694,71 +1694,81 @@ struct ARPiPMapView: View {
             userMapPosition = projectedPosition
             // Share position with coordinator for proximity-based triangle selection
             arCalibrationCoordinator.updateUserPosition(projectedPosition)
+            
+            // DIAGNOSTIC: Log user position and triangle containment once per second
+            print("📍 [USER_POSITION] User is at (\(String(format: "%.1f", projectedPosition.x)), \(String(format: "%.1f", projectedPosition.y))) on the Map")
+            
+            // Check which calibrated triangle contains the user (if any)
+            let containingTriangle = findContainingTriangle(mapPosition: projectedPosition)
+            if let triangleID = containingTriangle {
+                print("📍 [USER_POSITION] User is within Triangle \(String(triangleID.uuidString.prefix(8)))")
+            } else {
+                print("📍 [USER_POSITION] User is not within a calibrated Triangle")
+            }
+        } else {
+            print("📍 [USER_POSITION] Could not project AR position to map")
         }
     }
     
-    /// Project AR world position to 2D map coordinates using placed markers
+    /// Project AR world position to 2D map coordinates using session-calibrated triangle data
     private func projectARPositionToMap(arPosition: simd_float3) -> CGPoint? {
-        guard let triangle = selectedTriangle else {
+        let sessionTriangles = arCalibrationCoordinator.sessionCalibratedTriangles
+        let mapPointPositions = arCalibrationCoordinator.mapPointARPositions
+        let triangleStore = arCalibrationCoordinator.triangleStore
+        
+        // Need at least one calibrated triangle with position data
+        guard !sessionTriangles.isEmpty, !mapPointPositions.isEmpty else {
             return nil
         }
         
-        let arStore = arCalibrationCoordinator.arStore
-        
-        // Get placed markers for this triangle
-        let placedMarkerMapPointIDs = arCalibrationCoordinator.placedMarkers
-        guard placedMarkerMapPointIDs.count >= 2 else {
-            // Need at least 2 markers for projection
-            return nil
-        }
-        
-        // Collect AR world positions and corresponding 2D map positions
-        var arPositions: [simd_float3] = []
-        var mapPositions: [CGPoint] = []
-        
-        for mapPointID in placedMarkerMapPointIDs {
-            // Find AR marker linked to this mapPointID
-            // Look through triangle's arMarkerIDs to find the marker
-            for markerIDString in triangle.arMarkerIDs {
-                guard let markerUUID = UUID(uuidString: markerIDString),
-                      let arMarker = arStore.marker(withID: markerUUID),
-                      arMarker.mapPointID == mapPointID.uuidString,
-                      let mapPoint = mapPointStore.points.first(where: { $0.id == mapPointID }) else {
-                    continue
+        // Find a triangle where we have AR positions for all 3 vertices
+        for triangleID in sessionTriangles {
+            guard let triangle = triangleStore.triangle(withID: triangleID),
+                  triangle.vertexIDs.count == 3 else { continue }
+            
+            // Collect AR positions and map positions for this triangle's vertices
+            var arPositions: [simd_float3] = []
+            var mapPositions: [CGPoint] = []
+            
+            for vertexID in triangle.vertexIDs {
+                guard let arPos = mapPointPositions[vertexID],
+                      let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }) else {
+                    break
                 }
-                
-                // Extract AR position from transform
-                let transform = arMarker.worldTransform.toSimd()
-                let arPos = simd_float3(
-                    transform.columns.3.x,
-                    transform.columns.3.y,
-                    transform.columns.3.z
-                )
                 arPositions.append(arPos)
                 mapPositions.append(mapPoint.mapPoint)
-                break // Found marker for this mapPointID
+            }
+            
+            // If we have all 3 vertices, use this triangle for projection
+            if arPositions.count == 3 && mapPositions.count == 3 {
+                return projectUsingBarycentric(
+                    userARPos: arPosition,
+                    arPositions: arPositions,
+                    mapPositions: mapPositions
+                )
             }
         }
         
-        guard arPositions.count >= 2 else {
-            return nil
+        // Fallback: try to use any 2 vertices we have positions for
+        var arPositions: [simd_float3] = []
+        var mapPositions: [CGPoint] = []
+        
+        for (vertexID, arPos) in mapPointPositions {
+            guard let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }) else { continue }
+            arPositions.append(arPos)
+            mapPositions.append(mapPoint.mapPoint)
+            if arPositions.count >= 2 { break }
         }
         
-        // Use barycentric interpolation for 3 points, or linear interpolation for 2 points
-        if arPositions.count == 3 {
-            return projectUsingBarycentric(
-                userARPos: arPosition,
-                arPositions: arPositions,
-                mapPositions: mapPositions
-            )
-        } else {
-            // Linear interpolation using 2 points
+        if arPositions.count >= 2 {
             return projectUsingLinear(
                 userARPos: arPosition,
                 arPositions: Array(arPositions.prefix(2)),
                 mapPositions: Array(mapPositions.prefix(2))
             )
         }
+        
+        return nil
     }
     
     /// Project using barycentric coordinates (for 3 points)
@@ -1847,6 +1857,51 @@ struct ARPiPMapView: View {
         let mapY = map0.y + tCGFloat * deltaY
         
         return CGPoint(x: mapX, y: mapY)
+    }
+    
+    /// Find which session-calibrated triangle contains the given map position
+    /// Returns nil if position is outside all calibrated triangles
+    private func findContainingTriangle(mapPosition: CGPoint) -> UUID? {
+        let triangleStore = arCalibrationCoordinator.triangleStore
+        let sessionTriangles = arCalibrationCoordinator.sessionCalibratedTriangles
+        
+        for triangleID in sessionTriangles {
+            guard let triangle = triangleStore.triangle(withID: triangleID) else { continue }
+            
+            // Get vertex 2D positions
+            let vertexPositions = triangle.vertexIDs.compactMap { vertexID -> CGPoint? in
+                mapPointStore.points.first { $0.id == vertexID }?.mapPoint
+            }
+            
+            guard vertexPositions.count == 3 else { continue }
+            
+            // Check if point is inside triangle using barycentric method
+            if pointInTriangle(mapPosition, vertices: vertexPositions) {
+                return triangleID
+            }
+        }
+        
+        return nil
+    }
+    
+    /// Check if point p is inside triangle defined by vertices (barycentric method)
+    private func pointInTriangle(_ p: CGPoint, vertices: [CGPoint]) -> Bool {
+        guard vertices.count == 3 else { return false }
+        
+        let v0 = vertices[0]
+        let v1 = vertices[1]
+        let v2 = vertices[2]
+        
+        let denom = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y)
+        guard abs(denom) > 0.0001 else { return false }
+        
+        let a = ((v1.y - v2.y) * (p.x - v2.x) + (v2.x - v1.x) * (p.y - v2.y)) / denom
+        let b = ((v2.y - v0.y) * (p.x - v2.x) + (v0.x - v2.x) * (p.y - v2.y)) / denom
+        let c = 1 - a - b
+        
+        // Point is inside if all barycentric coordinates are non-negative (with small epsilon)
+        let epsilon: CGFloat = -0.001
+        return a >= epsilon && b >= epsilon && c >= epsilon
     }
 }
 

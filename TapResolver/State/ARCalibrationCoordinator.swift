@@ -41,7 +41,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     private var sessionMarkerPositions: [String: simd_float3] = [:]
     
     /// Maps MapPoint ID to AR position for current session (for ghost calculation)
-    private var mapPointARPositions: [UUID: simd_float3] = [:]
+    var mapPointARPositions: [UUID: simd_float3] = [:]
     
     // MARK: - Preloaded Historical Position Index
     
