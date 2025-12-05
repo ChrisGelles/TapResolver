@@ -37,6 +37,7 @@ private struct MapCanvas: View {
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var transformProcessor: TransformProcessor
     @EnvironmentObject private var metricSquares: MetricSquareStore
+    @EnvironmentObject private var hud: HUDPanelsState
 
     let uiImage: UIImage
 
@@ -66,7 +67,7 @@ private struct MapCanvas: View {
             // >>> INSERTED: MetricSquaresOverlay between dots (z=28) and BeaconOverlay (z=30)
             MetricSquaresOverlay()
                 .frame(width: mapSize.width, height: mapSize.height)
-                .zIndex(25)
+                .zIndex(hud.isSquareOpen ? 32 : 25)
             
             // Dots rendered in map-local coords (z = 28)
             BeaconOverlayDots()

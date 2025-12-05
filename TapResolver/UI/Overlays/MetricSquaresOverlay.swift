@@ -101,7 +101,17 @@ struct MetricSquaresOverlay: View {
         private func cornerResizeGesture(corner: Corner, locked: Bool) -> some Gesture {
             DragGesture(minimumDistance: 6, coordinateSpace: .global)
                 .onChanged { value in
+                    guard !mapTransform.isPinching else { return }
                     guard !locked else { return }
+                    
+                    // 🟧 DIAGNOSTIC: Log on first drag frame
+                    if startCenter == nil {
+                        print("🟧 CORNER RESIZE START — corner: \(corner)")
+                        print("   startLocation (screen): \(value.startLocation)")
+                        print("   square.center (map): \(square.center)")
+                        print("   square.side: \(square.side)")
+                    }
+                    
                     if startCenter == nil || startSide == nil || startCorner0 == nil || anchorCorner0 == nil {
                         startCenter = square.center
                         startSide   = square.side
@@ -128,6 +138,9 @@ struct MetricSquaresOverlay: View {
                         x: (ac0.x + newCorner.x) / 2,
                         y: (ac0.y + newCorner.y) / 2
                     )
+
+                    // 🟧 DIAGNOSTIC: Log significant updates
+                    print("🟧 CORNER RESIZE — translation: (\(Int(value.translation.width)), \(Int(value.translation.height))) → sideNew: \(Int(sideNew)), newCenter: (\(Int(newCenter.x)), \(Int(newCenter.y)))")
 
                     squares.updateSideAndCenter(id: square.id, side: sideNew, center: newCenter)
                 }

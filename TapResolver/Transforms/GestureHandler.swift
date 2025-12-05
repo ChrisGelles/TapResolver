@@ -40,9 +40,7 @@ final class MapGestureHandler: ObservableObject {
 
     // Derived totals
     var totalScale: CGFloat {
-        let result = steadyScale * gestureScale
-        print("🔄 [GESTURE] totalScale computed: steady:\(String(format: "%.3f", steadyScale)) × gesture:\(String(format: "%.3f", gestureScale)) = \(String(format: "%.3f", result))")
-        return result
+        steadyScale * gestureScale
     }
 
     var totalRotation: Angle {
@@ -89,7 +87,6 @@ final class MapGestureHandler: ObservableObject {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { [weak self] value in
                 guard let self else { return }
-                print("🔄 [GESTURE] pan.onChanged — translation:(\(Int(value.translation.width)),\(Int(value.translation.height))) steadyOffset:(\(Int(self.steadyOffset.width)),\(Int(self.steadyOffset.height)))")
                 self.gestureTranslation = value.translation
                 self.emitTotals()
             }
@@ -137,10 +134,7 @@ final class MapGestureHandler: ObservableObject {
     private func clamp<T: Comparable>(_ x: T, _ a: T, _ b: T) -> T { min(max(x, a), b) }
 
     private func emitTotals() {
-        guard !isSyncing else {
-            print("🔄 [GESTURE] emitTotals suppressed — isSyncing=true")
-            return
-        }
+        guard !isSyncing else { return }
         onTotalsChanged?(totalScale, totalRotation.radians, totalOffset)
     }
     
@@ -149,13 +143,8 @@ final class MapGestureHandler: ObservableObject {
     /// Sync internal state to match externally-applied transform.
     /// Call this after PinchRotateCentroidBridge ends a gesture to prevent jumps.
     func syncToExternalTransform(scale: CGFloat, rotation: Angle, offset: CGSize) {
-        print("🔄 [GESTURE] syncToExternal ENTRY — steadyScale:\(String(format: "%.3f", steadyScale)) gestureScale:\(String(format: "%.3f", gestureScale)) totalScale:\(String(format: "%.3f", totalScale))")
-        
         isSyncing = true
-        defer { 
-            isSyncing = false 
-            print("🔄 [GESTURE] syncToExternal EXIT — steadyScale:\(String(format: "%.3f", steadyScale)) gestureScale:\(String(format: "%.3f", gestureScale)) totalScale:\(String(format: "%.3f", totalScale))")
-        }
+        defer { isSyncing = false }
         
         steadyScale = scale
         steadyRotation = rotation
