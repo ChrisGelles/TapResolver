@@ -75,8 +75,6 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
             self.pinch = p
             self.rotate = r
             self.attachedWindow = window
-            
-            print("🤏 [BRIDGE] Attached recognizers to window")
         }
 
         func detachFromWindow() {
@@ -89,7 +87,6 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
             pinch = nil
             rotate = nil
             attachedWindow = nil
-            print("🤏 [BRIDGE] Detached recognizers from window")
         }
 
         func gestureRecognizer(_ g1: UIGestureRecognizer,
@@ -122,8 +119,6 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
             } else {
                 centroid = r.location(in: window)
             }
-
-            print("🤏 [BRIDGE] phase:\(phase) scale:\(String(format: "%.3f", p.scale)) rot:\(String(format: "%.3f", r.rotation)) centroid:(\(Int(centroid.x)),\(Int(centroid.y)))")
 
             onUpdate(State(
                 phase: phase,

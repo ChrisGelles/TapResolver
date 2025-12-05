@@ -170,8 +170,6 @@ final class MapTransformStore: ObservableObject {
         pinchAnchorMapPoint = screenToMap(centroid)
         
         isPinching = true
-        
-        print("🤏 [STORE] beginPinch — anchor:(\(Int(pinchAnchorMapPoint.x)),\(Int(pinchAnchorMapPoint.y))) centroid:(\(Int(centroid.x)),\(Int(centroid.y))) initialScale:\(String(format: "%.3f", pinchInitialScale))")
     }
     
     /// Call during pinch/rotate gesture.
@@ -199,17 +197,11 @@ final class MapTransformStore: ObservableObject {
             width: pinchInitialOffset.width + dx,
             height: pinchInitialOffset.height + dy
         )
-        
-        // 🔍 DIAGNOSTIC: Log pinch updates
-        print("🤏 [STORE] updatePinch — scale:\(String(format: "%.3f", newScale)) rot:\(String(format: "%.3f", newRotation)) offset:(\(Int(totalOffset.width)),\(Int(totalOffset.height))) centroid:(\(Int(centroidScreen.x)),\(Int(centroidScreen.y)))")
     }
     
     /// Call when pinch/rotate gesture ends.
     func endPinch() {
-        print("🔄 [STORE] endPinch — totalScale:\(String(format: "%.3f", totalScale)) totalRot:\(String(format: "%.3f", totalRotationRadians)) totalOffset:(\(Int(totalOffset.width)),\(Int(totalOffset.height)))")
         isPinching = false
-        
-        print("🤏 [STORE] endPinch — finalScale:\(String(format: "%.3f", totalScale)) finalRot:\(String(format: "%.3f", totalRotationRadians)) finalOffset:(\(Int(totalOffset.width)),\(Int(totalOffset.height)))")
         
         // Optionally normalize rotation to 0..<2π for tidiness
         // totalRotationRadians = totalRotationRadians.truncatingRemainder(dividingBy: 2 * .pi)
