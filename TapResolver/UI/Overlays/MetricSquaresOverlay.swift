@@ -144,9 +144,17 @@ struct MetricSquaresOverlay: View {
                     let dy = abs(newCorner.y - ac0.y)
                     let sideNew = max(10, max(dx, dy))
                     
+                    // Constrain corner to maintain square shape (prevents anchor drift)
+                    let signX: CGFloat = newCorner.x >= ac0.x ? 1 : -1
+                    let signY: CGFloat = newCorner.y >= ac0.y ? 1 : -1
+                    let constrainedCorner = CGPoint(
+                        x: ac0.x + signX * sideNew,
+                        y: ac0.y + signY * sideNew
+                    )
+                    
                     let newCenter = CGPoint(
-                        x: (ac0.x + newCorner.x) / 2,
-                        y: (ac0.y + newCorner.y) / 2
+                        x: (ac0.x + constrainedCorner.x) / 2,
+                        y: (ac0.y + constrainedCorner.y) / 2
                     )
                     
                     squares.updateSideAndCenter(id: square.id, side: sideNew, center: newCenter)
