@@ -133,4 +133,18 @@ final class MapGestureHandler: ObservableObject {
     private func emitTotals() {
         onTotalsChanged?(totalScale, totalRotation.radians, totalOffset)
     }
+    
+    // MARK: - External Sync
+    
+    /// Sync internal state to match externally-applied transform.
+    /// Call this after PinchRotateCentroidBridge ends a gesture to prevent jumps.
+    func syncToExternalTransform(scale: CGFloat, rotation: Angle, offset: CGSize) {
+        steadyScale = scale
+        steadyRotation = rotation
+        steadyOffset = offset
+        gestureScale = 1.0
+        gestureRotation = .degrees(0)
+        gestureTranslation = .zero
+        // Don't emit — the store already has the correct values
+    }
 }

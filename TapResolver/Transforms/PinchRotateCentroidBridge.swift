@@ -94,12 +94,11 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
         }
     }
 
-    /// Intercept only multi-touch (>=2). One-finger touches pass through.
+    /// Transparent view that receives all touches.
+    /// Single-finger touches pass through via cancelsTouchesInView = false on recognizers.
+    /// Pinch/rotate recognizers naturally require 2+ fingers to activate.
     private final class PassThroughWhenSingleTouchView: UIView {
-        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-            let active = event?.allTouches?.filter { $0.phase != .cancelled && $0.phase != .ended }.count ?? 0
-            if active < 2 { return nil }
-            return super.hitTest(point, with: event)
-        }
+        // No hitTest override — let all touches reach the gesture recognizers.
+        // The recognizers themselves filter for 2+ finger gestures.
     }
 }

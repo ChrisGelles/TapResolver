@@ -89,7 +89,7 @@ struct MetricSquaresOverlay: View {
                     }
                     let dMap = mapTransform.screenTranslationToMap(value.translation)
                     let base = startCenter ?? square.center
-                    let newCenter = CGPoint(x: base.x + dMap.x, y: base.y + dMap.y)
+                    let newCenter = CGPoint(x: base.x + dMap.width, y: base.y + dMap.height)
                     squares.updateCenter(id: square.id, to: newCenter)
                 }
                 .onEnded { _ in
@@ -116,7 +116,7 @@ struct MetricSquaresOverlay: View {
                     else { return }
 
                     let dMap = mapTransform.screenTranslationToMap(value.translation)
-                    let newCorner = CGPoint(x: sc0.x + dMap.x, y: sc0.y + dMap.y)
+                    let newCorner = CGPoint(x: sc0.x + dMap.width, y: sc0.y + dMap.height)
                     let moveMagnitude = max(abs(value.translation.width), abs(value.translation.height))
                     guard moveMagnitude > 2 else { return }
 

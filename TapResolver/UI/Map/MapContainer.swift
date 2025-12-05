@@ -114,6 +114,12 @@ private struct MapCanvas: View {
             }
             
         }
+        .onReceive(Timer.publish(every: 5.0, on: .main, in: .common).autoconnect()) { _ in
+            if !mapTransform.isTransformValid {
+                print("🚨 [TRANSFORM] Invalid state detected!")
+                mapTransform.printDiagnostics(label: "INVALID")
+            }
+        }
 
         // Apply transforms (scale → rotate → translate)
         .scaleEffect(mapTransform.totalScale, anchor: .center)
@@ -121,13 +127,39 @@ private struct MapCanvas: View {
         .offset(mapTransform.totalOffset)
 
         .overlay(
-            PinchRotateCentroidBridge { _ in
-                // NOP: do nothing for now
+            PinchRotateCentroidBridge { update in
+                // 🔍 DIAGNOSTIC: Verify bridge is firing
+                print("🤏 [BRIDGE] phase:\(update.phase) scale:\(String(format: "%.3f", update.scale)) rot:\(String(format: "%.3f", update.rotationRadians)) centroid:(\(Int(update.centroidInScreen.x)),\(Int(update.centroidInScreen.y)))")
+                
+                switch update.phase {
+                case .began:
+                    mapTransform.beginPinch(atCentroidScreen: update.centroidInScreen)
+                    
+                case .changed:
+                    mapTransform.updatePinch(
+                        pinchScale: update.scale,
+                        pinchRotation: update.rotationRadians,
+                        centroidScreen: update.centroidInScreen
+                    )
+                    
+                case .ended, .cancelled:
+                    mapTransform.endPinch()
+                    // Sync GestureHandler's steady state to match final transform
+                    // This prevents a jump when the next gesture starts
+                    gestures.syncToExternalTransform(
+                        scale: mapTransform.totalScale,
+                        rotation: Angle(radians: Double(mapTransform.totalRotationRadians)),
+                        offset: mapTransform.totalOffset
+                    )
+                    
+                default:
+                    break
+                }
             }
             .ignoresSafeArea()
         )
-        // Gestures; disable while a square is interacting
-        .gesture(gestures.combinedGesture)
+        // Gestures: pan only — pinch/rotate handled by PinchRotateCentroidBridge
+        .gesture(gestures.panOnlyGesture)
         //.disabled(metricSquares.isInteracting)
 
         .onTapGesture(count: 2) {

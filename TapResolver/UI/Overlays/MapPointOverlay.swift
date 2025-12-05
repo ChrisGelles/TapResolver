@@ -77,7 +77,7 @@ struct MapPointOverlay: View {
                             if startPoint == nil { startPoint = point.mapPoint }
                             let dMap = mapTransform.screenTranslationToMap(value.translation)
                             let base = startPoint ?? point.mapPoint
-                            let newPoint = CGPoint(x: base.x + dMap.x, y: base.y + dMap.y)
+                            let newPoint = CGPoint(x: base.x + dMap.width, y: base.y + dMap.height)
                             mapPointStore.updatePoint(id: point.id, to: newPoint)
                         }
                         .onEnded { _ in
