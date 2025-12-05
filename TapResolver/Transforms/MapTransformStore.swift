@@ -206,6 +206,7 @@ final class MapTransformStore: ObservableObject {
     
     /// Call when pinch/rotate gesture ends.
     func endPinch() {
+        print("🔄 [STORE] endPinch — totalScale:\(String(format: "%.3f", totalScale)) totalRot:\(String(format: "%.3f", totalRotationRadians)) totalOffset:(\(Int(totalOffset.width)),\(Int(totalOffset.height)))")
         isPinching = false
         
         print("🤏 [STORE] endPinch — finalScale:\(String(format: "%.3f", totalScale)) finalRot:\(String(format: "%.3f", totalRotationRadians)) finalOffset:(\(Int(totalOffset.width)),\(Int(totalOffset.height)))")

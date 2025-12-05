@@ -130,6 +130,12 @@ final class TransformProcessor: ObservableObject {
 
     // Main entry from GestureHandler (call very frequently)
     func enqueueCandidate(scale: CGFloat, rotationRadians: Double, offset: CGSize) {
+        let scaleChanged = abs(scale - lastScale) > 0.001
+        let rotChanged = abs(rotationRadians - lastRotation) > 0.001
+        let offChanged = abs(offset.width - lastOffset.width) > 0.5 || abs(offset.height - lastOffset.height) > 0.5
+        
+        print("🔄 [PROCESSOR] enqueue — scale:\(String(format: "%.3f", scale)) (last:\(String(format: "%.3f", lastScale)) changed:\(scaleChanged)) offset:(\(Int(offset.width)),\(Int(offset.height))) (changed:\(offChanged))")
+        
         // REPLACE the immediate write with a deferred commit:
         if passThrough {
             // Coalesce to next runloop tick (avoids "publish during view update")

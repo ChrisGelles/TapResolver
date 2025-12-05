@@ -28,6 +28,9 @@ final class MapGestureHandler: ObservableObject {
 
     // Notify listeners when totals change (optional external wiring)
     var onTotalsChanged: ((CGFloat, Double, CGSize) -> Void)?
+    
+    /// When true, suppresses onTotalsChanged callback to prevent race conditions during sync
+    private var isSyncing = false
 
     init(minScale: CGFloat = 0.5, maxScale: CGFloat = 4.0, zoomStep: CGFloat = 1.25) {
         self.minScale = minScale
@@ -37,7 +40,9 @@ final class MapGestureHandler: ObservableObject {
 
     // Derived totals
     var totalScale: CGFloat {
-        clamp(steadyScale * gestureScale, minScale, maxScale)
+        let result = steadyScale * gestureScale
+        print("🔄 [GESTURE] totalScale computed: steady:\(String(format: "%.3f", steadyScale)) × gesture:\(String(format: "%.3f", gestureScale)) = \(String(format: "%.3f", result))")
+        return result
     }
 
     var totalRotation: Angle {
@@ -84,6 +89,7 @@ final class MapGestureHandler: ObservableObject {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { [weak self] value in
                 guard let self else { return }
+                print("🔄 [GESTURE] pan.onChanged — translation:(\(Int(value.translation.width)),\(Int(value.translation.height))) steadyOffset:(\(Int(self.steadyOffset.width)),\(Int(self.steadyOffset.height)))")
                 self.gestureTranslation = value.translation
                 self.emitTotals()
             }
@@ -131,6 +137,10 @@ final class MapGestureHandler: ObservableObject {
     private func clamp<T: Comparable>(_ x: T, _ a: T, _ b: T) -> T { min(max(x, a), b) }
 
     private func emitTotals() {
+        guard !isSyncing else {
+            print("🔄 [GESTURE] emitTotals suppressed — isSyncing=true")
+            return
+        }
         onTotalsChanged?(totalScale, totalRotation.radians, totalOffset)
     }
     
@@ -139,12 +149,19 @@ final class MapGestureHandler: ObservableObject {
     /// Sync internal state to match externally-applied transform.
     /// Call this after PinchRotateCentroidBridge ends a gesture to prevent jumps.
     func syncToExternalTransform(scale: CGFloat, rotation: Angle, offset: CGSize) {
+        print("🔄 [GESTURE] syncToExternal ENTRY — steadyScale:\(String(format: "%.3f", steadyScale)) gestureScale:\(String(format: "%.3f", gestureScale)) totalScale:\(String(format: "%.3f", totalScale))")
+        
+        isSyncing = true
+        defer { 
+            isSyncing = false 
+            print("🔄 [GESTURE] syncToExternal EXIT — steadyScale:\(String(format: "%.3f", steadyScale)) gestureScale:\(String(format: "%.3f", gestureScale)) totalScale:\(String(format: "%.3f", totalScale))")
+        }
+        
         steadyScale = scale
         steadyRotation = rotation
         steadyOffset = offset
         gestureScale = 1.0
         gestureRotation = .degrees(0)
         gestureTranslation = .zero
-        // Don't emit — the store already has the correct values
     }
 }

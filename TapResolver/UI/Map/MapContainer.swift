@@ -151,6 +151,13 @@ private struct MapCanvas: View {
                         rotation: Angle(radians: Double(mapTransform.totalRotationRadians)),
                         offset: mapTransform.totalOffset
                     )
+                    // Explicitly sync TransformProcessor's cache to prevent stale comparisons
+                    print("🔄 [CONTAINER] Post-sync push to TransformProcessor")
+                    transformProcessor.enqueueCandidate(
+                        scale: mapTransform.totalScale,
+                        rotationRadians: mapTransform.totalRotationRadians,
+                        offset: mapTransform.totalOffset
+                    )
                     
                 default:
                     break
@@ -189,9 +196,18 @@ private struct MapCanvas: View {
                 transformProcessor.setMapSize(mapSize)
                 pushTransformTotals()
             }
-            .onChange(of: gestures.totalScale)   {  pushTransformTotals() }
-            .onChange(of: gestures.totalRotation){  pushTransformTotals() }
-            .onChange(of: gestures.totalOffset)  {  pushTransformTotals() }
+            .onChange(of: gestures.totalScale) { 
+                print("🔄 [SYNC] onChange(totalScale) fired — value:\(String(format: "%.3f", gestures.totalScale))")
+                pushTransformTotals() 
+            }
+            .onChange(of: gestures.totalRotation) { 
+                print("🔄 [SYNC] onChange(totalRotation) fired — value:\(String(format: "%.3f", gestures.totalRotation.radians))")
+                pushTransformTotals() 
+            }
+            .onChange(of: gestures.totalOffset) { 
+                print("🔄 [SYNC] onChange(totalOffset) fired — value:(\(Int(gestures.totalOffset.width)),\(Int(gestures.totalOffset.height)))")
+                pushTransformTotals() 
+            }
             .onChange(of: mapSize)               {
                 transformProcessor.setMapSize(mapSize)
                 pushTransformTotals()
