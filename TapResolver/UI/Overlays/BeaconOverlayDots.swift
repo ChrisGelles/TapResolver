@@ -69,8 +69,9 @@ public struct BeaconOverlayDots: View {
             // 🚫 Disable dragging when locked
             .allowsHitTesting(!locked)
             .gesture(
-                DragGesture(minimumDistance: 6)
+                DragGesture(minimumDistance: 6, coordinateSpace: .global)
                     .onChanged { value in
+                        guard !mapTransform.isPinching else { return }
                         guard !locked else { return }
                         if startPoint == nil { startPoint = dot.mapPoint }
                         let dMap = mapTransform.screenTranslationToMap(value.translation)

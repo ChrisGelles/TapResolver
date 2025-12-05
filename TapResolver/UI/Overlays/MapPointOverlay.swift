@@ -71,8 +71,9 @@ struct MapPointOverlay: View {
             .contentShape(Circle())
             .position(point.mapPoint)
                 .gesture(
-                    DragGesture(minimumDistance: 6)
+                    DragGesture(minimumDistance: 6, coordinateSpace: .global)
                         .onChanged { value in
+                            guard !mapTransform.isPinching else { return }
                             guard !isLocked else { return }
                             if startPoint == nil { startPoint = point.mapPoint }
                             let dMap = mapTransform.screenTranslationToMap(value.translation)
