@@ -142,11 +142,14 @@ struct MetricSquaresOverlay: View {
                     
                     let dx = abs(newCorner.x - ac0.x)
                     let dy = abs(newCorner.y - ac0.y)
-                    let sideNew = max(10, max(dx, dy))
                     
-                    // Constrain corner to maintain square shape (prevents anchor drift)
-                    let signX: CGFloat = newCorner.x >= ac0.x ? 1 : -1
-                    let signY: CGFloat = newCorner.y >= ac0.y ? 1 : -1
+                    // Minimum 60pt screen size, converted to map space
+                    let minScreenSize: CGFloat = 60
+                    let minMapSize = minScreenSize / mapTransform.totalScale
+                    let sideNew = max(minMapSize, max(dx, dy))
+                    
+                    // Use fixed signs based on corner (prevents flipping)
+                    let (signX, signY) = signs(for: corner)
                     let constrainedCorner = CGPoint(
                         x: ac0.x + signX * sideNew,
                         y: ac0.y + signY * sideNew
@@ -197,6 +200,15 @@ struct MetricSquaresOverlay: View {
                 }
             }
             return closest
+        }
+        
+        private func signs(for corner: Corner) -> (x: CGFloat, y: CGFloat) {
+            switch corner {
+            case .topLeft:     return (-1, -1)
+            case .topRight:    return ( 1, -1)
+            case .bottomLeft:  return (-1,  1)
+            case .bottomRight: return ( 1,  1)
+            }
         }
 
         enum Corner: CaseIterable {
