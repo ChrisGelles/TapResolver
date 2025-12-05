@@ -36,6 +36,7 @@ struct MetricSquaresOverlay: View {
         @State private var startSide: CGFloat? = nil
         @State private var startCorner0: CGPoint? = nil
         @State private var anchorCorner0: CGPoint? = nil
+        @State private var activeCorner: Corner? = nil
 
         private let handleHitRadius: CGFloat = 10
 
@@ -65,9 +66,14 @@ struct MetricSquaresOverlay: View {
                             .overlay(Circle().stroke(square.color, lineWidth: 2))
                             .frame(width: 12, height: 12)
                             .position(x: cornerPoint.x, y: cornerPoint.y)
-                            .contentShape(Circle())
-                            .highPriorityGesture(cornerResizeGesture(corner: corner, locked: locked))
                     }
+                    
+                    // Transparent overlay for unified corner hit detection
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .frame(width: square.side + 40, height: square.side + 40)
+                        .position(x: square.center.x, y: square.center.y)
+                        .highPriorityGesture(unifiedCornerGesture(locked: locked))
                 }
             }
         }
@@ -98,50 +104,51 @@ struct MetricSquaresOverlay: View {
                 }
         }
 
-        private func cornerResizeGesture(corner: Corner, locked: Bool) -> some Gesture {
+        private func unifiedCornerGesture(locked: Bool) -> some Gesture {
             DragGesture(minimumDistance: 6, coordinateSpace: .global)
                 .onChanged { value in
                     guard !mapTransform.isPinching else { return }
                     guard !locked else { return }
                     
-                    // 🟧 DIAGNOSTIC: Log on first drag frame
-                    if startCenter == nil {
-                        print("🟧 CORNER RESIZE START — corner: \(corner)")
-                        print("   startLocation (screen): \(value.startLocation)")
+                    // Determine corner on first frame
+                    if activeCorner == nil {
+                        activeCorner = nearestCorner(to: value.startLocation)
+                        print("🟦 UNIFIED CORNER — detected: \(activeCorner!) at screen: \(value.startLocation)")
+                    }
+                    
+                    guard let corner = activeCorner else { return }
+                    
+                    // Initialize drag state
+                    if startCenter == nil || startSide == nil || startCorner0 == nil || anchorCorner0 == nil {
+                        startCenter = square.center
+                        startSide = square.side
+                        startCorner0 = point(for: corner, center: square.center, side: square.side)
+                        anchorCorner0 = point(for: corner.opposite, center: square.center, side: square.side)
+                        squares.isInteracting = true
+                        print("🟦 CORNER RESIZE START — corner: \(corner)")
                         print("   square.center (map): \(square.center)")
                         print("   square.side: \(square.side)")
                     }
                     
-                    if startCenter == nil || startSide == nil || startCorner0 == nil || anchorCorner0 == nil {
-                        startCenter = square.center
-                        startSide   = square.side
-                        startCorner0 = point(for: corner, center: square.center, side: square.side)
-                        anchorCorner0 = point(for: corner.opposite, center: square.center, side: square.side)
-                        squares.isInteracting = true
-                    }
-
                     guard
                         let sc0 = startCorner0,
                         let ac0 = anchorCorner0
                     else { return }
-
+                    
                     let dMap = mapTransform.screenTranslationToMap(value.translation)
                     let newCorner = CGPoint(x: sc0.x + dMap.width, y: sc0.y + dMap.height)
                     let moveMagnitude = max(abs(value.translation.width), abs(value.translation.height))
                     guard moveMagnitude > 2 else { return }
-
+                    
                     let dx = abs(newCorner.x - ac0.x)
                     let dy = abs(newCorner.y - ac0.y)
                     let sideNew = max(10, max(dx, dy))
-
+                    
                     let newCenter = CGPoint(
                         x: (ac0.x + newCorner.x) / 2,
                         y: (ac0.y + newCorner.y) / 2
                     )
-
-                    // 🟧 DIAGNOSTIC: Log significant updates
-                    print("🟧 CORNER RESIZE — translation: (\(Int(value.translation.width)), \(Int(value.translation.height))) → sideNew: \(Int(sideNew)), newCenter: (\(Int(newCenter.x)), \(Int(newCenter.y)))")
-
+                    
                     squares.updateSideAndCenter(id: square.id, side: sideNew, center: newCenter)
                 }
                 .onEnded { _ in
@@ -149,6 +156,7 @@ struct MetricSquaresOverlay: View {
                         squareMetrics.updatePixelSide(for: final.id, side: final.side)
                         print("▢ Square \(final.id) — side (map px): \(Int(final.side))")
                     }
+                    activeCorner = nil
                     startCenter = nil
                     startSide = nil
                     startCorner0 = nil
@@ -165,6 +173,22 @@ struct MetricSquaresOverlay: View {
             case .bottomLeft:  return CGPoint(x: center.x - h, y: center.y + h)
             case .bottomRight: return CGPoint(x: center.x + h, y: center.y + h)
             }
+        }
+        
+        private func nearestCorner(to screenPoint: CGPoint) -> Corner {
+            let mapPoint = mapTransform.screenToMap(screenPoint)
+            var closest: Corner = .bottomRight
+            var closestDist: CGFloat = .greatestFiniteMagnitude
+            
+            for corner in Corner.allCases {
+                let cornerPos = point(for: corner, center: square.center, side: square.side)
+                let dist = hypot(mapPoint.x - cornerPos.x, mapPoint.y - cornerPos.y)
+                if dist < closestDist {
+                    closestDist = dist
+                    closest = corner
+                }
+            }
+            return closest
         }
 
         enum Corner: CaseIterable {
