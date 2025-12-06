@@ -81,7 +81,6 @@ struct MetricSquaresOverlay: View {
                                 .onEnded { _ in
                                     guard !locked else { return }
                                     forceDragMode = true
-                                    print("🟦 LONG PRESS — force drag mode activated")
                                 }
                         )
                         .highPriorityGesture(unifiedCornerGesture(locked: locked))
@@ -101,7 +100,6 @@ struct MetricSquaresOverlay: View {
                         // Long-press override: force drag mode regardless of position
                         if forceDragMode {
                             interactionMode = .drag
-                            print("🟦 UNIFIED GESTURE — mode: DRAG (long-press override)")
                         } else {
                             let (corner, distance) = nearestCorner(to: value.startLocation)
                             
@@ -113,10 +111,8 @@ struct MetricSquaresOverlay: View {
                             if distance < cornerThresholdMap {
                                 interactionMode = .resize
                                 activeCorner = corner
-                                print("🟦 UNIFIED GESTURE — mode: RESIZE, corner: \(corner)")
                             } else {
                                 interactionMode = .drag
-                                print("🟦 UNIFIED GESTURE — mode: DRAG")
                             }
                         }
                     }
@@ -134,7 +130,6 @@ struct MetricSquaresOverlay: View {
                     if interactionMode == .resize {
                         if let final = squares.squares.first(where: { $0.id == square.id }) {
                             squareMetrics.updatePixelSide(for: final.id, side: final.side)
-                            print("▢ Square \(final.id) — side (map px): \(Int(final.side))")
                         }
                     }
                     
@@ -160,9 +155,6 @@ struct MetricSquaresOverlay: View {
                 startCorner0 = point(for: corner, center: square.center, side: square.side)
                 anchorCorner0 = point(for: corner.opposite, center: square.center, side: square.side)
                 squares.isInteracting = true
-                print("🟦 CORNER RESIZE START — corner: \(corner)")
-                print("   square.center (map): \(square.center)")
-                print("   square.side: \(square.side)")
             }
             
             guard
@@ -202,7 +194,6 @@ struct MetricSquaresOverlay: View {
             if startCenter == nil {
                 startCenter = square.center
                 squares.isInteracting = true
-                print("🟦 CENTER DRAG START — center: \(square.center)")
             }
             
             let dMap = mapTransform.screenTranslationToMap(value.translation)
