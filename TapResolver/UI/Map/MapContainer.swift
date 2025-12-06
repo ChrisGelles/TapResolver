@@ -129,41 +129,65 @@ private struct MapCanvas: View {
 
         .overlay(
             PinchRotateCentroidBridge { update in
-                switch update.phase {
-                case .began:
-                    mapTransform.beginPinch(atCentroidScreen: update.centroidInScreen)
+                switch update.gestureMode {
+                case .pinchRotate:
+                    let phase: TransformProcessor.PinchPhase
+                    switch update.phase {
+                    case .began: phase = .began
+                    case .changed: phase = .changed
+                    case .ended: phase = .ended
+                    case .cancelled: phase = .cancelled
+                    }
                     
-                case .changed:
-                    mapTransform.updatePinch(
-                        pinchScale: update.scale,
-                        pinchRotation: update.rotationRadians,
-                        centroidScreen: update.centroidInScreen
+                    transformProcessor.handlePinchRotate(
+                        phase: phase,
+                        scaleFromStart: update.scale,
+                        rotationFromStart: update.rotationRadians,
+                        centroidInScreen: update.centroidInScreen
                     )
                     
-                case .ended, .cancelled:
-                    mapTransform.endPinch()
-                    // Sync GestureHandler's steady state to match final transform
-                    // This prevents a jump when the next gesture starts
-                    gestures.syncToExternalTransform(
-                        scale: mapTransform.totalScale,
-                        rotation: Angle(radians: Double(mapTransform.totalRotationRadians)),
-                        offset: mapTransform.totalOffset
-                    )
-                    // Explicitly sync TransformProcessor's cache to prevent stale comparisons
-                    transformProcessor.enqueueCandidate(
-                        scale: mapTransform.totalScale,
-                        rotationRadians: mapTransform.totalRotationRadians,
-                        offset: mapTransform.totalOffset
+                    // Sync GestureHandler's steady state after pinch ends
+                    if update.phase == .ended || update.phase == .cancelled {
+                        gestures.syncToExternalTransform(
+                            scale: mapTransform.totalScale,
+                            rotation: Angle(radians: Double(mapTransform.totalRotationRadians)),
+                            offset: mapTransform.totalOffset
+                        )
+                        transformProcessor.enqueueCandidate(
+                            scale: mapTransform.totalScale,
+                            rotationRadians: mapTransform.totalRotationRadians,
+                            offset: mapTransform.totalOffset
+                        )
+                    }
+                    
+                case .pan:
+                    let phase: TransformProcessor.PinchPhase
+                    switch update.phase {
+                    case .began: phase = .began
+                    case .changed: phase = .changed
+                    case .ended: phase = .ended
+                    case .cancelled: phase = .cancelled
+                    }
+                    
+                    transformProcessor.handlePan(
+                        phase: phase,
+                        translation: update.panTranslation
                     )
                     
-                default:
-                    break
+                    // Sync GestureHandler after pan ends
+                    if update.phase == .ended || update.phase == .cancelled {
+                        gestures.syncToExternalTransform(
+                            scale: mapTransform.totalScale,
+                            rotation: Angle(radians: Double(mapTransform.totalRotationRadians)),
+                            offset: mapTransform.totalOffset
+                        )
+                    }
                 }
             }
             .ignoresSafeArea()
         )
-        // Gestures: pan only — pinch/rotate handled by PinchRotateCentroidBridge
-        .gesture(gestures.panOnlyGesture)
+        // All gestures now handled by PinchRotateCentroidBridge (UIKit)
+        // .gesture(gestures.panOnlyGesture)  // REMOVED - pan now in bridge
         //.disabled(metricSquares.isInteracting)
 
         .onTapGesture(count: 2) {
