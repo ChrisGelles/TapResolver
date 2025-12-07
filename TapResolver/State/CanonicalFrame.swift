@@ -140,6 +140,18 @@ struct CanonicalFrame {
         )
     }
     
+    // MARK: - Factory Methods
+    
+    /// Creates a canonical frame from the current map context
+    /// - Parameters:
+    ///   - mapSize: Size of the map image in pixels
+    ///   - metersPerPixel: Scale factor (meters per pixel) from MetricSquare calibration
+    /// - Returns: A canonical frame centered on the map
+    static func fromMapContext(mapSize: CGSize, metersPerPixel: Float) -> CanonicalFrame {
+        let pixelsPerMeter = 1.0 / metersPerPixel
+        return CanonicalFrame(mapSize: mapSize, pixelsPerMeter: pixelsPerMeter)
+    }
+    
     // MARK: - Debug
     
     var debugDescription: String {

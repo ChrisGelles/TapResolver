@@ -97,6 +97,35 @@ final class ARCalibrationCoordinator: ObservableObject {
     var triangleStore: TrianglePatchStore
     var metricSquareStore: MetricSquareStore?
     
+    // MARK: - Session Transform
+    
+    /// Represents the rigid body transform from an AR session's coordinate frame to the canonical frame
+    struct SessionToCanonicalTransform {
+        let rotationY: Float           // Radians, Y-axis rotation
+        let translation: SIMD3<Float>  // Translation vector
+        let scale: Float               // Scale factor (AR meters / canonical meters)
+        
+        /// Transforms a position from session coordinates to canonical coordinates
+        func apply(to sessionPosition: SIMD3<Float>) -> SIMD3<Float> {
+            // Apply scale
+            let scaled = sessionPosition * scale
+            
+            // Apply rotation around Y axis
+            let cosR = cos(rotationY)
+            let sinR = sin(rotationY)
+            let rotated = SIMD3<Float>(
+                scaled.x * cosR - scaled.z * sinR,
+                scaled.y,
+                scaled.x * sinR + scaled.z * cosR
+            )
+            
+            // Apply translation
+            return rotated + translation
+        }
+    }
+    
+    // MARK: - Initialization
+    
     init(arStore: ARWorldMapStore, mapStore: MapPointStore, triangleStore: TrianglePatchStore, metricSquareStore: MetricSquareStore? = nil) {
         self.arStore = arStore
         self.mapStore = mapStore
@@ -1404,6 +1433,14 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // Don't auto-start next triangle - let user decide
         print("✅ Calibration complete. Ghost markers planted for adjacent triangles.")
+        
+        // DEBUG: Manual bake-down trigger - remove after testing
+        // To test: complete a calibration crawl and check console for bake-down output
+        #if DEBUG
+        print("\n🧪 [DEBUG] To manually trigger bake-down, call:")
+        print("   calibrationCoordinator.bakeDownCalibrationSession(mapSize: mapSize, metersPerPixel: metersPerPixel)")
+        print("   where mapSize and metersPerPixel come from your map context")
+        #endif
     }
     
     /// Transitions from readyToFill to surveyMode when Fill Triangle is tapped
@@ -2152,6 +2189,217 @@ final class ARCalibrationCoordinator: ObservableObject {
             sessionID: arStore.currentSessionID,
             sessionTimestamp: arStore.currentSessionStartTime
         )
+    }
+    
+    // MARK: - Bake-Down System (Milestone 5)
+    
+    /// Computes the transform from current AR session to canonical frame
+    /// using two correspondence points (planted markers)
+    ///
+    /// - Parameters:
+    ///   - marker1MapPosition: First marker's position in map pixels
+    ///   - marker1ARPosition: First marker's position in current AR session
+    ///   - marker2MapPosition: Second marker's position in map pixels
+    ///   - marker2ARPosition: Second marker's position in current AR session
+    ///   - canonicalFrame: The canonical frame to transform into
+    /// - Returns: Transform from session to canonical, or nil if computation fails
+    private func computeSessionToCanonicalTransform(
+        marker1MapPosition: CGPoint,
+        marker1ARPosition: SIMD3<Float>,
+        marker2MapPosition: CGPoint,
+        marker2ARPosition: SIMD3<Float>,
+        canonicalFrame: CanonicalFrame
+    ) -> SessionToCanonicalTransform? {
+        
+        // Convert map positions to canonical 3D positions
+        let canonical1 = canonicalFrame.mapToCanonical(marker1MapPosition)
+        let canonical2 = canonicalFrame.mapToCanonical(marker2MapPosition)
+        
+        // Calculate edge vectors in both coordinate systems (XZ plane only)
+        let canonicalEdge = SIMD2<Float>(canonical2.x - canonical1.x, canonical2.z - canonical1.z)
+        let sessionEdge = SIMD2<Float>(marker2ARPosition.x - marker1ARPosition.x, marker2ARPosition.z - marker1ARPosition.z)
+        
+        let canonicalLength = simd_length(canonicalEdge)
+        let sessionLength = simd_length(sessionEdge)
+        
+        guard canonicalLength > 0.001, sessionLength > 0.001 else {
+            print("⚠️ [BAKE_TRANSFORM] Degenerate edge - markers too close")
+            return nil
+        }
+        
+        // Calculate scale: canonical meters per session meter
+        // (canonical frame uses real-world scale derived from MetricSquare)
+        let scale = canonicalLength / sessionLength
+        
+        // Calculate rotation: angle from session edge to canonical edge
+        let canonicalAngle = atan2(canonicalEdge.y, canonicalEdge.x)
+        let sessionAngle = atan2(sessionEdge.y, sessionEdge.x)
+        let rotation = canonicalAngle - sessionAngle
+        
+        // Calculate translation: where session origin lands in canonical space
+        // First, rotate and scale the session position of marker 1
+        let cosR = cos(rotation)
+        let sinR = sin(rotation)
+        let scaledSession1 = marker1ARPosition * scale
+        let rotatedSession1 = SIMD3<Float>(
+            scaledSession1.x * cosR - scaledSession1.z * sinR,
+            scaledSession1.y,
+            scaledSession1.x * sinR + scaledSession1.z * cosR
+        )
+        
+        // Translation = canonical position - transformed session position
+        let translation = canonical1 - rotatedSession1
+        
+        print("📐 [BAKE_TRANSFORM] Computed session→canonical transform:")
+        print("   Scale: \(String(format: "%.4f", scale)) (canonical/session)")
+        print("   Rotation: \(String(format: "%.1f", rotation * 180 / .pi))°")
+        print("   Translation: (\(String(format: "%.2f", translation.x)), \(String(format: "%.2f", translation.y)), \(String(format: "%.2f", translation.z)))")
+        
+        return SessionToCanonicalTransform(rotationY: rotation, translation: translation, scale: scale)
+    }
+    
+    /// Bakes down the current calibration session's position data into canonical positions
+    ///
+    /// This should be called at the end of a successful calibration crawl.
+    /// It transforms all touched MapPoint positions from session coordinates
+    /// to canonical coordinates and updates their baked consensus.
+    ///
+    /// - Parameters:
+    ///   - mapSize: Size of the map image in pixels
+    ///   - metersPerPixel: Scale factor from MetricSquare calibration
+    /// - Returns: Number of MapPoints updated, or nil if bake-down failed
+    func bakeDownCalibrationSession(mapSize: CGSize, metersPerPixel: Float) -> Int? {
+        print("\n" + String(repeating: "=", count: 60))
+        print("🔥 [BAKE_DOWN] Starting calibration bake-down")
+        print(String(repeating: "=", count: 60))
+        
+        // Create canonical frame
+        let canonicalFrame = CanonicalFrame.fromMapContext(mapSize: mapSize, metersPerPixel: metersPerPixel)
+        print("📐 [BAKE_DOWN] Canonical frame:")
+        print("   Origin: (\(Int(canonicalFrame.originMapCoordinate.x)), \(Int(canonicalFrame.originMapCoordinate.y))) pixels (map center)")
+        print("   Scale: \(String(format: "%.1f", canonicalFrame.pixelsPerMeter)) pixels/meter")
+        
+        // We need at least 2 planted markers to compute the transform
+        guard placedMarkers.count >= 2 else {
+            print("⚠️ [BAKE_DOWN] Need at least 2 planted markers, have \(placedMarkers.count)")
+            return nil
+        }
+        
+        // Get the first two planted markers for transform computation
+        let marker1ID = placedMarkers[0]
+        let marker2ID = placedMarkers[1]
+        
+        // Find their MapPoints and AR positions
+        guard let marker1MapPoint = mapStore.points.first(where: { $0.id == marker1ID }),
+              let marker2MapPoint = mapStore.points.first(where: { $0.id == marker2ID }),
+              let marker1ARPos = mapPointARPositions[marker1ID],
+              let marker2ARPos = mapPointARPositions[marker2ID] else {
+            print("⚠️ [BAKE_DOWN] Could not find marker data for transform computation")
+            return nil
+        }
+        
+        print("📍 [BAKE_DOWN] Using markers for transform:")
+        print("   Marker 1: \(String(marker1ID.uuidString.prefix(8))) map=(\(Int(marker1MapPoint.position.x)), \(Int(marker1MapPoint.position.y))) AR=(\(String(format: "%.2f", marker1ARPos.x)), \(String(format: "%.2f", marker1ARPos.y)), \(String(format: "%.2f", marker1ARPos.z)))")
+        print("   Marker 2: \(String(marker2ID.uuidString.prefix(8))) map=(\(Int(marker2MapPoint.position.x)), \(Int(marker2MapPoint.position.y))) AR=(\(String(format: "%.2f", marker2ARPos.x)), \(String(format: "%.2f", marker2ARPos.y)), \(String(format: "%.2f", marker2ARPos.z)))")
+        
+        // Compute session→canonical transform
+        guard let transform = computeSessionToCanonicalTransform(
+            marker1MapPosition: marker1MapPoint.position,
+            marker1ARPosition: marker1ARPos,
+            marker2MapPosition: marker2MapPoint.position,
+            marker2ARPosition: marker2ARPos,
+            canonicalFrame: canonicalFrame
+        ) else {
+            print("⚠️ [BAKE_DOWN] Failed to compute transform")
+            return nil
+        }
+        
+        // Verify transform by checking marker 2
+        let transformedMarker2 = transform.apply(to: marker2ARPos)
+        let expectedCanonical2 = canonicalFrame.mapToCanonical(marker2MapPoint.position)
+        let verificationError = simd_distance(transformedMarker2, expectedCanonical2)
+        print("✅ [BAKE_DOWN] Transform verification error: \(String(format: "%.3f", verificationError))m")
+        
+        if verificationError > 0.1 {
+            print("⚠️ [BAKE_DOWN] Verification error exceeds 0.1m threshold - transform may be unreliable")
+        }
+        
+        // Now transform all touched MapPoints and update their baked positions
+        var updatedCount = 0
+        
+        print("\n📦 [BAKE_DOWN] Processing \(mapPointARPositions.count) MapPoint(s)...")
+        
+        for (mapPointID, sessionARPosition) in mapPointARPositions {
+            guard let index = mapStore.points.firstIndex(where: { $0.id == mapPointID }) else {
+                print("   ⚠️ \(String(mapPointID.uuidString.prefix(8))): MapPoint not found in store")
+                continue
+            }
+            
+            // Transform session position to canonical
+            let canonicalPosition = transform.apply(to: sessionARPosition)
+            
+            // Get current baked state
+            let currentBaked = mapStore.points[index].bakedCanonicalPosition
+            let currentConfidence = mapStore.points[index].bakedConfidence ?? 0
+            let currentSampleCount = mapStore.points[index].bakedSampleCount
+            
+            // Determine confidence for this session's data
+            // Use the confidence from position history if available, otherwise default to 0.9
+            let sessionConfidence: Float
+            if let latestRecord = mapStore.points[index].arPositionHistory.last,
+               latestRecord.sessionID == arStore.currentSessionID {
+                sessionConfidence = latestRecord.confidenceScore
+            } else {
+                sessionConfidence = 0.9  // Default for calibration
+            }
+            
+            // Calculate new baked position as weighted average
+            let newBakedPosition: SIMD3<Float>
+            let newConfidence: Float
+            let newSampleCount: Int
+            
+            if let existing = currentBaked, currentSampleCount > 0 {
+                // Blend with existing: weighted by (confidence × sampleCount) vs new confidence
+                let existingWeight = currentConfidence * Float(currentSampleCount)
+                let newWeight = sessionConfidence
+                let totalWeight = existingWeight + newWeight
+                
+                newBakedPosition = (existing * existingWeight + canonicalPosition * newWeight) / totalWeight
+                newConfidence = totalWeight / Float(currentSampleCount + 1)  // Average confidence
+                newSampleCount = currentSampleCount + 1
+                
+                let delta = simd_distance(existing, newBakedPosition)
+                print("   ✅ \(String(mapPointID.uuidString.prefix(8))): blended (Δ=\(String(format: "%.3f", delta))m) → (\(String(format: "%.2f", newBakedPosition.x)), \(String(format: "%.2f", newBakedPosition.y)), \(String(format: "%.2f", newBakedPosition.z))) [samples: \(newSampleCount)]")
+            } else {
+                // First bake for this MapPoint
+                newBakedPosition = canonicalPosition
+                newConfidence = sessionConfidence
+                newSampleCount = 1
+                
+                print("   ✅ \(String(mapPointID.uuidString.prefix(8))): NEW → (\(String(format: "%.2f", newBakedPosition.x)), \(String(format: "%.2f", newBakedPosition.y)), \(String(format: "%.2f", newBakedPosition.z))) [samples: 1]")
+            }
+            
+            // Update the MapPoint
+            mapStore.points[index].bakedCanonicalPosition = newBakedPosition
+            mapStore.points[index].bakedConfidence = newConfidence
+            mapStore.points[index].bakedSampleCount = newSampleCount
+            
+            updatedCount += 1
+        }
+        
+        // Save changes
+        mapStore.save()
+        
+        print("\n" + String(repeating: "=", count: 60))
+        print("🔥 [BAKE_DOWN] Complete: \(updatedCount) MapPoint(s) updated")
+        print(String(repeating: "=", count: 60) + "\n")
+        
+        return updatedCount
+    }
+    
+    /// Debug function to display current baked positions
+    func debugBakedPositions() {
+        mapStore.debugBakedPositionSummary()
     }
     
     // MARK: - Crawl Coverage Diagnostics
