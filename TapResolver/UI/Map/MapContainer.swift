@@ -91,6 +91,14 @@ private struct MapCanvas: View {
             UserNavigation()
                 .frame(width: mapSize.width, height: mapSize.height)
                 .zIndex(35)
+            
+            // User position dot overlay (z = 37)
+            UserPositionOverlay(
+                userPosition: nil,  // TODO: Wire to actual user position source
+                isEnabled: AppSettings.followUserInMainMap
+            )
+            .frame(width: mapSize.width, height: mapSize.height)
+            .zIndex(37)
 
             RSSILabelsOverlay()
                 .frame(width: mapSize.width, height: mapSize.height)

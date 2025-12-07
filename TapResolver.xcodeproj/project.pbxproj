@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		6B7845742EE208AD00F1AE4E /* Main-App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B7845732EE208A900F1AE4E /* Main-App.swift */; };
 		6BEDF80E2EAD0BB600357282 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 6BAF103E2EAA685C00DCE1FD /* ZIPFoundation */; };
 /* End PBXBuildFile section */
 
@@ -29,6 +30,7 @@
 
 /* Begin PBXFileReference section */
 		6B407BCC2EA66C7D0001A56D /* TapResolver.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = TapResolver.xctestplan; sourceTree = "<group>"; };
+		6B7845732EE208A900F1AE4E /* Main-App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Main-App.swift"; sourceTree = "<group>"; };
 		6BDF50CB2E779EF700CBB5E5 /* TapResolver.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TapResolver.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6BDF50D82E779EF900CBB5E5 /* TapResolverTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TapResolverTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6BDF50E22E779EF900CBB5E5 /* TapResolverUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TapResolverUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -94,6 +96,7 @@
 		6BDF50C22E779EF700CBB5E5 = {
 			isa = PBXGroup;
 			children = (
+				6B7845732EE208A900F1AE4E /* Main-App.swift */,
 				6B407BCC2EA66C7D0001A56D /* TapResolver.xctestplan */,
 				6BDF50CD2E779EF700CBB5E5 /* TapResolver */,
 				6BDF50DB2E779EF900CBB5E5 /* TapResolverTests */,
@@ -260,6 +263,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6B7845742EE208AD00F1AE4E /* Main-App.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

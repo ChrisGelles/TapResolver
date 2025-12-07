@@ -1226,6 +1226,42 @@ private struct DebugSettingsPanel: View {
                             .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
                         }
                         .buttonStyle(.plain)
+                        
+                        // MARK: - User Position Tracking Toggles
+                        
+                        // Follow User in PiP Toggle
+                        Button {
+                            AppSettings.followUserInPiP.toggle()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: AppSettings.followUserInPiP ? "location.fill" : "location")
+                                    .font(.system(size: 24))
+                                Text("PiP Follow")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(AppSettings.followUserInPiP ? .green : .gray)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Follow User in Main Map Toggle
+                        Button {
+                            AppSettings.followUserInMainMap.toggle()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: AppSettings.followUserInMainMap ? "map.fill" : "map")
+                                    .font(.system(size: 24))
+                                Text("Map Follow")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(AppSettings.followUserInMainMap ? .green : .gray)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 20)

@@ -1046,12 +1046,16 @@ struct ARPiPMapView: View {
     // User position tracking
     @State private var userMapPosition: CGPoint? = nil
     @State private var positionUpdateTimer: Timer? = nil
-    @State private var isAnimating: Bool = false
     @State private var positionSamples: [simd_float3] = [] // Ring buffer for smoothing
     
+    // Timed transition after calibration completes
+    @State private var calibrationJustCompleted: Bool = false
+    
     // Debug toggle: Center PiP on user position during crawl mode (.readyToFill)
-    // TODO: Move to DebugSettingsManager once validated
-    @State private var followUserInPiPMap: Bool = true
+    // Uses AppSettings.followUserInPiP instead of local state
+    private var followUserInPiPMap: Bool {
+        AppSettings.followUserInPiP
+    }
     
     var body: some View {
         Group {
@@ -1111,6 +1115,14 @@ struct ARPiPMapView: View {
                     }
                     .onChange(of: arCalibrationCoordinator.calibrationState) { oldState, newState in
                 handleCalibrationStateChange(oldState: oldState, newState: newState, mapImage: mapImage, frameSize: frameSize)
+                        
+                        // Timed transition: show triangle frame for 1.5 sec after calibration completes
+                        if case .readyToFill = newState, oldState != .readyToFill {
+                            calibrationJustCompleted = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                calibrationJustCompleted = false
+                            }
+                        }
                     }
                     .onChange(of: arCalibrationCoordinator.placedMarkers.count) { _ in
                 handlePlacedMarkersChange(mapImage: mapImage, frameSize: frameSize)
@@ -1192,13 +1204,64 @@ struct ARPiPMapView: View {
         
         // CASE 2: Frame entire triangle when calibration complete (readyToFill state)
         if case .readyToFill = arCalibrationCoordinator.calibrationState {
-            // Triangle complete - either follow user or frame triangle
+            // PRIORITY 1: Show triangle frame briefly after calibration completes
+            if calibrationJustCompleted, let triangle = selectedTriangle,
+               triangle.vertexIDs.count == 3 {
+                // Frame the entire triangle (existing triangle framing code)
+                let currentState = arCalibrationCoordinator.calibrationState
+                let shouldLog = lastLoggedTransformState != currentState
+                if shouldLog {
+                    print("🎯 [PIP_TRANSFORM] readyToFill state - showing triangle frame (calibration just completed)")
+                    lastLoggedTransformState = currentState
+                }
+                
+                let vertexPoints = triangle.vertexIDs.compactMap { vertexID in
+                    mapPointStore.points.first(where: { $0.id == vertexID })?.mapPoint
+                }
+                
+                guard vertexPoints.count == 3 else {
+                    print("⚠️ [PIP_TRANSFORM] Could not find all 3 vertices")
+                    // Fall through to full map view
+                    return calculateFullMapTransform(frameSize: frameSize, imageSize: imageSize)
+                }
+                
+                let minX = vertexPoints.map { $0.x }.min()!
+                let maxX = vertexPoints.map { $0.x }.max()!
+                let minY = vertexPoints.map { $0.y }.min()!
+                let maxY = vertexPoints.map { $0.y }.max()!
+                
+                let padding: CGFloat = 100 // Padding around triangle
+                let cornerA = CGPoint(x: minX - padding, y: minY - padding)
+                let cornerB = CGPoint(x: maxX + padding, y: maxY + padding)
+                
+                if shouldLog {
+                    print("📐 [PIP_TRANSFORM] Triangle bounds: A(\(Int(cornerA.x)), \(Int(cornerA.y))) B(\(Int(cornerB.x)), \(Int(cornerB.y)))")
+                }
+                
+                let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+                let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+                
+                if shouldLog {
+                    print("✅ [PIP_TRANSFORM] Calculated triangle frame - scale: \(String(format: "%.3f", scale)), offset: (\(String(format: "%.1f", offset.width)), \(String(format: "%.1f", offset.height)))")
+                }
+                return (scale, offset)
+            }
+            
+            // PRIORITY 2: Follow user position during crawl mode (after delay)
             if followUserInPiPMap, let userPos = userMapPosition {
                 // Follow user position during crawl mode
-                print("📍 [PIP_TRANSFORM] Following user at (\(String(format: "%.0f", userPos.x)), \(String(format: "%.0f", userPos.y)))")
-                let focused = PiPMapTransform.focused(on: userPos, imageSize: imageSize, frameSize: frameSize, targetZoom: 8.0)
-                return (focused.scale, focused.offset)
-            } else if let triangle = selectedTriangle,
+                // Use regionSize approach (same as ghost marker focus) instead of broken targetZoom
+                let regionSize: CGFloat = 400  // Same framing as ghost marker proximity
+                let cornerA = CGPoint(x: userPos.x - regionSize/2, y: userPos.y - regionSize/2)
+                let cornerB = CGPoint(x: userPos.x + regionSize/2, y: userPos.y + regionSize/2)
+                
+                let scale = calculateScale(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+                let offset = calculateOffset(pointA: cornerA, pointB: cornerB, frameSize: frameSize, imageSize: imageSize)
+                return (scale, offset)
+            }
+            
+            // PRIORITY 3: Fallback - frame the entire triangle
+            if let triangle = selectedTriangle,
            triangle.vertexIDs.count == 3 {
                 // Fallback: frame the entire triangle
                 // Only log on state change
@@ -1492,9 +1555,10 @@ struct ARPiPMapView: View {
                 .allowsHitTesting(false) // Disable gestures in PiP
             
             // User position dot overlay (only in calibration mode)
-            if isCalibrationMode, let userPos = userMapPosition {
-                userPositionDot(userPos: userPos)
-            }
+            UserPositionOverlay(
+                userPosition: userMapPosition,
+                isEnabled: isCalibrationMode && AppSettings.followUserInPiP
+            )
             
             // Focused point indicator (if any) - must be after MapContainer to render on top
             if let pointID = focusedPointID,
@@ -1502,30 +1566,6 @@ struct ARPiPMapView: View {
                 focusedPointIndicator(pointID: pointID, point: point)
             }
         }
-    }
-    
-    @ViewBuilder
-    private func userPositionDot(userPos: CGPoint) -> some View {
-        ZStack {
-            // Base dot
-            Circle()
-                .fill(Color(red: 103/255, green: 31/255, blue: 121/255))
-                .frame(width: 15, height: 15)
-            
-            // Pulse animation ring
-            Circle()
-                .stroke(Color(red: 73/255, green: 206/255, blue: 248/255), lineWidth: 2)
-                .frame(width: 15, height: 15)
-                .scaleEffect(isAnimating ? 22.0/15.0 : 1.0) // Grow from 15px to 22px
-                .opacity(isAnimating ? 0.0 : 0.5) // Fade from 0.5 to 0
-                .onAppear {
-                    // Start repeating animation
-                    withAnimation(Animation.easeOut(duration: 1.0).repeatForever(autoreverses: false)) {
-                        isAnimating = true
-                    }
-                }
-        }
-        .position(userPos)
     }
     
     @ViewBuilder
@@ -1651,9 +1691,6 @@ struct ARPiPMapView: View {
     private func startUserPositionTracking() {
         guard isCalibrationMode else { return }
         
-        // Start pulse animation
-        isAnimating = true
-        
         // Start position update timer (every 1 second)
         // Note: Using Timer with struct - timer will be invalidated on deinit
         positionUpdateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
@@ -1669,7 +1706,6 @@ struct ARPiPMapView: View {
         positionUpdateTimer = nil
         userMapPosition = nil
         positionSamples.removeAll()
-        isAnimating = false
     }
     
     private func updateUserPosition() {
