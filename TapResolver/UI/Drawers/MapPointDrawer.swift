@@ -67,6 +67,15 @@ struct MapPointDrawer: View {
             .scrollIndicators(.hidden)
             .opacity(hud.isMapPointOpen ? 1 : 0)          // hide visuals when closed
             .allowsHitTesting(hud.isMapPointOpen)         // ignore touches when closed
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        mapTransform.isHUDInteracting = true
+                    }
+                    .onEnded { _ in
+                        mapTransform.isHUDInteracting = false
+                    }
+            )
 
             // Top bar
             HStack(spacing: 2) {

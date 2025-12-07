@@ -73,6 +73,15 @@ struct BeaconDrawer: View {
             .scrollIndicators(.hidden)
             .opacity(hud.isBeaconOpen ? 1 : 0)          // hide visuals when closed
             .allowsHitTesting(hud.isBeaconOpen)         // ignore touches when closed
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        mapTransform.isHUDInteracting = true
+                    }
+                    .onEnded { _ in
+                        mapTransform.isHUDInteracting = false
+                    }
+            )
 
             // Top bar
             HStack(spacing: 2) {

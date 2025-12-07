@@ -1081,21 +1081,27 @@ final class ARCalibrationCoordinator: ObservableObject {
         placedVertexIDs: [UUID],
         placedARPositions: [simd_float3]
     ) -> simd_float3? {
+        let calcStart = Date()
+        var timingLog: [(String, TimeInterval)] = []
+        
         guard placedVertexIDs.count == 2, placedARPositions.count == 2 else {
             print("⚠️ [GHOST_3RD] Need exactly 2 placed markers")
             return nil
         }
         
         // Get MapPoints for all 3 vertices
+        let lookupStart = Date()
         guard let thirdMapPoint = mapStore.points.first(where: { $0.id == thirdVertexID }),
               let firstMapPoint = mapStore.points.first(where: { $0.id == placedVertexIDs[0] }),
               let secondMapPoint = mapStore.points.first(where: { $0.id == placedVertexIDs[1] }) else {
             print("⚠️ [GHOST_3RD] Could not find MapPoints for vertices")
             return nil
         }
+        timingLog.append(("MapPoint lookup", Date().timeIntervalSince(lookupStart)))
         
         // PRIORITY 1: Check if 3rd vertex has consensus position from history
         // AND both placed markers have consensus positions (required for rigid transform)
+        let consensusStart = Date()
         if let consensus = thirdMapPoint.consensusPosition,
            let firstConsensus = firstMapPoint.consensusPosition,
            let secondConsensus = secondMapPoint.consensusPosition {
@@ -1137,6 +1143,13 @@ final class ARCalibrationCoordinator: ObservableObject {
                     print("👻 [GHOST_3RD] Transformed consensus: (\(String(format: "%.2f", transformedPosition.x)), \(String(format: "%.2f", transformedPosition.y)), \(String(format: "%.2f", transformedPosition.z)))")
                     print("   Original consensus was: (\(String(format: "%.2f", consensus.x)), \(String(format: "%.2f", consensus.y)), \(String(format: "%.2f", consensus.z)))")
                     print("   Verification error: \(String(format: "%.3f", verificationError))m ✓")
+                    
+                    timingLog.append(("Consensus + transform", Date().timeIntervalSince(consensusStart)))
+                    let totalMs = Date().timeIntervalSince(calcStart) * 1000
+                    print("⏱️ [GHOST_3RD] Timing breakdown (total: \(String(format: "%.1f", totalMs))ms):")
+                    for (label, duration) in timingLog {
+                        print("   └─ \(label): \(String(format: "%.1f", duration * 1000))ms")
+                    }
                     
                     return transformedPosition
                 }
@@ -1211,6 +1224,13 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("👻 [GHOST_3RD] Calculated from map: (\(String(format: "%.2f", ghostPosition.x)), \(String(format: "%.2f", ghostPosition.y)), \(String(format: "%.2f", ghostPosition.z)))")
         print("   Scale: \(String(format: "%.4f", scale)) AR meters per map pixel")
         print("   Rotation: \(String(format: "%.1f", rotation * 180 / .pi))°")
+        
+        timingLog.append(("2D geometry fallback", Date().timeIntervalSince(consensusStart)))
+        let totalMs = Date().timeIntervalSince(calcStart) * 1000
+        print("⏱️ [GHOST_3RD] Timing breakdown (total: \(String(format: "%.1f", totalMs))ms):")
+        for (label, duration) in timingLog {
+            print("   └─ \(label): \(String(format: "%.1f", duration * 1000))ms")
+        }
         
         return ghostPosition
     }

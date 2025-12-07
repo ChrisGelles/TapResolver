@@ -866,12 +866,15 @@ public final class MapPointStore: ObservableObject {
             }
             print("✅ MapPointStore: Reload complete - \(points.count) points loaded")
             
-            // Diagnostic: Log position history after loading
+            // Diagnostic: Aggregate data summary
+            let totalRecords = points.reduce(0) { $0 + $1.arPositionHistory.count }
+            let uniqueSessions = Set(points.flatMap { $0.arPositionHistory.map { $0.sessionID } })
+            let pointsWithHistory = points.filter { !$0.arPositionHistory.isEmpty }.count
+            print("📊 [DATA_SUMMARY] \(points.count) MapPoints, \(pointsWithHistory) with history, \(totalRecords) total position records across \(uniqueSessions.count) sessions")
+            
+            // Verbose per-MapPoint logging (comment out if too noisy)
             for point in points where !point.arPositionHistory.isEmpty {
-                print("📊 [DIAG] MapPoint \(point.id.uuidString.prefix(8)) has \(point.arPositionHistory.count) position records")
-                if let consensus = point.consensusPosition {
-                    print("   Consensus: (\(String(format: "%.2f", consensus.x)), \(String(format: "%.2f", consensus.y)), \(String(format: "%.2f", consensus.z)))")
-                }
+                print("   └─ MP \(point.id.uuidString.prefix(8)): \(point.arPositionHistory.count) records")
             }
         } else {
             self.points = []

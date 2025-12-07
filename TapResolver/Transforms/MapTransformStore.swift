@@ -36,6 +36,10 @@ final class MapTransformStore: ObservableObject {
     /// The bridge should skip map pan while this is true.
     @Published var isOverlayDragging: Bool = false
     
+    /// Indicates whether a HUD drawer is being interacted with (scrolling, etc).
+    /// The bridge should skip map pan while this is true.
+    @Published var isHUDInteracting: Bool = false
+    
     // Pan session
     private var panInitialOffset: CGSize = .zero
     

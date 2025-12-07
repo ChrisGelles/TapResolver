@@ -136,7 +136,7 @@ private struct MapCanvas: View {
         .offset(mapTransform.totalOffset)
 
         .overlay(
-            PinchRotateCentroidBridge(isOverlayDragging: { mapTransform.isOverlayDragging }) { update in
+            PinchRotateCentroidBridge(shouldBlockPan: { mapTransform.isOverlayDragging || mapTransform.isHUDInteracting }) { update in
                 switch update.gestureMode {
                 case .pinchRotate:
                     let phase: TransformProcessor.PinchPhase

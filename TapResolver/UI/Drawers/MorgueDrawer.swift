@@ -8,6 +8,7 @@ import SwiftUI
 struct MorgueDrawer: View {
     @EnvironmentObject private var hud: HUDPanelsState
     @EnvironmentObject private var beaconLists: BeaconListsStore
+    @EnvironmentObject private var mapTransform: MapTransformStore
 
     private let collapsedWidth: CGFloat = 56
     private let expandedWidth: CGFloat = 180
@@ -36,6 +37,15 @@ struct MorgueDrawer: View {
                 .padding(.trailing, 6)
             }
             .scrollIndicators(.hidden)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        mapTransform.isHUDInteracting = true
+                    }
+                    .onEnded { _ in
+                        mapTransform.isHUDInteracting = false
+                    }
+            )
 
             // Header
             HStack(spacing: 2) {

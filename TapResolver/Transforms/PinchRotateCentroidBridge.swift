@@ -12,8 +12,8 @@ import UIKit
 /// Unified gesture bridge that reports pinch/rotate AND pan from UIKit.
 /// Handles finger count transitions (2→1→2) seamlessly.
 struct PinchRotateCentroidBridge: UIViewRepresentable {
-    /// Closure to check if overlay is dragging (returns true if map pan should be blocked)
-    var isOverlayDragging: () -> Bool = { false }
+    /// Closure to check if map pan should be blocked (overlay dragging or HUD interaction)
+    var shouldBlockPan: () -> Bool = { false }
     
     struct State {
         enum Phase { case began, changed, ended, cancelled }
@@ -34,7 +34,7 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
         var isNavigationSessionActive: Bool
     }
     let onUpdate: (State) -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(onUpdate: onUpdate, isOverlayDragging: isOverlayDragging) }
+    func makeCoordinator() -> Coordinator { Coordinator(onUpdate: onUpdate, shouldBlockPan: shouldBlockPan) }
 
     func makeUIView(context: Context) -> UIView {
         let v = UIView()
@@ -56,7 +56,7 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let onUpdate: (State) -> Void
-        let isOverlayDragging: () -> Bool
+        let shouldBlockPan: () -> Bool
         weak var anchorView: UIView?
         var pinch: UIPinchGestureRecognizer?
         var rotate: UIRotationGestureRecognizer?
@@ -82,9 +82,9 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
         // Session start time for logging
         private var sessionStartTime: CFAbsoluteTime = 0
         
-        init(onUpdate: @escaping (State) -> Void, isOverlayDragging: @escaping () -> Bool) {
+        init(onUpdate: @escaping (State) -> Void, shouldBlockPan: @escaping () -> Bool) {
             self.onUpdate = onUpdate
-            self.isOverlayDragging = isOverlayDragging
+            self.shouldBlockPan = shouldBlockPan
             self.sessionStartTime = CFAbsoluteTimeGetCurrent()
         }
         
@@ -150,8 +150,8 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
             // Ignore pan while pinching (2+ fingers)
             guard !isPinchActive else { return }
             
-            // Check if an overlay claimed this touch
-            if isOverlayDragging() {
+            // Check if an overlay or HUD claimed this touch
+            if shouldBlockPan() {
                 // If pan was active, cancel it
                 if isPanActive {
                     isPanActive = false

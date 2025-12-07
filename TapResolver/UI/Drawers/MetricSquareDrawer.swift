@@ -51,6 +51,15 @@ struct MetricSquareDrawer: View {
                 .padding(.trailing, 6)
             }
             .scrollIndicators(.hidden)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        mapTransform.isHUDInteracting = true
+                    }
+                    .onEnded { _ in
+                        mapTransform.isHUDInteracting = false
+                    }
+            )
 
             topBar
                 .frame(height: topBarHeight)
