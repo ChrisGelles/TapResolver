@@ -306,6 +306,7 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
+            let sceneStart = Date()
             print("👻 [GHOST_RENDER] Placing ghost marker for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
             
             // Check if ghost already exists for this MapPoint
@@ -338,7 +339,9 @@ struct ARViewContainer: UIViewRepresentable {
             // Add to scene
             sceneView?.scene.rootNode.addChildNode(ghostNode)
             
+            let sceneDuration = Date().timeIntervalSince(sceneStart) * 1000
             print("✅ [GHOST_RENDER] Ghost marker rendered for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            print("   ⏱️ SceneKit creation: \(String(format: "%.1f", sceneDuration))ms")
         }
         
         /// Remove a ghost marker from the scene

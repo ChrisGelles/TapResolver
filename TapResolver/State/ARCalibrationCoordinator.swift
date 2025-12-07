@@ -1259,15 +1259,19 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // STEP 2: For each adjacent triangle, plant ghost at far vertex
         var ghostsPlanted = 0
+        var skippedReasons: [(UUID, String)] = []  // Track why vertices were skipped
+        
         for adjacentTriangle in adjacentTriangles {
             // Get the far vertex (REUSE existing function)
             guard let farVertexID = triangleStore.getFarVertex(adjacentTriangle: adjacentTriangle, sourceTriangle: calibratedTriangle) else {
+                skippedReasons.append((adjacentTriangle.id, "Could not determine far vertex"))
                 print("⚠️ [GHOST_PLANT] Could not find far vertex for triangle \(String(adjacentTriangle.id.uuidString.prefix(8)))")
                 continue
             }
             
             // Get MapPoint for far vertex
             guard let farVertexMapPoint = mapPointStore.points.first(where: { $0.id == farVertexID }) else {
+                skippedReasons.append((farVertexID, "MapPoint not found in store"))
                 print("⚠️ [GHOST_PLANT] Could not find MapPoint for far vertex \(String(farVertexID.uuidString.prefix(8)))")
                 continue
             }
@@ -1276,11 +1280,13 @@ final class ARCalibrationCoordinator: ObservableObject {
             // Uses mapPointARPositions which is updated by BOTH calibration and crawl mode
             let hasPositionInCurrentSession = mapPointARPositions[farVertexID] != nil
             if hasPositionInCurrentSession {
-                print("⏭️ [GHOST_PLANT] Skipping MapPoint \(String(farVertexID.uuidString.prefix(8))) - already has AR position in current session")
+                skippedReasons.append((farVertexID, "Already has AR position in mapPointARPositions"))
+                print("⭐️ [GHOST_PLANT] Skipping MapPoint \(String(farVertexID.uuidString.prefix(8))) - already has AR position in current session")
                 continue
             }
             
             // Calculate ghost position using barycentric interpolation
+            let calcStart = Date()
             guard let ghostPosition = calculateGhostPosition(
                 mapPoint: farVertexMapPoint,
                 calibratedTriangleID: calibratedTriangle.id,
@@ -1288,11 +1294,15 @@ final class ARCalibrationCoordinator: ObservableObject {
                 mapPointStore: mapPointStore,
                 arWorldMapStore: arWorldMapStore
             ) else {
+                let calcDuration = Date().timeIntervalSince(calcStart) * 1000
+                skippedReasons.append((farVertexID, "Ghost position calculation failed (\(String(format: "%.1f", calcDuration))ms)"))
                 print("⚠️ [GHOST_PLANT] Could not calculate ghost position for MapPoint \(String(farVertexID.uuidString.prefix(8)))")
                 continue
             }
+            let calcDuration = Date().timeIntervalSince(calcStart) * 1000
             
             // Post notification to coordinator to render ghost
+            let notifyStart = Date()
             NotificationCenter.default.post(
                 name: NSNotification.Name("PlaceGhostMarker"),
                 object: nil,
@@ -1301,12 +1311,20 @@ final class ARCalibrationCoordinator: ObservableObject {
                     "position": ghostPosition
                 ]
             )
+            let notifyDuration = Date().timeIntervalSince(notifyStart) * 1000
             
             ghostsPlanted += 1
             print("👻 [GHOST_PLANT] Planted ghost for MapPoint \(String(farVertexID.uuidString.prefix(8))) at position \(ghostPosition)")
+            print("   ⏱️ Calc: \(String(format: "%.1f", calcDuration))ms | Notify: \(String(format: "%.1f", notifyDuration))ms")
         }
         
-        print("✅ [GHOST_PLANT] Planted \(ghostsPlanted) ghost marker(s) for adjacent triangle vertices (including previously-calibrated triangles)")
+        print("✅ [GHOST_PLANT] Planted \(ghostsPlanted) ghost marker(s), skipped \(skippedReasons.count)")
+        if !skippedReasons.isEmpty {
+            print("   Skipped vertices:")
+            for (id, reason) in skippedReasons {
+                print("   • \(String(id.uuidString.prefix(8))): \(reason)")
+            }
+        }
     }
     
     /// Check if the active triangle has all 3 markers placed (calibration complete)
@@ -2134,6 +2152,69 @@ final class ARCalibrationCoordinator: ObservableObject {
             sessionID: arStore.currentSessionID,
             sessionTimestamp: arStore.currentSessionStartTime
         )
+    }
+    
+    // MARK: - Crawl Coverage Diagnostics
+    
+    /// Diagnostic: Show coverage of triangle vertices during calibration crawl
+    /// Call this at end of calibration to see which vertices were missed
+    func debugCrawlCoverage() {
+        print("\n" + String(repeating: "=", count: 80))
+        print("🔍 [CRAWL_COVERAGE] Calibration Crawl Coverage Analysis")
+        print(String(repeating: "=", count: 80))
+        
+        // Get all triangle-edge MapPoints
+        let triangleVertices = mapStore.points.filter { $0.roles.contains(.triangleEdge) }
+        let totalVertices = triangleVertices.count
+        
+        // Check which have AR positions
+        var covered: [UUID] = []
+        var missing: [UUID] = []
+        
+        for vertex in triangleVertices {
+            if mapPointARPositions[vertex.id] != nil {
+                covered.append(vertex.id)
+            } else {
+                missing.append(vertex.id)
+            }
+        }
+        
+        print("📊 Summary:")
+        print("   Total triangle vertices: \(totalVertices)")
+        print("   Covered (have AR position): \(covered.count)")
+        print("   Missing (no AR position): \(missing.count)")
+        print("")
+        
+        if !missing.isEmpty {
+            print("❌ MISSING VERTICES:")
+            for missingID in missing {
+                if let point = mapStore.points.first(where: { $0.id == missingID }) {
+                    // Find which triangles contain this vertex
+                    let containingTriangles = triangleStore.triangles.filter { $0.vertexIDs.contains(missingID) }
+                    let calibratedTriangles = containingTriangles.filter { sessionCalibratedTriangles.contains($0.id) }
+                    
+                    print("   • MapPoint \(String(missingID.uuidString.prefix(8))) at (\(Int(point.position.x)), \(Int(point.position.y)))")
+                    print("     Member of \(containingTriangles.count) triangle(s), \(calibratedTriangles.count) calibrated this session")
+                    
+                    // For each containing triangle, explain why this vertex wasn't covered
+                    for triangle in containingTriangles {
+                        let isCalibrated = sessionCalibratedTriangles.contains(triangle.id)
+                        let otherVertices = triangle.vertexIDs.filter { $0 != missingID }
+                        let otherVerticesCovered = otherVertices.allSatisfy { mapPointARPositions[$0] != nil }
+                        
+                        print("       Triangle \(String(triangle.id.uuidString.prefix(8))): calibrated=\(isCalibrated), other vertices covered=\(otherVerticesCovered)")
+                    }
+                }
+            }
+        }
+        
+        print("")
+        print("✅ Calibrated triangles this session: \(sessionCalibratedTriangles.count)")
+        for triangleID in sessionCalibratedTriangles {
+            print("   • \(String(triangleID.uuidString.prefix(8)))")
+        }
+        
+        print(String(repeating: "=", count: 80) + "\n")
     }
 }
 
