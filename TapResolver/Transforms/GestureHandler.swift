@@ -28,6 +28,9 @@ final class MapGestureHandler: ObservableObject {
 
     // Notify listeners when totals change (optional external wiring)
     var onTotalsChanged: ((CGFloat, Double, CGSize) -> Void)?
+    
+    /// When true, suppresses onTotalsChanged callback to prevent race conditions during sync
+    private var isSyncing = false
 
     init(minScale: CGFloat = 0.5, maxScale: CGFloat = 4.0, zoomStep: CGFloat = 1.25) {
         self.minScale = minScale
@@ -37,7 +40,7 @@ final class MapGestureHandler: ObservableObject {
 
     // Derived totals
     var totalScale: CGFloat {
-        clamp(steadyScale * gestureScale, minScale, maxScale)
+        steadyScale * gestureScale
     }
 
     var totalRotation: Angle {
@@ -131,6 +134,23 @@ final class MapGestureHandler: ObservableObject {
     private func clamp<T: Comparable>(_ x: T, _ a: T, _ b: T) -> T { min(max(x, a), b) }
 
     private func emitTotals() {
+        guard !isSyncing else { return }
         onTotalsChanged?(totalScale, totalRotation.radians, totalOffset)
+    }
+    
+    // MARK: - External Sync
+    
+    /// Sync internal state to match externally-applied transform.
+    /// Call this after PinchRotateCentroidBridge ends a gesture to prevent jumps.
+    func syncToExternalTransform(scale: CGFloat, rotation: Angle, offset: CGSize) {
+        isSyncing = true
+        defer { isSyncing = false }
+        
+        steadyScale = scale
+        steadyRotation = rotation
+        steadyOffset = offset
+        gestureScale = 1.0
+        gestureRotation = .degrees(0)
+        gestureTranslation = .zero
     }
 }

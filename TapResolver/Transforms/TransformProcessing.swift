@@ -35,6 +35,7 @@ final class TransformProcessor: ObservableObject {
 
         switch phase {
         case .began:
+            store.isPinching = true
             originScale    = store.totalScale
             originRotation = store.totalRotationRadians
             originOffset   = store.totalOffset
@@ -65,12 +66,38 @@ final class TransformProcessor: ObservableObject {
             let t1 = CGSize(width: a_scr0.x - Cscreen.x - rx,
                             height: a_scr0.y - Cscreen.y - ry)
 
-            // Defer publish (uses your existing coalescer)
-            enqueueCandidate(scale: s1, rotationRadians: th1, offset: t1)
+            // Write directly to store - bypass _setTotals guard since WE set isPinching
+            store.totalScale = s1
+            store.totalRotationRadians = CGFloat(th1)
+            store.totalOffset = t1
 
         case .ended, .cancelled:
+            store.isPinching = false
             fixedAnchorScreen = nil
             fixedAnchorMap = nil
+        }
+    }
+
+    // MARK: - Pan Gesture Handling (from bridge)
+
+    @MainActor
+    func handlePan(
+        phase: PinchPhase,
+        translation: CGSize
+    ) {
+        guard let store = mapTransform else { return }
+        
+        switch phase {
+        case .began:
+            store.beginPan()
+            // print("🖐️ [TransformProcessor] Pan began")
+            
+        case .changed:
+            store.updatePan(translation: translation)
+            
+        case .ended, .cancelled:
+            store.endPan()
+            // print("🖐️ [TransformProcessor] Pan ended")
         }
     }
 
@@ -130,6 +157,11 @@ final class TransformProcessor: ObservableObject {
 
     // Main entry from GestureHandler (call very frequently)
     func enqueueCandidate(scale: CGFloat, rotationRadians: Double, offset: CGSize) {
+        // Skip when bridge is driving transforms - prevents SwiftUI gesture spam
+        if let store = mapTransform, store.isPinching {
+            return
+        }
+        
         // REPLACE the immediate write with a deferred commit:
         if passThrough {
             // Coalesce to next runloop tick (avoids "publish during view update")
@@ -178,4 +210,3 @@ final class TransformProcessor: ObservableObject {
         lastOffset = pendingOffset
     }
 }
-
