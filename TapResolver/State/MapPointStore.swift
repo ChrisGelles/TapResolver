@@ -168,6 +168,14 @@ public final class MapPointStore: ObservableObject {
         // MARK: - Position History (Milestone 2)
         public var arPositionHistory: [ARPositionRecord] = []
         
+        // MARK: - Baked Canonical Position (Milestone 5)
+        
+        // These values are computed at calibration end and represent the MapPoint's
+        // position in a map-centered canonical coordinate frame.
+        public var bakedCanonicalPosition: SIMD3<Float>?  // Position in canonical frame
+        public var bakedConfidence: Float?                 // Aggregate confidence (0.0-1.0)
+        public var bakedSampleCount: Int = 0               // Number of calibration sessions that contributed
+        
         public var mapPoint: CGPoint {
             get { position }
             set { position = newValue }
@@ -185,7 +193,10 @@ public final class MapPointStore: ObservableObject {
             photoFilename: String? = nil,  // NEW
             triangleMemberships: [UUID] = [],
             isLocked: Bool = true,  // ✅ ADD THIS PARAMETER
-            arPositionHistory: [ARPositionRecord] = []  // NEW
+            arPositionHistory: [ARPositionRecord] = [],
+            bakedCanonicalPosition: SIMD3<Float>? = nil,
+            bakedConfidence: Float? = nil,
+            bakedSampleCount: Int = 0
         ) {
             self.id = id ?? UUID()
             self.position = mapPoint
@@ -200,6 +211,9 @@ public final class MapPointStore: ObservableObject {
             self.triangleMemberships = triangleMemberships
             self.isLocked = isLocked  // ✅ ADD THIS ASSIGNMENT
             self.arPositionHistory = arPositionHistory  // NEW
+            self.bakedCanonicalPosition = bakedCanonicalPosition
+            self.bakedConfidence = bakedConfidence
+            self.bakedSampleCount = bakedSampleCount
         }
         
         // MARK: - Consensus Position (Milestone 2)
@@ -256,6 +270,86 @@ public final class MapPointStore: ObservableObject {
             }
             if let consensus = consensusPosition {
                 print("   📍 Consensus: (\(String(format: "%.2f", consensus.x)), \(String(format: "%.2f", consensus.y)), \(String(format: "%.2f", consensus.z)))")
+            }
+        }
+        
+        // MARK: - Codable
+        
+        enum CodingKeys: String, CodingKey {
+            case id, position, name, createdDate, sessions
+            case linkedARMarkerID, arMarkerID, roles
+            case locationPhotoData, photoFilename, photoOutdated, photoCapturedAtPosition
+            case triangleMemberships, isLocked, arPositionHistory
+            case bakedCanonicalPositionArray, bakedConfidence, bakedSampleCount
+        }
+        
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(UUID.self, forKey: .id)
+            position = try container.decode(CGPoint.self, forKey: .position)
+            name = try container.decodeIfPresent(String.self, forKey: .name)
+            createdDate = try container.decode(Date.self, forKey: .createdDate)
+            sessions = try container.decode([ScanSession].self, forKey: .sessions)
+            linkedARMarkerID = try container.decodeIfPresent(UUID.self, forKey: .linkedARMarkerID)
+            arMarkerID = try container.decodeIfPresent(String.self, forKey: .arMarkerID)
+            
+            // Decode roles
+            if let rolesArray = try container.decodeIfPresent([MapPointRole].self, forKey: .roles) {
+                roles = Set(rolesArray)
+            } else {
+                roles = []
+            }
+            
+            locationPhotoData = try container.decodeIfPresent(Data.self, forKey: .locationPhotoData)
+            photoFilename = try container.decodeIfPresent(String.self, forKey: .photoFilename)
+            photoOutdated = try container.decodeIfPresent(Bool.self, forKey: .photoOutdated)
+            photoCapturedAtPosition = try container.decodeIfPresent(CGPoint.self, forKey: .photoCapturedAtPosition)
+            
+            triangleMemberships = try container.decodeIfPresent([UUID].self, forKey: .triangleMemberships) ?? []
+            isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? true
+            arPositionHistory = try container.decodeIfPresent([ARPositionRecord].self, forKey: .arPositionHistory) ?? []
+            
+            // Decode baked canonical position (Milestone 5)
+            if let bakedArray = try container.decodeIfPresent([Float].self, forKey: .bakedCanonicalPositionArray),
+               bakedArray.count == 3 {
+                bakedCanonicalPosition = SIMD3<Float>(bakedArray[0], bakedArray[1], bakedArray[2])
+            } else {
+                bakedCanonicalPosition = nil
+            }
+            bakedConfidence = try container.decodeIfPresent(Float.self, forKey: .bakedConfidence)
+            bakedSampleCount = try container.decodeIfPresent(Int.self, forKey: .bakedSampleCount) ?? 0
+        }
+        
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(id, forKey: .id)
+            try container.encode(position, forKey: .position)
+            try container.encodeIfPresent(name, forKey: .name)
+            try container.encode(createdDate, forKey: .createdDate)
+            try container.encode(sessions, forKey: .sessions)
+            try container.encodeIfPresent(linkedARMarkerID, forKey: .linkedARMarkerID)
+            try container.encodeIfPresent(arMarkerID, forKey: .arMarkerID)
+            try container.encode(Array(roles), forKey: .roles)
+            try container.encodeIfPresent(locationPhotoData, forKey: .locationPhotoData)
+            try container.encodeIfPresent(photoFilename, forKey: .photoFilename)
+            try container.encodeIfPresent(photoOutdated, forKey: .photoOutdated)
+            try container.encodeIfPresent(photoCapturedAtPosition, forKey: .photoCapturedAtPosition)
+            
+            if !triangleMemberships.isEmpty {
+                try container.encode(triangleMemberships, forKey: .triangleMemberships)
+            }
+            try container.encode(isLocked, forKey: .isLocked)
+            if !arPositionHistory.isEmpty {
+                try container.encode(arPositionHistory, forKey: .arPositionHistory)
+            }
+            
+            // Encode baked canonical position (Milestone 5)
+            if let baked = bakedCanonicalPosition {
+                try container.encode([baked.x, baked.y, baked.z], forKey: .bakedCanonicalPositionArray)
+            }
+            try container.encodeIfPresent(bakedConfidence, forKey: .bakedConfidence)
+            if bakedSampleCount > 0 {
+                try container.encode(bakedSampleCount, forKey: .bakedSampleCount)
             }
         }
     }
@@ -1522,6 +1616,32 @@ public final class MapPointStore: ObservableObject {
         print("   Purged \(totalRecords) legacy AR position record(s)")
         print("   Affected \(affectedPoints) MapPoint(s)")
         print("   Ghost placement will use 2D map geometry until fresh data accumulates")
+    }
+    
+    // MARK: - Baked Position Diagnostics
+    
+    /// Prints summary of baked canonical positions
+    func debugBakedPositionSummary() {
+        let pointsWithBaked = points.filter { $0.bakedCanonicalPosition != nil }
+        let pointsWithHistory = points.filter { !$0.arPositionHistory.isEmpty }
+        
+        print("\n" + String(repeating: "=", count: 60))
+        print("📦 [BAKED_POSITION] Summary")
+        print(String(repeating: "=", count: 60))
+        print("   Total MapPoints: \(points.count)")
+        print("   With position history: \(pointsWithHistory.count)")
+        print("   With baked canonical position: \(pointsWithBaked.count)")
+        
+        if !pointsWithBaked.isEmpty {
+            print("\n   Baked positions:")
+            for point in pointsWithBaked {
+                if let baked = point.bakedCanonicalPosition,
+                   let confidence = point.bakedConfidence {
+                    print("   • \(String(point.id.uuidString.prefix(8))): (\(String(format: "%.2f", baked.x)), \(String(format: "%.2f", baked.y)), \(String(format: "%.2f", baked.z))) conf=\(String(format: "%.2f", confidence)) samples=\(point.bakedSampleCount)")
+                }
+            }
+        }
+        print(String(repeating: "=", count: 60) + "\n")
     }
     
 }
