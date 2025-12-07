@@ -1059,6 +1059,7 @@ private struct DebugSettingsPanel: View {
     @State private var showingPurgeARHistoryAlert = false
     @State private var showingFullResetAlert = false
     @State private var orphanPurgeResultMessage = ""
+    @State private var showingLogShare = false
     
     var body: some View {
         GeometryReader { geometry in
@@ -1262,6 +1263,26 @@ private struct DebugSettingsPanel: View {
                             .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
                         }
                         .buttonStyle(.plain)
+                        
+                        // Export Console Log Button
+                        Button {
+                            showingLogShare = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "doc.text")
+                                    .font(.system(size: 24))
+                                Text("Export Log")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .sheet(isPresented: $showingLogShare) {
+                            ShareSheet(items: [FileLogger.shared.logFileURL])
+                        }
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 20)
