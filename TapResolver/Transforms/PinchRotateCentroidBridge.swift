@@ -115,7 +115,7 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
             self.pan = pan
             self.attachedWindow = window
             
-            print("🎛️ [\(timestamp())] Bridge attached to window (pinch + rotate + pan)")
+            // print("🎛️ [\(timestamp())] Bridge attached to window (pinch + rotate + pan)")
         }
 
         func detachFromWindow() {
@@ -151,7 +151,7 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
             case .began:
                 isPanActive = true
                 isNavigationSessionActive = true
-                print("🖐️ [\(timestamp())] Pan BEGAN (UIKit)")
+                // print("🖐️ [\(timestamp())] Pan BEGAN (UIKit)")
                 onUpdate(State(
                     phase: .began,
                     gestureMode: .pan,
@@ -176,7 +176,7 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
             case .ended:
                 isPanActive = false
                 isNavigationSessionActive = false
-                print("🖐️ [\(timestamp())] Pan ENDED (UIKit)")
+                // print("🖐️ [\(timestamp())] Pan ENDED (UIKit)")
                 onUpdate(State(
                     phase: .ended,
                     gestureMode: .pan,
@@ -190,7 +190,7 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
             case .cancelled, .failed:
                 isPanActive = false
                 isNavigationSessionActive = false
-                print("🖐️ [\(timestamp())] Pan CANCELLED (UIKit)")
+                // print("🖐️ [\(timestamp())] Pan CANCELLED (UIKit)")
                 onUpdate(State(
                     phase: .cancelled,
                     gestureMode: .pan,
@@ -221,7 +221,7 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
             if wasTwo && !isTwo && isPinchActive {
                 isPinchActive = false
                 // Keep isNavigationSessionActive = true so pan can continue
-                print("✌️→☝️ [\(timestamp())] Pinch ENDED (2→1), pan will continue")
+                // print("✌️→☝️ [\(timestamp())] Pinch ENDED (2→1), pan will continue")
                 
                 // End pinch with last valid centroid (prevents jump)
                 onUpdate(State(
@@ -240,7 +240,7 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
                     isPanActive = true
                     
                     // CRITICAL: Send .began so store.beginPan() captures current offset
-                    print("🖐️ [\(timestamp())] Pan BEGAN (after 2→1 transition)")
+                    // print("🖐️ [\(timestamp())] Pan BEGAN (after 2→1 transition)")
                     onUpdate(State(
                         phase: .began,
                         gestureMode: .pan,
@@ -259,7 +259,7 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
             if !wasTwo && isTwo {
                 // Debounce rapid transitions
                 if now - lastTransitionTime < transitionDebounceInterval {
-                    print("⚡ [\(timestamp())] Debounced 1→2 transition")
+                    // print("⚡ [\(timestamp())] Debounced 1→2 transition")
                     return
                 }
                 lastTransitionTime = now
@@ -267,7 +267,7 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
                 // End any active pan before starting pinch
                 if isPanActive {
                     isPanActive = false
-                    print("🖐️→✌️ [\(timestamp())] Pan ended, switching to pinch")
+                    // print("🖐️→✌️ [\(timestamp())] Pan ended, switching to pinch")
                     onUpdate(State(
                         phase: .ended,
                         gestureMode: .pan,
@@ -294,7 +294,7 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
                 
                 isPinchActive = true
                 isNavigationSessionActive = true
-                print("☝️→✌️ [\(timestamp())] Pinch BEGAN (1→2) at (\(Int(centroid.x)), \(Int(centroid.y)))")
+                // print("☝️→✌️ [\(timestamp())] Pinch BEGAN (1→2) at (\(Int(centroid.x)), \(Int(centroid.y)))")
                 
                 onUpdate(State(
                     phase: .began,
@@ -326,12 +326,12 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
                 isPinchActive = false
                 isNavigationSessionActive = false
                 phase = .ended
-                print("✌️ [\(timestamp())] Pinch ENDED (lift both)")
+                // print("✌️ [\(timestamp())] Pinch ENDED (lift both)")
             } else if p.state == .cancelled || r.state == .cancelled {
                 isPinchActive = false
                 isNavigationSessionActive = false
                 phase = .cancelled
-                print("✌️ [\(timestamp())] Pinch CANCELLED")
+                // print("✌️ [\(timestamp())] Pinch CANCELLED")
             } else if !isPinchActive {
                 // Fresh 2-finger start (0→2)
                 isPinchActive = true
@@ -339,7 +339,7 @@ struct PinchRotateCentroidBridge: UIViewRepresentable {
                 p.scale = 1.0
                 r.rotation = 0
                 phase = .began
-                print("✌️ [\(timestamp())] Pinch BEGAN (fresh) at (\(Int(centroid.x)), \(Int(centroid.y)))")
+                // print("✌️ [\(timestamp())] Pinch BEGAN (fresh) at (\(Int(centroid.x)), \(Int(centroid.y)))")
             } else {
                 phase = .changed
             }

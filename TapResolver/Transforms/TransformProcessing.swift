@@ -90,14 +90,14 @@ final class TransformProcessor: ObservableObject {
         switch phase {
         case .began:
             store.beginPan()
-            print("🖐️ [TransformProcessor] Pan began")
+            // print("🖐️ [TransformProcessor] Pan began")
             
         case .changed:
             store.updatePan(translation: translation)
             
         case .ended, .cancelled:
             store.endPan()
-            print("🖐️ [TransformProcessor] Pan ended")
+            // print("🖐️ [TransformProcessor] Pan ended")
         }
     }
 
