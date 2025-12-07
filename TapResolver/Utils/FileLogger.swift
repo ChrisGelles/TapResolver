@@ -88,6 +88,29 @@ public final class FileLogger {
     /// Get the URL of the log file for sharing
     public var logFileURL: URL { fileURL }
     
+    /// Generate a shareable filename with timestamp (local time)
+    /// Format: TapRez-Console-20251207-1246.log
+    public func generateExportFilename() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmm"
+        formatter.timeZone = .current  // Local time, not GMT
+        let timestamp = formatter.string(from: Date())
+        return "TapRez-Console-\(timestamp).log"
+    }
+    
+    /// Get a URL with the formatted export filename (for sharing)
+    public var exportFileURL: URL {
+        let tempDir = FileManager.default.temporaryDirectory
+        let exportName = generateExportFilename()
+        let exportURL = tempDir.appendingPathComponent(exportName)
+        
+        // Copy current log to temp location with nice filename
+        try? FileManager.default.removeItem(at: exportURL)
+        try? FileManager.default.copyItem(at: fileURL, to: exportURL)
+        
+        return exportURL
+    }
+    
     /// Get the contents of the log file as a string
     public func getLogContents() -> String {
         do {
@@ -107,11 +130,14 @@ public final class FileLogger {
         }
     }
     
-    /// Clear the log file
+    /// Clear the log file and start fresh with new header
     public func clearLog() {
         queue.async { [weak self] in
             guard let self = self else { return }
-            let header = "📱 Log cleared at \(self.dateFormatter.string(from: Date()))\n\n"
+            let header = "\n" + String(repeating: "=", count: 80) + "\n"
+                + "📱 TapResolver Log Cleared & Restarted\n"
+                + "   Date: \(self.dateFormatter.string(from: Date()))\n"
+                + String(repeating: "=", count: 80) + "\n\n"
             try? header.write(to: self.fileURL, atomically: true, encoding: .utf8)
         }
     }

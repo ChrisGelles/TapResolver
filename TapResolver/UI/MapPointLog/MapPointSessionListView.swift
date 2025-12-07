@@ -11,6 +11,7 @@ import SwiftUI
 
 struct MapPointSessionListView: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
+    @EnvironmentObject private var mapTransform: MapTransformStore
     
     let pointID: String
     let onDismiss: () -> Void
@@ -179,6 +180,11 @@ struct MapPointSessionListView: View {
                     }
                     .padding(16)
                 }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { _ in mapTransform.isHUDInteracting = true }
+                        .onEnded { _ in mapTransform.isHUDInteracting = false }
+                )
                 .background(Color.black.opacity(0.85))
             }
         }

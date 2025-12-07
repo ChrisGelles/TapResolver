@@ -12,6 +12,8 @@ import Foundation
 // MARK: - Notification Extensions
 extension Notification.Name {
     static let beaconSelectedForTxPower = Notification.Name("beaconSelectedForTxPower")
+    static let sliderInteractionBegan = Notification.Name("sliderInteractionBegan")
+    static let sliderInteractionEnded = Notification.Name("sliderInteractionEnded")
 }
 
 // MARK: - Color extension for hex support
@@ -67,6 +69,12 @@ struct HUDContainer: View {
                 if let beaconID = notification.object as? String {
                     selectedBeaconForTxPower = beaconID
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .sliderInteractionBegan)) { _ in
+                mapTransform.isHUDInteracting = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .sliderInteractionEnded)) { _ in
+                mapTransform.isHUDInteracting = false
             }
             // AR view launch is now handled via ARViewLaunchContext
             // Removed notification handler - using direct method call instead
@@ -832,6 +840,16 @@ struct CustomSlider: UIViewRepresentable {
             action: #selector(Coordinator.valueChanged(_:)),
             for: .valueChanged
         )
+        slider.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.touchBegan),
+            for: .touchDown
+        )
+        slider.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.touchEnded),
+            for: [.touchUpInside, .touchUpOutside, .touchCancel]
+        )
         return slider
     }
     
@@ -851,6 +869,14 @@ struct CustomSlider: UIViewRepresentable {
         
         init(_ parent: CustomSlider) {
             self.parent = parent
+        }
+        
+        @objc func touchBegan() {
+            NotificationCenter.default.post(name: .sliderInteractionBegan, object: nil)
+        }
+        
+        @objc func touchEnded() {
+            NotificationCenter.default.post(name: .sliderInteractionEnded, object: nil)
         }
         
         @objc func valueChanged(_ sender: UISlider) {
@@ -1050,6 +1076,7 @@ private struct DebugSettingsPanel: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var triangleStore: TrianglePatchStore
     @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var mapTransform: MapTransformStore
     
     @Binding var showRelocalizationDebug: Bool
     @State private var showingSoftResetAlert = false
@@ -1281,12 +1308,34 @@ private struct DebugSettingsPanel: View {
                         }
                         .buttonStyle(.plain)
                         .sheet(isPresented: $showingLogShare) {
-                            ShareSheet(items: [FileLogger.shared.logFileURL])
+                            ShareSheet(items: [FileLogger.shared.exportFileURL])
                         }
+                        
+                        // Clear Console Log Button
+                        Button {
+                            FileLogger.shared.clearLog()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 24))
+                                Text("Clear Log")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 20)
                 }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { _ in mapTransform.isHUDInteracting = true }
+                        .onEnded { _ in mapTransform.isHUDInteracting = false }
+                )
                 .background(Color.black.opacity(0.7))
             }
             .frame(height: min(geometry.size.height * 0.5, 400))
