@@ -346,6 +346,18 @@ If you see `✌️→☝️ Pinch ENDED (2→1)` without a following `🖐️ Pa
 
 ## Known Issues / Future Work
 
+### Overlay Drag Conflict (RESOLVED - December 2024)
+
+**Symptom**: Dragging overlay elements (Beacon Dots, Map Points, Metric Squares) would also pan the map simultaneously.
+
+**Root Cause**: Window-level UIKit gesture recognizers captured all touches, including those on overlay elements.
+
+**Fix**: Added `isOverlayDragging` flag to `MapTransformStore`. Overlays set this flag when dragging starts, and `PinchRotateCentroidBridge` skips map pan when the flag is true.
+
+**Status**: ✅ Fixed in commit `aa89ec4`. See `OVERLAY_DRAG_GESTURE_FIX.md` for details.
+
+---
+
 ### Overlay Drag Offset (Issue 2 - Diagnosed, Not Yet Fixed)
 
 **Symptom**: MapPoints and BeaconDots have incorrect drag offsets when moved.
@@ -359,6 +371,8 @@ DragGesture(minimumDistance: 6, coordinateSpace: .global)
 ```
 
 **Status**: Ready for implementation in next phase.
+
+**Note**: This issue was resolved as part of the overlay drag conflict fix - overlays now use `.global` coordinate space.
 
 ---
 
