@@ -97,6 +97,18 @@ final class ARCalibrationCoordinator: ObservableObject {
     var triangleStore: TrianglePatchStore
     var metricSquareStore: MetricSquareStore?
     
+    // MARK: - Baked Position Session Transform (Milestone 5 - Step 4)
+    
+    /// Cached transform from canonical frame to current AR session
+    /// Computed once when 2 markers are planted, used for all ghost placements
+    private var cachedCanonicalToSessionTransform: SessionToCanonicalTransform?
+    
+    /// Map size for canonical frame (cached from bake trigger)
+    private var cachedMapSize: CGSize?
+    
+    /// Meters per pixel for canonical frame (cached from MetricSquare)
+    private var cachedMetersPerPixel: Float?
+    
     // MARK: - Session Transform
     
     /// Represents the rigid body transform from an AR session's coordinate frame to the canonical frame
@@ -604,14 +616,24 @@ final class ARCalibrationCoordinator: ObservableObject {
             }
             
             // MARK: - Record position in history (Milestone 2)
+            let confidence: Float = sourceType == .ghostConfirm ? 1.0 : (sourceType == .ghostAdjust ? 0.8 : 0.95)
             let record = ARPositionRecord(
                 position: marker.arPosition,
                 sessionID: arStore.currentSessionID,
                 sourceType: sourceType,
                 distortionVector: distortionVector,
-                confidenceScore: sourceType == .ghostConfirm ? 1.0 : (sourceType == .ghostAdjust ? 0.8 : 0.95)
+                confidenceScore: confidence
             )
             mapStore.addPositionRecord(mapPointID: mapPointID, record: record)
+            
+            // MILESTONE 5: Update baked position incrementally for ghost confirm/adjust
+            if sourceType == .ghostConfirm || sourceType == .ghostAdjust {
+                updateBakedPositionIncrementally(
+                    mapPointID: mapPointID,
+                    sessionPosition: marker.arPosition,
+                    confidence: confidence
+                )
+            }
         } catch {
             print("❌ Failed to save marker to ARWorldMapStore: \(error)")
             return
@@ -644,6 +666,21 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // MILESTONE 3: After 2nd marker, plant ghost for 3rd vertex
         if placedMarkers.count == 2 {
+            // MILESTONE 5: Compute and cache session transform for baked ghost positions
+            // Try to get map parameters for transform computation
+            if let pixelsPerMeter = getPixelsPerMeter() {
+                let metersPerPixel = 1.0 / pixelsPerMeter
+                // Try to get map size from notification or use a reasonable default
+                // If mapSize is not available, transform computation will be skipped
+                // and ghost calculation will fall back to legacy method
+                if let mapSize = cachedMapSize {
+                    computeSessionTransformForBakedData(mapSize: mapSize, metersPerPixel: metersPerPixel)
+                } else {
+                    // Map size not cached yet - will be computed on first ghost calculation if needed
+                    print("📐 [SESSION_TRANSFORM] Map size not cached, will compute transform on first ghost if needed")
+                }
+            }
+            
             // Find the unplaced vertex
             let unplacedVertices = triangleVertices.filter { !placedMarkers.contains($0) }
             if let thirdVertexID = unplacedVertices.first {
@@ -1103,6 +1140,60 @@ final class ARCalibrationCoordinator: ObservableObject {
         return ghostPosition
     }
     
+    /// Fast ghost position calculation using baked canonical positions
+    /// Returns nil if baked data unavailable, caller should fall back to legacy calculation
+    ///
+    /// - Parameter targetMapPointID: The MapPoint to calculate ghost position for
+    /// - Returns: AR position in current session coordinates, or nil if baked data unavailable
+    func calculateGhostPositionFromBakedData(for targetMapPointID: UUID) -> SIMD3<Float>? {
+        let startTime = Date()
+        
+        // Check prerequisites
+        guard let transform = cachedCanonicalToSessionTransform else {
+            print("👻 [BAKED_GHOST] No cached transform - computing...")
+            
+            // Try to compute transform if we have the data
+            if let mapSize = cachedMapSize, let metersPerPixel = cachedMetersPerPixel {
+                guard computeSessionTransformForBakedData(mapSize: mapSize, metersPerPixel: metersPerPixel) else {
+                    print("👻 [BAKED_GHOST] Failed to compute transform, falling back to legacy")
+                    return nil
+                }
+            } else {
+                print("👻 [BAKED_GHOST] No map parameters cached, falling back to legacy")
+                return nil
+            }
+            
+            guard let newTransform = cachedCanonicalToSessionTransform else {
+                return nil
+            }
+            
+            return calculateGhostPositionFromBakedDataInternal(for: targetMapPointID, using: newTransform, startTime: startTime)
+        }
+        
+        return calculateGhostPositionFromBakedDataInternal(for: targetMapPointID, using: transform, startTime: startTime)
+    }
+    
+    private func calculateGhostPositionFromBakedDataInternal(
+        for targetMapPointID: UUID,
+        using transform: SessionToCanonicalTransform,
+        startTime: Date
+    ) -> SIMD3<Float>? {
+        // Look up baked position
+        guard let targetMapPoint = mapStore.points.first(where: { $0.id == targetMapPointID }),
+              let bakedPosition = targetMapPoint.bakedCanonicalPosition else {
+            print("👻 [BAKED_GHOST] No baked position for \(String(targetMapPointID.uuidString.prefix(8))), falling back to legacy")
+            return nil
+        }
+        
+        // Apply transform: canonical → session
+        let sessionPosition = transform.apply(to: bakedPosition)
+        
+        let duration = Date().timeIntervalSince(startTime) * 1000
+        print("👻 [BAKED_GHOST] ✅ \(String(targetMapPointID.uuidString.prefix(8))): baked(\(String(format: "%.2f", bakedPosition.x)), \(String(format: "%.2f", bakedPosition.z))) → session(\(String(format: "%.2f", sessionPosition.x)), \(String(format: "%.2f", sessionPosition.z))) in \(String(format: "%.2f", duration))ms")
+        
+        return sessionPosition
+    }
+    
     /// Calculate ghost position for 3rd vertex when only 2 markers are placed
     /// Uses hierarchical approach: consensus history first, then 2D map geometry
     private func calculateGhostPositionForThirdVertex(
@@ -1110,6 +1201,12 @@ final class ARCalibrationCoordinator: ObservableObject {
         placedVertexIDs: [UUID],
         placedARPositions: [simd_float3]
     ) -> simd_float3? {
+        // MILESTONE 5: Try baked data first (fast path)
+        if let bakedPosition = calculateGhostPositionFromBakedData(for: thirdVertexID) {
+            return bakedPosition
+        }
+        print("👻 [GHOST_CALC] Using legacy calculation (no baked data available)")
+        
         let calcStart = Date()
         var timingLog: [(String, TimeInterval)] = []
         
@@ -1853,6 +1950,12 @@ final class ARCalibrationCoordinator: ObservableObject {
         selectedGhostEstimatedPosition = nil
         nearbyButNotVisibleGhostID = nil
         repositionModeActive = false
+        
+        // Clear baked data transform cache
+        cachedCanonicalToSessionTransform = nil
+        cachedMapSize = nil
+        cachedMetersPerPixel = nil
+        
         print("🎯 CalibrationState → \(stateDescription) (reset)")
         print("🔄 ARCalibrationCoordinator: Reset complete - all markers cleared")
     }
@@ -1984,6 +2087,13 @@ final class ARCalibrationCoordinator: ObservableObject {
             confidenceScore: confidence
         )
         mapStore.addPositionRecord(mapPointID: ghostMapPointID, record: positionRecord)
+        
+        // MILESTONE 5: Update baked position incrementally
+        updateBakedPositionIncrementally(
+            mapPointID: ghostMapPointID,
+            sessionPosition: ghostPosition,
+            confidence: confidence
+        )
         
         let adjustmentNote = wasAdjusted ? "(adjusted)" : "(confirmed)"
         print("📍 [POSITION_HISTORY] crawl \(adjustmentNote) → MapPoint \(String(ghostMapPointID.uuidString.prefix(8)))")
@@ -2258,6 +2368,121 @@ final class ARCalibrationCoordinator: ObservableObject {
         return SessionToCanonicalTransform(rotationY: rotation, translation: translation, scale: scale)
     }
     
+    /// Sets map parameters needed for baked data transforms
+    /// Call this when calibration starts, before any markers are placed
+    ///
+    /// - Parameters:
+    ///   - mapSize: Size of the map image in pixels
+    ///   - metersPerPixel: Scale factor (meters per pixel) from MetricSquare calibration
+    public func setMapParametersForBakedData(mapSize: CGSize, metersPerPixel: Float) {
+        self.cachedMapSize = mapSize
+        self.cachedMetersPerPixel = metersPerPixel
+        print("📐 [MAP_PARAMS] Cached map parameters for baked data:")
+        print("   Map size: \(Int(mapSize.width)) × \(Int(mapSize.height)) pixels")
+        print("   Scale: \(String(format: "%.4f", metersPerPixel)) meters/pixel")
+    }
+    
+    /// Computes and caches the transform from canonical frame to current AR session
+    /// Call this after 2 markers are planted to enable fast ghost placement
+    ///
+    /// - Parameters:
+    ///   - mapSize: Size of the map image in pixels
+    ///   - metersPerPixel: Scale factor from MetricSquare calibration
+    /// - Returns: true if transform was computed successfully
+    @discardableResult
+    func computeSessionTransformForBakedData(mapSize: CGSize, metersPerPixel: Float) -> Bool {
+        print("📐 [SESSION_TRANSFORM] Computing canonical↔session transform...")
+        
+        // Cache parameters for later use
+        cachedMapSize = mapSize
+        cachedMetersPerPixel = metersPerPixel
+        
+        // Need at least 2 planted markers
+        guard placedMarkers.count >= 2 else {
+            print("⚠️ [SESSION_TRANSFORM] Need 2+ markers, have \(placedMarkers.count)")
+            return false
+        }
+        
+        let marker1ID = placedMarkers[0]
+        let marker2ID = placedMarkers[1]
+        
+        guard let marker1MapPoint = mapStore.points.first(where: { $0.id == marker1ID }),
+              let marker2MapPoint = mapStore.points.first(where: { $0.id == marker2ID }),
+              let marker1AR = mapPointARPositions[marker1ID],
+              let marker2AR = mapPointARPositions[marker2ID] else {
+            print("⚠️ [SESSION_TRANSFORM] Could not find marker data")
+            return false
+        }
+        
+        // Create canonical frame
+        let pixelsPerMeter = 1.0 / metersPerPixel
+        let canonicalOrigin = CGPoint(x: mapSize.width / 2, y: mapSize.height / 2)
+        let floorHeight: Float = -1.1
+        
+        // Convert map positions to canonical
+        let marker1Canonical = SIMD3<Float>(
+            Float(marker1MapPoint.position.x - canonicalOrigin.x) / pixelsPerMeter,
+            floorHeight,
+            Float(marker1MapPoint.position.y - canonicalOrigin.y) / pixelsPerMeter
+        )
+        let marker2Canonical = SIMD3<Float>(
+            Float(marker2MapPoint.position.x - canonicalOrigin.x) / pixelsPerMeter,
+            floorHeight,
+            Float(marker2MapPoint.position.y - canonicalOrigin.y) / pixelsPerMeter
+        )
+        
+        // Compute canonical→session transform (INVERSE of session→canonical)
+        // Edge vectors
+        let canonicalEdge = SIMD2<Float>(marker2Canonical.x - marker1Canonical.x, marker2Canonical.z - marker1Canonical.z)
+        let sessionEdge = SIMD2<Float>(marker2AR.x - marker1AR.x, marker2AR.z - marker1AR.z)
+        
+        let canonicalLength = simd_length(canonicalEdge)
+        let sessionLength = simd_length(sessionEdge)
+        
+        guard canonicalLength > 0.001, sessionLength > 0.001 else {
+            print("⚠️ [SESSION_TRANSFORM] Degenerate edge")
+            return false
+        }
+        
+        // Scale: session meters per canonical meter (inverse of bake-down scale)
+        let scale = sessionLength / canonicalLength
+        
+        // Rotation: angle from canonical edge to session edge (inverse direction)
+        let canonicalAngle = atan2(canonicalEdge.y, canonicalEdge.x)
+        let sessionAngle = atan2(sessionEdge.y, sessionEdge.x)
+        let rotation = sessionAngle - canonicalAngle  // Note: reversed from bake-down
+        
+        // Translation: compute where canonical origin maps to in session space
+        let cosR = cos(rotation)
+        let sinR = sin(rotation)
+        let scaledCanonical1 = marker1Canonical * scale
+        let rotatedCanonical1 = SIMD3<Float>(
+            scaledCanonical1.x * cosR - scaledCanonical1.z * sinR,
+            scaledCanonical1.y,
+            scaledCanonical1.x * sinR + scaledCanonical1.z * cosR
+        )
+        let translation = marker1AR - rotatedCanonical1
+        
+        // Create and cache the transform
+        cachedCanonicalToSessionTransform = SessionToCanonicalTransform(
+            rotationY: rotation,
+            translation: translation,
+            scale: scale
+        )
+        
+        // Verify with second marker
+        let transformedMarker2 = cachedCanonicalToSessionTransform!.apply(to: marker2Canonical)
+        let verificationError = simd_distance(transformedMarker2, marker2AR)
+        
+        print("📐 [SESSION_TRANSFORM] Cached canonical→session transform:")
+        print("   Scale: \(String(format: "%.4f", scale)) (session/canonical)")
+        print("   Rotation: \(String(format: "%.1f", rotation * 180 / .pi))°")
+        print("   Translation: (\(String(format: "%.2f", translation.x)), \(String(format: "%.2f", translation.y)), \(String(format: "%.2f", translation.z)))")
+        print("   ✅ Verification error: \(String(format: "%.3f", verificationError))m")
+        
+        return true
+    }
+    
     /// Bakes down the current calibration session's position data into canonical positions
     ///
     /// This should be called at the end of a successful calibration crawl.
@@ -2395,6 +2620,86 @@ final class ARCalibrationCoordinator: ObservableObject {
         print(String(repeating: "=", count: 60) + "\n")
         
         return updatedCount
+    }
+    
+    /// Updates a MapPoint's baked position incrementally when user confirms or adjusts ghost
+    /// This keeps baked data fresh without requiring a full re-bake
+    ///
+    /// - Parameters:
+    ///   - mapPointID: The MapPoint to update
+    ///   - sessionPosition: The confirmed/adjusted position in current session coordinates
+    ///   - confidence: Confidence score for this sample (0.95 for confirm, 0.90 for adjust)
+    func updateBakedPositionIncrementally(
+        mapPointID: UUID,
+        sessionPosition: SIMD3<Float>,
+        confidence: Float
+    ) {
+        guard let transform = cachedCanonicalToSessionTransform,
+              let mapSize = cachedMapSize,
+              let metersPerPixel = cachedMetersPerPixel else {
+            print("⚠️ [BAKE_UPDATE] No cached transform - cannot update baked position")
+            return
+        }
+        
+        guard let index = mapStore.points.firstIndex(where: { $0.id == mapPointID }) else {
+            print("⚠️ [BAKE_UPDATE] MapPoint \(String(mapPointID.uuidString.prefix(8))) not found")
+            return
+        }
+        
+        // Compute inverse transform: session → canonical
+        // The cached transform is canonical→session, so we need to invert it
+        let inverseRotation = -transform.rotationY
+        let inverseScale = 1.0 / transform.scale
+        
+        // Invert: first remove translation, then rotate, then scale
+        let translated = sessionPosition - transform.translation
+        let cosR = cos(inverseRotation)
+        let sinR = sin(inverseRotation)
+        let rotated = SIMD3<Float>(
+            translated.x * cosR - translated.z * sinR,
+            translated.y,
+            translated.x * sinR + translated.z * cosR
+        )
+        let canonicalPosition = rotated * inverseScale
+        
+        // Get current baked state
+        let currentBaked = mapStore.points[index].bakedCanonicalPosition
+        let currentConfidence = mapStore.points[index].bakedConfidence ?? 0
+        let currentSampleCount = mapStore.points[index].bakedSampleCount
+        
+        // Compute new weighted average
+        let newBakedPosition: SIMD3<Float>
+        let newConfidence: Float
+        let newSampleCount: Int
+        
+        if let existing = currentBaked, currentSampleCount > 0 {
+            // Blend with existing
+            let existingWeight = currentConfidence * Float(currentSampleCount)
+            let newWeight = confidence
+            let totalWeight = existingWeight + newWeight
+            
+            newBakedPosition = (existing * existingWeight + canonicalPosition * newWeight) / totalWeight
+            newConfidence = totalWeight / Float(currentSampleCount + 1)
+            newSampleCount = currentSampleCount + 1
+            
+            let delta = simd_distance(existing, newBakedPosition)
+            print("🔥 [BAKE_UPDATE] \(String(mapPointID.uuidString.prefix(8))): blended (Δ=\(String(format: "%.3f", delta))m) conf=\(String(format: "%.2f", newConfidence)) samples=\(newSampleCount)")
+        } else {
+            // First bake for this MapPoint
+            newBakedPosition = canonicalPosition
+            newConfidence = confidence
+            newSampleCount = 1
+            print("🔥 [BAKE_UPDATE] \(String(mapPointID.uuidString.prefix(8))): NEW baked position, conf=\(String(format: "%.2f", newConfidence))")
+        }
+        
+        // Update and save
+        mapStore.points[index].bakedCanonicalPosition = newBakedPosition
+        mapStore.points[index].bakedConfidence = newConfidence
+        mapStore.points[index].bakedSampleCount = newSampleCount
+        
+        // Update bake timestamp in MapPointStore
+        mapStore.lastBakeTimestamp = Date()
+        mapStore.save()
     }
     
     /// Debug function to display current baked positions

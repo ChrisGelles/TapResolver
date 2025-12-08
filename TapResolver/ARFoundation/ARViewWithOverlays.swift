@@ -36,6 +36,8 @@ struct ARViewWithOverlays: View {
     @State private var warningDistance: Float = 0
     @State private var warningMapPointID: UUID? = nil
     
+    // Track which calibrated triangle the user is currently standing in
+    @State private var userContainingTriangleID: UUID? = nil
     
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
@@ -110,6 +112,12 @@ struct ARViewWithOverlays: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PlacementBlockedDismissed"))) { _ in
                 showPlacementWarning = false
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserContainingTriangleChanged"))) { notification in
+                let newTriangleID = notification.userInfo?["triangleID"] as? UUID
+                if userContainingTriangleID != newTriangleID {
+                    userContainingTriangleID = newTriangleID
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UpdateGhostSelection"))) { notification in
                 if let cameraPosition = notification.userInfo?["cameraPosition"] as? simd_float3,
@@ -395,77 +403,6 @@ struct ARViewWithOverlays: View {
                     .cornerRadius(16)
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
                     .zIndex(1000)
-                }
-                
-                // Survey Marker Controls (below PiP map) - only when triangle is calibrated
-                if let triangle = selectedTriangle,
-                   triangle.isCalibrated {
-                    VStack(spacing: 12) {
-                        // Spacing slider
-                        VStack(spacing: 4) {
-                            Text("Survey Spacing")
-                                .font(.caption)
-                                .foregroundColor(.white)
-                            
-                            HStack(spacing: 8) {
-                                Text("0.5m")
-                                    .font(.caption2)
-                                    .foregroundColor(surveySpacing == 0.5 ? .green : .gray)
-                                    .onTapGesture { surveySpacing = 0.5 }
-                                
-                                Text("0.75m")
-                                    .font(.caption2)
-                                    .foregroundColor(surveySpacing == 0.75 ? .green : .gray)
-                                    .onTapGesture { surveySpacing = 0.75 }
-                                
-                                Text("1.0m")
-                                    .font(.caption2)
-                                    .foregroundColor(surveySpacing == 1.0 ? .green : .gray)
-                                    .onTapGesture { surveySpacing = 1.0 }
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.7))
-                        .cornerRadius(8)
-                        
-                        // Fill Triangle button
-                        Button(action: {
-                            print("🎯 [FILL_TRIANGLE_BTN] Button tapped")
-                            print("   Current state: \(arCalibrationCoordinator.stateDescription)")
-                            
-                            arCalibrationCoordinator.enterSurveyMode()
-                            
-                            print("🎯 [FILL_TRIANGLE_BTN] Entering survey mode")
-                            print("   New state: \(arCalibrationCoordinator.stateDescription)")
-                            
-                            NotificationCenter.default.post(
-                                name: NSNotification.Name("FillTriangleWithSurveyMarkers"),
-                                object: nil,
-                                userInfo: [
-                                    "triangleID": triangle.id,
-                                    "spacing": surveySpacing,
-                                    "arWorldMapStore": arCalibrationCoordinator.arStore
-                                ]
-                            )
-                        }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "grid.circle.fill")
-                                    .font(.system(size: 14))
-                                Text("Fill Triangle")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(Color.red.opacity(0.8))
-                            .cornerRadius(8)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .position(x: geo.size.width - 120, y: 270) // Below PiP map
-                    .zIndex(997)
                 }
                 
                 // Reference Image View (top-left, below xmark) - only when placing vertices
@@ -758,11 +695,10 @@ struct ARViewWithOverlays: View {
                         .padding(.bottom, 40)
                     }
                     
-                    // Survey Marker Generation Button
-                    if let currentTriangleID = arCalibrationCoordinator.activeTriangleID,
-                       let triangle = selectedTriangle,
-                       triangle.id == currentTriangleID,
-                       arCalibrationCoordinator.isTriangleComplete(currentTriangleID) {
+                    // Survey Marker Generation Button - shows when user is standing in a calibrated triangle
+                    if let containingTriangleID = userContainingTriangleID,
+                       let triangle = arCalibrationCoordinator.triangleStore.triangle(withID: containingTriangleID),
+                       triangle.isCalibrated {
                         
                         Button(action: {
                             print("🎯 [FILL_TRIANGLE_BTN] Button tapped")
@@ -780,7 +716,7 @@ struct ARViewWithOverlays: View {
                                 name: NSNotification.Name("FillTriangleWithSurveyMarkers"),
                                 object: nil,
                                 userInfo: [
-                                    "triangleID": currentTriangleID,
+                                    "triangleID": containingTriangleID,
                                     "spacing": surveySpacing,
                                     "arWorldMapStore": arCalibrationCoordinator.arStore,
                                     "triangleStore": arCalibrationCoordinator.triangleStore
@@ -995,6 +931,7 @@ struct ARPiPMapView: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
+    @EnvironmentObject private var metricSquares: MetricSquareStore
     
     // Focused point ID for zoom/center (nil = show full map or frame triangle)
     // Computed reactively from arCalibrationCoordinator to respond to currentVertexIndex changes
@@ -1047,6 +984,7 @@ struct ARPiPMapView: View {
     @State private var userMapPosition: CGPoint? = nil
     @State private var positionUpdateTimer: Timer? = nil
     @State private var positionSamples: [simd_float3] = [] // Ring buffer for smoothing
+    @State private var lastContainingTriangleID: UUID? = nil // Track last containing triangle to detect changes
     
     // Timed transition after calibration completes
     @State private var calibrationJustCompleted: Bool = false
@@ -1078,6 +1016,16 @@ struct ARPiPMapView: View {
         }
         .onChange(of: locationManager.currentLocationID) { _ in
             loadMapImage()
+        }
+        .onChange(of: mapImage) { newImage in
+            guard let img = newImage else { return }
+            // MILESTONE 5: Cache map parameters when image loads
+            let lockedSquares = metricSquares.squares.filter { $0.isLocked }
+            let squaresToUse = lockedSquares.isEmpty ? metricSquares.squares : lockedSquares
+            if let firstSquare = squaresToUse.first, firstSquare.side > 0, firstSquare.meters > 0 {
+                let metersPerPixel = Float(firstSquare.meters) / Float(firstSquare.side)
+                arCalibrationCoordinator.setMapParametersForBakedData(mapSize: img.size, metersPerPixel: metersPerPixel)
+            }
         }
         .onChange(of: isCalibrationMode) { newValue in
             if newValue {
@@ -1706,6 +1654,7 @@ struct ARPiPMapView: View {
         positionUpdateTimer = nil
         userMapPosition = nil
         positionSamples.removeAll()
+        lastContainingTriangleID = nil
     }
     
     private func updateUserPosition() {
@@ -1736,10 +1685,19 @@ struct ARPiPMapView: View {
             
             // Check which calibrated triangle contains the user (if any)
             let containingTriangle = findContainingTriangle(mapPosition: projectedPosition)
-            if let triangleID = containingTriangle {
-                print("📍 [USER_POSITION] User is within Triangle \(String(triangleID.uuidString.prefix(8)))")
-            } else {
-                print("📍 [USER_POSITION] User is not within a calibrated Triangle")
+            if lastContainingTriangleID != containingTriangle {
+                lastContainingTriangleID = containingTriangle
+                // Post notification to update userContainingTriangleID in ARViewWithOverlays
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("UserContainingTriangleChanged"),
+                    object: nil,
+                    userInfo: ["triangleID": containingTriangle as Any]
+                )
+                if let triangleID = containingTriangle {
+                    print("📍 [USER_POSITION] User entered Triangle \(String(triangleID.uuidString.prefix(8)))")
+                } else {
+                    print("📍 [USER_POSITION] User exited calibrated triangle area")
+                }
             }
         } else {
             print("📍 [USER_POSITION] Could not project AR position to map")
