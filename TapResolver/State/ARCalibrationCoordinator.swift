@@ -2296,29 +2296,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         let proximityThreshold: Float = 2.0
         
-        // Only process during active calibration states where ghosts may be visible
-        let isValidState: Bool
-        switch calibrationState {
-        case .placingVertices:
-            isValidState = true  // Ghost for 3rd vertex appears during placement
-        case .readyToFill:
-            isValidState = true  // Ghosts for adjacent triangles after completion
-        default:
-            isValidState = false
-        }
-        
-        guard isValidState else {
-            // Clear selection if not in correct state
-            if selectedGhostMapPointID != nil {
-                print("👻 [GHOST_SELECT] Cleared selection - not in valid calibration state")
-                selectedGhostMapPointID = nil
-                selectedGhostEstimatedPosition = nil
-            }
-            if nearbyButNotVisibleGhostID != nil {
-                nearbyButNotVisibleGhostID = nil
-            }
-            return
-        }
+        // Ghost selection now works in ANY state to allow interaction anytime
+        // The UI (shouldShowGhostButtons) will show buttons when a ghost is selected
         
         // Find closest ghost within threshold
         var closestID: UUID? = nil

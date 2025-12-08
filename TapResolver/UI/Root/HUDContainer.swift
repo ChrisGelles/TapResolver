@@ -1313,7 +1313,9 @@ private struct DebugSettingsPanel: View {
                         
                         // Clear Console Log Button
                         Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                             FileLogger.shared.clearLog()
+                            print("Internal Log Cleared")
                         } label: {
                             VStack(spacing: 8) {
                                 Image(systemName: "trash")

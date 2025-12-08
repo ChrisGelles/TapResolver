@@ -654,8 +654,34 @@ struct ARViewWithOverlays: View {
                                     
                                     // Clear reposition mode if it was active
                                     arCalibrationCoordinator.repositionModeActive = false
+                                } else if let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID {
+                                    // Generic ghost adjustment - ghost selected in any other state
+                                    // Remove ghost first, then place marker at crosshair
+                                    print("🔗 [GENERIC_ADJUST] Adjusting ghost position via crosshair")
+                                    print("   Ghost MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
+                                    print("   Current state: \(arCalibrationCoordinator.stateDescription)")
+                                    
+                                    // Remove the ghost marker first
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("RemoveGhostMarker"),
+                                        object: nil,
+                                        userInfo: ["mapPointID": ghostMapPointID]
+                                    )
+                                    
+                                    // Clear ghost selection
+                                    arCalibrationCoordinator.selectedGhostMapPointID = nil
+                                    
+                                    // Then place marker at crosshair
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("PlaceMarkerAtCursor"),
+                                        object: nil,
+                                        userInfo: ["ghostMapPointID": ghostMapPointID]
+                                    )
+                                    
+                                    // Clear reposition mode if it was active
+                                    arCalibrationCoordinator.repositionModeActive = false
                                 } else {
-                                    // Normal crosshair placement (not crawl mode, not 3rd vertex adjust)
+                                    // Normal crosshair placement (no ghost selected)
                                     NotificationCenter.default.post(
                                         name: NSNotification.Name("PlaceMarkerAtCursor"),
                                         object: nil
