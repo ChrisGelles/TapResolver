@@ -1665,6 +1665,67 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("🎯 CalibrationState → Ready to Fill (exited survey mode)")
     }
     
+    /// Transition to readyToFill state and create ghosts for adjacent triangles
+    /// Called after GENERIC_ADJUST to continue the calibration crawl
+    public func transitionToReadyToFillAndRefreshGhosts(placedMapPointID: UUID) {
+        print("🔄 [REFRESH_GHOSTS] Starting adjacent triangle discovery for MapPoint \(String(placedMapPointID.uuidString.prefix(8)))")
+        
+        // Find triangles that contain this vertex
+        let containingTriangles = triangleStore.triangles.filter { triangle in
+            triangle.vertexIDs.contains(placedMapPointID)
+        }
+        
+        print("   Found \(containingTriangles.count) triangle(s) containing this vertex")
+        
+        // Find the best triangle to activate (one with most vertices already planted)
+        var bestTriangle: TrianglePatch? = nil
+        var bestPlantedCount = 0
+        
+        for triangle in containingTriangles {
+            // Count how many vertices have positions in this session
+            let plantedCount = triangle.vertexIDs.filter { mapPointARPositions[$0] != nil }.count
+            
+            // Skip if already fully planted (3 vertices)
+            guard plantedCount < 3 else { continue }
+            
+            // Skip if already in sessionCalibratedTriangles
+            guard !sessionCalibratedTriangles.contains(triangle.id) else { continue }
+            
+            if plantedCount > bestPlantedCount {
+                bestPlantedCount = plantedCount
+                bestTriangle = triangle
+            }
+        }
+        
+        if let triangle = bestTriangle {
+            print("   Best candidate: Triangle \(String(triangle.id.uuidString.prefix(8))) with \(bestPlantedCount) vertices planted")
+            
+            // Set this as the active triangle
+            activeTriangleID = triangle.id
+            
+            // Transition to readyToFill
+            calibrationState = .readyToFill
+            print("🎯 CalibrationState → Ready to Fill (from ghost refresh)")
+            
+            // Post notification to create ghosts for unplanted vertices
+            NotificationCenter.default.post(
+                name: NSNotification.Name("RefreshAdjacentGhosts"),
+                object: nil,
+                userInfo: [
+                    "triangleID": triangle.id,
+                    "placedMapPointID": placedMapPointID
+                ]
+            )
+        } else {
+            print("   No suitable adjacent triangle found - staying in current state")
+            // Still transition out of surveyMode if we were in it
+            if case .surveyMode = calibrationState {
+                calibrationState = .readyToFill
+                print("🎯 CalibrationState → Ready to Fill (no adjacent triangle)")
+            }
+        }
+    }
+    
     var stateDescription: String {
         switch calibrationState {
         case .idle:

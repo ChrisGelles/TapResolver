@@ -344,6 +344,41 @@ struct ARViewContainer: UIViewRepresentable {
             print("   ⏱️ SceneKit creation: \(String(format: "%.1f", sceneDuration))ms")
         }
         
+        /// Create a ghost marker at the specified position for the given MapPoint ID
+        func createGhostMarker(at position: simd_float3, for mapPointID: UUID) {
+            // Check if ghost already exists for this MapPoint
+            if ghostMarkers[mapPointID] != nil {
+                print("⚠️ [GHOST_CREATE] Ghost already exists for MapPoint \(String(mapPointID.uuidString.prefix(8))) - skipping")
+                return
+            }
+            
+            // Create ghost marker node
+            let ghostNode = ARMarkerRenderer.createNode(
+                at: position,
+                options: MarkerOptions(
+                    color: .orange,
+                    markerID: UUID(),
+                    userDeviceHeight: userDeviceHeight,
+                    badgeColor: nil,
+                    radius: 0.03,
+                    animateOnAppearance: true,
+                    animationOvershoot: 0.04,
+                    isGhost: true
+                )
+            )
+            
+            ghostNode.name = "ghostMarker_\(mapPointID.uuidString)"
+            
+            // Store in ghostMarkers dictionary
+            ghostMarkers[mapPointID] = ghostNode
+            ghostMarkerPositions[mapPointID] = position
+            
+            // Add to scene
+            sceneView?.scene.rootNode.addChildNode(ghostNode)
+            
+            print("✅ [GHOST_CREATE] Created ghost marker for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+        }
+        
         /// Remove a ghost marker from the scene
         func removeGhostMarker(mapPointID: UUID) {
             guard let ghostNode = ghostMarkers[mapPointID] else {
@@ -586,6 +621,58 @@ struct ARViewContainer: UIViewRepresentable {
                 name: NSNotification.Name("ConfirmGhostMarker"),
                 object: nil
             )
+            
+            // Listen for RefreshAdjacentGhosts notification
+            NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("RefreshAdjacentGhosts"),
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self,
+                      let triangleID = notification.userInfo?["triangleID"] as? UUID,
+                      let placedMapPointID = notification.userInfo?["placedMapPointID"] as? UUID else {
+                    print("⚠️ [REFRESH_GHOSTS] Missing required data in notification")
+                    return
+                }
+                
+                print("👻 [REFRESH_GHOSTS] Creating ghosts for triangle \(String(triangleID.uuidString.prefix(8)))")
+                
+                guard let triangle = self.arCalibrationCoordinator?.triangleStore.triangle(withID: triangleID) else {
+                    print("⚠️ [REFRESH_GHOSTS] Triangle not found")
+                    return
+                }
+                
+                // Find vertices that don't have markers yet
+                for vertexID in triangle.vertexIDs {
+                    // Skip the vertex we just placed
+                    guard vertexID != placedMapPointID else { continue }
+                    
+                    // Skip if already has a position in this session
+                    guard self.arCalibrationCoordinator?.mapPointARPositions[vertexID] == nil else {
+                        print("   Vertex \(String(vertexID.uuidString.prefix(8))): Already has session position")
+                        continue
+                    }
+                    
+                    // Skip if ghost already exists
+                    if self.ghostMarkerPositions[vertexID] != nil {
+                        print("   Vertex \(String(vertexID.uuidString.prefix(8))): Ghost already exists")
+                        continue
+                    }
+                    
+                    // Try to create ghost from baked position
+                    if let coordinator = self.arCalibrationCoordinator,
+                       coordinator.hasValidSessionTransform,
+                       let mapPoint = self.mapPointStore?.points.first(where: { $0.id == vertexID }),
+                       let bakedPos = mapPoint.bakedCanonicalPosition,
+                       let sessionPos = coordinator.projectBakedToSession(bakedPos) {
+                        
+                        self.createGhostMarker(at: sessionPos, for: vertexID)
+                        print("   Vertex \(String(vertexID.uuidString.prefix(8))): Created ghost from baked position")
+                    } else {
+                        print("   Vertex \(String(vertexID.uuidString.prefix(8))): No baked position available")
+                    }
+                }
+            }
             
             // Listen for RemoveGhostMarker notification (crawl mode cleanup)
             NotificationCenter.default.addObserver(

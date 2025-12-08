@@ -680,6 +680,11 @@ struct ARViewWithOverlays: View {
                                     
                                     // Clear reposition mode if it was active
                                     arCalibrationCoordinator.repositionModeActive = false
+                                    
+                                    // Transition to readyToFill and trigger adjacent triangle discovery
+                                    // This ensures the crawl can continue after promoting a ghost in any state
+                                    print("🔗 [GENERIC_ADJUST] Triggering adjacent triangle discovery")
+                                    arCalibrationCoordinator.transitionToReadyToFillAndRefreshGhosts(placedMapPointID: ghostMapPointID)
                                 } else {
                                     // Normal crosshair placement (no ghost selected)
                                     NotificationCenter.default.post(
