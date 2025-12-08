@@ -146,6 +146,24 @@ public final class MapPointStore: ObservableObject {
     // CRITICAL: Prevent data loss during reload operations
     internal var isReloading: Bool = false
     
+    // MARK: - Bake-Down Freshness Tracking (Milestone 5)
+    
+    /// Timestamp of last successful bake-down operation
+    @Published public var lastBakeTimestamp: Date? = nil
+    
+    /// Number of sessions that were included in the last bake
+    public var lastBakeSessionCount: Int = 0
+    
+    /// UserDefaults key for persisting bake timestamp
+    private var bakeTimestampKey: String {
+        return ctx.key("BakeTimestamp_v1")
+    }
+    
+    /// UserDefaults key for persisting bake session count
+    private var bakeSessionCountKey: String {
+        return ctx.key("BakeSessionCount_v1")
+    }
+    
     // DIAGNOSTIC: Track which instance this is
     internal let instanceID = UUID().uuidString
     
@@ -801,6 +819,12 @@ public final class MapPointStore: ObservableObject {
         // Summary log only
         print("💾 Saved \(points.count) Map Point(s)")
         
+        // Also persist bake metadata
+        if let bakeTime = lastBakeTimestamp {
+            UserDefaults.standard.set(bakeTime, forKey: bakeTimestampKey)
+            UserDefaults.standard.set(lastBakeSessionCount, forKey: bakeSessionCountKey)
+        }
+        
         // Save AR Markers
         // saveARMarkers()  // AR Markers no longer persisted
     }
@@ -986,6 +1010,16 @@ public final class MapPointStore: ObservableObject {
         
         // REMOVED: No longer load activePointID from UserDefaults
         // User must explicitly select a MapPoint each session
+        
+        // Load bake metadata
+        lastBakeTimestamp = UserDefaults.standard.object(forKey: bakeTimestampKey) as? Date
+        lastBakeSessionCount = UserDefaults.standard.integer(forKey: bakeSessionCountKey)
+        
+        if let bakeTime = lastBakeTimestamp {
+            print("📦 [BAKE_META] Last bake: \(bakeTime.formatted()), sessions: \(lastBakeSessionCount)")
+        } else {
+            print("📦 [BAKE_META] No previous bake found")
+        }
         
         // Removed verbose logging - data loaded successfully
     }
@@ -1616,6 +1650,296 @@ public final class MapPointStore: ObservableObject {
         print("   Purged \(totalRecords) legacy AR position record(s)")
         print("   Affected \(affectedPoints) MapPoint(s)")
         print("   Ghost placement will use 2D map geometry until fresh data accumulates")
+    }
+    
+    // MARK: - Retrospective Bake-Down System (Milestone 5)
+    
+    /// Checks if baked positions need to be recalculated
+    /// Returns true if there's new position history since last bake
+    func checkBakeFreshness() -> Bool {
+        // Find the most recent position history timestamp
+        let latestHistoryTimestamp = points
+            .flatMap { $0.arPositionHistory }
+            .map { $0.timestamp }
+            .max()
+        
+        guard let latestHistory = latestHistoryTimestamp else {
+            print("📦 [BAKE_FRESH] No position history exists")
+            return false  // Nothing to bake
+        }
+        
+        guard let lastBake = lastBakeTimestamp else {
+            print("📦 [BAKE_FRESH] No previous bake — needs full bake")
+            return true  // Never baked, need to bake
+        }
+        
+        let needsRebake = latestHistory > lastBake
+        if needsRebake {
+            print("📦 [BAKE_FRESH] New data since last bake (\(latestHistory.formatted()) > \(lastBake.formatted()))")
+        } else {
+            print("📦 [BAKE_FRESH] Baked data is current")
+        }
+        
+        return needsRebake
+    }
+    
+    /// Bakes down ALL historical position data into canonical positions
+    /// This processes every session in the history, requiring no active AR session
+    ///
+    /// - Parameters:
+    ///   - mapSize: Size of the map image in pixels
+    ///   - metersPerPixel: Scale factor from MetricSquare calibration
+    /// - Returns: Number of MapPoints updated, or nil if bake failed
+    func bakeDownHistoricalData(mapSize: CGSize, metersPerPixel: Float) -> Int? {
+        let startTime = Date()
+        print("\n" + String(repeating: "=", count: 70))
+        print("🔥 [HISTORICAL_BAKE] Starting RETROSPECTIVE bake-down")
+        print("   This processes ALL historical sessions — no AR required")
+        print(String(repeating: "=", count: 70))
+        
+        // Create canonical frame (map-centered coordinate system)
+        let pixelsPerMeter = 1.0 / metersPerPixel
+        let canonicalOrigin = CGPoint(x: mapSize.width / 2, y: mapSize.height / 2)
+        let floorHeight: Float = -1.1  // Typical phone height
+        
+        print("📐 [HISTORICAL_BAKE] Canonical frame:")
+        print("   Map size: \(Int(mapSize.width)) × \(Int(mapSize.height)) pixels")
+        print("   Origin: (\(Int(canonicalOrigin.x)), \(Int(canonicalOrigin.y))) pixels (map center)")
+        print("   Scale: \(String(format: "%.1f", pixelsPerMeter)) pixels/meter")
+        print("   Floor height: \(floorHeight)m")
+        
+        // Step 1: Collect all unique session IDs from history
+        var sessionIDs = Set<UUID>()
+        for point in points {
+            for record in point.arPositionHistory {
+                sessionIDs.insert(record.sessionID)
+            }
+        }
+        
+        print("\n📊 [HISTORICAL_BAKE] Found \(sessionIDs.count) historical session(s) to process")
+        
+        if sessionIDs.isEmpty {
+            print("⚠️ [HISTORICAL_BAKE] No historical data to bake")
+            return nil
+        }
+        
+        // Step 2: Build index of positions by session
+        // sessionPositions[sessionID][mapPointID] = (arPosition, confidence)
+        var sessionPositions: [UUID: [UUID: (position: SIMD3<Float>, confidence: Float)]] = [:]
+        
+        for point in points {
+            for record in point.arPositionHistory {
+                if sessionPositions[record.sessionID] == nil {
+                    sessionPositions[record.sessionID] = [:]
+                }
+                // If multiple records from same session, keep highest confidence
+                if let existing = sessionPositions[record.sessionID]?[point.id] {
+                    if record.confidenceScore > existing.confidence {
+                        sessionPositions[record.sessionID]?[point.id] = (record.position, record.confidenceScore)
+                    }
+                } else {
+                    sessionPositions[record.sessionID]?[point.id] = (record.position, record.confidenceScore)
+                }
+            }
+        }
+        
+        // Step 3: For each session, compute transform and bake positions
+        var bakedPositionsAccumulator: [UUID: [(position: SIMD3<Float>, weight: Float)]] = [:]
+        var sessionsProcessed = 0
+        var sessionsSkipped = 0
+        
+        for sessionID in sessionIDs {
+            guard let positionsInSession = sessionPositions[sessionID] else { continue }
+            
+            let sessionPrefix = String(sessionID.uuidString.prefix(8))
+            print("\n🔄 [SESSION] Processing \(sessionPrefix) (\(positionsInSession.count) MapPoint(s))")
+            
+            // Need at least 2 MapPoints to compute transform
+            guard positionsInSession.count >= 2 else {
+                print("   ⏭️ Skipping — need 2+ MapPoints for transform, have \(positionsInSession.count)")
+                sessionsSkipped += 1
+                continue
+            }
+            
+            // Pick 2 reference MapPoints (use first two that have good confidence)
+            let sortedByConfidence = positionsInSession.sorted { $0.value.confidence > $1.value.confidence }
+            let ref1ID = sortedByConfidence[0].key
+            let ref2ID = sortedByConfidence[1].key
+            
+            guard let ref1MapPoint = points.first(where: { $0.id == ref1ID }),
+                  let ref2MapPoint = points.first(where: { $0.id == ref2ID }) else {
+                print("   ⚠️ Could not find reference MapPoints in store")
+                sessionsSkipped += 1
+                continue
+            }
+            
+            let ref1AR = sortedByConfidence[0].value.position
+            let ref2AR = sortedByConfidence[1].value.position
+            let ref1Map = ref1MapPoint.position
+            let ref2Map = ref2MapPoint.position
+            
+            print("   📍 Reference 1: \(String(ref1ID.uuidString.prefix(8))) map=(\(Int(ref1Map.x)), \(Int(ref1Map.y))) AR=(\(String(format: "%.2f", ref1AR.x)), \(String(format: "%.2f", ref1AR.y)), \(String(format: "%.2f", ref1AR.z)))")
+            print("   📍 Reference 2: \(String(ref2ID.uuidString.prefix(8))) map=(\(Int(ref2Map.x)), \(Int(ref2Map.y))) AR=(\(String(format: "%.2f", ref2AR.x)), \(String(format: "%.2f", ref2AR.y)), \(String(format: "%.2f", ref2AR.z)))")
+            
+            // Convert map positions to canonical 3D
+            let ref1Canonical = SIMD3<Float>(
+                Float(ref1Map.x - canonicalOrigin.x) / pixelsPerMeter,
+                floorHeight,
+                Float(ref1Map.y - canonicalOrigin.y) / pixelsPerMeter
+            )
+            let ref2Canonical = SIMD3<Float>(
+                Float(ref2Map.x - canonicalOrigin.x) / pixelsPerMeter,
+                floorHeight,
+                Float(ref2Map.y - canonicalOrigin.y) / pixelsPerMeter
+            )
+            
+            // Compute session→canonical transform
+            // Edge vectors in XZ plane
+            let canonicalEdge = SIMD2<Float>(ref2Canonical.x - ref1Canonical.x, ref2Canonical.z - ref1Canonical.z)
+            let sessionEdge = SIMD2<Float>(ref2AR.x - ref1AR.x, ref2AR.z - ref1AR.z)
+            
+            let canonicalLength = simd_length(canonicalEdge)
+            let sessionLength = simd_length(sessionEdge)
+            
+            guard canonicalLength > 0.001, sessionLength > 0.001 else {
+                print("   ⚠️ Degenerate edge — reference points too close")
+                sessionsSkipped += 1
+                continue
+            }
+            
+            // Scale: canonical meters per session meter
+            let scale = canonicalLength / sessionLength
+            
+            // Rotation: angle from session edge to canonical edge
+            let canonicalAngle = atan2(canonicalEdge.y, canonicalEdge.x)
+            let sessionAngle = atan2(sessionEdge.y, sessionEdge.x)
+            let rotation = canonicalAngle - sessionAngle
+            
+            // Translation: compute where session origin maps to in canonical space
+            let cosR = cos(rotation)
+            let sinR = sin(rotation)
+            let scaledRef1AR = ref1AR * scale
+            let rotatedRef1AR = SIMD3<Float>(
+                scaledRef1AR.x * cosR - scaledRef1AR.z * sinR,
+                scaledRef1AR.y,
+                scaledRef1AR.x * sinR + scaledRef1AR.z * cosR
+            )
+            let translation = ref1Canonical - rotatedRef1AR
+            
+            // Verify transform quality using second reference point
+            let scaledRef2AR = ref2AR * scale
+            let rotatedRef2AR = SIMD3<Float>(
+                scaledRef2AR.x * cosR - scaledRef2AR.z * sinR,
+                scaledRef2AR.y,
+                scaledRef2AR.x * sinR + scaledRef2AR.z * cosR
+            )
+            let transformedRef2 = rotatedRef2AR + translation
+            let verificationError = simd_distance(transformedRef2, ref2Canonical)
+            
+            print("   📐 Transform: scale=\(String(format: "%.4f", scale)) rot=\(String(format: "%.1f", rotation * 180 / .pi))° trans=(\(String(format: "%.2f", translation.x)), \(String(format: "%.2f", translation.z)))")
+            print("   ✅ Verification error: \(String(format: "%.3f", verificationError))m")
+            
+            if verificationError > 0.5 {
+                print("   ⚠️ High verification error — session may have scale drift, including with reduced weight")
+            }
+            
+            // Apply transform to all positions from this session
+            for (mapPointID, (arPosition, confidence)) in positionsInSession {
+                // Apply transform: scale, rotate, translate
+                let scaled = arPosition * scale
+                let rotated = SIMD3<Float>(
+                    scaled.x * cosR - scaled.z * sinR,
+                    scaled.y,
+                    scaled.x * sinR + scaled.z * cosR
+                )
+                let canonical = rotated + translation
+                
+                // Weight by confidence, reduced if verification error was high
+                let adjustedWeight = verificationError > 0.5 ? confidence * 0.5 : confidence
+                
+                if bakedPositionsAccumulator[mapPointID] == nil {
+                    bakedPositionsAccumulator[mapPointID] = []
+                }
+                bakedPositionsAccumulator[mapPointID]?.append((position: canonical, weight: adjustedWeight))
+            }
+            
+            sessionsProcessed += 1
+            print("   ✅ Transformed \(positionsInSession.count) position(s) to canonical frame")
+        }
+        
+        print("\n" + String(repeating: "-", count: 70))
+        print("📊 [HISTORICAL_BAKE] Session summary:")
+        print("   Processed: \(sessionsProcessed)")
+        print("   Skipped: \(sessionsSkipped)")
+        print(String(repeating: "-", count: 70))
+        
+        // Step 4: Compute weighted average for each MapPoint and update baked positions
+        var updatedCount = 0
+        
+        print("\n📦 [HISTORICAL_BAKE] Computing baked positions...")
+        
+        for (mapPointID, samples) in bakedPositionsAccumulator {
+            guard let index = points.firstIndex(where: { $0.id == mapPointID }) else {
+                continue
+            }
+            
+            // Weighted average
+            var weightedSum = SIMD3<Float>(0, 0, 0)
+            var totalWeight: Float = 0
+            
+            for sample in samples {
+                weightedSum += sample.position * sample.weight
+                totalWeight += sample.weight
+            }
+            
+            guard totalWeight > 0 else { continue }
+            
+            let bakedPosition = weightedSum / totalWeight
+            let avgConfidence = totalWeight / Float(samples.count)
+            
+            // Update MapPoint
+            points[index].bakedCanonicalPosition = bakedPosition
+            points[index].bakedConfidence = avgConfidence
+            points[index].bakedSampleCount = samples.count
+            
+            print("   ✅ \(String(mapPointID.uuidString.prefix(8))): (\(String(format: "%.2f", bakedPosition.x)), \(String(format: "%.2f", bakedPosition.y)), \(String(format: "%.2f", bakedPosition.z))) [samples: \(samples.count), conf: \(String(format: "%.2f", avgConfidence))]")
+            
+            updatedCount += 1
+        }
+        
+        // Step 5: Update metadata and save
+        lastBakeTimestamp = Date()
+        lastBakeSessionCount = sessionsProcessed
+        save()
+        
+        let duration = Date().timeIntervalSince(startTime) * 1000
+        
+        print("\n" + String(repeating: "=", count: 70))
+        print("🔥 [HISTORICAL_BAKE] Complete!")
+        print("   MapPoints updated: \(updatedCount)")
+        print("   Sessions processed: \(sessionsProcessed)")
+        print("   Duration: \(String(format: "%.1f", duration))ms")
+        print("   Bake timestamp: \(lastBakeTimestamp!.formatted())")
+        print(String(repeating: "=", count: 70) + "\n")
+        
+        return updatedCount
+    }
+    
+    /// Convenience method to trigger bake if data is stale
+    /// Call this on map load
+    ///
+    /// - Parameters:
+    ///   - mapSize: Size of the map image in pixels
+    ///   - metersPerPixel: Scale factor from MetricSquare calibration
+    /// - Returns: true if bake was performed, false if skipped
+    @discardableResult
+    func bakeIfNeeded(mapSize: CGSize, metersPerPixel: Float) -> Bool {
+        guard checkBakeFreshness() else {
+            return false
+        }
+        
+        let _ = bakeDownHistoricalData(mapSize: mapSize, metersPerPixel: metersPerPixel)
+        return true
     }
     
     // MARK: - Baked Position Diagnostics

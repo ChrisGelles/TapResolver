@@ -184,7 +184,23 @@ struct MapNavigationView: View {
         mapPointStore.reloadForActiveLocation()
         trianglePatchStore.load()  // Reload triangles for new location
 
-        // 5) Overlays can render now
+        // 5) Trigger bake-down if historical data has changed
+        if let mapImage = mapUIImage {
+            // Use first locked square, or any square if none are locked
+            let lockedSquares = metricSquares.squares.filter { $0.isLocked }
+            let squaresToUse = lockedSquares.isEmpty ? metricSquares.squares : lockedSquares
+            
+            if let firstSquare = squaresToUse.first, firstSquare.meters > 0 {
+                let metersPerPixel = Float(firstSquare.meters) / Float(firstSquare.side)
+                mapPointStore.bakeIfNeeded(mapSize: mapImage.size, metersPerPixel: metersPerPixel)
+            } else {
+                print("⚠️ [MAP_LOAD] Cannot bake — missing MetricSquare or square has zero meters")
+            }
+        } else {
+            print("⚠️ [MAP_LOAD] Cannot bake — missing map image")
+        }
+
+        // 6) Overlays can render now
         overlaysReady = true
     }
     
