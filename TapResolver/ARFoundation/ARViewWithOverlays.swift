@@ -525,11 +525,15 @@ struct ARViewWithOverlays: View {
                     // Place Marker / Ghost Interaction buttons
                     // Show during vertex placement OR when in readyToFill with a ghost selected (crawl mode)
                     // BUT NOT when reposition is pending (user tapped "Reposition Marker")
+                    // Ghost interaction buttons show whenever a ghost is selected
+                    // This ensures ghosts can always be confirmed/adjusted regardless of state
                     let shouldShowGhostButtons: Bool = {
-                    if case .placingVertices = arCalibrationCoordinator.calibrationState {
+                        // Always show if a ghost is selected (enables interaction in any state)
+                        if arCalibrationCoordinator.selectedGhostMapPointID != nil {
                             return true
                         }
-                        if arCalibrationCoordinator.calibrationState == .readyToFill && arCalibrationCoordinator.selectedGhostMapPointID != nil {
+                        // Also show during vertex placement for normal workflow
+                        if case .placingVertices = arCalibrationCoordinator.calibrationState {
                             return true
                         }
                         return false
