@@ -700,7 +700,7 @@ struct ARViewWithOverlays: View {
                     if let containingTriangleID = userContainingTriangleID,
                        let _ = arCalibrationCoordinator.triangleStore.triangle(withID: containingTriangleID),
                        (arCalibrationCoordinator.sessionCalibratedTriangles.contains(containingTriangleID) ||
-                        arCalibrationCoordinator.triangleHasBakedVertices(containingTriangleID)) {
+                        arCalibrationCoordinator.triangleCanBeFilled(containingTriangleID)) {
                         
                         Button(action: {
                             print("🎯 [FILL_TRIANGLE_BTN] Button tapped")

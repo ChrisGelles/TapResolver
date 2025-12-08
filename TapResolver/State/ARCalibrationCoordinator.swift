@@ -1475,6 +1475,33 @@ final class ARCalibrationCoordinator: ObservableObject {
         return true
     }
     
+    /// Check if a triangle can be filled with survey markers
+    /// Returns true if all 3 vertices have EITHER:
+    /// - A current session position (from mapPointARPositions), OR
+    /// - A baked position that can be projected to session
+    /// This is the correct check for Fill Triangle button visibility
+    public func triangleCanBeFilled(_ triangleID: UUID) -> Bool {
+        guard hasValidSessionTransform,
+              let triangle = triangleStore.triangle(withID: triangleID),
+              triangle.vertexIDs.count == 3 else {
+            return false
+        }
+        
+        for vertexID in triangle.vertexIDs {
+            // Check if vertex has current session position
+            if mapPointARPositions[vertexID] != nil {
+                continue // This vertex is covered
+            }
+            
+            // Check if vertex has baked position
+            guard let mapPoint = mapStore.points.first(where: { $0.id == vertexID }),
+                  mapPoint.bakedCanonicalPosition != nil else {
+                return false // No position source for this vertex
+            }
+        }
+        return true
+    }
+    
     /// Check if session has a valid canonical→session transform
     public var hasValidSessionTransform: Bool {
         return cachedCanonicalToSessionTransform != nil
@@ -1627,6 +1654,15 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         calibrationState = .surveyMode
         print("🎯 CalibrationState → \(stateDescription)")
+    }
+    
+    public func exitSurveyMode() {
+        guard case .surveyMode = calibrationState else {
+            print("⚠️ [EXIT_SURVEY] Not in survey mode, current state: \(stateDescription)")
+            return
+        }
+        calibrationState = .readyToFill
+        print("🎯 CalibrationState → Ready to Fill (exited survey mode)")
     }
     
     var stateDescription: String {
