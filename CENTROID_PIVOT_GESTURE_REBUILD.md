@@ -1,3 +1,15 @@
+> 📚 **HISTORICAL REFERENCE**
+
+> 
+
+> This document explains the reasoning and debugging process behind the centroid-pivot gesture implementation.
+
+> 
+
+> For current system documentation, see `GESTURE_SYSTEM_COMPLETE.md`.
+
+---
+
 # Centroid-Pivot Gesture System: Complete Rebuild Documentation
 
 **Date:** December 4, 2025  

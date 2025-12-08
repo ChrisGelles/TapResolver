@@ -344,17 +344,263 @@ If you see `✌️→☝️ Pinch ENDED (2→1)` without a following `🖐️ Pa
 
 ---
 
+## Touch Claim Mechanisms
+
+The window-level UIKit gesture recognizers in `PinchRotateCentroidBridge` capture all touches by design. This creates a conflict when the user interacts with overlay elements or HUD components—both the element AND the map would respond. 
+
+We solve this with **claim flags** in `MapTransformStore` that child views set when they need exclusive touch ownership.
+
+### Architecture
+
+```
+User Touch on UI Element
+
+       │
+
+       ▼
+
+Child View sets claim flag = true
+
+       │
+
+       ├──► Overlay dragging: mapTransform.isOverlayDragging = true
+
+       │
+
+       └──► HUD scrolling:    mapTransform.isHUDInteracting = true
+
+       │
+
+       ▼
+
+PinchRotateCentroidBridge.shouldBlockPan()
+
+       │
+
+       ├──► Returns true: Skip/cancel map pan
+
+       │
+
+       └──► Returns false: Process map pan normally
+
+       │
+
+       ▼
+
+User lifts finger
+
+       │
+
+       ▼
+
+Child View sets claim flag = false
+```
+
+### Claim Flags
+
+| Flag | Purpose | Set By |
+
+|------|---------|--------|
+
+| `isOverlayDragging` | Blocks map pan during overlay element drags | BeaconOverlayDots, MapPointOverlay, MetricSquaresOverlay |
+
+| `isHUDInteracting` | Blocks map pan during HUD scrolling/sliding | Drawer ScrollViews, DebugSettingsPanel, MapPointLogView, CustomSlider |
+
+### Implementation Pattern
+
+#### For SwiftUI Overlays (Drag Gestures)
+
+```swift
+// In overlay view with DragGesture:
+
+.onChanged { value in
+
+    if startPoint == nil {
+
+        startPoint = element.position
+
+        mapTransform.isOverlayDragging = true  // ← Claim touch
+
+    }
+
+    // ... drag logic
+
+}
+
+.onEnded { _ in
+
+    startPoint = nil
+
+    mapTransform.isOverlayDragging = false     // ← Release touch
+
+}
+
+```
+
+#### For SwiftUI ScrollViews
+
+```swift
+ScrollView {
+
+    // ... content
+
+}
+
+.simultaneousGesture(
+
+    DragGesture(minimumDistance: 0)
+
+        .onChanged { _ in mapTransform.isHUDInteracting = true }
+
+        .onEnded { _ in mapTransform.isHUDInteracting = false }
+
+)
+
+```
+
+#### For UIKit Components (UISlider)
+
+UIKit components can't directly access SwiftUI environment objects, so they use NotificationCenter:
+
+```swift
+// In UIViewRepresentable Coordinator:
+
+@objc func touchBegan() {
+
+    NotificationCenter.default.post(name: .sliderInteractionBegan, object: nil)
+
+}
+
+@objc func touchEnded() {
+
+    NotificationCenter.default.post(name: .sliderInteractionEnded, object: nil)
+
+}
+
+// In parent SwiftUI view:
+
+.onReceive(NotificationCenter.default.publisher(for: .sliderInteractionBegan)) { _ in
+
+    mapTransform.isHUDInteracting = true
+
+}
+
+.onReceive(NotificationCenter.default.publisher(for: .sliderInteractionEnded)) { _ in
+
+    mapTransform.isHUDInteracting = false
+
+}
+
+```
+
+### Bridge Integration
+
+In `PinchRotateCentroidBridge`, the `shouldBlockPan` closure checks both flags:
+
+```swift
+// Wired in MapContainer.swift:
+
+shouldBlockPan: { mapTransform.isOverlayDragging || mapTransform.isHUDInteracting }
+
+```
+
+When `shouldBlockPan()` returns `true`:
+
+1. If pan is not active: Early return, ignore the touch
+
+2. If pan is already active: Send `.cancelled` event to clean up state, then return
+
+### Files Using Touch Claim
+
+| File | Component | Claim Flag |
+
+|------|-----------|------------|
+
+| `BeaconOverlayDots.swift` | DraggableDot | `isOverlayDragging` |
+
+| `MapPointOverlay.swift` | Point drag gesture | `isOverlayDragging` |
+
+| `MetricSquaresOverlay.swift` | Drag + resize gestures | `isOverlayDragging` |
+
+| `BeaconDrawer.swift` | ScrollView | `isHUDInteracting` |
+
+| `MapPointDrawer.swift` | ScrollView | `isHUDInteracting` |
+
+| `MetricSquareDrawer.swift` | ScrollView | `isHUDInteracting` |
+
+| `MorgueDrawer.swift` | ScrollView | `isHUDInteracting` |
+
+| `DebugSettingsPanel` | ScrollView (in HUDContainer.swift) | `isHUDInteracting` |
+
+| `MapPointLogView.swift` | ScrollView | `isHUDInteracting` |
+
+| `MapPointSessionListView.swift` | ScrollView | `isHUDInteracting` |
+
+| `CustomSlider` | UISlider (in HUDContainer.swift) | `isHUDInteracting` (via notification) |
+
+### Testing Checklist
+
+**Overlay Drags (isOverlayDragging)**
+
+- [ ] Beacon Dot drag: Only dot moves, map does NOT pan
+
+- [ ] Map Point drag: Only point moves, map does NOT pan
+
+- [ ] Metric Square drag: Only square moves, map does NOT pan
+
+- [ ] Metric Square resize: Only square resizes, map does NOT pan
+
+**HUD Interactions (isHUDInteracting)**
+
+- [ ] Beacon Drawer scroll: Map does NOT pan
+
+- [ ] Map Point Drawer scroll: Map does NOT pan
+
+- [ ] Metric Square Drawer scroll: Map does NOT pan
+
+- [ ] Morgue Drawer scroll: Map does NOT pan
+
+- [ ] Debug Settings Panel scroll: Map does NOT pan
+
+- [ ] Map Point Log scroll: Map does NOT pan
+
+- [ ] Session List scroll: Map does NOT pan
+
+- [ ] Duration Slider drag: Map does NOT pan
+
+**Normal Operation (no flags set)**
+
+- [ ] Touching empty map area: Map pans normally
+
+- [ ] Pinch/rotate gestures: Work as expected
+
+- [ ] 2→1 and 1→2 transitions: Still smooth
+
+### Adding New Claimable Components
+
+When adding a new UI element that should block map pan:
+
+1. **For SwiftUI views with DragGesture**: Set `mapTransform.isOverlayDragging = true` in `.onChanged` (first call), clear in `.onEnded`
+
+2. **For SwiftUI ScrollViews**: Add `.simultaneousGesture(DragGesture...)` pattern setting `isHUDInteracting`
+
+3. **For UIKit components**: Use NotificationCenter to bridge to SwiftUI, then set `isHUDInteracting` in the `.onReceive` handler
+
+4. **For new claim types**: Add a new `@Published` flag to `MapTransformStore` and include it in the `shouldBlockPan` check in `MapContainer.swift`
+
+---
+
 ## Known Issues / Future Work
 
-### Overlay Drag Conflict (RESOLVED - December 2024)
+### Overlay & HUD Touch Conflicts (RESOLVED - December 2024)
 
-**Symptom**: Dragging overlay elements (Beacon Dots, Map Points, Metric Squares) would also pan the map simultaneously.
+**Symptom**: Dragging overlay elements or scrolling HUD panels would also pan the map simultaneously.
 
-**Root Cause**: Window-level UIKit gesture recognizers captured all touches, including those on overlay elements.
+**Root Cause**: Window-level UIKit gesture recognizers captured all touches, including those on overlay elements and HUD components.
 
-**Fix**: Added `isOverlayDragging` flag to `MapTransformStore`. Overlays set this flag when dragging starts, and `PinchRotateCentroidBridge` skips map pan when the flag is true.
+**Fix**: Added touch claim flags (`isOverlayDragging`, `isHUDInteracting`) to `MapTransformStore`. Components set these flags when they need exclusive touch ownership, and `PinchRotateCentroidBridge` skips map pan when either flag is true.
 
-**Status**: ✅ Fixed in commit `aa89ec4`. See `OVERLAY_DRAG_GESTURE_FIX.md` for details.
+**Status**: ✅ Fixed. See "Touch Claim Mechanisms" section above for complete documentation.
 
 ---
 
@@ -428,4 +674,6 @@ Could be simplified or split into separate concerns in a future refactor.
 
 ---
 
-*This document replaces both `GestureSystem.md` and `GESTURE_REBUILD.md`.*
+*This document replaces `GestureSystem.md`, `GESTURE_REBUILD.md`, and `OVERLAY_DRAG_GESTURE_FIX.md`.*
+
+*For historical context on the centroid-pivot implementation decisions, see `CENTROID_PIVOT_GESTURE_REBUILD.md` (archived).*

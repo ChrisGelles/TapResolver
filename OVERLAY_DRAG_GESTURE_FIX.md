@@ -1,3 +1,15 @@
+> ⚠️ **ARCHIVED DOCUMENT**
+
+> 
+
+> This document has been superseded by the "Touch Claim Mechanisms" section in `GESTURE_SYSTEM_COMPLETE.md`.
+
+> 
+
+> Retained for historical reference only.
+
+---
+
 # Overlay Drag Gesture Conflict Fix
 
 **Date:** December 2024  

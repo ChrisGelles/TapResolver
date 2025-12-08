@@ -934,6 +934,19 @@ struct ARViewContainer: UIViewRepresentable {
                     }
                 }
                 
+                // PRIORITY 3: Check baked positions with session transform
+                if !foundMarker,
+                   let coordinator = self.arCalibrationCoordinator,
+                   coordinator.hasValidSessionTransform,
+                   let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }),
+                   let bakedPosition = mapPoint.bakedCanonicalPosition,
+                   let sessionPosition = coordinator.projectBakedToSession(bakedPosition) {
+                    markersFromCurrentSession.append((vertexID, UUID(), sessionPosition, "bakedPosition"))
+                    print("✅ [SURVEY_VALIDATION] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): Using baked position projected to session")
+                    print("   Baked: \(bakedPosition) → Session: \(sessionPosition)")
+                    foundMarker = true
+                }
+                
                 if !foundMarker {
                     print("❌ [SURVEY_VALIDATION] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): No marker found anywhere")
                 }
@@ -1031,7 +1044,18 @@ struct ARViewContainer: UIViewRepresentable {
                     print("   Session: \(String(sessionID.uuidString.prefix(8)))")
                     print("   Source: \(foundSource)")
                 } else {
-                    print("❌ [SURVEY_3D] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): No AR marker found!")
+                    // PRIORITY 3: Try baked position with session transform
+                    if let coordinator = self.arCalibrationCoordinator,
+                       coordinator.hasValidSessionTransform,
+                       let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }),
+                       let bakedPosition = mapPoint.bakedCanonicalPosition,
+                       let sessionPosition = coordinator.projectBakedToSession(bakedPosition) {
+                        triangle3D.append(sessionPosition)
+                        print("✅ [SURVEY_3D] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): Using baked position")
+                        print("   Baked: \(bakedPosition) → Session: \(sessionPosition)")
+                    } else {
+                        print("❌ [SURVEY_3D] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): No AR marker found!")
+                    }
                 }
             }
             
@@ -1043,22 +1067,31 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
-            // CRITICAL: Count markers from current session (checking session ID, not just placedMarkers)
+            // CRITICAL: Count markers from current session OR with valid baked positions
             var markersFromCurrentSessionCount = 0
             for (index, vertexID) in triangle.vertexIDs.enumerated() {
-                guard index < triangle.arMarkerIDs.count,
+                // Check placedMarkers first (need marker UUID for this)
+                if index < triangle.arMarkerIDs.count,
                    let markerIDString = triangle.arMarkerIDs[index].isEmpty ? nil : triangle.arMarkerIDs[index],
-                      let markerUUID = UUID(uuidString: markerIDString) else {
-                    continue
+                   let markerUUID = UUID(uuidString: markerIDString) {
+                    
+                    if placedMarkers[markerUUID] != nil {
+                        markersFromCurrentSessionCount += 1
+                        continue
+                    }
+                    // Check ARWorldMapStore with session ID validation
+                    if let storedMarker = arWorldMapStore.markers.first(where: { UUID(uuidString: $0.id) == markerUUID }),
+                       storedMarker.sessionID == arWorldMapStore.currentSessionID {
+                        markersFromCurrentSessionCount += 1
+                        continue
+                    }
                 }
                 
-                // Check placedMarkers first
-                if placedMarkers[markerUUID] != nil {
-                    markersFromCurrentSessionCount += 1
-                }
-                // Check ARWorldMapStore with session ID validation
-                else if let storedMarker = arWorldMapStore.markers.first(where: { UUID(uuidString: $0.id) == markerUUID }),
-                        storedMarker.sessionID == arWorldMapStore.currentSessionID {
+                // PRIORITY 3: Check baked position availability
+                if let coordinator = self.arCalibrationCoordinator,
+                   coordinator.hasValidSessionTransform,
+                   let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }),
+                   mapPoint.bakedCanonicalPosition != nil {
                     markersFromCurrentSessionCount += 1
                 }
             }
