@@ -1674,33 +1674,30 @@ struct ARPiPMapView: View {
         // Average the samples for smoothing
         let smoothedPosition = positionSamples.reduce(simd_float3(0, 0, 0), +) / Float(positionSamples.count)
         
-        // Project AR world position to 2D map coordinates
+        // Check which calibrated triangle contains the user (AR-space, no projection needed)
+        let containingTriangle = findContainingTriangleInARSpace(cameraPosition: smoothedPosition)
+        if lastContainingTriangleID != containingTriangle {
+            lastContainingTriangleID = containingTriangle
+            // Post notification to update userContainingTriangleID in ARViewWithOverlays
+            NotificationCenter.default.post(
+                name: NSNotification.Name("UserContainingTriangleChanged"),
+                object: nil,
+                userInfo: ["triangleID": containingTriangle as Any]
+            )
+            if let triangleID = containingTriangle {
+                print("📍 [USER_TRIANGLE] User entered Triangle \(String(triangleID.uuidString.prefix(8)))")
+            } else {
+                print("📍 [USER_TRIANGLE] User exited calibrated triangle area")
+            }
+        }
+        
+        // Project AR world position to 2D map coordinates (for PiP map display)
         if let projectedPosition = projectARPositionToMap(arPosition: smoothedPosition) {
             userMapPosition = projectedPosition
-            // Share position with coordinator for proximity-based triangle selection
+            // Share position with coordinator for proximity-based ghost selection
             arCalibrationCoordinator.updateUserPosition(projectedPosition)
-            
-            // DIAGNOSTIC: Log user position and triangle containment once per second
-            print("📍 [USER_POSITION] User is at (\(String(format: "%.1f", projectedPosition.x)), \(String(format: "%.1f", projectedPosition.y))) on the Map")
-            
-            // Check which calibrated triangle contains the user (if any)
-            let containingTriangle = findContainingTriangle(mapPosition: projectedPosition)
-            if lastContainingTriangleID != containingTriangle {
-                lastContainingTriangleID = containingTriangle
-                // Post notification to update userContainingTriangleID in ARViewWithOverlays
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("UserContainingTriangleChanged"),
-                    object: nil,
-                    userInfo: ["triangleID": containingTriangle as Any]
-                )
-                if let triangleID = containingTriangle {
-                    print("📍 [USER_POSITION] User entered Triangle \(String(triangleID.uuidString.prefix(8)))")
-                } else {
-                    print("📍 [USER_POSITION] User exited calibrated triangle area")
-                }
-            }
         } else {
-            print("📍 [USER_POSITION] Could not project AR position to map")
+            userMapPosition = nil
         }
     }
     
@@ -1851,6 +1848,53 @@ struct ARPiPMapView: View {
         let mapY = map0.y + tCGFloat * deltaY
         
         return CGPoint(x: mapX, y: mapY)
+    }
+    
+    /// Find which session-calibrated triangle contains the camera position in AR space
+    /// This is more efficient than projecting to map coordinates first
+    /// Returns nil if position is outside all calibrated triangles
+    private func findContainingTriangleInARSpace(cameraPosition: simd_float3) -> UUID? {
+        let triangleStore = arCalibrationCoordinator.triangleStore
+        let sessionTriangles = arCalibrationCoordinator.sessionCalibratedTriangles
+        let arPositions = arCalibrationCoordinator.mapPointARPositions
+        
+        for triangleID in sessionTriangles {
+            guard let triangle = triangleStore.triangle(withID: triangleID),
+                  triangle.vertexIDs.count == 3 else { continue }
+            
+            // Get AR positions for all 3 vertices
+            let vertexARPositions = triangle.vertexIDs.compactMap { arPositions[$0] }
+            guard vertexARPositions.count == 3 else { continue }
+            
+            // Check containment in AR XZ plane (ignoring height)
+            if pointInTriangleXZ(cameraPosition, vertices: vertexARPositions) {
+                return triangleID
+            }
+        }
+        return nil
+    }
+    
+    /// Check if point p is inside triangle defined by vertices in AR XZ plane
+    private func pointInTriangleXZ(_ p: simd_float3, vertices: [simd_float3]) -> Bool {
+        guard vertices.count == 3 else { return false }
+        
+        // Project to XZ plane (horizontal plane, ignoring Y height)
+        let v0 = simd_float2(vertices[0].x, vertices[0].z)
+        let v1 = simd_float2(vertices[1].x, vertices[1].z)
+        let v2 = simd_float2(vertices[2].x, vertices[2].z)
+        let pt = simd_float2(p.x, p.z)
+        
+        // Barycentric coordinate calculation
+        let denom = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y)
+        guard abs(denom) > 0.0001 else { return false }
+        
+        let a = ((v1.y - v2.y) * (pt.x - v2.x) + (v2.x - v1.x) * (pt.y - v2.y)) / denom
+        let b = ((v2.y - v0.y) * (pt.x - v2.x) + (v0.x - v2.x) * (pt.y - v2.y)) / denom
+        let c = 1 - a - b
+        
+        // Point is inside if all barycentric coordinates are non-negative (with small epsilon)
+        let epsilon: Float = -0.001
+        return a >= epsilon && b >= epsilon && c >= epsilon
     }
     
     /// Find which session-calibrated triangle contains the given map position
