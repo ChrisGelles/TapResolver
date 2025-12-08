@@ -1459,6 +1459,84 @@ final class ARCalibrationCoordinator: ObservableObject {
         return placedMarkers.count == 3 && triangle.vertexIDs.allSatisfy { placedMarkers.contains($0) }
     }
     
+    /// Check if a triangle has baked canonical positions for all 3 vertices
+    public func triangleHasBakedVertices(_ triangleID: UUID) -> Bool {
+        guard let triangle = triangleStore.triangle(withID: triangleID),
+              triangle.vertexIDs.count == 3 else {
+            return false
+        }
+        
+        for vertexID in triangle.vertexIDs {
+            guard let mapPoint = mapStore.points.first(where: { $0.id == vertexID }),
+                  mapPoint.bakedCanonicalPosition != nil else {
+                return false
+            }
+        }
+        return true
+    }
+    
+    /// Check if session has a valid canonical→session transform
+    public var hasValidSessionTransform: Bool {
+        return cachedCanonicalToSessionTransform != nil
+    }
+    
+    /// Project a baked canonical position to current session AR space
+    /// Returns nil if no valid transform is cached
+    public func projectBakedToSession(_ bakedPosition: SIMD3<Float>) -> SIMD3<Float>? {
+        guard let transform = cachedCanonicalToSessionTransform else {
+            return nil
+        }
+        
+        // The transform stores canonical→session parameters
+        // Apply inverse of the apply() method: scale, rotate, translate
+        let cosR = cos(transform.rotationY)
+        let sinR = sin(transform.rotationY)
+        let scale = transform.scale
+        
+        // Apply scale first
+        let scaled = bakedPosition * scale
+        
+        // Apply rotation around Y axis (inverse direction)
+        let rotated = SIMD3<Float>(
+            scaled.x * cosR - scaled.z * sinR,
+            scaled.y,
+            scaled.x * sinR + scaled.z * cosR
+        )
+        
+        // Apply translation
+        return rotated + transform.translation
+    }
+    
+    /// Get session-space AR positions for a triangle's vertices using baked data
+    /// Returns nil if transform not available or vertices don't have baked positions
+    public func getTriangleVertexPositionsFromBaked(_ triangleID: UUID) -> [UUID: SIMD3<Float>]? {
+        guard hasValidSessionTransform,
+              let triangle = triangleStore.triangle(withID: triangleID),
+              triangle.vertexIDs.count == 3 else {
+            return nil
+        }
+        
+        var positions: [UUID: SIMD3<Float>] = [:]
+        
+        for vertexID in triangle.vertexIDs {
+            // First check if we have a session-planted position
+            if let sessionPos = mapPointARPositions[vertexID] {
+                positions[vertexID] = sessionPos
+                continue
+            }
+            
+            // Fall back to baked position projected to session
+            guard let mapPoint = mapStore.points.first(where: { $0.id == vertexID }),
+                  let bakedPos = mapPoint.bakedCanonicalPosition,
+                  let sessionPos = projectBakedToSession(bakedPos) else {
+                return nil // Missing data for this vertex
+            }
+            positions[vertexID] = sessionPos
+        }
+        
+        return positions.count == 3 ? positions : nil
+    }
+    
     private func updateProgressDots() {
         guard let triangleID = activeTriangleID,
               let triangle = triangleStore.triangle(withID: triangleID) else {
@@ -2479,6 +2557,10 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("   Rotation: \(String(format: "%.1f", rotation * 180 / .pi))°")
         print("   Translation: (\(String(format: "%.2f", translation.x)), \(String(format: "%.2f", translation.y)), \(String(format: "%.2f", translation.z)))")
         print("   ✅ Verification error: \(String(format: "%.3f", verificationError))m")
+        
+        // Count how many triangles are now fillable via baked data
+        let fillableCount = triangleStore.triangles.filter { triangleHasBakedVertices($0.id) }.count
+        print("📐 [SESSION_TRANSFORM] \(fillableCount) triangle(s) now fillable via baked data")
         
         return true
     }

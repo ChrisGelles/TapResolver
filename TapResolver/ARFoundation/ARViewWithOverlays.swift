@@ -695,10 +695,12 @@ struct ARViewWithOverlays: View {
                         .padding(.bottom, 40)
                     }
                     
-                    // Survey Marker Generation Button - shows when user is standing in a calibrated triangle
+                    // Survey Marker Generation Button - shows when user is standing in a fillable triangle
+                    // A triangle is fillable if all 3 vertices have known positions (session or baked)
                     if let containingTriangleID = userContainingTriangleID,
-                       let triangle = arCalibrationCoordinator.triangleStore.triangle(withID: containingTriangleID),
-                       triangle.isCalibrated {
+                       let _ = arCalibrationCoordinator.triangleStore.triangle(withID: containingTriangleID),
+                       (arCalibrationCoordinator.sessionCalibratedTriangles.contains(containingTriangleID) ||
+                        arCalibrationCoordinator.triangleHasBakedVertices(containingTriangleID)) {
                         
                         Button(action: {
                             print("🎯 [FILL_TRIANGLE_BTN] Button tapped")
@@ -1850,11 +1852,13 @@ struct ARPiPMapView: View {
         return CGPoint(x: mapX, y: mapY)
     }
     
-    /// Find which session-calibrated triangle contains the camera position in AR space
-    /// This is more efficient than projecting to map coordinates first
-    /// Returns nil if position is outside all calibrated triangles
+    /// Find which triangle contains the camera position in AR space
+    /// Checks both session-calibrated triangles AND triangles with baked vertex data
+    /// Returns nil if position is outside all known triangles
     private func findContainingTriangleInARSpace(cameraPosition: simd_float3) -> UUID? {
         let triangleStore = arCalibrationCoordinator.triangleStore
+        
+        // First check session-calibrated triangles (highest confidence)
         let sessionTriangles = arCalibrationCoordinator.sessionCalibratedTriangles
         let arPositions = arCalibrationCoordinator.mapPointARPositions
         
@@ -1862,15 +1866,38 @@ struct ARPiPMapView: View {
             guard let triangle = triangleStore.triangle(withID: triangleID),
                   triangle.vertexIDs.count == 3 else { continue }
             
-            // Get AR positions for all 3 vertices
             let vertexARPositions = triangle.vertexIDs.compactMap { arPositions[$0] }
             guard vertexARPositions.count == 3 else { continue }
             
-            // Check containment in AR XZ plane (ignoring height)
             if pointInTriangleXZ(cameraPosition, vertices: vertexARPositions) {
                 return triangleID
             }
         }
+        
+        // Then check triangles with baked data (if we have a valid transform)
+        guard arCalibrationCoordinator.hasValidSessionTransform else {
+            return nil
+        }
+        
+        // Get all triangles and check those with baked vertices
+        for triangle in triangleStore.triangles {
+            // Skip if already checked in session triangles
+            guard !sessionTriangles.contains(triangle.id) else { continue }
+            
+            // Get positions from baked data
+            guard let vertexPositions = arCalibrationCoordinator.getTriangleVertexPositionsFromBaked(triangle.id) else {
+                continue
+            }
+            
+            let orderedPositions = triangle.vertexIDs.compactMap { vertexPositions[$0] }
+            guard orderedPositions.count == 3 else { continue }
+            
+            if pointInTriangleXZ(cameraPosition, vertices: orderedPositions) {
+                print("📍 [USER_TRIANGLE] Found containing triangle \(String(triangle.id.uuidString.prefix(8))) via baked data")
+                return triangle.id
+            }
+        }
+        
         return nil
     }
     
