@@ -110,7 +110,7 @@ public class SurveySelectionCoordinator: ObservableObject {
         guard state == .selectingTriangles, !selectedTriangleIDs.isEmpty else { return }
         generateGridPoints()
         state = .selectingAnchors
-        print("📐 [SurveySelectionCoordinator] Grid: \(gridPoints_m.count) points")
+        print("📐 [SurveySelectionCoordinator] Swath confirmed: \(gridPoints_m.count) Survey Marker positions")
     }
     
     public func reset() {
