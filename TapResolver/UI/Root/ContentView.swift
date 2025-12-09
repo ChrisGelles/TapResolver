@@ -51,6 +51,7 @@ struct ContentView: View {
                 isCalibrationMode: arViewLaunchContext.isCalibrationMode,
                 selectedTriangle: arViewLaunchContext.selectedTriangle
             )
+            .environmentObject(arViewLaunchContext)
         }
         // Provide environments exactly as before + new locationManager
         .environmentObject(beaconDotStore)

@@ -9,6 +9,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import simd
 
 public enum SurveySelectionState: Equatable {
     case idle
@@ -24,7 +25,6 @@ public class SurveySelectionCoordinator: ObservableObject {
     
     @Published public private(set) var state: SurveySelectionState = .idle
     @Published public private(set) var selectedTriangleIDs: Set<UUID> = []
-    @Published public private(set) var gridPoints_m: [CGPoint] = []
     @Published public private(set) var anchorMapPointIDs: [UUID] = []
     
     public var gridSpacing_m: Double = 1.0
@@ -101,77 +101,42 @@ public class SurveySelectionCoordinator: ObservableObject {
     
     public func cancelSelection() {
         selectedTriangleIDs.removeAll()
-        gridPoints_m.removeAll()
         anchorMapPointIDs.removeAll()
         state = .idle
     }
     
     public func confirmSelectionAndBeginAnchoring() {
         guard state == .selectingTriangles, !selectedTriangleIDs.isEmpty else { return }
-        generateGridPoints()
         state = .selectingAnchors
-        print("📐 [SurveySelectionCoordinator] Swath confirmed: \(gridPoints_m.count) Survey Marker positions")
+        
+        guard let region = getSurveyableRegion() else {
+            print("⚠️ [SurveySelectionCoordinator] Could not create region")
+            return
+        }
+        
+        let vertexCount = region.allVertexIDs.count
+        let suggestedAnchors = getSuggestedAnchorPoints()
+        
+        print("📐 [SurveySelectionCoordinator] Swath confirmed:")
+        print("   Triangles: \(selectedTriangleIDs.count)")
+        print("   Unique vertices: \(vertexCount)")
+        print("   Suggested anchors: \(suggestedAnchors.map { String($0.uuidString.prefix(8)) })")
+        
+        // Post notification to launch AR in Swath Survey mode
+        NotificationCenter.default.post(
+            name: NSNotification.Name("LaunchSwathSurveyAR"),
+            object: nil,
+            userInfo: [
+                "selectedTriangleIDs": Array(selectedTriangleIDs),
+                "suggestedAnchorIDs": suggestedAnchors
+            ]
+        )
     }
     
     public func reset() {
         selectedTriangleIDs.removeAll()
-        gridPoints_m.removeAll()
         anchorMapPointIDs.removeAll()
         state = .idle
-    }
-    
-    private func generateGridPoints() {
-        guard let triStore = triangleStore,
-              let mapStore = mapPointStore,
-              let ppm = getPixelsPerMeter() else { return }
-        
-        let selected = triStore.triangles.filter { selectedTriangleIDs.contains($0.id) }
-        guard !selected.isEmpty else { gridPoints_m = []; return }
-        
-        var verts: [CGPoint] = []
-        for tri in selected {
-            for vid in tri.vertexIDs {
-                if let pt = mapStore.points.first(where: { $0.id == vid }) {
-                    verts.append(CGPoint(x: pt.position.x, y: pt.position.y))
-                }
-            }
-        }
-        guard !verts.isEmpty else { gridPoints_m = []; return }
-        
-        let minX = verts.map { $0.x }.min()! / ppm
-        let maxX = verts.map { $0.x }.max()! / ppm
-        let minY = verts.map { $0.y }.min()! / ppm
-        let maxY = verts.map { $0.y }.max()! / ppm
-        
-        var pts: [CGPoint] = []
-        var y = minY
-        while y <= maxY {
-            var x = minX
-            while x <= maxX {
-                let px = CGPoint(x: x * ppm, y: y * ppm)
-                if isInsideAny(px, tris: selected, mapStore: mapStore) {
-                    pts.append(CGPoint(x: x, y: y))
-                }
-                x += gridSpacing_m
-            }
-            y += gridSpacing_m
-        }
-        gridPoints_m = pts
-    }
-    
-    private func isInsideAny(_ p: CGPoint, tris: [TrianglePatch], mapStore: MapPointStore) -> Bool {
-        for tri in tris {
-            guard tri.vertexIDs.count == 3 else { continue }
-            var v: [CGPoint] = []
-            for vid in tri.vertexIDs {
-                if let pt = mapStore.points.first(where: { $0.id == vid }) {
-                    v.append(CGPoint(x: pt.position.x, y: pt.position.y))
-                }
-            }
-            guard v.count == 3 else { continue }
-            if pointInTri(p, v[0], v[1], v[2]) { return true }
-        }
-        return false
     }
     
     private func pointInTri(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint, _ c: CGPoint) -> Bool {
@@ -187,4 +152,79 @@ public class SurveySelectionCoordinator: ObservableObject {
     public var hasSelection: Bool { !selectedTriangleIDs.isEmpty }
     public var selectedCount: Int { selectedTriangleIDs.count }
     public func isTriangleSelected(_ id: UUID) -> Bool { selectedTriangleIDs.contains(id) }
+    
+    /// Get the SurveyableRegion for the current selection
+    /// Returns nil if no triangles are selected
+    func getSurveyableRegion() -> SurveyableRegion? {
+        guard let triStore = triangleStore else { return nil }
+        let selected = triStore.triangles.filter { selectedTriangleIDs.contains($0.id) }
+        guard !selected.isEmpty else { return nil }
+        return SurveyableRegion.swath(selected)
+    }
+    
+    /// Identify suggested anchor points (vertices that are far apart)
+    /// Returns up to 3 vertex IDs that maximize coverage
+    func getSuggestedAnchorPoints() -> [UUID] {
+        guard let region = getSurveyableRegion(),
+              let mapStore = mapPointStore else { return [] }
+        
+        let vertexIDs = Array(region.allVertexIDs)
+        guard vertexIDs.count >= 3 else { return vertexIDs }
+        
+        // Get positions for all vertices
+        var positions: [UUID: CGPoint] = [:]
+        for vid in vertexIDs {
+            if let pt = mapStore.points.first(where: { $0.id == vid }) {
+                positions[vid] = CGPoint(x: pt.position.x, y: pt.position.y)
+            }
+        }
+        
+        guard positions.count >= 3 else { return Array(positions.keys) }
+        
+        // Simple greedy algorithm: pick first point, then farthest from it, then farthest from both
+        guard let first = positions.keys.first,
+              let firstPos = positions[first] else { return [] }
+        var anchors: [UUID] = [first]
+        
+        // Find farthest from first
+        var maxDist: CGFloat = 0
+        var second: UUID?
+        for (id, pos) in positions where id != first {
+            let d = distanceBetween(firstPos, pos)
+            if d > maxDist {
+                maxDist = d
+                second = id
+            }
+        }
+        if let s = second {
+            anchors.append(s)
+        }
+        
+        // Find farthest from both (maximize minimum distance)
+        guard let secondID = second, let secondPos = positions[secondID] else {
+            return anchors
+        }
+        
+        var maxMinDist: CGFloat = 0
+        var third: UUID?
+        for (id, pos) in positions where !anchors.contains(id) {
+            let d1 = distanceBetween(firstPos, pos)
+            let d2 = distanceBetween(secondPos, pos)
+            let minD = min(d1, d2)
+            if minD > maxMinDist {
+                maxMinDist = minD
+                third = id
+            }
+        }
+        if let t = third {
+            anchors.append(t)
+        }
+        
+        print("📐 [SurveySelectionCoordinator] Suggested anchors: \(anchors.map { String($0.uuidString.prefix(8)) })")
+        return anchors
+    }
+    
+    private func distanceBetween(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
+        return hypot(b.x - a.x, b.y - a.y)
+    }
 }

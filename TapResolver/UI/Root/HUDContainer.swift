@@ -77,6 +77,22 @@ struct HUDContainer: View {
             .onReceive(NotificationCenter.default.publisher(for: .sliderInteractionEnded)) { _ in
                 mapTransform.isHUDInteracting = false
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("LaunchSwathSurveyAR"))) { notification in
+                guard let userInfo = notification.userInfo,
+                      let triangleIDs = userInfo["selectedTriangleIDs"] as? [UUID],
+                      let anchorIDs = userInfo["suggestedAnchorIDs"] as? [UUID] else {
+                    print("⚠️ [HUD] LaunchSwathSurveyAR missing data")
+                    return
+                }
+                print("🚀 [HUD] Launching AR for Swath Survey")
+                print("   Triangles: \(triangleIDs.count)")
+                print("   Suggested anchors: \(anchorIDs.count)")
+                
+                arViewLaunchContext.launchSwathSurvey(
+                    triangleIDs: triangleIDs,
+                    suggestedAnchorIDs: anchorIDs
+                )
+            }
             // AR view launch is now handled via ARViewLaunchContext
             // Removed notification handler - using direct method call instead
             .overlay(alignment: .topLeading) { topLeftButtons }

@@ -201,6 +201,14 @@ struct ARViewContainer: UIViewRepresentable {
                 object: nil
             )
             
+            // Listen for FillSwathWithSurveyMarkers notification
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleFillSwathWithSurveyMarkers),
+                name: NSNotification.Name("FillSwathWithSurveyMarkers"),
+                object: nil
+            )
+            
             // Listen for triangle calibration complete
             NotificationCenter.default.addObserver(
                 forName: NSNotification.Name("TriangleCalibrationComplete"),
@@ -297,6 +305,30 @@ struct ARViewContainer: UIViewRepresentable {
             print("   vertexIDs: \(triangle.vertexIDs.map { String($0.uuidString.prefix(8)) })")
             
             generateSurveyMarkers(for: triangle, spacing: spacing, arWorldMapStore: arWorldMapStore)
+        }
+        
+        @objc func handleFillSwathWithSurveyMarkers(notification: Notification) {
+            print("📬 [ARViewContainer] Received FillSwathWithSurveyMarkers notification")
+            
+            guard let userInfo = notification.userInfo,
+                  let triangleIDs = userInfo["triangleIDs"] as? [UUID],
+                  let spacing = userInfo["spacing"] as? Float,
+                  let triangleStore = userInfo["triangleStore"] as? TrianglePatchStore,
+                  let arWorldMapStore = userInfo["arWorldMapStore"] as? ARWorldMapStore else {
+                print("⚠️ [ARViewContainer] FillSwathWithSurveyMarkers missing required data")
+                return
+            }
+            
+            print("🔍 [ARViewContainer] Processing Swath: \(triangleIDs.count) triangles, spacing: \(spacing)m")
+            
+            let triangles = triangleStore.triangles.filter { triangleIDs.contains($0.id) }
+            guard !triangles.isEmpty else {
+                print("⚠️ [ARViewContainer] No valid triangles found for swath")
+                return
+            }
+            
+            let region = SurveyableRegion.swath(triangles)
+            generateSurveyMarkersForRegion(region, spacing: spacing, arWorldMapStore: arWorldMapStore)
         }
         
         @objc func handlePlaceGhostMarker(notification: Notification) {

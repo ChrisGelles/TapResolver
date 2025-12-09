@@ -44,6 +44,7 @@ struct ARViewWithOverlays: View {
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
     @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
     @EnvironmentObject private var metricSquares: MetricSquareStore
+    @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
     
     // Relocalization coordinator for strategy selection (developer UI)
     @StateObject private var relocalizationCoordinator: RelocalizationCoordinator
@@ -781,6 +782,44 @@ struct ARViewWithOverlays: View {
                         Spacer()
                             .frame(height: 60)
                             .padding(.bottom, 60)
+                    }
+                    
+                    // Fill Swath button - appears in Swath Survey mode with valid transform
+                    if arViewLaunchContext.launchMode == .swathSurvey,
+                       arCalibrationCoordinator.hasValidSessionTransform {
+                        
+                        Button(action: {
+                            print("🎯 [FILL_SWATH_BTN] Button tapped")
+                            
+                            let triangleIDs = arViewLaunchContext.swathTriangleIDs
+                            guard !triangleIDs.isEmpty else {
+                                print("⚠️ [FILL_SWATH_BTN] No triangles in swath")
+                                return
+                            }
+                            
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("FillSwathWithSurveyMarkers"),
+                                object: nil,
+                                userInfo: [
+                                    "triangleIDs": triangleIDs,
+                                    "spacing": surveySpacing,
+                                    "arWorldMapStore": arCalibrationCoordinator.arStore as Any,
+                                    "triangleStore": arCalibrationCoordinator.triangleStore as Any
+                                ]
+                            )
+                        }) {
+                            HStack {
+                                Image(systemName: "square.grid.3x3.fill")
+                                Text("Fill Swath (\(arViewLaunchContext.swathTriangleIDs.count)△)")
+                            }
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                            .background(Color.green)
+                            .cornerRadius(12)
+                        }
+                        .padding(.bottom, 20)
                     }
                 }
                 .zIndex(997)
