@@ -927,308 +927,177 @@ struct ARViewContainer: UIViewRepresentable {
         
         // MARK: - Survey Marker Generation
         
-        /// Generate survey markers inside a calibrated triangle
-        private func generateSurveyMarkers(for triangle: TrianglePatch, spacing: Float, arWorldMapStore: ARWorldMapStore) {
+        // MARK: - Region-Based Survey Marker Generation
+        /// Generate survey markers for a SurveyableRegion (single triangle or multi-triangle Swath)
+        /// This is the core implementation; single-triangle calls are routed through here.
+        private func generateSurveyMarkersForRegion(
+            _ region: SurveyableRegion,
+            spacing: Float,
+            arWorldMapStore: ARWorldMapStore
+        ) {
             // Clear existing survey markers
             clearSurveyMarkers()
             
-            // CRITICAL: Survey markers require all 3 vertices to be from the CURRENT AR session
-            // Mixing coordinates from different sessions produces incorrect results because each
-            // session has a different origin point (0,0,0) where the user started.
-            //
-            // RELOCALIZATION TODO: When lightweight relocalization is implemented, this check
-            // can be removed. Instead, we'll transform markers from previous sessions into the
-            // current session's coordinate system using the transformation matrix calculated from
-            // re-placed known markers.
-            
-            print("🔍 [SURVEY_VALIDATION] Checking triangle vertices for session compatibility")
-            print("   Current session ID: \(arWorldMapStore.currentSessionID)")
-            print("   Triangle ID: \(triangle.id)")
-            
-            // Get triangle vertices from MapPointStore
             guard let mapPointStore = mapPointStore else {
-                print("⚠️ MapPointStore not available")
+                print("⚠️ [REGION_SURVEY] MapPointStore not available")
                 return
             }
             
-            let vertexPoints = triangle.vertexIDs.compactMap { vertexID in
-                mapPointStore.points.first(where: { $0.id == vertexID })
-            }
+            print("🔍 [REGION_SURVEY] Processing region with \(region.triangleCount) triangle(s)")
+            print("   Unique vertices: \(region.allVertexIDs.count)")
+            print("   Current session ID: \(arWorldMapStore.currentSessionID)")
             
-            guard vertexPoints.count == 3 else {
-                print("⚠️ Triangle does not have 3 valid vertices")
-                return
-            }
+            // STEP 1: Validate all vertices have positions
+            var vertexPositions3D: [UUID: simd_float3] = [:]
+            var validationFailures: [UUID] = []
             
-            // Check if all 3 vertices have markers from the current session
-            // CRITICAL: Check session ID, not just presence in placedMarkers
-            // Markers might be in ARWorldMapStore but still from current session
-            var markersFromCurrentSession: [(vertexID: UUID, markerID: UUID, position: simd_float3, source: String)] = []
-            var markersFromOtherSessions: [(vertexID: UUID, sessionID: UUID, markerID: String)] = []
-            print("🔍 [SURVEY_VALIDATION] Current session ID: \(arWorldMapStore.currentSessionID)")
-            print("🔍 [SURVEY_VALIDATION] Triangle arMarkerIDs count: \(triangle.arMarkerIDs.count)")
-            print("🔍 [SURVEY_VALIDATION] Triangle arMarkerIDs contents: \(triangle.arMarkerIDs)")
-            print("🔍 [SURVEY_VALIDATION] Triangle vertexIDs: \(triangle.vertexIDs.map { String($0.uuidString.prefix(8)) })")
-            for (index, vertexID) in triangle.vertexIDs.enumerated() {
-                var foundMarker = false
-                
-                print("🔍 [SURVEY_VALIDATION] Checking vertex[\(index)] \(String(vertexID.uuidString.prefix(8)))")
-                
-                // Try to get marker ID from triangle (may be empty for interior triangles)
-                var markerUUID: UUID? = nil
-                if index < triangle.arMarkerIDs.count && !triangle.arMarkerIDs[index].isEmpty {
-                    markerUUID = UUID(uuidString: triangle.arMarkerIDs[index])
-                }
-                
-                // PRIORITY 1: Check placedMarkers (runtime dictionary) - requires valid markerUUID
-                if let mUUID = markerUUID, let markerNode = placedMarkers[mUUID] {
-                    markersFromCurrentSession.append((vertexID, mUUID, markerNode.simdPosition, "placedMarkers"))
-                    print("✅ [SURVEY_VALIDATION] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): Found in placedMarkers (current session)")
-                    foundMarker = true
-                }
-                
-                // PRIORITY 2: Check ARWorldMapStore - requires valid markerUUID
-                if !foundMarker, let mUUID = markerUUID,
-                   let storedMarker = arWorldMapStore.markers.first(where: { UUID(uuidString: $0.id) == mUUID }) {
-                    if storedMarker.sessionID == arWorldMapStore.currentSessionID {
-                        let position = storedMarker.positionInSession
-                        markersFromCurrentSession.append((vertexID, mUUID, position, "ARWorldMapStore"))
-                        print("✅ [SURVEY_VALIDATION] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): Found in storage (current session)")
-                        foundMarker = true
-                    } else {
-                        markersFromOtherSessions.append((vertexID, storedMarker.sessionID, storedMarker.id))
-                        print("⚠️ [SURVEY_VALIDATION] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): From different session")
-                        print("   Marker session: \(String(storedMarker.sessionID.uuidString.prefix(8)))")
-                        print("   Current session: \(String(arWorldMapStore.currentSessionID.uuidString.prefix(8)))")
-                        // Don't set foundMarker=true - try baked position instead
-                    }
-                }
-                
-                // PRIORITY 3: Check baked positions - works even without markerUUID (interior triangles)
-                if !foundMarker,
-                   let coordinator = self.arCalibrationCoordinator,
-                   coordinator.hasValidSessionTransform,
-                   let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }),
-                   let bakedPosition = mapPoint.bakedCanonicalPosition,
-                   let sessionPosition = coordinator.projectBakedToSession(bakedPosition) {
-                    markersFromCurrentSession.append((vertexID, UUID(), sessionPosition, "bakedPosition"))
-                    print("✅ [SURVEY_VALIDATION] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): Using baked position projected to session")
-                    print("   Baked: \(bakedPosition) → Session: \(sessionPosition)")
-                    foundMarker = true
-                }
-                
-                if !foundMarker {
-                    print("❌ [SURVEY_VALIDATION] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): No position source available")
-                    if markerUUID == nil {
-                        print("   Note: No arMarkerID recorded for this vertex (interior triangle)")
-                    }
-                }
-            }
-            print("📊 [SURVEY_VALIDATION] Summary:")
-            print("   Current session markers: \(markersFromCurrentSession.count)/3")
-            print("   Other session markers: \(markersFromOtherSessions.count)")
-            for marker in markersFromCurrentSession {
-                print("   ✅ \(String(marker.vertexID.uuidString.prefix(8))) via \(marker.source)")
-            }
-            for marker in markersFromOtherSessions {
-                print("   ⚠️ \(String(marker.vertexID.uuidString.prefix(8))) from session \(String(marker.sessionID.uuidString.prefix(8)))")
-            }
-            
-            // VALIDATION: All 3 markers must be from current session
-            if markersFromCurrentSession.count < 3 {
-                print("❌ [SURVEY_VALIDATION] Cannot place survey markers - coordinate system mismatch")
-                print("   Markers from current session: \(markersFromCurrentSession.count)/3")
-                print("   Markers from other sessions: \(markersFromOtherSessions.count)")
-                print("")
-                print("🔧 SOLUTION: Re-calibrate all 3 vertices in the current AR session")
-                print("   This ensures all markers use the same coordinate origin.")
-                print("")
-                print("💡 FUTURE: When relocalization is implemented, you'll be able to:")
-                print("   1. Place 2+ known markers to establish coordinate transformation")
-                print("   2. System automatically transforms stored markers to current session")
-                print("   3. Survey markers work across sessions")
-                
-                // CRITICAL: Revert state so ghost confirmation can work again
-                arCalibrationCoordinator?.exitSurveyMode()
-                print("🔄 [SURVEY_VALIDATION] Reverted state from surveyMode")
-                
-                return
-            }
-            
-            print("✅ [SURVEY_VALIDATION] All 3 vertices from current session - proceeding")
-            
-            // Get 2D map coordinates
-            let triangle2D = vertexPoints.map { $0.mapPoint }
-            
-            print("📍 Plotting points within triangle A(\(String(format: "%.1f", triangle2D[0].x)), \(String(format: "%.1f", triangle2D[0].y))) B(\(String(format: "%.1f", triangle2D[1].x)), \(String(format: "%.1f", triangle2D[1].y))) C(\(String(format: "%.1f", triangle2D[2].x)), \(String(format: "%.1f", triangle2D[2].y)))")
-            
-            // Get 3D AR positions - CRITICAL: Use current AR session coordinates ONLY
-            // Mixing coordinates from different sessions produces incorrect interpolation because
-            // each session has a different origin point where the user started.
-            //
-            // RELOCALIZATION TODO: When implemented, this section will:
-            // 1. Check if markers are from current session
-            // 2. If not, look up the session transformation matrix
-            // 3. Apply transformation: old_position * transform = new_position
-            // 4. Use transformed positions for interpolation
-            var triangle3D: [simd_float3] = []
-            print("🔍 [SURVEY_3D] Getting AR positions for triangle vertices")
-            print("   Current session: \(arWorldMapStore.currentSessionID)")
-            print("   Triangle has \(triangle.arMarkerIDs.count) marker IDs")
-            
-            for (index, vertexID) in triangle.vertexIDs.enumerated() {
+            for vertexID in region.allVertexIDs {
                 var foundPosition: simd_float3?
                 var foundSource: String = "none"
                 
-                // Try to get marker ID from triangle (may be empty for interior triangles)
-                var markerUUID: UUID? = nil
-                if index < triangle.arMarkerIDs.count && !triangle.arMarkerIDs[index].isEmpty {
-                    markerUUID = UUID(uuidString: triangle.arMarkerIDs[index])
-                }
-                
-                // PRIORITY 1: Check placedMarkers - requires valid markerUUID
-                if let mUUID = markerUUID, let markerNode = placedMarkers[mUUID] {
-                    foundPosition = markerNode.simdPosition
-                    foundSource = "current session (placedMarkers)"
-                    print("✅ [SURVEY_3D] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): \(foundSource)")
-                }
-                
-                // PRIORITY 2: Check ARWorldMapStore - requires valid markerUUID
-                if foundPosition == nil, let mUUID = markerUUID,
-                   let storedMarker = arWorldMapStore.markers.first(where: { UUID(uuidString: $0.id) == mUUID }) {
-                    if storedMarker.sessionID == arWorldMapStore.currentSessionID {
-                        foundPosition = storedMarker.positionInSession
-                        foundSource = "current session (ARWorldMapStore)"
-                        print("✅ [SURVEY_3D] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): \(foundSource)")
-                    } else {
-                        print("⚠️ [SURVEY_3D] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): From different session - trying baked position")
-                    }
-                }
-                
-                // PRIORITY 3: Baked position - works even without markerUUID
-                if foundPosition == nil,
-                   let coordinator = self.arCalibrationCoordinator,
-                   coordinator.hasValidSessionTransform,
-                   let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }),
-                   let bakedPosition = mapPoint.bakedCanonicalPosition,
-                   let sessionPosition = coordinator.projectBakedToSession(bakedPosition) {
-                    foundPosition = sessionPosition
-                    foundSource = "baked position"
-                    print("✅ [SURVEY_3D] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): Using baked position")
-                    print("   Baked: \(bakedPosition) → Session: \(sessionPosition)")
-                }
-                
-                if let position = foundPosition {
-                    triangle3D.append(position)
-                    print("   Source: \(foundSource)")
-                } else {
-                    print("❌ [SURVEY_3D] Vertex[\(index)] \(String(vertexID.uuidString.prefix(8))): No position source available")
-                }
-            }
-            
-            print("🔍 [SURVEY_3D] Collected \(triangle3D.count)/3 AR positions")
-            // Validate that we have 3 positions
-            guard triangle3D.count == 3 else {
-                print("❌ [SURVEY_3D] Could not retrieve 3 AR positions for triangle vertices (got \(triangle3D.count)/3)")
-                print("   This usually means markers haven't been placed in the current AR session")
-                return
-            }
-            
-            // The markersFromCurrentSession array already contains all valid positions
-            // (from placedMarkers, ARWorldMapStore current session, or baked positions)
-            // So we just need to verify we got 3 positions in triangle3D
-            let markersFromCurrentSessionCount = triangle3D.count
-            
-            if markersFromCurrentSessionCount < 3 {
-                print("❌ [SURVEY_3D] FATAL: Could not get positions for all 3 vertices")
-                print("   Valid positions: \(markersFromCurrentSessionCount)/3")
-                print("   Cannot place survey markers")
-                
-                // CRITICAL: Revert state so ghost confirmation can work again
-                arCalibrationCoordinator?.exitSurveyMode()
-                print("🔄 [SURVEY_3D] Reverted state from surveyMode")
-                
-                return
-            }
-            
-            print("✅ [SURVEY_3D] All markers from current session - safe to proceed")
-            
-            print("🌍 Planting Survey Markers within triangle A(\(String(format: "%.2f", triangle3D[0].x)), \(String(format: "%.2f", triangle3D[0].y)), \(String(format: "%.2f", triangle3D[0].z))) B(\(String(format: "%.2f", triangle3D[1].x)), \(String(format: "%.2f", triangle3D[1].y)), \(String(format: "%.2f", triangle3D[1].z))) C(\(String(format: "%.2f", triangle3D[2].x)), \(String(format: "%.2f", triangle3D[2].y)), \(String(format: "%.2f", triangle3D[2].z)))")
-            
-            // Get map scale (pixels per meter)
-            guard let pxPerMeter = getPixelsPerMeter() else {
-                print("⚠️ No map scale available (pxPerMeter)")
-                return
-            }
-            
-            // Generate 2D fill points
-            let fillPoints2D = generateTriangleFillPoints(
-                triangle: triangle2D,
-                spacingMeters: spacing,
-                pxPerMeter: pxPerMeter
-            )
-            
-            print("📍 Generated \(fillPoints2D.count) survey points at \(spacing)m spacing")
-            
-            // Log first few 2D points
-            let pointsToShow = min(fillPoints2D.count, 20)
-            var pointsList = ""
-            for i in 0..<pointsToShow {
-                let p = fillPoints2D[i]
-                pointsList += "s\(i+1)(\(String(format: "%.1f", p.x)), \(String(format: "%.1f", p.y))) "
-            }
-            if fillPoints2D.count > 20 {
-                pointsList += "... (\(fillPoints2D.count - 20) more)"
-            }
-            print("📊 2D Survey Points: \(pointsList)")
-            
-            // Interpolate to 3D AR positions and place markers
-            // Use the AVERAGE Y of the three calibration markers as ground level
-            // This ensures survey markers are on the same plane as calibration markers
-            let groundY = (triangle3D[0].y + triangle3D[1].y + triangle3D[2].y) / 3.0
-            
-            for (index, point2D) in fillPoints2D.enumerated() {
-                // Round 2D coordinates to 1 decimal place for future data export
-                let roundedX = round(point2D.x * 10) / 10
-                let roundedY = round(point2D.y * 10) / 10
-                let roundedPoint2D = CGPoint(x: roundedX, y: roundedY)
-                
-                guard let position3D = interpolateARPosition(
-                    fromMapPoint: roundedPoint2D,
-                    triangle2D: triangle2D,
-                    triangle3D: triangle3D
-                ) else {
-                    print("⚠️ Could not interpolate AR position for point \(index)")
+                // Find the MapPoint
+                guard let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }) else {
+                    print("❌ [REGION_SURVEY] Vertex \(String(vertexID.uuidString.prefix(8))): MapPoint not found")
+                    validationFailures.append(vertexID)
                     continue
                 }
                 
-                // Create position with interpolated X/Z but consistent ground Y
-                let groundPosition = simd_float3(position3D.x, groundY, position3D.z)
+                // Find marker ID if associated with any triangle
+                var markerUUID: UUID? = nil
+                for tri in region.triangles {
+                    if let idx = tri.vertexIDs.firstIndex(of: vertexID),
+                       idx < tri.arMarkerIDs.count,
+                       !tri.arMarkerIDs[idx].isEmpty {
+                        markerUUID = UUID(uuidString: tri.arMarkerIDs[idx])
+                        break
+                    }
+                }
                 
-                // Log position BEFORE placing marker
-                print("📍 Survey Marker placed at (\(String(format: "%.2f", groundPosition.x)), \(String(format: "%.2f", groundPosition.y)), \(String(format: "%.2f", groundPosition.z)))")
+                // PRIORITY 1: placedMarkers (current session runtime)
+                if let mUUID = markerUUID, let markerNode = placedMarkers[mUUID] {
+                    foundPosition = markerNode.simdPosition
+                    foundSource = "placedMarkers"
+                }
                 
-                // Use placeSurveyMarkerOnly() to create survey marker without MapPoint updates
-                if let markerID = placeSurveyMarkerOnly(at: groundPosition, mapPoint: vertexPoints.first(where: { $0.mapPoint == roundedPoint2D }) ?? vertexPoints[0]) {
-                    // Survey marker placed - no photo capture, no MapPoint updates
-                    print("📍 Survey marker placed at map(\(roundedX), \(roundedY)) → AR(\(String(format: "%.2f", groundPosition.x)), \(String(format: "%.2f", groundPosition.y)), \(String(format: "%.2f", groundPosition.z)))")
+                // PRIORITY 2: ARWorldMapStore (current session persisted)
+                if foundPosition == nil, let mUUID = markerUUID,
+                   let storedMarker = arWorldMapStore.markers.first(where: { UUID(uuidString: $0.id) == mUUID }),
+                   storedMarker.sessionID == arWorldMapStore.currentSessionID {
+                    foundPosition = storedMarker.positionInSession
+                    foundSource = "ARWorldMapStore"
+                }
+                
+                // PRIORITY 3: Baked position projected to session
+                if foundPosition == nil,
+                   let coordinator = self.arCalibrationCoordinator,
+                   coordinator.hasValidSessionTransform,
+                   let bakedPosition = mapPoint.bakedCanonicalPosition,
+                   let sessionPosition = coordinator.projectBakedToSession(bakedPosition) {
+                    foundPosition = sessionPosition
+                    foundSource = "bakedPosition"
+                }
+                
+                if let pos = foundPosition {
+                    vertexPositions3D[vertexID] = pos
+                    print("✅ [REGION_SURVEY] Vertex \(String(vertexID.uuidString.prefix(8))): \(foundSource)")
+                } else {
+                    print("❌ [REGION_SURVEY] Vertex \(String(vertexID.uuidString.prefix(8))): No position source")
+                    validationFailures.append(vertexID)
                 }
             }
             
-            // Log first few 3D positions
-            var markers3D = ""
-            var markerCount = 0
-            for (_, node) in surveyMarkers.prefix(20) {
-                markerCount += 1
-                let pos = node.simdPosition
-                markers3D += "s\(markerCount)(\(String(format: "%.2f", pos.x)), \(String(format: "%.2f", pos.y)), \(String(format: "%.2f", pos.z))) "
+            // Check validation
+            if !validationFailures.isEmpty {
+                print("❌ [REGION_SURVEY] Validation failed: \(validationFailures.count) vertices without positions")
+                arCalibrationCoordinator?.exitSurveyMode()
+                return
             }
-            if surveyMarkers.count > 20 {
-                markers3D += "... (\(surveyMarkers.count - 20) more)"
-            }
-            print("📊 3D Survey Markers: \(markers3D)")
             
-            print("✅ Placed \(surveyMarkers.count) survey markers")
+            print("✅ [REGION_SURVEY] All \(region.allVertexIDs.count) vertices validated")
+            
+            // STEP 2: Build triangle vertex lookup (pixels)
+            var triangleVertices_px: [UUID: [CGPoint]] = [:]
+            var triangleVertices_3D: [UUID: [simd_float3]] = [:]
+            
+            for triangle in region.triangles {
+                var verts_px: [CGPoint] = []
+                var verts_3D: [simd_float3] = []
+                
+                for vid in triangle.vertexIDs {
+                    if let mp = mapPointStore.points.first(where: { $0.id == vid }) {
+                        verts_px.append(mp.mapPoint)
+                    }
+                    if let pos = vertexPositions3D[vid] {
+                        verts_3D.append(pos)
+                    }
+                }
+                
+                if verts_px.count == 3 && verts_3D.count == 3 {
+                    triangleVertices_px[triangle.id] = verts_px
+                    triangleVertices_3D[triangle.id] = verts_3D
+                } else {
+                    print("⚠️ [REGION_SURVEY] Triangle \(triangle.id) incomplete vertices")
+                }
+            }
+            
+            // STEP 3: Get pixels per meter
+            guard let pxPerMeter = getPixelsPerMeter() else {
+                print("⚠️ [REGION_SURVEY] No map scale available")
+                return
+            }
+            
+            // STEP 4: Generate fill points for entire region
+            let fillPoints = generateFillPointsForRegion(
+                region: region,
+                spacingMeters: spacing,
+                pxPerMeter: pxPerMeter,
+                triangleVertices: triangleVertices_px
+            )
+            
+            print("📍 [REGION_SURVEY] Generated \(fillPoints.count) survey points at \(spacing)m spacing")
+            
+            // STEP 5: Interpolate and place markers
+            var placedCount = 0
+            
+            for fillPoint in fillPoints {
+                guard let tri_px = triangleVertices_px[fillPoint.containingTriangleID],
+                      let tri_3D = triangleVertices_3D[fillPoint.containingTriangleID] else {
+                    print("⚠️ [REGION_SURVEY] Missing triangle data for \(fillPoint.coordinateKey)")
+                    continue
+                }
+                
+                guard let position3D = interpolateARPosition(
+                    fromMapPoint: fillPoint.mapPosition_px,
+                    triangle2D: tri_px,
+                    triangle3D: tri_3D
+                ) else {
+                    print("⚠️ [REGION_SURVEY] Could not interpolate \(fillPoint.coordinateKey)")
+                    continue
+                }
+                
+                // Use average ground Y from containing triangle
+                let groundY = (tri_3D[0].y + tri_3D[1].y + tri_3D[2].y) / 3.0
+                let groundPosition = simd_float3(position3D.x, groundY, position3D.z)
+                
+                // Place marker - get a MapPoint from the containing triangle for logging
+                if let containingTriangle = region.triangles.first(where: { $0.id == fillPoint.containingTriangleID }),
+                   let firstVertexID = containingTriangle.vertexIDs.first,
+                   let mapPoint = mapPointStore.points.first(where: { $0.id == firstVertexID }) {
+                    if placeSurveyMarkerOnly(at: groundPosition, mapPoint: mapPoint) != nil {
+                        placedCount += 1
+                    }
+                }
+            }
+            
+            print("✅ [REGION_SURVEY] Placed \(placedCount) survey markers")
+        }
+        
+        /// Generate survey markers inside a calibrated triangle
+        /// This is a convenience wrapper around generateSurveyMarkersForRegion
+        private func generateSurveyMarkers(for triangle: TrianglePatch, spacing: Float, arWorldMapStore: ARWorldMapStore) {
+            print("🔍 [SURVEY] Single triangle mode - routing to region generator")
+            let region = SurveyableRegion.single(triangle)
+            generateSurveyMarkersForRegion(region, spacing: spacing, arWorldMapStore: arWorldMapStore)
         }
         
         /// Clear all survey markers from scene
