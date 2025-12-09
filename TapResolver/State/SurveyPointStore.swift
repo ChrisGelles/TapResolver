@@ -195,7 +195,23 @@ public class SurveyPointStore: ObservableObject {
     // MARK: - Initialization
     
     public init() {
-        // Location must be set via setLocation() before use
+        // Subscribe to location changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(locationDidChange),
+            name: .locationDidChange,
+            object: nil
+        )
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    @objc private func locationDidChange() {
+        let newLocationID = PersistenceContext.shared.locationID
+        print("📍 [SurveyPointStore] Location changed → \(newLocationID)")
+        setLocation(newLocationID)
     }
     
     // MARK: - Location Management

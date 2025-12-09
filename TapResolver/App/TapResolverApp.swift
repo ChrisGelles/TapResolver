@@ -43,6 +43,7 @@ struct TapResolverApp: App {
     @StateObject private var beaconState = BeaconStateManager()
     @StateObject private var arWorldMapStore = ARWorldMapStore()
     @StateObject private var trianglePatchStore = TrianglePatchStore()
+    @StateObject private var surveyPointStore = SurveyPointStore()
     @StateObject private var arViewLaunchContext = ARViewLaunchContext()
     @StateObject private var arCalibrationCoordinator: ARCalibrationCoordinator
     
@@ -95,6 +96,7 @@ struct TapResolverApp: App {
                 .environmentObject(beaconState)  // Inject BeaconStateManager into view hierarchy
                 .environmentObject(arWorldMapStore)
                 .environmentObject(trianglePatchStore)  // Shared TrianglePatchStore instance
+                .environmentObject(surveyPointStore)
                 .environmentObject(arViewLaunchContext)  // Unified AR view launch context
                 .environmentObject(arCalibrationCoordinator)
                 .onAppear {
