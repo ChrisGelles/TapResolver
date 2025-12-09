@@ -75,6 +75,7 @@ struct ARViewWithOverlays: View {
             )
             .edgesIgnoringSafeArea(.all)
             .onAppear {
+
                 // RELOCALIZATION PREP: Start new AR session when view appears
                 // This ensures each AR session gets a unique session ID for coordinate tracking
                 arWorldMapStore.startNewSession()

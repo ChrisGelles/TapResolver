@@ -44,6 +44,7 @@ struct TapResolverApp: App {
     @StateObject private var arWorldMapStore = ARWorldMapStore()
     @StateObject private var trianglePatchStore = TrianglePatchStore()
     @StateObject private var surveyPointStore = SurveyPointStore()
+    @StateObject private var surveySelectionCoordinator = SurveySelectionCoordinator()
     @StateObject private var arViewLaunchContext = ARViewLaunchContext()
     @StateObject private var arCalibrationCoordinator: ARCalibrationCoordinator
     
@@ -97,6 +98,7 @@ struct TapResolverApp: App {
                 .environmentObject(arWorldMapStore)
                 .environmentObject(trianglePatchStore)  // Shared TrianglePatchStore instance
                 .environmentObject(surveyPointStore)
+                .environmentObject(surveySelectionCoordinator)
                 .environmentObject(arViewLaunchContext)  // Unified AR view launch context
                 .environmentObject(arCalibrationCoordinator)
                 .onAppear {
@@ -105,6 +107,12 @@ struct TapResolverApp: App {
                     arCalibrationCoordinator.mapStore = mapPointStore
                     arCalibrationCoordinator.triangleStore = trianglePatchStore
                     arCalibrationCoordinator.metricSquareStore = metricSquares
+                    
+                    surveySelectionCoordinator.configure(
+                        triangleStore: trianglePatchStore,
+                        metricSquareStore: metricSquares,
+                        mapPointStore: mapPointStore
+                    )
                     
                     LocationMigration.runIfNeeded()
                     squareMetrics.setMetricSquareStore(metricSquares)
