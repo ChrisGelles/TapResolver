@@ -111,7 +111,8 @@ struct TapResolverApp: App {
                     surveySelectionCoordinator.configure(
                         triangleStore: trianglePatchStore,
                         metricSquareStore: metricSquares,
-                        mapPointStore: mapPointStore
+                        mapPointStore: mapPointStore,
+                        mapTransformStore: mapTransform
                     )
                     
                     LocationMigration.runIfNeeded()

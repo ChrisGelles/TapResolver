@@ -43,6 +43,7 @@ struct HUDContainer: View {
     @EnvironmentObject private var beaconState: BeaconStateManager
     @EnvironmentObject private var triangleStore: TrianglePatchStore
     @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
+    @EnvironmentObject private var surveySelectionCoordinator: SurveySelectionCoordinator
     @StateObject private var beaconLogger = SimpleBeaconLogger()
     @StateObject private var relocalizationCoordinator: RelocalizationCoordinator
 
@@ -142,10 +143,45 @@ struct HUDContainer: View {
                         MarkerDeletionButton()          // 🗑️📍 Delete All AR Markers
                         */
                     }
+            }
+            Spacer()
+            
+            // Survey selection mode bar
+            if surveySelectionCoordinator.state == .selectingTriangles {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 20) {
+                        Button {
+                            surveySelectionCoordinator.cancelSelection()
+                        } label: {
+                            Text("CANCEL")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 12)
+                                .background(Color.red.opacity(0.9))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        
+                        Button {
+                            surveySelectionCoordinator.confirmSelectionAndBeginAnchoring()
+                        } label: {
+                            Text("BEGIN (\(surveySelectionCoordinator.selectedCount))")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 12)
+                                .background(Color.green.opacity(0.9))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .disabled(surveySelectionCoordinator.selectedCount == 0)
+                        .opacity(surveySelectionCoordinator.selectedCount == 0 ? 0.5 : 1.0)
+                    }
+                    .padding(.bottom, 50)
                 }
-                Spacer()
-                
-                if hud.isMapPointOpen {
+            }
+            
+            if hud.isMapPointOpen {
                     VStack(spacing: 8) {
                         if showScanQuality {
                             ScanQualityDisplayView(
@@ -297,6 +333,23 @@ struct HUDContainer: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .padding(.top, 80)
+            }
+            
+            // Survey selection button
+            if surveySelectionCoordinator.state == .idle && !triangleStore.isCreatingTriangle {
+                Button {
+                    surveySelectionCoordinator.beginTriangleSelection()
+                } label: {
+                    Image("tin-polygon")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 24, height: 24)
+                        .foregroundColor(.white)
+                        .frame(width: 48, height: 48)
+                        .background(Color.orange.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
             }
             
             // MARK: - Connection Button (Hidden - preserving for future use)

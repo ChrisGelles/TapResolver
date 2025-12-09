@@ -345,6 +345,65 @@ final class MapTransformStore: ObservableObject {
         print("🎯 Centered map on point: (\(Int(mapPoint.x)), \(Int(mapPoint.y))) → offset: (\(Int(newOffset.width)), \(Int(newOffset.height)))")
     }
     
+    /// Frames the map to fit all given points with padding.
+    /// Used by survey mode to show all triangles.
+    @MainActor
+    public func frameToFitPoints(_ points: [CGPoint], padding: CGFloat = 60, animated: Bool = true) {
+        guard !points.isEmpty else { return }
+        guard mapSize.width > 0, mapSize.height > 0 else { return }
+        guard screenCenter.x > 0 || screenCenter.y > 0 else { return }
+        
+        // Calculate bounding box
+        let minX = points.map { $0.x }.min()!
+        let maxX = points.map { $0.x }.max()!
+        let minY = points.map { $0.y }.min()!
+        let maxY = points.map { $0.y }.max()!
+        
+        let boxWidth = maxX - minX
+        let boxHeight = maxY - minY
+        let boxCenterX = (minX + maxX) / 2
+        let boxCenterY = (minY + maxY) / 2
+        
+        // Calculate scale to fit
+        let availableWidth = screenCenter.x * 2 - padding * 2
+        let availableHeight = screenCenter.y * 2 - padding * 2
+        
+        guard boxWidth > 0, boxHeight > 0 else {
+            // Single point or line - just center on it
+            centerOnPoint(CGPoint(x: boxCenterX, y: boxCenterY), animated: animated)
+            return
+        }
+        
+        let scaleX = availableWidth / boxWidth
+        let scaleY = availableHeight / boxHeight
+        let newScale = min(min(scaleX, scaleY), maxScale)
+        let clampedScale = max(newScale, minScale)
+        
+        // Calculate offset to center the bounding box
+        let mapCenterX = mapSize.width / 2
+        let mapCenterY = mapSize.height / 2
+        let deltaX = boxCenterX - mapCenterX
+        let deltaY = boxCenterY - mapCenterY
+        
+        // At the new scale, with no rotation, offset needed:
+        let newOffsetX = -deltaX * clampedScale
+        let newOffsetY = -deltaY * clampedScale
+        
+        print("🎯 [MapTransform] Framing \(points.count) points: scale=\(String(format: "%.3f", clampedScale)), offset=(\(Int(newOffsetX)), \(Int(newOffsetY)))")
+        
+        if animated {
+            withAnimation(.easeInOut(duration: 0.4)) {
+                totalScale = clampedScale
+                totalRotationRadians = 0  // Reset rotation for clean framing
+                totalOffset = CGSize(width: newOffsetX, height: newOffsetY)
+            }
+        } else {
+            totalScale = clampedScale
+            totalRotationRadians = 0
+            totalOffset = CGSize(width: newOffsetX, height: newOffsetY)
+        }
+    }
+    
     // MARK: - Diagnostics
     
     /// Print current transform state for debugging.

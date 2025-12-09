@@ -11,31 +11,63 @@ import CoreGraphics
 struct TriangleOverlay: View {
     @EnvironmentObject private var triangleStore: TrianglePatchStore
     @EnvironmentObject private var mapPointStore: MapPointStore
+    @EnvironmentObject private var surveySelectionCoordinator: SurveySelectionCoordinator
+    
+    private let surveySelectionColor = Color(red: 0.05, green: 0.1, blue: 0.78)
     
     var body: some View {
         ZStack {
             // Unselected triangles (rendered first, below)
             ForEach(triangleStore.triangles) { triangle in
-                // Skip if this triangle is selected (render it separately on top)
+                // Skip if this triangle is selected via normal selection (render it separately on top)
                 if triangleStore.selectedTriangleID != triangle.id,
                    let positions = getVertexPositions(triangle.vertexIDs) {
+                    
+                    // Determine fill based on survey selection state
+                    let isSurveySelected = surveySelectionCoordinator.isTriangleSelected(triangle.id)
+                    let inSurveyMode = surveySelectionCoordinator.state == .selectingTriangles
+                    
+                    let fillColor: Color = {
+                        if inSurveyMode && isSurveySelected {
+                            return surveySelectionColor.opacity(0.5)
+                        } else {
+                            return triangle.statusColor.opacity(0.15)
+                        }
+                    }()
+                    
+                    let strokeColor: Color = {
+                        if inSurveyMode && isSurveySelected {
+                            return surveySelectionColor
+                        } else {
+                            return triangle.statusColor
+                        }
+                    }()
+                    
                     TriangleShape(vertices: positions)
-                        .fill(triangle.statusColor.opacity(0.15))
+                        .fill(fillColor)
                         .overlay(
                             TriangleShape(vertices: positions)
-                                .stroke(triangle.statusColor, lineWidth: 1.5)
+                                .stroke(strokeColor, lineWidth: inSurveyMode && isSurveySelected ? 2.5 : 1.5)
                         )
                         .contentShape(TriangleShape(vertices: positions))
                         .onTapGesture {
-                            triangleStore.selectedTriangleID = triangle.id
-                            print("📐 Selected triangle: \(triangle.id)")
+                            if surveySelectionCoordinator.state == .selectingTriangles {
+                                // Survey mode: toggle selection
+                                surveySelectionCoordinator.toggleTriangleSelection(triangle.id)
+                                print("📐 Toggled survey selection: \(triangle.id)")
+                            } else {
+                                // Normal mode: single selection
+                                triangleStore.selectedTriangleID = triangle.id
+                                print("🔺 Selected triangle: \(triangle.id)")
+                            }
                         }
                         .onLongPressGesture(minimumDuration: 0.5) {
-                            // Select the triangle first
+                            // Only allow long-press calibration when NOT in survey mode
+                            guard surveySelectionCoordinator.state == .idle else { return }
+                            
                             triangleStore.selectedTriangleID = triangle.id
                             print("🔵 Selected triangle via long-press: \(triangle.id)")
                             
-                            // Post notification to trigger AR calibration workflow
                             NotificationCenter.default.post(
                                 name: NSNotification.Name("StartTriangleCalibration"),
                                 object: nil,

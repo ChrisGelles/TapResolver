@@ -32,6 +32,7 @@ public class SurveySelectionCoordinator: ObservableObject {
     private weak var triangleStore: TrianglePatchStore?
     private weak var metricSquareStore: MetricSquareStore?
     private weak var mapPointStore: MapPointStore?
+    private weak var mapTransformStore: MapTransformStore?
     
     public init() {
         print("📐 [SurveySelectionCoordinator] Initialized")
@@ -40,11 +41,13 @@ public class SurveySelectionCoordinator: ObservableObject {
     func configure(
         triangleStore: TrianglePatchStore,
         metricSquareStore: MetricSquareStore,
-        mapPointStore: MapPointStore
+        mapPointStore: MapPointStore,
+        mapTransformStore: MapTransformStore
     ) {
         self.triangleStore = triangleStore
         self.metricSquareStore = metricSquareStore
         self.mapPointStore = mapPointStore
+        self.mapTransformStore = mapTransformStore
         print("📐 [SurveySelectionCoordinator] Configured")
     }
     
@@ -64,6 +67,27 @@ public class SurveySelectionCoordinator: ObservableObject {
         }
         state = .selectingTriangles
         print("📐 [SurveySelectionCoordinator] Selection mode, \(selectedTriangleIDs.count) triangles")
+        
+        // Frame to show all triangles
+        frameAllTriangles()
+    }
+    
+    private func frameAllTriangles() {
+        guard let triStore = triangleStore,
+              let mapStore = mapPointStore,
+              let transform = mapTransformStore else { return }
+        
+        var allVertices: [CGPoint] = []
+        for triangle in triStore.triangles {
+            for vertexID in triangle.vertexIDs {
+                if let point = mapStore.points.first(where: { $0.id == vertexID }) {
+                    allVertices.append(CGPoint(x: point.position.x, y: point.position.y))
+                }
+            }
+        }
+        
+        guard !allVertices.isEmpty else { return }
+        transform.frameToFitPoints(allVertices, padding: 80, animated: true)
     }
     
     public func toggleTriangleSelection(_ id: UUID) {
