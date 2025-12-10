@@ -280,15 +280,18 @@ final class ARCalibrationCoordinator: ObservableObject {
             return
         }
         
+        // REFACTOR CANDIDATE: clearExistingMarkersFromScene()
         // Clear any existing calibration markers from scene - we're re-calibrating from scratch
         if let coordinator = ARViewContainer.Coordinator.current {
             coordinator.clearCalibrationMarkers()  // Remove old marker nodes from scene
         }
         
+        // Triangle-specific state (not needed for Swath anchoring)
         activeTriangleID = triangleID
         currentTriangleID = triangleID
         triangleVertices = triangle.vertexIDs
         
+        // REFACTOR CANDIDATE: resetCalibrationState()
         // Clear any existing markers - we're re-calibrating from scratch
         placedMarkers = []
         completedMarkerCount = 0
@@ -297,7 +300,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         calibrationState = .placingVertices(currentIndex: 0)
         print("🎯 CalibrationState → \(stateDescription)")
         
-        // Clear ALL marker IDs for re-calibration
+        // Triangle-specific: Clear marker IDs in TriangleStore
         print("🔄 Re-calibrating triangle - clearing ALL existing markers")
         print("   Old arMarkerIDs: \(triangle.arMarkerIDs)")
         triangleStore.clearAllMarkers(for: triangleID)
@@ -305,6 +308,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             print("   New arMarkerIDs: \(updatedTriangle.arMarkerIDs)")
         }
         
+        // REFACTOR CANDIDATE: validateVertexCount() -> Bool
         // Validate triangleVertices is set correctly
         guard triangleVertices.count == 3 else {
             print("❌ Invalid triangle: expected 3 vertices, got \(triangleVertices.count)")
@@ -313,11 +317,12 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         print("📍 Starting calibration with vertices: \(triangleVertices.map { String($0.uuidString.prefix(8)) })")
         
-        // If triangle had previous markers, log them but don't use them
+        // Triangle-specific logging
         if !triangle.arMarkerIDs.isEmpty && triangle.arMarkerIDs.contains(where: { !$0.isEmpty }) {
             print("🔄 Re-calibrating triangle - clearing \(triangle.arMarkerIDs.filter { !$0.isEmpty }.count) existing markers")
         }
         
+        // REFACTOR CANDIDATE: loadReferencePhotoForCurrentVertex()
         // Update reference photo for the current vertex (first vertex, index 0)
         if let currentVertexID = getCurrentVertexID(),
            let mapPoint = mapStore.points.first(where: { $0.id == currentVertexID }) {
@@ -336,6 +341,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             print("⚠️ Could not load reference photo for first vertex")
         }
         
+        // REFACTOR CANDIDATE: initializeUIState(statusText:)
         // Update UI state
         progressDots = (false, false, false)
         statusText = "Place AR markers for triangle (0/3)"
@@ -344,6 +350,72 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("🎯 ARCalibrationCoordinator: Starting calibration for triangle \(String(triangleID.uuidString.prefix(8)))")
         
         print("🚀 [CALIBRATION] startCalibration() ready for markers: \(formatter.string(from: Date()))")
+        
+        // Preload historical position data for fast ghost calculations
+        preloadHistoricalPositions()
+    }
+    
+    /// Start Swath Survey anchoring workflow
+    /// Similar to startCalibration but uses provided anchor IDs instead of triangle vertices
+    /// - Parameter anchorIDs: The 3 MapPoint IDs to use as anchors (from SurveySelectionCoordinator.suggestedAnchorIDs)
+    func startSwathAnchoring(anchorIDs: [UUID]) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        print("🚀 [SWATH_ANCHOR] startSwathAnchoring() BEGIN: \(formatter.string(from: Date()))")
+        
+        // REFACTOR CANDIDATE: clearExistingMarkersFromScene()
+        // Clear any existing calibration markers from scene
+        if let coordinator = ARViewContainer.Coordinator.current {
+            coordinator.clearCalibrationMarkers()
+        }
+        
+        // Swath-specific: No triangle state, just set vertices directly
+        activeTriangleID = nil
+        currentTriangleID = nil
+        triangleVertices = anchorIDs
+        
+        // REFACTOR CANDIDATE: resetCalibrationState()
+        // Clear any existing markers
+        placedMarkers = []
+        completedMarkerCount = 0
+        currentVertexIndex = 0
+        lastPrintedVertexIndex = nil
+        calibrationState = .placingVertices(currentIndex: 0)
+        print("🎯 CalibrationState → \(stateDescription)")
+        
+        // REFACTOR CANDIDATE: validateVertexCount() -> Bool
+        guard triangleVertices.count == 3 else {
+            print("❌ Invalid swath anchors: expected 3 anchor IDs, got \(triangleVertices.count)")
+            return
+        }
+        
+        print("📍 Starting swath anchoring with vertices: \(triangleVertices.map { String($0.uuidString.prefix(8)) })")
+        
+        // REFACTOR CANDIDATE: loadReferencePhotoForCurrentVertex()
+        if let currentVertexID = getCurrentVertexID(),
+           let mapPoint = mapStore.points.first(where: { $0.id == currentVertexID }) {
+            let photoData: Data? = {
+                if let diskData = mapStore.loadPhotoFromDisk(for: currentVertexID) {
+                    return diskData
+                } else {
+                    return mapPoint.locationPhotoData
+                }
+            }()
+            setReferencePhoto(photoData)
+            
+            print("🎯 Guiding user to anchor MapPoint (\(String(format: "%.1f", mapPoint.mapPoint.x)), \(String(format: "%.1f", mapPoint.mapPoint.y)))")
+        } else {
+            print("⚠️ Could not load reference photo for first anchor")
+        }
+        
+        // REFACTOR CANDIDATE: initializeUIState(statusText:)
+        progressDots = (false, false, false)
+        statusText = "Place AR markers for swath anchors (0/3)"
+        isActive = true
+        
+        print("🎯 ARCalibrationCoordinator: Starting swath anchoring with \(anchorIDs.count) anchors")
+        
+        print("🚀 [SWATH_ANCHOR] startSwathAnchoring() ready for markers: \(formatter.string(from: Date()))")
         
         // Preload historical position data for fast ghost calculations
         preloadHistoricalPositions()
@@ -784,6 +856,110 @@ final class ARCalibrationCoordinator: ObservableObject {
         let registerEndTime = Date()
         let registerDuration = registerEndTime.timeIntervalSince(registerStartTime) * 1000
         print("📍 [REGISTER] END: \(formatter.string(from: registerEndTime)) (duration: \(String(format: "%.1f", registerDuration))ms)")
+    }
+    
+    /// Register an anchor marker during Swath Survey anchoring workflow
+    /// This is a simplified version of registerMarker that doesn't require triangle validation
+    /// REFACTOR NOTE: This function shares significant code with registerMarker().
+    /// Consider extracting shared logic into helper methods:
+    ///   - saveMarkerToStore()
+    ///   - trackMarkerPosition()
+    ///   - recordPositionHistory()
+    ///   - advanceToNextVertex()
+    /// - Parameters:
+    ///   - mapPointID: The MapPoint ID for this anchor
+    ///   - marker: The AR marker that was placed
+    func registerSwathAnchor(mapPointID: UUID, marker: ARMarker) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        print("📍 [SWATH_ANCHOR] registerSwathAnchor BEGIN: \(formatter.string(from: Date()))")
+        print("   MapPoint: \(String(mapPointID.uuidString.prefix(8)))")
+        print("   Position: (\(String(format: "%.2f", marker.arPosition.x)), \(String(format: "%.2f", marker.arPosition.y)), \(String(format: "%.2f", marker.arPosition.z)))")
+        
+        // Validate this is one of our target anchors
+        guard triangleVertices.contains(mapPointID) else {
+            print("❌ [SWATH_ANCHOR] MapPoint \(String(mapPointID.uuidString.prefix(8))) is not a swath anchor vertex")
+            return
+        }
+        
+        // Check if already placed
+        guard !placedMarkers.contains(mapPointID) else {
+            print("⚠️ [SWATH_ANCHOR] MapPoint \(String(mapPointID.uuidString.prefix(8))) already has a marker")
+            return
+        }
+        
+        // REFACTOR CANDIDATE: saveMarkerToStore() - shared with registerMarker
+        // Save to ARWorldMapStore
+        do {
+            let worldMapMarker = convertToWorldMapMarker(marker)
+            try arStore.saveMarker(worldMapMarker)
+            print("💾 [SWATH_ANCHOR] Saved marker to ARWorldMapStore")
+            
+            // REFACTOR CANDIDATE: trackMarkerPosition() - shared with registerMarker
+            // Track position for transform computation
+            sessionMarkerPositions[marker.id.uuidString] = marker.arPosition
+            mapPointARPositions[mapPointID] = marker.arPosition
+            print("📍 [SWATH_ANCHOR] Stored position for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            
+            // REFACTOR CANDIDATE: recordPositionHistory() - shared with registerMarker
+            // Record in position history
+            let record = ARPositionRecord(
+                position: marker.arPosition,
+                sessionID: arStore.currentSessionID,
+                sourceType: .calibration,
+                distortionVector: nil,
+                confidenceScore: 0.95
+            )
+            mapStore.addPositionRecord(mapPointID: mapPointID, record: record)
+            
+        } catch {
+            print("❌ [SWATH_ANCHOR] Failed to save marker: \(error)")
+            return
+        }
+        
+        // REFACTOR CANDIDATE: updatePlacementProgress() - shared with registerMarker
+        // Track placed marker and update UI
+        placedMarkers.append(mapPointID)
+        completedMarkerCount = placedMarkers.count
+        updateProgressDots()
+        
+        print("📊 [SWATH_ANCHOR] Progress: \(placedMarkers.count)/3 anchors placed")
+        
+        // REFACTOR CANDIDATE: computeTransformAfterSecondMarker() - shared with registerMarker
+        // After 2 markers, compute session transform for baked data
+        if placedMarkers.count == 2 {
+            if let pixelsPerMeter = getPixelsPerMeter() {
+                let metersPerPixel = 1.0 / pixelsPerMeter
+                if let mapSize = cachedMapSize {
+                    computeSessionTransformForBakedData(mapSize: mapSize, metersPerPixel: metersPerPixel)
+                }
+            }
+        }
+        
+        // REFACTOR CANDIDATE: advanceToNextVertex() - shared with registerMarker
+        // Advance to next anchor or complete
+        if placedMarkers.count < 3 {
+            // Move to next vertex
+            currentVertexIndex += 1
+            calibrationState = .placingVertices(currentIndex: currentVertexIndex)
+            statusText = "Place AR markers for swath anchors (\(placedMarkers.count)/3)"
+            
+            // Load reference photo for next anchor
+            if let nextVertexID = getCurrentVertexID(),
+               let mapPoint = mapStore.points.first(where: { $0.id == nextVertexID }) {
+                let photoData: Data? = mapStore.loadPhotoFromDisk(for: nextVertexID) ?? mapPoint.locationPhotoData
+                setReferencePhoto(photoData)
+                print("🎯 [SWATH_ANCHOR] Advancing to anchor \(currentVertexIndex + 1): MapPoint \(String(nextVertexID.uuidString.prefix(8)))")
+                print("   Position: (\(String(format: "%.1f", mapPoint.mapPoint.x)), \(String(format: "%.1f", mapPoint.mapPoint.y)))")
+            }
+        } else {
+            // All 3 anchors placed - ready for Fill Swath
+            calibrationState = .readyToFill
+            statusText = "Swath anchors complete - ready to fill"
+            print("✅ [SWATH_ANCHOR] All 3 anchors placed - hasValidSessionTransform: \(hasValidSessionTransform)")
+        }
+        
+        print("📍 [SWATH_ANCHOR] registerSwathAnchor END: \(formatter.string(from: Date()))")
     }
     
     // MARK: - Shared Vertex Helper
@@ -1565,6 +1741,19 @@ final class ARCalibrationCoordinator: ObservableObject {
     }
     
     private func updateProgressDots() {
+        // SWATH SURVEY MODE: Use triangleVertices (anchor IDs) instead of triangle
+        if activeTriangleID == nil && !triangleVertices.isEmpty {
+            var states = [false, false, false]
+            for (index, vertexID) in triangleVertices.enumerated() {
+                if index < 3 {
+                    states[index] = placedMarkers.contains(vertexID)
+                }
+            }
+            progressDots = (states[0], states[1], states[2])
+            return
+        }
+        
+        // TRIANGLE CALIBRATION MODE: Use active triangle vertices
         guard let triangleID = activeTriangleID,
               let triangle = triangleStore.triangle(withID: triangleID) else {
             progressDots = (false, false, false)

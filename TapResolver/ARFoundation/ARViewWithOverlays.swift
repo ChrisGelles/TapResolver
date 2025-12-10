@@ -90,10 +90,18 @@ struct ARViewWithOverlays: View {
                 // If in calibration mode with a selected triangle, initialize calibration state
                 if isCalibrationMode, let triangle = selectedTriangle {
                     DispatchQueue.main.async {
-                    arCalibrationCoordinator.startCalibration(for: triangle.id)
-                    arCalibrationCoordinator.setVertices(triangle.vertexIDs)
-                    currentMode = .triangleCalibration(triangleID: triangle.id)
-                    print("🎯 ARViewWithOverlays: Auto-initialized calibration for triangle \(String(triangle.id.uuidString.prefix(8)))")
+                        arCalibrationCoordinator.startCalibration(for: triangle.id)
+                        arCalibrationCoordinator.setVertices(triangle.vertexIDs)
+                        currentMode = .triangleCalibration(triangleID: triangle.id)
+                        print("🎯 ARViewWithOverlays: Auto-initialized calibration for triangle \(String(triangle.id.uuidString.prefix(8)))")
+                    }
+                } else if arViewLaunchContext.launchMode == .swathSurvey {
+                    // Swath Survey mode: Initialize anchoring with suggested anchor points
+                    DispatchQueue.main.async {
+                        let anchorIDs = arViewLaunchContext.suggestedAnchorIDs
+                        arCalibrationCoordinator.startSwathAnchoring(anchorIDs: anchorIDs)
+                        currentMode = .idle  // Will show calibration UI via calibrationState
+                        print("🎯 ARViewWithOverlays: Auto-initialized swath anchoring with \(anchorIDs.count) anchors")
                     }
                 } else {
                     // Set mode to idle - user will choose Calibrate or Relocalize
@@ -165,7 +173,38 @@ struct ARViewWithOverlays: View {
                     return
                 }
                 
-                // Handle marker placement in calibration mode
+                // SWATH SURVEY MODE: Handle anchor placement separately
+                if arViewLaunchContext.launchMode == .swathSurvey,
+                   case .placingVertices = arCalibrationCoordinator.calibrationState,
+                   let markerID = notification.userInfo?["markerID"] as? UUID,
+                   let positionArray = notification.userInfo?["position"] as? [Float],
+                   positionArray.count == 3 {
+                    
+                    print("🎯 [SWATH_ANCHOR_TRACE] Processing swath anchor placement")
+                    
+                    guard let currentVertexID = arCalibrationCoordinator.getCurrentVertexID() else {
+                        print("⚠️ [SWATH_ANCHOR_TRACE] No current vertex ID")
+                        return
+                    }
+                    
+                    let arPosition = simd_float3(positionArray[0], positionArray[1], positionArray[2])
+                    let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID })
+                    let mapCoordinates = mapPoint?.mapPoint ?? CGPoint.zero
+                    
+                    let marker = ARMarker(
+                        id: markerID,
+                        linkedMapPointID: currentVertexID,
+                        arPosition: arPosition,
+                        mapCoordinates: mapCoordinates,
+                        isAnchor: false
+                    )
+                    
+                    arCalibrationCoordinator.registerSwathAnchor(mapPointID: currentVertexID, marker: marker)
+                    print("✅ [SWATH_ANCHOR_TRACE] Registered swath anchor for MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
+                    return
+                }
+                
+                // Handle marker placement in calibration mode (triangle calibration)
                 guard isCalibrationMode,
                       let triangle = selectedTriangle,
                       let markerID = notification.userInfo?["markerID"] as? UUID,
@@ -328,6 +367,7 @@ struct ARViewWithOverlays: View {
                     .environmentObject(mapPointStore)
                     .environmentObject(locationManager)
                     .environmentObject(arCalibrationCoordinator)
+                    .allowsHitTesting(false)  // Prevent PiP map from intercepting gestures
                     .frame(width: 280, height: 220)
                     .onChange(of: arCalibrationCoordinator.calibrationState) { oldState, newState in
                         // Only log on actual state CHANGES, not every recomputation
@@ -455,8 +495,25 @@ struct ARViewWithOverlays: View {
                 }
             }
             
-            // Tap-to-Place Button (bottom) - only in ACTIVE triangle calibration mode
-            if case .triangleCalibration = currentMode {
+            // Tap-to-Place Button (bottom) - during triangle calibration OR swath survey anchoring
+            // Swath Survey uses calibrationState.placingVertices with currentMode == .idle
+            let showCalibrationUI: Bool = {
+                if case .triangleCalibration = currentMode {
+                    return true
+                }
+                // Swath Survey: show UI during vertex placement AND when ready to fill
+                if arViewLaunchContext.launchMode == .swathSurvey {
+                    if case .placingVertices = arCalibrationCoordinator.calibrationState {
+                        return true
+                    }
+                    if case .readyToFill = arCalibrationCoordinator.calibrationState {
+                        return true
+                    }
+                }
+                return false
+            }()
+            
+            if showCalibrationUI {
                 VStack {
                     Spacer()
                     
@@ -1015,11 +1072,11 @@ struct ARPiPMapView: View {
     // Focused point ID for zoom/center (nil = show full map or frame triangle)
     // Computed reactively from arCalibrationCoordinator to respond to currentVertexIndex changes
     private var focusedPointID: UUID? {
-        // SWATH SURVEY MODE: Focus on first suggested anchor when AR launches
+        // SWATH SURVEY MODE: Focus on current anchor vertex during placement
         if arViewLaunchContext.launchMode == .swathSurvey {
-            // Return first suggested anchor for initial framing (same as Calibration Crawl's first vertex)
-            if let firstAnchorID = arViewLaunchContext.suggestedAnchorIDs.first {
-                return firstAnchorID
+            // During vertex placement, focus on current anchor (same as Calibration Crawl)
+            if case .placingVertices = arCalibrationCoordinator.calibrationState {
+                return arCalibrationCoordinator.getCurrentVertexID()
             }
             return nil
         }
