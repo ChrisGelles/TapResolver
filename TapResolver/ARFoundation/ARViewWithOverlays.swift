@@ -826,7 +826,8 @@ struct ARViewWithOverlays: View {
             }
             
             // Place AR Marker Button + Strategy Picker (bottom) - only in idle mode with no triangle selected
-            if currentMode == .idle && selectedTriangle == nil {
+            // Exclude Swath Survey mode - it has its own workflow
+            if currentMode == .idle && selectedTriangle == nil && arViewLaunchContext.launchMode != .swathSurvey {
                 VStack {
                     Spacer()
                     
@@ -1009,10 +1010,21 @@ struct ARPiPMapView: View {
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
     @EnvironmentObject private var metricSquares: MetricSquareStore
+    @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
     
     // Focused point ID for zoom/center (nil = show full map or frame triangle)
     // Computed reactively from arCalibrationCoordinator to respond to currentVertexIndex changes
     private var focusedPointID: UUID? {
+        // SWATH SURVEY MODE: Focus on first suggested anchor when AR launches
+        if arViewLaunchContext.launchMode == .swathSurvey {
+            // Return first suggested anchor for initial framing (same as Calibration Crawl's first vertex)
+            if let firstAnchorID = arViewLaunchContext.suggestedAnchorIDs.first {
+                return firstAnchorID
+            }
+            return nil
+        }
+        
+        // CALIBRATION MODE: Original behavior
         guard isCalibrationMode else { return nil }
         
         // When calibration is complete (readyToFill state), return nil to trigger triangle framing
