@@ -26,15 +26,20 @@ final class GroundCrosshairNode: SCNNode {
         self.name = "groundCrosshair"
         self.isHidden = true
         
+        // Render on top of AR planes (higher = later in render pass)
+        self.renderingOrder = 200
+        
         // Inner ring
         let circle = SCNTorus(ringRadius: 0.1, pipeRadius: 0.002)
         circle.firstMaterial?.diffuse.contents = defaultRingColor
+        makeOcclusionProof(circle.firstMaterial)
         circleNode.geometry = circle
         addChildNode(circleNode)
         
         // Confidence ring
         let outer = SCNTorus(ringRadius: 0.18, pipeRadius: 0.002)
         outer.firstMaterial?.diffuse.contents = confidenceRingColor
+        makeOcclusionProof(outer.firstMaterial)
         outerRingNode.geometry = outer
         outerRingNode.name = "outerConfidenceRing"
         outerRingNode.isHidden = true
@@ -46,20 +51,29 @@ final class GroundCrosshairNode: SCNNode {
         
         hLineNode.geometry = SCNBox(width: len, height: thick, length: thick, chamferRadius: 0)
         hLineNode.geometry?.firstMaterial?.diffuse.contents = defaultRingColor
+        makeOcclusionProof(hLineNode.geometry?.firstMaterial)
         addChildNode(hLineNode)
         
         hLine2Node.geometry = SCNBox(width: len, height: thick, length: thick, chamferRadius: 0)
         hLine2Node.geometry?.firstMaterial?.diffuse.contents = defaultRingColor
+        makeOcclusionProof(hLine2Node.geometry?.firstMaterial)
         hLine2Node.eulerAngles.y = .pi / 2
         addChildNode(hLine2Node)
         
         vLineNode.geometry = SCNBox(width: thick, height: len, length: thick, chamferRadius: 0)
         vLineNode.geometry?.firstMaterial?.diffuse.contents = defaultRingColor
+        makeOcclusionProof(vLineNode.geometry?.firstMaterial)
         addChildNode(vLineNode)
     }
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    /// Configures material to render on top of AR planes regardless of depth
+    private func makeOcclusionProof(_ material: SCNMaterial?) {
+        material?.readsFromDepthBuffer = false
+        material?.writesToDepthBuffer = false
     }
     
     func update(position: simd_float3, snapped: Bool = false, confident: Bool = false) {

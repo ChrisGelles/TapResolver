@@ -76,6 +76,8 @@ struct ARViewWithOverlays: View {
             )
             .edgesIgnoringSafeArea(.all)
             .onAppear {
+                // Prevent screen dimming during AR session
+                UIApplication.shared.isIdleTimerDisabled = true
 
                 // RELOCALIZATION PREP: Start new AR session when view appears
                 // This ensures each AR session gets a unique session ID for coordinate tracking
@@ -141,6 +143,9 @@ struct ARViewWithOverlays: View {
                 }
             }
             .onDisappear {
+                // Re-enable screen dimming when leaving AR
+                UIApplication.shared.isIdleTimerDisabled = false
+
                 // Clean up on dismiss - defer to avoid view update conflicts
                 DispatchQueue.main.async {
                 currentMode = .idle
