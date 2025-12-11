@@ -1641,12 +1641,15 @@ struct ARPiPMapView: View {
     @ViewBuilder
     private func pipMapZStack(mapImage: UIImage) -> some View {
         ZStack {
-            // Use MapContainer (same as main map view)
-            MapContainer(mapImage: mapImage)
+            // MARK: - TECH DEBT: PiP gestures disabled via parameter
+            // gesturesEnabled: false prevents the UIKit gesture bridge from being created.
+            // .allowsHitTesting(false) is kept for belt-and-suspenders but doesn't block UIKit gestures.
+            // See MapContainer.swift for notes on the proper fix (moving focusedPointIndicator inside).
+            MapContainer(mapImage: mapImage, gesturesEnabled: false)
                 .environmentObject(pipTransform)
                 .environmentObject(pipProcessor)
                 .frame(width: mapImage.size.width, height: mapImage.size.height)
-                .allowsHitTesting(false) // Disable gestures in PiP
+                .allowsHitTesting(false)
             
             // User position dot overlay (only in calibration mode)
             UserPositionOverlay(
