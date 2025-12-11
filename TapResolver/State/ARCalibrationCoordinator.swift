@@ -92,10 +92,11 @@ final class ARCalibrationCoordinator: ObservableObject {
     private var triangleVertices: [UUID] = []
     private var lastPrintedVertexIndex: Int? = nil  // Track last printed vertex to prevent spam
     
-    var arStore: ARWorldMapStore
-    var mapStore: MapPointStore
-    var triangleStore: TrianglePatchStore
-    var metricSquareStore: MetricSquareStore?
+    // MARK: - Store References (configured via configure() method)
+    private weak var arStore: ARWorldMapStore?
+    private weak var mapStore: MapPointStore?
+    private weak var triangleStore: TrianglePatchStore?
+    private weak var metricSquareStore: MetricSquareStore?
     
     // MARK: - Baked Position Session Transform (Milestone 5 - Step 4)
     
@@ -138,11 +139,54 @@ final class ARCalibrationCoordinator: ObservableObject {
     
     // MARK: - Initialization
     
-    init(arStore: ARWorldMapStore, mapStore: MapPointStore, triangleStore: TrianglePatchStore, metricSquareStore: MetricSquareStore? = nil) {
+    init() {
+        print("🎯 [ARCalibrationCoordinator] Initialized (unconfigured)")
+    }
+    
+    /// Configure the coordinator with required store references.
+    /// MUST be called before any operations that access stores.
+    /// This replaces the old pattern of passing stores to init().
+    func configure(
+        arStore: ARWorldMapStore,
+        mapStore: MapPointStore,
+        triangleStore: TrianglePatchStore,
+        metricSquareStore: MetricSquareStore
+    ) {
         self.arStore = arStore
         self.mapStore = mapStore
         self.triangleStore = triangleStore
         self.metricSquareStore = metricSquareStore
+        print("🎯 [ARCalibrationCoordinator] Configured with stores")
+    }
+    
+    // MARK: - Safe Store Accessors
+    // These provide clear crash messages if stores are accessed before configure() is called.
+    // In Step 4, all internal usages of mapStore/arStore/triangleStore will use these instead.
+    
+    private var safeMapStore: MapPointStore {
+        guard let store = mapStore else {
+            fatalError("❌ [ARCalibrationCoordinator] mapStore accessed before configure() called")
+        }
+        return store
+    }
+    
+    private var safeARStore: ARWorldMapStore {
+        guard let store = arStore else {
+            fatalError("❌ [ARCalibrationCoordinator] arStore accessed before configure() called")
+        }
+        return store
+    }
+    
+    private var safeTriangleStore: TrianglePatchStore {
+        guard let store = triangleStore else {
+            fatalError("❌ [ARCalibrationCoordinator] triangleStore accessed before configure() called")
+        }
+        return store
+    }
+    
+    private var safeMetricSquareStore: MetricSquareStore? {
+        // This one was already optional, so we just return it as-is
+        return metricSquareStore
     }
     
     /// Get pixels per meter conversion factor from MetricSquareStore
