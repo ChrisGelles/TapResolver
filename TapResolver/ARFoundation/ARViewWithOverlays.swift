@@ -814,7 +814,7 @@ struct ARViewWithOverlays: View {
                                 userInfo: [
                                     "triangleID": containingTriangleID,
                                     "spacing": surveySpacing,
-                                    "arWorldMapStore": arCalibrationCoordinator.arStore,
+                                    "arWorldMapStore": arCalibrationCoordinator.arStoreAccess,
                                     "triangleStore": arCalibrationCoordinator.triangleStoreAccess
                                 ]
                             )
@@ -860,7 +860,7 @@ struct ARViewWithOverlays: View {
                                 userInfo: [
                                     "triangleIDs": triangleIDs,
                                     "spacing": surveySpacing,
-                                    "arWorldMapStore": arCalibrationCoordinator.arStore as Any,
+                                    "arWorldMapStore": arCalibrationCoordinator.arStoreAccess as Any,
                                     "triangleStore": arCalibrationCoordinator.triangleStoreAccess as Any
                                 ]
                             )

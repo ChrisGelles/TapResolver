@@ -669,7 +669,7 @@ struct ARViewContainer: UIViewRepresentable {
                 
                 print("👻 [REFRESH_GHOSTS] Creating ghosts for triangle \(String(triangleID.uuidString.prefix(8)))")
                 
-                guard let triangle = self.arCalibrationCoordinator?.triangleStore.triangle(withID: triangleID) else {
+                guard let triangle = self.arCalibrationCoordinator?.triangleStoreAccess.triangle(withID: triangleID) else {
                     print("⚠️ [REFRESH_GHOSTS] Triangle not found")
                     return
                 }

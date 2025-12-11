@@ -167,6 +167,12 @@ final class ARCalibrationCoordinator: ObservableObject {
         return safeTriangleStore
     }
     
+    /// Public read-only access to the AR world map store.
+    /// External code can use this to access AR session data.
+    public var arStoreAccess: ARWorldMapStore {
+        return safeARStore
+    }
+    
     // MARK: - Safe Store Accessors
     // These provide clear crash messages if stores are accessed before configure() is called.
     // In Step 4, all internal usages of mapStore/arStore/triangleStore will use these instead.
@@ -327,7 +333,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         formatter.dateFormat = "HH:mm:ss.SSS"
         print("🚀 [CALIBRATION] startCalibration() BEGIN: \(formatter.string(from: Date()))")
         
-        guard let triangle = triangleStore.triangle(withID: triangleID) else {
+        guard let triangle = safeTriangleStore.triangle(withID: triangleID) else {
             print("❌ Cannot start calibration: Triangle \(triangleID) not found")
             return
         }
@@ -355,8 +361,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Triangle-specific: Clear marker IDs in TriangleStore
         print("🔄 Re-calibrating triangle - clearing ALL existing markers")
         print("   Old arMarkerIDs: \(triangle.arMarkerIDs)")
-        triangleStore.clearAllMarkers(for: triangleID)
-        if let updatedTriangle = triangleStore.triangle(withID: triangleID) {
+        safeTriangleStore.clearAllMarkers(for: triangleID)
+        if let updatedTriangle = safeTriangleStore.triangle(withID: triangleID) {
             print("   New arMarkerIDs: \(updatedTriangle.arMarkerIDs)")
         }
         
@@ -377,9 +383,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         // REFACTOR CANDIDATE: loadReferencePhotoForCurrentVertex()
         // Update reference photo for the current vertex (first vertex, index 0)
         if let currentVertexID = getCurrentVertexID(),
-           let mapPoint = mapStore.points.first(where: { $0.id == currentVertexID }) {
+           let mapPoint = safeMapStore.points.first(where: { $0.id == currentVertexID }) {
             let photoData: Data? = {
-                if let diskData = mapStore.loadPhotoFromDisk(for: currentVertexID) {
+                if let diskData = safeMapStore.loadPhotoFromDisk(for: currentVertexID) {
                     return diskData
                 } else {
                     return mapPoint.locationPhotoData
@@ -445,9 +451,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // REFACTOR CANDIDATE: loadReferencePhotoForCurrentVertex()
         if let currentVertexID = getCurrentVertexID(),
-           let mapPoint = mapStore.points.first(where: { $0.id == currentVertexID }) {
+           let mapPoint = safeMapStore.points.first(where: { $0.id == currentVertexID }) {
             let photoData: Data? = {
-                if let diskData = mapStore.loadPhotoFromDisk(for: currentVertexID) {
+                if let diskData = safeMapStore.loadPhotoFromDisk(for: currentVertexID) {
                     return diskData
                 } else {
                     return mapPoint.locationPhotoData
@@ -486,7 +492,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         var totalRecords = 0
         
-        for mapPoint in mapStore.points {
+        for mapPoint in safeMapStore.points {
             for record in mapPoint.arPositionHistory {
                 let sessionID = record.sessionID
                 historicalSessionIDs.insert(sessionID)
@@ -639,7 +645,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // MARK: Photo verification on marker placement
         print("📍 registerMarker called for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
-        if let mapPoint = mapStore.points.first(where: { $0.id == mapPointID }) {
+        if let mapPoint = safeMapStore.points.first(where: { $0.id == mapPointID }) {
             if let photoFilename = mapPoint.photoFilename {
                 print("🖼 Photo '\(photoFilename)' linked to MapPoint \(String(mapPoint.id.uuidString.prefix(8)))")
             } else {
@@ -653,7 +659,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // Normal mode - require active triangle
         guard let activeID = activeTriangleID,
-              let activeTriangle = triangleStore.triangle(withID: activeID) else {
+              let activeTriangle = safeTriangleStore.triangle(withID: activeID) else {
             print("❌ Cannot register marker: No active triangle")
             return
         }
@@ -688,11 +694,11 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         do {
             let worldMapMarker = convertToWorldMapMarker(marker)
-            try arStore.saveMarker(worldMapMarker)
+            try safeARStore.saveMarker(worldMapMarker)
             print("💾 Saving AR Marker with session context:")
             print("   Marker ID: \(marker.id)")
-            print("   Session ID: \(arStore.currentSessionID)")
-            print("   Session Time: \(arStore.currentSessionStartTime)")
+            print("   Session ID: \(safeARStore.currentSessionID)")
+            print("   Session Time: \(safeARStore.currentSessionStartTime)")
             print("   Storage Key: ARWorldMapStore (saved successfully)")
             
             // Track this marker's position for current session (used by ghost planting)
@@ -743,12 +749,12 @@ final class ARCalibrationCoordinator: ObservableObject {
             let confidence: Float = sourceType == .ghostConfirm ? 1.0 : (sourceType == .ghostAdjust ? 0.8 : 0.95)
             let record = ARPositionRecord(
                 position: marker.arPosition,
-                sessionID: arStore.currentSessionID,
+                sessionID: safeARStore.currentSessionID,
                 sourceType: sourceType,
                 distortionVector: distortionVector,
                 confidenceScore: confidence
             )
-            mapStore.addPositionRecord(mapPointID: mapPointID, record: record)
+            safeMapStore.addPositionRecord(mapPointID: mapPointID, record: record)
             
             // MILESTONE 5: Update baked position incrementally for ghost confirm/adjust
             if sourceType == .ghostConfirm || sourceType == .ghostAdjust {
@@ -851,9 +857,9 @@ final class ARCalibrationCoordinator: ObservableObject {
                         print("📍 Advanced to next vertex: index=\(index), vertexID=\(String(vertexID.uuidString.prefix(8)))")
                         
                         // Update reference photo for next vertex
-                        if let mapPoint = mapStore.points.first(where: { $0.id == vertexID }) {
+                        if let mapPoint = safeMapStore.points.first(where: { $0.id == vertexID }) {
                             let photoData: Data? = {
-                                if let diskData = mapStore.loadPhotoFromDisk(for: vertexID) {
+                                if let diskData = safeMapStore.loadPhotoFromDisk(for: vertexID) {
                                     return diskData
                                 } else {
                                     return mapPoint.locationPhotoData
@@ -944,7 +950,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Save to ARWorldMapStore
         do {
             let worldMapMarker = convertToWorldMapMarker(marker)
-            try arStore.saveMarker(worldMapMarker)
+            try safeARStore.saveMarker(worldMapMarker)
             print("💾 [SWATH_ANCHOR] Saved marker to ARWorldMapStore")
             
             // REFACTOR CANDIDATE: trackMarkerPosition() - shared with registerMarker
@@ -957,12 +963,12 @@ final class ARCalibrationCoordinator: ObservableObject {
             // Record in position history
             let record = ARPositionRecord(
                 position: marker.arPosition,
-                sessionID: arStore.currentSessionID,
+                sessionID: safeARStore.currentSessionID,
                 sourceType: .calibration,
                 distortionVector: nil,
                 confidenceScore: 0.95
             )
-            mapStore.addPositionRecord(mapPointID: mapPointID, record: record)
+            safeMapStore.addPositionRecord(mapPointID: mapPointID, record: record)
             
         } catch {
             print("❌ [SWATH_ANCHOR] Failed to save marker: \(error)")
@@ -998,8 +1004,8 @@ final class ARCalibrationCoordinator: ObservableObject {
             
             // Load reference photo for next anchor
             if let nextVertexID = getCurrentVertexID(),
-               let mapPoint = mapStore.points.first(where: { $0.id == nextVertexID }) {
-                let photoData: Data? = mapStore.loadPhotoFromDisk(for: nextVertexID) ?? mapPoint.locationPhotoData
+               let mapPoint = safeMapStore.points.first(where: { $0.id == nextVertexID }) {
+                let photoData: Data? = safeMapStore.loadPhotoFromDisk(for: nextVertexID) ?? mapPoint.locationPhotoData
                 setReferencePhoto(photoData)
                 print("🎯 [SWATH_ANCHOR] Advancing to anchor \(currentVertexIndex + 1): MapPoint \(String(nextVertexID.uuidString.prefix(8)))")
                 print("   Position: (\(String(format: "%.1f", mapPoint.mapPoint.x)), \(String(format: "%.1f", mapPoint.mapPoint.y)))")
@@ -1029,7 +1035,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         preferredTriangleID: UUID?
     ) -> TrianglePatch? {
         // Find ALL triangles containing this MapPoint
-        let matchingTriangles = triangleStore.triangles.filter { $0.vertexIDs.contains(mapPointID) }
+        let matchingTriangles = safeTriangleStore.triangles.filter { $0.vertexIDs.contains(mapPointID) }
         
         guard !matchingTriangles.isEmpty else {
             print("⚠️ [SHARED_VERTEX] No triangles contain MapPoint \(String(mapPointID.uuidString.prefix(8)))")
@@ -1053,7 +1059,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             guard let vertexIndex = triangle.vertexIDs.firstIndex(of: mapPointID) else { continue }
             
             // Use the existing addMarkerToTriangle method which handles array sizing
-            triangleStore.addMarkerToTriangle(
+            safeTriangleStore.addMarkerToTriangle(
                 triangleID: triangle.id,
                 vertexMapPointID: mapPointID,
                 markerID: markerID
@@ -1067,7 +1073,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         // No need to call save() again here
         
         // Return fresh copy of primary triangle
-        return triangleStore.triangles.first(where: { $0.id == primaryTriangle.id })
+        return safeTriangleStore.triangles.first(where: { $0.id == primaryTriangle.id })
     }
     
     /// Calculate 3D AR position for a MapPoint using barycentric interpolation from a calibrated triangle
@@ -1084,7 +1090,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("👻 [GHOST_CALC] BEGIN: \(formatter.string(from: calcStartTime))")
         
         // Re-fetch triangle to ensure we have the latest arMarkerIDs (fixes stale struct issue)
-        guard let calibratedTriangle = triangleStore.triangles.first(where: { $0.id == calibratedTriangleID }) else {
+        guard let calibratedTriangle = safeTriangleStore.triangles.first(where: { $0.id == calibratedTriangleID }) else {
             print("⚠️ [GHOST_CALC] Could not find triangle \(String(calibratedTriangleID.uuidString.prefix(8)))")
             let calcEndTime = Date()
             let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
@@ -1407,7 +1413,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         startTime: Date
     ) -> SIMD3<Float>? {
         // Look up baked position
-        guard let targetMapPoint = mapStore.points.first(where: { $0.id == targetMapPointID }),
+        guard let targetMapPoint = safeMapStore.points.first(where: { $0.id == targetMapPointID }),
               let bakedPosition = targetMapPoint.bakedCanonicalPosition else {
             print("👻 [BAKED_GHOST] No baked position for \(String(targetMapPointID.uuidString.prefix(8))), falling back to legacy")
             return nil
@@ -1445,9 +1451,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // Get MapPoints for all 3 vertices
         let lookupStart = Date()
-        guard let thirdMapPoint = mapStore.points.first(where: { $0.id == thirdVertexID }),
-              let firstMapPoint = mapStore.points.first(where: { $0.id == placedVertexIDs[0] }),
-              let secondMapPoint = mapStore.points.first(where: { $0.id == placedVertexIDs[1] }) else {
+        guard let thirdMapPoint = safeMapStore.points.first(where: { $0.id == thirdVertexID }),
+              let firstMapPoint = safeMapStore.points.first(where: { $0.id == placedVertexIDs[0] }),
+              let secondMapPoint = safeMapStore.points.first(where: { $0.id == placedVertexIDs[1] }) else {
             print("⚠️ [GHOST_3RD] Could not find MapPoints for vertices")
             return nil
         }
@@ -1602,7 +1608,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("🔍 [GHOST_PLANT] Finding adjacent triangles to \(String(calibratedTriangle.id.uuidString.prefix(8)))")
         
         // STEP 1: Find triangles sharing an edge with calibrated triangle (REUSE existing function)
-        let adjacentTriangles = triangleStore.findAdjacentTriangles(calibratedTriangle.id)
+        let adjacentTriangles = safeTriangleStore.findAdjacentTriangles(calibratedTriangle.id)
         
         print("🔍 [GHOST_PLANT] Found \(adjacentTriangles.count) adjacent triangle(s)")
         
@@ -1617,7 +1623,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         for adjacentTriangle in adjacentTriangles {
             // Get the far vertex (REUSE existing function)
-            guard let farVertexID = triangleStore.getFarVertex(adjacentTriangle: adjacentTriangle, sourceTriangle: calibratedTriangle) else {
+            guard let farVertexID = safeTriangleStore.getFarVertex(adjacentTriangle: adjacentTriangle, sourceTriangle: calibratedTriangle) else {
                 skippedReasons.append((adjacentTriangle.id, "Could not determine far vertex"))
                 print("⚠️ [GHOST_PLANT] Could not find far vertex for triangle \(String(adjacentTriangle.id.uuidString.prefix(8)))")
                 continue
@@ -1683,19 +1689,19 @@ final class ARCalibrationCoordinator: ObservableObject {
     
     /// Check if the active triangle has all 3 markers placed (calibration complete)
     func isTriangleComplete(_ triangleID: UUID) -> Bool {
-        guard let triangle = triangleStore.triangle(withID: triangleID) else { return false }
+        guard let triangle = safeTriangleStore.triangle(withID: triangleID) else { return false }
         return placedMarkers.count == 3 && triangle.vertexIDs.allSatisfy { placedMarkers.contains($0) }
     }
     
     /// Check if a triangle has baked canonical positions for all 3 vertices
     public func triangleHasBakedVertices(_ triangleID: UUID) -> Bool {
-        guard let triangle = triangleStore.triangle(withID: triangleID),
+        guard let triangle = safeTriangleStore.triangle(withID: triangleID),
               triangle.vertexIDs.count == 3 else {
             return false
         }
         
         for vertexID in triangle.vertexIDs {
-            guard let mapPoint = mapStore.points.first(where: { $0.id == vertexID }),
+            guard let mapPoint = safeMapStore.points.first(where: { $0.id == vertexID }),
                   mapPoint.bakedCanonicalPosition != nil else {
                 return false
             }
@@ -1710,7 +1716,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// This is the correct check for Fill Triangle button visibility
     public func triangleCanBeFilled(_ triangleID: UUID) -> Bool {
         guard hasValidSessionTransform,
-              let triangle = triangleStore.triangle(withID: triangleID),
+              let triangle = safeTriangleStore.triangle(withID: triangleID),
               triangle.vertexIDs.count == 3 else {
             return false
         }
@@ -1722,7 +1728,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             }
             
             // Check if vertex has baked position
-            guard let mapPoint = mapStore.points.first(where: { $0.id == vertexID }),
+            guard let mapPoint = safeMapStore.points.first(where: { $0.id == vertexID }),
                   mapPoint.bakedCanonicalPosition != nil else {
                 return false // No position source for this vertex
             }
@@ -1766,7 +1772,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Returns nil if transform not available or vertices don't have baked positions
     public func getTriangleVertexPositionsFromBaked(_ triangleID: UUID) -> [UUID: SIMD3<Float>]? {
         guard hasValidSessionTransform,
-              let triangle = triangleStore.triangle(withID: triangleID),
+              let triangle = safeTriangleStore.triangle(withID: triangleID),
               triangle.vertexIDs.count == 3 else {
             return nil
         }
@@ -1781,7 +1787,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             }
             
             // Fall back to baked position projected to session
-            guard let mapPoint = mapStore.points.first(where: { $0.id == vertexID }),
+            guard let mapPoint = safeMapStore.points.first(where: { $0.id == vertexID }),
                   let bakedPos = mapPoint.bakedCanonicalPosition,
                   let sessionPos = projectBakedToSession(bakedPos) else {
                 return nil // Missing data for this vertex
@@ -1807,7 +1813,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // TRIANGLE CALIBRATION MODE: Use active triangle vertices
         guard let triangleID = activeTriangleID,
-              let triangle = triangleStore.triangle(withID: triangleID) else {
+              let triangle = safeTriangleStore.triangle(withID: triangleID) else {
             progressDots = (false, false, false)
             return
         }
@@ -1823,7 +1829,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     
     private func finalizeCalibration(for triangle: TrianglePatch) {
         let quality = computeCalibrationQuality(triangle)
-        triangleStore.markCalibrated(triangle.id, quality: quality)
+        safeTriangleStore.markCalibrated(triangle.id, quality: quality)
         
         // Add to session calibrated triangles for crawl mode
         sessionCalibratedTriangles.insert(triangle.id)
@@ -1831,7 +1837,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("   Session now has \(sessionCalibratedTriangles.count) calibrated triangle(s)")
         
         // Verify triangle state
-        if let updatedTriangle = triangleStore.triangle(withID: triangle.id) {
+        if let updatedTriangle = safeTriangleStore.triangle(withID: triangle.id) {
             print("🔍 Triangle \(String(triangle.id.uuidString.prefix(8))) state after marking:")
             print("   isCalibrated: \(updatedTriangle.isCalibrated)")
             print("   arMarkerIDs count: \(updatedTriangle.arMarkerIDs.count)")
@@ -1855,7 +1861,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         )
         
         // Re-fetch triangle to get absolutely latest state with all 3 marker IDs
-        guard let freshTriangle = triangleStore.triangles.first(where: { $0.id == triangle.id }) else {
+        guard let freshTriangle = safeTriangleStore.triangles.first(where: { $0.id == triangle.id }) else {
             print("⚠️ [FINALIZE] Could not re-fetch triangle for ghost planting")
             currentVertexIndex = 0
             return
@@ -1865,9 +1871,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Plant ghost markers for adjacent triangles
         plantGhostsForAdjacentTriangles(
             calibratedTriangle: freshTriangle,
-            triangleStore: triangleStore,
-            mapPointStore: mapStore,
-            arWorldMapStore: arStore
+            triangleStore: safeTriangleStore,
+            mapPointStore: safeMapStore,
+            arWorldMapStore: safeARStore
         )
         
         // Reset index for next calibration
@@ -1912,7 +1918,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("🔄 [REFRESH_GHOSTS] Starting adjacent triangle discovery for MapPoint \(String(placedMapPointID.uuidString.prefix(8)))")
         
         // Find triangles that contain this vertex
-        let containingTriangles = triangleStore.triangles.filter { triangle in
+        let containingTriangles = safeTriangleStore.triangles.filter { triangle in
             triangle.vertexIDs.contains(placedMapPointID)
         }
         
@@ -2005,7 +2011,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             // Calculate center point from triangle vertices
             let vertexIDs = triangle.vertexIDs
             let mapPoints = vertexIDs.compactMap { vertexID in
-                self.mapStore.points.first(where: { $0.id == vertexID })
+                self.safeMapStore.points.first(where: { $0.id == vertexID })
             }
             
             guard mapPoints.count == 3 else {
@@ -2049,16 +2055,16 @@ final class ARCalibrationCoordinator: ObservableObject {
             do {
                 let strategyID = "worldmap"
                 let strategyDisplayName = "ARWorldMap"
-                try self.arStore.savePatchForStrategy(worldMap, triangleID: triangle.id, strategyID: strategyID)
+                try self.safeARStore.savePatchForStrategy(worldMap, triangleID: triangle.id, strategyID: strategyID)
                 
                 // Store filename in triangle (format: "{triangleID}.armap")
                 let filename = "\(triangle.id.uuidString).armap"
                 
                 // Update legacy worldMapFilename for backward compatibility
-                self.triangleStore.setWorldMapFilename(for: triangle.id, filename: filename)
+                self.safeTriangleStore.setWorldMapFilename(for: triangle.id, filename: filename)
                 
                 // Update worldMapFilesByStrategy dictionary
-                self.triangleStore.setWorldMapFilename(for: triangle.id, strategyName: strategyDisplayName, filename: filename)
+                self.safeTriangleStore.setWorldMapFilename(for: triangle.id, strategyName: strategyDisplayName, filename: filename)
                 
                 print("✅ Saved ARWorldMap for triangle \(String(triangle.id.uuidString.prefix(8)))")
                 print("   Strategy: \(strategyID) (\(strategyDisplayName))")
@@ -2074,12 +2080,12 @@ final class ARCalibrationCoordinator: ObservableObject {
     
     /// Find an adjacent uncalibrated triangle to suggest for calibration crawling
     private func findAdjacentUncalibratedTriangle(to triangleID: UUID, userMapPosition: CGPoint?) -> TrianglePatch? {
-        guard let triangle = triangleStore.triangle(withID: triangleID) else {
+        guard let triangle = safeTriangleStore.triangle(withID: triangleID) else {
             return nil
         }
         
         // Get all adjacent uncalibrated triangles (share an edge = 2 vertices)
-        let adjacentCandidates = triangleStore.findAdjacentTriangles(triangleID)
+        let adjacentCandidates = safeTriangleStore.findAdjacentTriangles(triangleID)
             .filter { !$0.isCalibrated }
         
         guard !adjacentCandidates.isEmpty else {
@@ -2095,10 +2101,10 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // Find closest triangle based on distance to its "far vertex"
         let closestTriangle = adjacentCandidates.min { candidateA, candidateB in
-            guard let farVertexA = triangleStore.getFarVertex(adjacentTriangle: candidateA, sourceTriangle: triangle),
-                  let farVertexB = triangleStore.getFarVertex(adjacentTriangle: candidateB, sourceTriangle: triangle),
-                  let pointA = mapStore.points.first(where: { $0.id == farVertexA }),
-                  let pointB = mapStore.points.first(where: { $0.id == farVertexB }) else {
+            guard let farVertexA = safeTriangleStore.getFarVertex(adjacentTriangle: candidateA, sourceTriangle: triangle),
+                  let farVertexB = safeTriangleStore.getFarVertex(adjacentTriangle: candidateB, sourceTriangle: triangle),
+                  let pointA = safeMapStore.points.first(where: { $0.id == farVertexA }),
+                  let pointB = safeMapStore.points.first(where: { $0.id == farVertexB }) else {
                 return false
             }
             
@@ -2109,8 +2115,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
         
         if let next = closestTriangle,
-           let farVertex = triangleStore.getFarVertex(adjacentTriangle: next, sourceTriangle: triangle),
-           let farPoint = mapStore.points.first(where: { $0.id == farVertex }) {
+           let farVertex = safeTriangleStore.getFarVertex(adjacentTriangle: next, sourceTriangle: triangle),
+           let farPoint = safeMapStore.points.first(where: { $0.id == farVertex }) {
             let dist = distance(userPos, farPoint.mapPoint)
             print("📍 Selected nearest triangle (far vertex distance: \(Int(dist))px)")
         }
@@ -2145,7 +2151,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         let alreadyPlacedIDs = Set(placedMarkers)
         
         // Get all remaining map points that don't have markers
-        let remainingPoints = mapStore.points.filter { !alreadyPlacedIDs.contains($0.id) }
+        let remainingPoints = safeMapStore.points.filter { !alreadyPlacedIDs.contains($0.id) }
         
         guard !remainingPoints.isEmpty else {
             print("ℹ️ No remaining map points to plant ghost markers for")
@@ -2176,7 +2182,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Load AR markers from ARWorldMapStore
         let arMarkers = triangle.arMarkerIDs.compactMap { markerIDString -> ARWorldMapStore.ARMarker? in
             guard let markerUUID = UUID(uuidString: markerIDString) else { return nil }
-            return arStore.marker(withID: markerUUID)
+            return safeARStore.marker(withID: markerUUID)
         }
         
         guard arMarkers.count == 3 else {
@@ -2187,7 +2193,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Get MapPoints for the 3 vertices
         let vertexIDs = triangle.vertexIDs
         let mapPoints = vertexIDs.compactMap { vertexID in
-            mapStore.points.first(where: { $0.id == vertexID })
+            safeMapStore.points.first(where: { $0.id == vertexID })
         }
         
         guard mapPoints.count == 3 else {
@@ -2251,7 +2257,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         let quality = distortionScores.reduce(0, +) / Float(distortionScores.count)
         
         // Store measurements in triangle
-        triangleStore.setLegMeasurements(for: triangle.id, measurements: measurements)
+        safeTriangleStore.setLegMeasurements(for: triangle.id, measurements: measurements)
         
         print("📊 Calibration quality computed: \(String(format: "%.2f", quality)) (avg distortion score)")
         
@@ -2281,19 +2287,19 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Save marker to ARWorldMapStore
         do {
             let worldMapMarker = convertToWorldMapMarker(marker)
-            try arStore.saveMarker(worldMapMarker)
+            try safeARStore.saveMarker(worldMapMarker)
             
             sessionMarkerPositions[marker.id.uuidString] = marker.arPosition
             
             // Record with LOW confidence (0.1) so consensus ignores this outlier
             let record = ARPositionRecord(
                 position: marker.arPosition,
-                sessionID: arStore.currentSessionID,
+                sessionID: safeARStore.currentSessionID,
                 sourceType: .calibration,
                 distortionVector: marker.arPosition - blocked.ghostPosition,
                 confidenceScore: 0.1  // LOW confidence for override
             )
-            mapStore.addPositionRecord(mapPointID: mapPointID, record: record)
+            safeMapStore.addPositionRecord(mapPointID: mapPointID, record: record)
             print("📍 [OVERRIDE] Recorded with confidence 0.1 (outlier)")
             
         } catch {
@@ -2303,7 +2309,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // Update triangle with marker ID
         guard let triangleID = activeTriangleID else { return }
-        triangleStore.addMarkerToTriangle(
+        safeTriangleStore.addMarkerToTriangle(
             triangleID: triangleID,
             vertexMapPointID: mapPointID,
             markerID: marker.id
@@ -2319,7 +2325,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("✅ [OVERRIDE] Marker registered for MapPoint \(String(mapPointID.uuidString.prefix(8))) (\(count)/3)")
         
         if placedMarkers.count == 3 {
-            if let triangle = triangleStore.triangle(withID: triangleID) {
+            if let triangle = safeTriangleStore.triangle(withID: triangleID) {
                 finalizeCalibration(for: triangle)
             }
             calibrationState = .readyToFill
@@ -2410,7 +2416,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("   Was Adjusted: \(wasAdjusted)")
         
         // Find all triangles containing this ghost MapPoint
-        let trianglesWithGhost = triangleStore.triangles.filter { triangle in
+        let trianglesWithGhost = safeTriangleStore.triangles.filter { triangle in
             triangle.vertexIDs.contains(ghostMapPointID)
         }
         
@@ -2423,7 +2429,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         var sourceTriangle: TrianglePatch? = nil  // The calibrated triangle we're adjacent to
         
         // Get all calibrated triangles from this session
-        let calibratedTriangles = triangleStore.triangles.filter { sessionCalibratedTriangles.contains($0.id) }
+        let calibratedTriangles = safeTriangleStore.triangles.filter { sessionCalibratedTriangles.contains($0.id) }
         print("   Session calibrated triangles: \(calibratedTriangles.map { String($0.id.uuidString.prefix(8)) })")
         
         for candidate in trianglesWithGhost {
@@ -2498,11 +2504,11 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         let positionRecord = ARPositionRecord(
             position: ghostPosition,
-            sessionID: arStore.currentSessionID,
+            sessionID: safeARStore.currentSessionID,
             sourceType: sourceType,
             confidenceScore: confidence
         )
-        mapStore.addPositionRecord(mapPointID: ghostMapPointID, record: positionRecord)
+        safeMapStore.addPositionRecord(mapPointID: ghostMapPointID, record: positionRecord)
         
         // MILESTONE 5: Update baked position incrementally
         updateBakedPositionIncrementally(
@@ -2547,7 +2553,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("✅ [ADJACENT_ACTIVATE] Added \(String(adjacentTriangle.id.uuidString.prefix(8))) to sessionCalibratedTriangles (now \(sessionCalibratedTriangles.count) triangle(s))")
         
         // CRITICAL: Persist calibration to storage (mirrors finalizeCalibration behavior)
-        triangleStore.markCalibrated(adjacentTriangle.id, quality: 1.0)
+        safeTriangleStore.markCalibrated(adjacentTriangle.id, quality: 1.0)
         print("💾 [ADJACENT_ACTIVATE] Persisted calibration for triangle \(String(adjacentTriangle.id.uuidString.prefix(8)))")
         
         // Update status
@@ -2563,12 +2569,12 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Plant ghost markers for the newly activated triangle's uncalibrated adjacent triangles
         // This enables continuous crawling across the mesh
         print("🔗 [ADJACENT_ACTIVATE] Planting ghosts for newly activated triangle's neighbors")
-        if let freshTriangle = triangleStore.triangle(withID: adjacentTriangle.id) {
+        if let freshTriangle = safeTriangleStore.triangle(withID: adjacentTriangle.id) {
             plantGhostsForAdjacentTriangles(
                 calibratedTriangle: freshTriangle,
-                triangleStore: triangleStore,
-                mapPointStore: mapStore,
-                arWorldMapStore: arStore
+                triangleStore: safeTriangleStore,
+                mapPointStore: safeMapStore,
+                arWorldMapStore: safeARStore
             )
         }
         
@@ -2691,8 +2697,8 @@ final class ARCalibrationCoordinator: ObservableObject {
             worldTransform: codableTransform,
             createdAt: marker.createdAt,
             observations: nil,
-            sessionID: arStore.currentSessionID,
-            sessionTimestamp: arStore.currentSessionStartTime
+            sessionID: safeARStore.currentSessionID,
+            sessionTimestamp: safeARStore.currentSessionStartTime
         )
     }
     
@@ -2801,8 +2807,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         let marker1ID = placedMarkers[0]
         let marker2ID = placedMarkers[1]
         
-        guard let marker1MapPoint = mapStore.points.first(where: { $0.id == marker1ID }),
-              let marker2MapPoint = mapStore.points.first(where: { $0.id == marker2ID }),
+        guard let marker1MapPoint = safeMapStore.points.first(where: { $0.id == marker1ID }),
+              let marker2MapPoint = safeMapStore.points.first(where: { $0.id == marker2ID }),
               let marker1AR = mapPointARPositions[marker1ID],
               let marker2AR = mapPointARPositions[marker2ID] else {
             print("⚠️ [SESSION_TRANSFORM] Could not find marker data")
@@ -2876,7 +2882,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("   ✅ Verification error: \(String(format: "%.3f", verificationError))m")
         
         // Count how many triangles are now fillable via baked data
-        let fillableCount = triangleStore.triangles.filter { triangleHasBakedVertices($0.id) }.count
+        let fillableCount = safeTriangleStore.triangles.filter { triangleHasBakedVertices($0.id) }.count
         print("📐 [SESSION_TRANSFORM] \(fillableCount) triangle(s) now fillable via baked data")
         
         return true
@@ -2914,8 +2920,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         let marker2ID = placedMarkers[1]
         
         // Find their MapPoints and AR positions
-        guard let marker1MapPoint = mapStore.points.first(where: { $0.id == marker1ID }),
-              let marker2MapPoint = mapStore.points.first(where: { $0.id == marker2ID }),
+        guard let marker1MapPoint = safeMapStore.points.first(where: { $0.id == marker1ID }),
+              let marker2MapPoint = safeMapStore.points.first(where: { $0.id == marker2ID }),
               let marker1ARPos = mapPointARPositions[marker1ID],
               let marker2ARPos = mapPointARPositions[marker2ID] else {
             print("⚠️ [BAKE_DOWN] Could not find marker data for transform computation")
@@ -2954,7 +2960,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("\n📦 [BAKE_DOWN] Processing \(mapPointARPositions.count) MapPoint(s)...")
         
         for (mapPointID, sessionARPosition) in mapPointARPositions {
-            guard let index = mapStore.points.firstIndex(where: { $0.id == mapPointID }) else {
+            guard let index = safeMapStore.points.firstIndex(where: { $0.id == mapPointID }) else {
                 print("   ⚠️ \(String(mapPointID.uuidString.prefix(8))): MapPoint not found in store")
                 continue
             }
@@ -2963,15 +2969,15 @@ final class ARCalibrationCoordinator: ObservableObject {
             let canonicalPosition = transform.apply(to: sessionARPosition)
             
             // Get current baked state
-            let currentBaked = mapStore.points[index].bakedCanonicalPosition
-            let currentConfidence = mapStore.points[index].bakedConfidence ?? 0
-            let currentSampleCount = mapStore.points[index].bakedSampleCount
+            let currentBaked = safeMapStore.points[index].bakedCanonicalPosition
+            let currentConfidence = safeMapStore.points[index].bakedConfidence ?? 0
+            let currentSampleCount = safeMapStore.points[index].bakedSampleCount
             
             // Determine confidence for this session's data
             // Use the confidence from position history if available, otherwise default to 0.9
             let sessionConfidence: Float
-            if let latestRecord = mapStore.points[index].arPositionHistory.last,
-               latestRecord.sessionID == arStore.currentSessionID {
+            if let latestRecord = safeMapStore.points[index].arPositionHistory.last,
+               latestRecord.sessionID == safeARStore.currentSessionID {
                 sessionConfidence = latestRecord.confidenceScore
             } else {
                 sessionConfidence = 0.9  // Default for calibration
@@ -3004,15 +3010,15 @@ final class ARCalibrationCoordinator: ObservableObject {
             }
             
             // Update the MapPoint
-            mapStore.points[index].bakedCanonicalPosition = newBakedPosition
-            mapStore.points[index].bakedConfidence = newConfidence
-            mapStore.points[index].bakedSampleCount = newSampleCount
+            safeMapStore.points[index].bakedCanonicalPosition = newBakedPosition
+            safeMapStore.points[index].bakedConfidence = newConfidence
+            safeMapStore.points[index].bakedSampleCount = newSampleCount
             
             updatedCount += 1
         }
         
         // Save changes
-        mapStore.save()
+        safeMapStore.save()
         
         print("\n" + String(repeating: "=", count: 60))
         print("🔥 [BAKE_DOWN] Complete: \(updatedCount) MapPoint(s) updated")
@@ -3040,7 +3046,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             return
         }
         
-        guard let index = mapStore.points.firstIndex(where: { $0.id == mapPointID }) else {
+        guard let index = safeMapStore.points.firstIndex(where: { $0.id == mapPointID }) else {
             print("⚠️ [BAKE_UPDATE] MapPoint \(String(mapPointID.uuidString.prefix(8))) not found")
             return
         }
@@ -3062,9 +3068,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         let canonicalPosition = rotated * inverseScale
         
         // Get current baked state
-        let currentBaked = mapStore.points[index].bakedCanonicalPosition
-        let currentConfidence = mapStore.points[index].bakedConfidence ?? 0
-        let currentSampleCount = mapStore.points[index].bakedSampleCount
+        let currentBaked = safeMapStore.points[index].bakedCanonicalPosition
+        let currentConfidence = safeMapStore.points[index].bakedConfidence ?? 0
+        let currentSampleCount = safeMapStore.points[index].bakedSampleCount
         
         // Compute new weighted average
         let newBakedPosition: SIMD3<Float>
@@ -3092,18 +3098,18 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
         
         // Update and save
-        mapStore.points[index].bakedCanonicalPosition = newBakedPosition
-        mapStore.points[index].bakedConfidence = newConfidence
-        mapStore.points[index].bakedSampleCount = newSampleCount
+        safeMapStore.points[index].bakedCanonicalPosition = newBakedPosition
+        safeMapStore.points[index].bakedConfidence = newConfidence
+        safeMapStore.points[index].bakedSampleCount = newSampleCount
         
         // Update bake timestamp in MapPointStore
-        mapStore.lastBakeTimestamp = Date()
-        mapStore.save()
+        safeMapStore.lastBakeTimestamp = Date()
+        safeMapStore.save()
     }
     
     /// Debug function to display current baked positions
     func debugBakedPositions() {
-        mapStore.debugBakedPositionSummary()
+        safeMapStore.debugBakedPositionSummary()
     }
     
     // MARK: - Crawl Coverage Diagnostics
@@ -3116,7 +3122,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         print(String(repeating: "=", count: 80))
         
         // Get all triangle-edge MapPoints
-        let triangleVertices = mapStore.points.filter { $0.roles.contains(.triangleEdge) }
+        let triangleVertices = safeMapStore.points.filter { $0.roles.contains(.triangleEdge) }
         let totalVertices = triangleVertices.count
         
         // Check which have AR positions
@@ -3140,9 +3146,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         if !missing.isEmpty {
             print("❌ MISSING VERTICES:")
             for missingID in missing {
-                if let point = mapStore.points.first(where: { $0.id == missingID }) {
+                if let point = safeMapStore.points.first(where: { $0.id == missingID }) {
                     // Find which triangles contain this vertex
-                    let containingTriangles = triangleStore.triangles.filter { $0.vertexIDs.contains(missingID) }
+                    let containingTriangles = safeTriangleStore.triangles.filter { $0.vertexIDs.contains(missingID) }
                     let calibratedTriangles = containingTriangles.filter { sessionCalibratedTriangles.contains($0.id) }
                     
                     print("   • MapPoint \(String(missingID.uuidString.prefix(8))) at (\(Int(point.position.x)), \(Int(point.position.y)))")
