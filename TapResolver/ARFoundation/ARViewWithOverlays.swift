@@ -792,7 +792,7 @@ struct ARViewWithOverlays: View {
                     // Survey Marker Generation Button - shows when user is standing in a fillable triangle
                     // A triangle is fillable if all 3 vertices have known positions (session or baked)
                     if let containingTriangleID = userContainingTriangleID,
-                       let _ = arCalibrationCoordinator.triangleStore.triangle(withID: containingTriangleID),
+                       let _ = arCalibrationCoordinator.triangleStoreAccess.triangle(withID: containingTriangleID),
                        (arCalibrationCoordinator.sessionCalibratedTriangles.contains(containingTriangleID) ||
                         arCalibrationCoordinator.triangleCanBeFilled(containingTriangleID)) {
                         
@@ -815,7 +815,7 @@ struct ARViewWithOverlays: View {
                                     "triangleID": containingTriangleID,
                                     "spacing": surveySpacing,
                                     "arWorldMapStore": arCalibrationCoordinator.arStore,
-                                    "triangleStore": arCalibrationCoordinator.triangleStore
+                                    "triangleStore": arCalibrationCoordinator.triangleStoreAccess
                                 ]
                             )
                         }) {
@@ -861,7 +861,7 @@ struct ARViewWithOverlays: View {
                                     "triangleIDs": triangleIDs,
                                     "spacing": surveySpacing,
                                     "arWorldMapStore": arCalibrationCoordinator.arStore as Any,
-                                    "triangleStore": arCalibrationCoordinator.triangleStore as Any
+                                    "triangleStore": arCalibrationCoordinator.triangleStoreAccess as Any
                                 ]
                             )
                         }) {
@@ -1611,7 +1611,7 @@ struct ARPiPMapView: View {
     
     private func handleCenterPiPNotification(notification: Notification, mapImage: UIImage) {
         guard let triangleID = notification.userInfo?["triangleID"] as? UUID,
-              let triangle = arCalibrationCoordinator.triangleStore.triangle(withID: triangleID) else {
+              let triangle = arCalibrationCoordinator.triangleStoreAccess.triangle(withID: triangleID) else {
             return
         }
         
@@ -1851,7 +1851,7 @@ struct ARPiPMapView: View {
     private func projectARPositionToMap(arPosition: simd_float3) -> CGPoint? {
         let sessionTriangles = arCalibrationCoordinator.sessionCalibratedTriangles
         let mapPointPositions = arCalibrationCoordinator.mapPointARPositions
-        let triangleStore = arCalibrationCoordinator.triangleStore
+        let triangleStore = arCalibrationCoordinator.triangleStoreAccess
         
         // Need at least one calibrated triangle with position data
         guard !sessionTriangles.isEmpty, !mapPointPositions.isEmpty else {
@@ -2000,7 +2000,7 @@ struct ARPiPMapView: View {
     /// Checks both session-calibrated triangles AND triangles with baked vertex data
     /// Returns nil if position is outside all known triangles
     private func findContainingTriangleInARSpace(cameraPosition: simd_float3) -> UUID? {
-        let triangleStore = arCalibrationCoordinator.triangleStore
+        let triangleStore = arCalibrationCoordinator.triangleStoreAccess
         
         // First check session-calibrated triangles (highest confidence)
         let sessionTriangles = arCalibrationCoordinator.sessionCalibratedTriangles
@@ -2071,7 +2071,7 @@ struct ARPiPMapView: View {
     /// Find which session-calibrated triangle contains the given map position
     /// Returns nil if position is outside all calibrated triangles
     private func findContainingTriangle(mapPosition: CGPoint) -> UUID? {
-        let triangleStore = arCalibrationCoordinator.triangleStore
+        let triangleStore = arCalibrationCoordinator.triangleStoreAccess
         let sessionTriangles = arCalibrationCoordinator.sessionCalibratedTriangles
         
         for triangleID in sessionTriangles {

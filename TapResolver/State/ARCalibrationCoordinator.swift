@@ -159,6 +159,14 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("🎯 [ARCalibrationCoordinator] Configured with stores")
     }
     
+    // MARK: - Public Store Access (for external code that needs read-only access)
+    
+    /// Public read-only access to the triangle store.
+    /// External code (like ARViewWithOverlays) can use this to query triangles.
+    public var triangleStoreAccess: TrianglePatchStore {
+        return safeTriangleStore
+    }
+    
     // MARK: - Safe Store Accessors
     // These provide clear crash messages if stores are accessed before configure() is called.
     // In Step 4, all internal usages of mapStore/arStore/triangleStore will use these instead.

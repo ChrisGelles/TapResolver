@@ -64,20 +64,8 @@ struct TapResolverApp: App {
             Self.hasLoggedLaunchTime = true
         }
         
-        // Initialize coordinator with temporary stores
-        // These will be updated to reference the actual @StateObject instances in onAppear
-        // Note: triangleStore will be set to the shared trianglePatchStore instance in onAppear
-        let tempARStore = ARWorldMapStore()
-        let tempMapStore = MapPointStore()
-        let tempTriangleStore = TrianglePatchStore()  // Temporary - replaced in onAppear
-        let tempMetricStore = MetricSquareStore()
-        
-        _arCalibrationCoordinator = StateObject(wrappedValue: ARCalibrationCoordinator(
-            arStore: tempARStore,
-            mapStore: tempMapStore,
-            triangleStore: tempTriangleStore,
-            metricSquareStore: tempMetricStore
-        ))
+        // Initialize coordinator without stores - configure() called in onAppear
+        _arCalibrationCoordinator = StateObject(wrappedValue: ARCalibrationCoordinator())
     }
 
     var body: some Scene {
@@ -102,11 +90,13 @@ struct TapResolverApp: App {
                 .environmentObject(arViewLaunchContext)  // Unified AR view launch context
                 .environmentObject(arCalibrationCoordinator)
                 .onAppear {
-                    // Update coordinator to use the actual store instances
-                    arCalibrationCoordinator.arStore = arWorldMapStore
-                    arCalibrationCoordinator.mapStore = mapPointStore
-                    arCalibrationCoordinator.triangleStore = trianglePatchStore
-                    arCalibrationCoordinator.metricSquareStore = metricSquares
+                    // Configure coordinator with actual store instances
+                    arCalibrationCoordinator.configure(
+                        arStore: arWorldMapStore,
+                        mapStore: mapPointStore,
+                        triangleStore: trianglePatchStore,
+                        metricSquareStore: metricSquares
+                    )
                     
                     surveySelectionCoordinator.configure(
                         triangleStore: trianglePatchStore,
