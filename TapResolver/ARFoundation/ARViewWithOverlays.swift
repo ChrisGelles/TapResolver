@@ -843,8 +843,30 @@ struct ARViewWithOverlays: View {
                         .buttonStyle(.plain)
                         
                         // Define Swath button
+                        // FUTURE: Swaths are user-defined collections of triangle patches.
+                        // This will eventually let users select which triangles to include
+                        // in a survey swath. For now, we plant ghosts for ALL triangles
+                        // to show the full spatial extent of the calibrated map.
                         Button(action: {
                             print("🟣 [DEFINE_SWATH_BTN] Define Swath button tapped")
+                            
+                            // Get the reference triangle (the one we just calibrated)
+                            guard let referenceTriangleID = userContainingTriangleID,
+                                  let referenceTriangle = arCalibrationCoordinator.triangleStoreAccess.triangle(withID: referenceTriangleID) else {
+                                print("⚠️ [DEFINE_SWATH_BTN] No reference triangle available")
+                                return
+                            }
+                            
+                            print("🟣 [DEFINE_SWATH_BTN] Reference triangle: \(String(referenceTriangleID.uuidString.prefix(8)))")
+                            
+                            // Plant ghosts for ALL triangle vertices
+                            arCalibrationCoordinator.plantGhostsForScope(
+                                scope: .allTriangles,
+                                referenceTriangle: referenceTriangle,
+                                triangleStore: arCalibrationCoordinator.triangleStoreAccess,
+                                mapPointStore: mapPointStore,
+                                arWorldMapStore: arWorldMapStore
+                            )
                         }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "square.3.layers.3d.top.filled")

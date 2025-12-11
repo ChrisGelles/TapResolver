@@ -1687,6 +1687,159 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
     }
     
+    // MARK: - Generalized Ghost Planting
+    
+    /// Defines the scope for ghost marker planting
+    enum GhostPlantingScope {
+        /// Plant ghosts for far vertices of triangles adjacent to the calibrated triangle
+        case adjacentToTriangle(TrianglePatch)
+        
+        /// Plant ghosts for ALL triangle vertices in the store
+        case allTriangles
+    }
+    
+    /// Build the set of candidate vertex IDs for ghost planting based on scope
+    /// - Parameters:
+    ///   - scope: The scope defining which vertices to consider
+    ///   - triangleStore: The store containing all triangle patches
+    /// - Returns: Set of MapPoint IDs that are candidates for ghost markers
+    private func buildGhostCandidateVertices(
+        scope: GhostPlantingScope,
+        triangleStore: TrianglePatchStore
+    ) -> Set<UUID> {
+        
+        switch scope {
+        case .adjacentToTriangle(let calibratedTriangle):
+            // Find far vertices of adjacent triangles
+            var candidates = Set<UUID>()
+            let adjacentTriangles = safeTriangleStore.findAdjacentTriangles(calibratedTriangle.id)
+            
+            print("🔍 [GHOST_CANDIDATES] Building candidates for adjacent triangles")
+            print("   Source triangle: \(String(calibratedTriangle.id.uuidString.prefix(8)))")
+            print("   Found \(adjacentTriangles.count) adjacent triangle(s)")
+            
+            for adjacent in adjacentTriangles {
+                if let farVertexID = safeTriangleStore.getFarVertex(
+                    adjacentTriangle: adjacent,
+                    sourceTriangle: calibratedTriangle
+                ) {
+                    candidates.insert(farVertexID)
+                    print("   + Far vertex \(String(farVertexID.uuidString.prefix(8))) from triangle \(String(adjacent.id.uuidString.prefix(8)))")
+                }
+            }
+            
+            print("   Total candidates: \(candidates.count)")
+            return candidates
+            
+        case .allTriangles:
+            // Collect ALL vertices from ALL triangles
+            var candidates = Set<UUID>()
+            
+            print("🔍 [GHOST_CANDIDATES] Building candidates for ALL triangles")
+            print("   Total triangles in store: \(triangleStore.triangles.count)")
+            
+            for triangle in triangleStore.triangles {
+                for vertexID in triangle.vertexIDs {
+                    candidates.insert(vertexID)
+                }
+            }
+            
+            print("   Total unique vertices: \(candidates.count)")
+            return candidates
+        }
+    }
+    
+    /// Plant ghost markers for vertices based on the specified scope
+    /// FUTURE: Swaths will be user-defined collections of triangle patches.
+    /// This function will eventually support a .swathTriangles(Set<UUID>) scope
+    /// for planting ghosts only within a selected swath region.
+    ///
+    /// - Parameters:
+    ///   - scope: Defines which vertices to consider for ghost planting
+    ///   - referenceTriangle: A calibrated triangle with known AR positions (used for ghost position calculation)
+    ///   - triangleStore: The store containing all triangle patches
+    ///   - mapPointStore: The store containing all map points
+    ///   - arWorldMapStore: The AR world map store
+    public func plantGhostsForScope(
+        scope: GhostPlantingScope,
+        referenceTriangle: TrianglePatch,
+        triangleStore: TrianglePatchStore,
+        mapPointStore: MapPointStore,
+        arWorldMapStore: ARWorldMapStore
+    ) {
+        let scopeDescription: String
+        switch scope {
+        case .adjacentToTriangle(let tri):
+            scopeDescription = "adjacent to \(String(tri.id.uuidString.prefix(8)))"
+        case .allTriangles:
+            scopeDescription = "all triangles"
+        }
+        
+        print("👻 [PLANT_SCOPE] BEGIN: Planting ghosts for scope: \(scopeDescription)")
+        print("   Reference triangle: \(String(referenceTriangle.id.uuidString.prefix(8)))")
+        
+        // STEP 1: Build candidate vertices based on scope
+        let candidates = buildGhostCandidateVertices(scope: scope, triangleStore: triangleStore)
+        
+        guard !candidates.isEmpty else {
+            print("ℹ️ [PLANT_SCOPE] No candidate vertices found")
+            return
+        }
+        
+        // STEP 2: Filter candidates
+        var ghostsPlanted = 0
+        var skippedHasPosition = 0
+        var skippedNoMapPoint = 0
+        var skippedCalcFailed = 0
+        
+        for vertexID in candidates {
+            // Skip if already has AR position in current session
+            if mapPointARPositions[vertexID] != nil {
+                skippedHasPosition += 1
+                continue
+            }
+            
+            // Get the MapPoint
+            guard let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }) else {
+                skippedNoMapPoint += 1
+                print("⚠️ [PLANT_SCOPE] MapPoint not found for vertex \(String(vertexID.uuidString.prefix(8)))")
+                continue
+            }
+            
+            // STEP 3: Calculate ghost position
+            // Uses the reference triangle for barycentric/session-transform calculation
+            guard let ghostPosition = calculateGhostPosition(
+                mapPoint: mapPoint,
+                calibratedTriangleID: referenceTriangle.id,
+                triangleStore: triangleStore,
+                mapPointStore: mapPointStore,
+                arWorldMapStore: arWorldMapStore
+            ) else {
+                skippedCalcFailed += 1
+                continue
+            }
+            
+            // STEP 4: Post notification to render ghost
+            NotificationCenter.default.post(
+                name: NSNotification.Name("PlaceGhostMarker"),
+                object: nil,
+                userInfo: [
+                    "mapPointID": vertexID,
+                    "position": ghostPosition
+                ]
+            )
+            
+            ghostsPlanted += 1
+            print("👻 [PLANT_SCOPE] Planted ghost for \(String(vertexID.uuidString.prefix(8)))")
+        }
+        
+        print("👻 [PLANT_SCOPE] COMPLETE:")
+        print("   Planted: \(ghostsPlanted)")
+        print("   Skipped (has session pos): \(skippedHasPosition)")
+        print("   Skipped (no MapPoint): \(skippedNoMapPoint)")
+        print("   Skipped (calc failed): \(skippedCalcFailed)")
+    }
+    
     /// Check if the active triangle has all 3 markers placed (calibration complete)
     func isTriangleComplete(_ triangleID: UUID) -> Bool {
         guard let triangle = safeTriangleStore.triangle(withID: triangleID) else { return false }
