@@ -566,19 +566,22 @@ struct ARViewWithOverlays: View {
                         .padding(.bottom, 12)
                     }
                     
-                    // Progress dots indicator
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(arCalibrationCoordinator.progressDots.0 ? Color.green : Color.gray)
-                            .frame(width: 12, height: 12)
-                        Circle()
-                            .fill(arCalibrationCoordinator.progressDots.1 ? Color.green : Color.gray)
-                            .frame(width: 12, height: 12)
-                        Circle()
-                            .fill(arCalibrationCoordinator.progressDots.2 ? Color.green : Color.gray)
-                            .frame(width: 12, height: 12)
+                    // Progress dots indicator - only show during initial triangle calibration
+                    // Hide after first triangle is calibrated (crawl mode uses single ghost confirmations)
+                    if arCalibrationCoordinator.sessionCalibratedTriangles.isEmpty {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(arCalibrationCoordinator.progressDots.0 ? Color.green : Color.gray)
+                                .frame(width: 12, height: 12)
+                            Circle()
+                                .fill(arCalibrationCoordinator.progressDots.1 ? Color.green : Color.gray)
+                                .frame(width: 12, height: 12)
+                            Circle()
+                                .fill(arCalibrationCoordinator.progressDots.2 ? Color.green : Color.gray)
+                                .frame(width: 12, height: 12)
+                        }
+                        .padding(.bottom, 8)
                     }
-                    .padding(.bottom, 8)
                     
                     // Status text
                     Text(arCalibrationCoordinator.statusText)
@@ -801,28 +804,29 @@ struct ARViewWithOverlays: View {
                        (arCalibrationCoordinator.sessionCalibratedTriangles.contains(containingTriangleID) ||
                         arCalibrationCoordinator.triangleCanBeFilled(containingTriangleID)) {
                         
-                        Button(action: {
-                            print("🎯 [FILL_TRIANGLE_BTN] Button tapped")
-                            print("   Current state: \(arCalibrationCoordinator.stateDescription)")
-                            
-                            arCalibrationCoordinator.enterSurveyMode()
-                            
-                            print("🎯 [FILL_TRIANGLE_BTN] Entering survey mode")
-                            print("   New state: \(arCalibrationCoordinator.stateDescription)")
-                            
-                            // Post notification to trigger survey marker generation
-                            // CRITICAL: Pass triangleStore so we can look up triangle by ID
-                            // Don't rely on selectedTriangle which might be stale
-                            NotificationCenter.default.post(
-                                name: NSNotification.Name("FillTriangleWithSurveyMarkers"),
-                                object: nil,
-                                userInfo: [
-                                    "triangleID": containingTriangleID,
-                                    "spacing": surveySpacing,
-                                    "arWorldMapStore": arCalibrationCoordinator.arStoreAccess,
-                                    "triangleStore": arCalibrationCoordinator.triangleStoreAccess
-                                ]
-                            )
+                        HStack(spacing: 16) {
+                            Button(action: {
+                                print("🎯 [FILL_TRIANGLE_BTN] Button tapped")
+                                print("   Current state: \(arCalibrationCoordinator.stateDescription)")
+                                
+                                arCalibrationCoordinator.enterSurveyMode()
+                                
+                                print("🎯 [FILL_TRIANGLE_BTN] Entering survey mode")
+                                print("   New state: \(arCalibrationCoordinator.stateDescription)")
+                                
+                                // Post notification to trigger survey marker generation
+                                // CRITICAL: Pass triangleStore so we can look up triangle by ID
+                                // Don't rely on selectedTriangle which might be stale
+                                NotificationCenter.default.post(
+                                    name: NSNotification.Name("FillTriangleWithSurveyMarkers"),
+                                    object: nil,
+                                    userInfo: [
+                                        "triangleID": containingTriangleID,
+                                        "spacing": surveySpacing,
+                                        "arWorldMapStore": arCalibrationCoordinator.arStoreAccess,
+                                        "triangleStore": arCalibrationCoordinator.triangleStoreAccess
+                                    ]
+                                )
                         }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "circle.grid.3x3.fill")
@@ -837,6 +841,25 @@ struct ARViewWithOverlays: View {
                             .cornerRadius(10)
                         }
                         .buttonStyle(.plain)
+                        
+                        // Define Swath button
+                        Button(action: {
+                            print("🟣 [DEFINE_SWATH_BTN] Define Swath button tapped")
+                        }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "square.3.layers.3d.top.filled")
+                                    .font(.system(size: 22, weight: .semibold))
+                                Text("Define Swath")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.purple.opacity(0.8))
+                            .cornerRadius(10)
+                        }
+                        .buttonStyle(.plain)
+                        }
                         .padding(.horizontal, 40)
                         .padding(.bottom, 60)
                     } else {
@@ -886,7 +909,7 @@ struct ARViewWithOverlays: View {
                 }
                 .zIndex(997)
             }
-            
+
             // Place AR Marker Button + Strategy Picker (bottom) - only in idle mode with no triangle selected
             // Exclude Swath Survey mode - it has its own workflow
             if currentMode == .idle && selectedTriangle == nil && arViewLaunchContext.launchMode != .swathSurvey {

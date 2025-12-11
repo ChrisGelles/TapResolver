@@ -1846,7 +1846,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             print("⚠️ Could not retrieve triangle after marking as calibrated")
         }
         
-        statusText = "✅ Triangle calibrated with quality \(Int(quality * 100))%"
+        statusText = ""
         
         print("🎉 ARCalibrationCoordinator: Triangle \(String(triangle.id.uuidString.prefix(8))) calibration complete (quality: \(Int(quality * 100))%)")
         
@@ -1924,37 +1924,29 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         print("   Found \(containingTriangles.count) triangle(s) containing this vertex")
         
-        // Find the best triangle to activate (one with most vertices already planted)
-        var bestTriangle: TrianglePatch? = nil
-        var bestPlantedCount = 0
+        // Track how many triangles we process
+        var processedCount = 0
         
+        // Process ALL adjacent triangles, not just "best candidate"
         for triangle in containingTriangles {
             // Count how many vertices have positions in this session
             let plantedCount = triangle.vertexIDs.filter { mapPointARPositions[$0] != nil }.count
             
             // Skip if already fully planted (3 vertices)
-            guard plantedCount < 3 else { continue }
+            guard plantedCount < 3 else {
+                print("   Triangle \(String(triangle.id.uuidString.prefix(8))): Already fully planted, skipping")
+                continue
+            }
             
             // Skip if already in sessionCalibratedTriangles
-            guard !sessionCalibratedTriangles.contains(triangle.id) else { continue }
-            
-            if plantedCount > bestPlantedCount {
-                bestPlantedCount = plantedCount
-                bestTriangle = triangle
+            guard !sessionCalibratedTriangles.contains(triangle.id) else {
+                print("   Triangle \(String(triangle.id.uuidString.prefix(8))): Already calibrated this session, skipping")
+                continue
             }
-        }
-        
-        if let triangle = bestTriangle {
-            print("   Best candidate: Triangle \(String(triangle.id.uuidString.prefix(8))) with \(bestPlantedCount) vertices planted")
             
-            // Set this as the active triangle
-            activeTriangleID = triangle.id
+            print("   Processing Triangle \(String(triangle.id.uuidString.prefix(8))) with \(plantedCount) vertices planted")
             
-            // Transition to readyToFill
-            calibrationState = .readyToFill
-            print("🎯 CalibrationState → Ready to Fill (from ghost refresh)")
-            
-            // Post notification to create ghosts for unplanted vertices
+            // Post notification to create ghosts for unplanted vertices of THIS triangle
             NotificationCenter.default.post(
                 name: NSNotification.Name("RefreshAdjacentGhosts"),
                 object: nil,
@@ -1963,14 +1955,15 @@ final class ARCalibrationCoordinator: ObservableObject {
                     "placedMapPointID": placedMapPointID
                 ]
             )
-        } else {
-            print("   No suitable adjacent triangle found - staying in current state")
-            // Still transition out of surveyMode if we were in it
-            if case .surveyMode = calibrationState {
-                calibrationState = .readyToFill
-                print("🎯 CalibrationState → Ready to Fill (no adjacent triangle)")
-            }
+            
+            processedCount += 1
         }
+        
+        print("👻 [REFRESH_GHOSTS] Processed \(processedCount) adjacent triangle(s)")
+        
+        // Transition to readyToFill state
+        calibrationState = .readyToFill
+        print("🎯 CalibrationState → Ready to Fill (from ghost refresh)")
     }
     
     var stateDescription: String {
@@ -2557,7 +2550,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("💾 [ADJACENT_ACTIVATE] Persisted calibration for triangle \(String(adjacentTriangle.id.uuidString.prefix(8)))")
         
         // Update status
-        statusText = "Triangle calibrated via crawl"
+        statusText = ""
         progressDots = (true, true, true)
         
         // Clear ghost selection state
