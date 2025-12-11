@@ -21,6 +21,7 @@ struct ContentView: View {
     @StateObject private var transformProcessor = TransformProcessor()
     @EnvironmentObject private var trianglePatchStore: TrianglePatchStore
     @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
+    @EnvironmentObject private var surveySelectionCoordinator: SurveySelectionCoordinator
 
     var body: some View {
         Group {
@@ -40,6 +41,7 @@ struct ContentView: View {
             set: { newValue in
                 if !newValue {
                     arViewLaunchContext.dismiss()
+                    surveySelectionCoordinator.reset()
                 }
             }
         )) {
