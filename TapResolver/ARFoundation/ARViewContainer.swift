@@ -984,76 +984,33 @@ struct ARViewContainer: UIViewRepresentable {
             var validationFailures: [UUID] = []
             
             for vertexID in region.allVertexIDs {
-                var foundPosition: simd_float3?
-                var foundSource: String = "none"
-                
-                // Find the MapPoint
-                guard let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }) else {
-                    print("❌ [REGION_SURVEY] Vertex \(String(vertexID.uuidString.prefix(8))): MapPoint not found")
-                    validationFailures.append(vertexID)
+                // Priority 1: Session position (confirmed marker placed this session)
+                if let coordinator = self.arCalibrationCoordinator,
+                   let sessionPos = coordinator.mapPointARPositions[vertexID] {
+                    vertexPositions3D[vertexID] = sessionPos
+                    print("📍 [REGION_SURVEY] Vertex \(String(vertexID.uuidString.prefix(8))): session position")
                     continue
                 }
                 
-                // ============================================================
-                // ESSENTIAL FOR SURVEY MARKER FILL: Position Source Priority
-                // This order is critical for both Triangle Fill and Swath Fill.
-                // mapPointARPositions is the authoritative source for positions
-                // planted in the current session (calibration crawl OR swath anchors).
-                // ============================================================
-                
-                // PRIORITY 0: mapPointARPositions (current session - calibration crawl & swath anchors)
-                // This is THE authoritative source for session-planted positions.
-                // Both registerMarker() and registerSwathAnchor() store positions here.
-                if let coordinator = self.arCalibrationCoordinator,
-                   let sessionPosition = coordinator.mapPointARPositions[vertexID] {
-                    foundPosition = sessionPosition
-                    foundSource = "mapPointARPositions"
+                // Priority 2: Ghost position (predicted position from session-level transform)
+                if let ghostPos = ghostMarkerPositions[vertexID] {
+                    vertexPositions3D[vertexID] = ghostPos
+                    print("👻 [REGION_SURVEY] Vertex \(String(vertexID.uuidString.prefix(8))): ghost position")
+                    continue
                 }
                 
-                // Find marker ID if associated with any triangle (needed for legacy checks below)
-                var markerUUID: UUID? = nil
-                if foundPosition == nil {
-                    for tri in region.triangles {
-                        if let idx = tri.vertexIDs.firstIndex(of: vertexID),
-                           idx < tri.arMarkerIDs.count,
-                           !tri.arMarkerIDs[idx].isEmpty {
-                            markerUUID = UUID(uuidString: tri.arMarkerIDs[idx])
-                            break
-                        }
-                    }
+                // Priority 3: Baked position (historical consensus projected to session)
+                if let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }),
+                   let bakedPos = mapPoint.bakedCanonicalPosition,
+                   let sessionPos = arCalibrationCoordinator?.projectBakedToSession(bakedPos) {
+                    vertexPositions3D[vertexID] = sessionPos
+                    print("🧱 [REGION_SURVEY] Vertex \(String(vertexID.uuidString.prefix(8))): baked position")
+                    continue
                 }
                 
-                // PRIORITY 1: placedMarkers (current session runtime - SceneKit node positions)
-                if foundPosition == nil, let mUUID = markerUUID, let markerNode = placedMarkers[mUUID] {
-                    foundPosition = markerNode.simdPosition
-                    foundSource = "placedMarkers"
-                }
-                
-                // PRIORITY 2: ARWorldMapStore (current session persisted)
-                if foundPosition == nil, let mUUID = markerUUID,
-                   let storedMarker = arWorldMapStore.markers.first(where: { UUID(uuidString: $0.id) == mUUID }),
-                   storedMarker.sessionID == arWorldMapStore.currentSessionID {
-                    foundPosition = storedMarker.positionInSession
-                    foundSource = "ARWorldMapStore"
-                }
-                
-                // PRIORITY 3: Baked position projected to session
-                if foundPosition == nil,
-                   let coordinator = self.arCalibrationCoordinator,
-                   coordinator.hasValidSessionTransform,
-                   let bakedPosition = mapPoint.bakedCanonicalPosition,
-                   let sessionPosition = coordinator.projectBakedToSession(bakedPosition) {
-                    foundPosition = sessionPosition
-                    foundSource = "bakedPosition"
-                }
-                
-                if let pos = foundPosition {
-                    vertexPositions3D[vertexID] = pos
-                    print("✅ [REGION_SURVEY] Vertex \(String(vertexID.uuidString.prefix(8))): \(foundSource)")
-                } else {
-                    print("❌ [REGION_SURVEY] Vertex \(String(vertexID.uuidString.prefix(8))): No position source")
-                    validationFailures.append(vertexID)
-                }
+                // No position available
+                validationFailures.append(vertexID)
+                print("❌ [REGION_SURVEY] Vertex \(String(vertexID.uuidString.prefix(8))): NO POSITION")
             }
             
             // Check validation
@@ -1063,7 +1020,11 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
+            let sessionCount = vertexPositions3D.filter { arCalibrationCoordinator?.mapPointARPositions[$0.key] != nil }.count
+            let ghostCount = vertexPositions3D.filter { arCalibrationCoordinator?.mapPointARPositions[$0.key] == nil && ghostMarkerPositions[$0.key] != nil }.count
+            let bakedCount = vertexPositions3D.count - sessionCount - ghostCount
             print("✅ [REGION_SURVEY] All \(region.allVertexIDs.count) vertices validated")
+            print("   Sources: \(sessionCount) session, \(ghostCount) ghost, \(bakedCount) baked")
             
             // STEP 2: Build triangle vertex lookup (pixels)
             var triangleVertices_px: [UUID: [CGPoint]] = [:]
