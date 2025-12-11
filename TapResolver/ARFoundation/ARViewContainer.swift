@@ -994,19 +994,37 @@ struct ARViewContainer: UIViewRepresentable {
                     continue
                 }
                 
-                // Find marker ID if associated with any triangle
+                // ============================================================
+                // ESSENTIAL FOR SURVEY MARKER FILL: Position Source Priority
+                // This order is critical for both Triangle Fill and Swath Fill.
+                // mapPointARPositions is the authoritative source for positions
+                // planted in the current session (calibration crawl OR swath anchors).
+                // ============================================================
+                
+                // PRIORITY 0: mapPointARPositions (current session - calibration crawl & swath anchors)
+                // This is THE authoritative source for session-planted positions.
+                // Both registerMarker() and registerSwathAnchor() store positions here.
+                if let coordinator = self.arCalibrationCoordinator,
+                   let sessionPosition = coordinator.mapPointARPositions[vertexID] {
+                    foundPosition = sessionPosition
+                    foundSource = "mapPointARPositions"
+                }
+                
+                // Find marker ID if associated with any triangle (needed for legacy checks below)
                 var markerUUID: UUID? = nil
-                for tri in region.triangles {
-                    if let idx = tri.vertexIDs.firstIndex(of: vertexID),
-                       idx < tri.arMarkerIDs.count,
-                       !tri.arMarkerIDs[idx].isEmpty {
-                        markerUUID = UUID(uuidString: tri.arMarkerIDs[idx])
-                        break
+                if foundPosition == nil {
+                    for tri in region.triangles {
+                        if let idx = tri.vertexIDs.firstIndex(of: vertexID),
+                           idx < tri.arMarkerIDs.count,
+                           !tri.arMarkerIDs[idx].isEmpty {
+                            markerUUID = UUID(uuidString: tri.arMarkerIDs[idx])
+                            break
+                        }
                     }
                 }
                 
-                // PRIORITY 1: placedMarkers (current session runtime)
-                if let mUUID = markerUUID, let markerNode = placedMarkers[mUUID] {
+                // PRIORITY 1: placedMarkers (current session runtime - SceneKit node positions)
+                if foundPosition == nil, let mUUID = markerUUID, let markerNode = placedMarkers[mUUID] {
                     foundPosition = markerNode.simdPosition
                     foundSource = "placedMarkers"
                 }
