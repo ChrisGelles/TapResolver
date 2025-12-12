@@ -74,6 +74,17 @@ class ARMarkerRenderer {
         sphereNode.name = "arMarkerSphere_\(options.markerID.uuidString)"
         markerNode.addChildNode(sphereNode)
         
+        // Inner sphere - visible from inside (flipped normals)
+        // 2mm smaller radius, dark blue, front-face culling shows interior
+        let innerSphere = SCNSphere(radius: options.radius - 0.002)
+        innerSphere.firstMaterial?.diffuse.contents = UIColor(red: 0.1, green: 0.15, blue: 0.4, alpha: 1.0)  // Dark blue
+        innerSphere.firstMaterial?.cullMode = .front  // Flip normals - visible from inside
+        innerSphere.firstMaterial?.isDoubleSided = false
+        let innerSphereNode = SCNNode(geometry: innerSphere)
+        innerSphereNode.position = SCNVector3(0, options.userDeviceHeight, 0)
+        innerSphereNode.name = "arMarkerInnerSphere_\(options.markerID.uuidString)"
+        markerNode.addChildNode(innerSphereNode)
+        
         // Badge (optional)
         if let badgeColor = options.badgeColor {
             let badgeSphere = SCNSphere(radius: 0.05)
