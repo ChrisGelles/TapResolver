@@ -44,11 +44,13 @@ class ARMarkerRenderer {
         markerNode.addChildNode(fillNode)
         
         // Vertical line (rod)
-        let line = SCNCylinder(radius: 0.00125, height: CGFloat(options.userDeviceHeight))
+        // Rod ends at bottom of sphere + 2mm overlap for visual connection
+        let rodHeight = CGFloat(options.userDeviceHeight) - options.radius + 0.002
+        let line = SCNCylinder(radius: 0.00125, height: rodHeight)
         line.firstMaterial?.diffuse.contents = UIColor.ARPalette.markerLine
         let lineNode = SCNNode(geometry: line)
         // Set pivot at bottom so rod grows upward from ground
-        lineNode.pivot = SCNMatrix4MakeTranslation(0, -Float(line.height) / 2.0, 0)
+        lineNode.pivot = SCNMatrix4MakeTranslation(0, -Float(rodHeight) / 2.0, 0)
         // Position at ground level (pivot is at bottom, so node position is at ground)
         lineNode.position = SCNVector3(0, 0, 0)
         markerNode.addChildNode(lineNode)
