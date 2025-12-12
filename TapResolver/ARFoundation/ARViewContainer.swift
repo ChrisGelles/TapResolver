@@ -1393,12 +1393,21 @@ struct ARViewContainer: UIViewRepresentable {
                 if isInside && !wasInside {
                     // ENTERED sphere - knock + start buzz
                     triggeredSurveyMarkers.insert(markerID)
-                    print("💥 [SURVEY_COLLISION] ENTERED marker \(String(markerID.uuidString.prefix(8))) at distance \(String(format: "%.3f", distance))m")
+                    
+                    // Calculate initial intensity for buzz
+                    let initialIntensity: Float
+                    if distance < deadZoneRadius {
+                        initialIntensity = 0.0
+                    } else {
+                        initialIntensity = (distance - deadZoneRadius) / (sphereRadius - deadZoneRadius)
+                    }
+                    
+                    print("💥 [SURVEY_COLLISION] ENTERED marker \(String(markerID.uuidString.prefix(8))) at distance \(String(format: "%.3f", distance))m, intensity \(String(format: "%.2f", initialIntensity))")
                     
                     NotificationCenter.default.post(
                         name: NSNotification.Name("SurveyMarkerEntered"),
                         object: nil,
-                        userInfo: ["markerID": markerID, "distance": distance, "radius": sphereRadius]
+                        userInfo: ["markerID": markerID, "distance": distance, "radius": sphereRadius, "intensity": initialIntensity]
                     )
                 } else if !isInside && wasInside {
                     // EXITED sphere - knock + stop buzz

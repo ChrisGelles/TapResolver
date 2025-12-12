@@ -145,9 +145,10 @@ struct ARViewWithOverlays: View {
             // Survey marker ENTERED - knock + start buzz
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SurveyMarkerEntered"))) { notification in
                 if let markerID = notification.userInfo?["markerID"] as? UUID {
-                    print("📳 [HAPTIC] ENTER knock for marker \(String(markerID.uuidString.prefix(8)))")
+                    let intensity = notification.userInfo?["intensity"] as? Float ?? 0.5
+                    print("📳 [HAPTIC] ENTER knock for marker \(String(markerID.uuidString.prefix(8))), starting buzz at \(String(format: "%.2f", intensity))")
                     playHardKnock()
-                    startContinuousBuzz()
+                    startContinuousBuzz(initialIntensity: intensity)
                 }
             }
             // Survey marker EXITED - knock + stop buzz
@@ -160,7 +161,9 @@ struct ARViewWithOverlays: View {
             }
             // Survey marker PROXIMITY - update buzz intensity
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SurveyMarkerProximity"))) { notification in
-                if let intensity = notification.userInfo?["intensity"] as? Float {
+                if let intensity = notification.userInfo?["intensity"] as? Float,
+                   let distance = notification.userInfo?["distance"] as? Float {
+                    print("📶 [HAPTIC] Proximity update: distance=\(String(format: "%.3f", distance))m, intensity=\(String(format: "%.2f", intensity))")
                     updateBuzzIntensity(intensity)
                 }
             }
@@ -1182,15 +1185,18 @@ struct ARViewWithOverlays: View {
     }
     
     /// Start continuous buzz haptic (called on sphere entry)
-    private func startContinuousBuzz() {
+    private func startContinuousBuzz(initialIntensity: Float) {
         guard let engine = hapticEngine else {
             print("⚠️ [HAPTICS] Engine not available for continuous buzz")
             return
         }
         
+        // Clamp intensity to valid range, with minimum of 0.1 to ensure haptic is audible
+        let startIntensity = max(0.1, min(1.0, initialIntensity))
+        
         do {
-            // Create a continuous haptic event with initial intensity 0
-            let intensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.0)
+            // Create a continuous haptic event with the initial intensity
+            let intensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: startIntensity)
             let sharpness = CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.3)
             
             let event = CHHapticEvent(
@@ -1204,7 +1210,7 @@ struct ARViewWithOverlays: View {
             continuousPlayer = try engine.makeAdvancedPlayer(with: pattern)
             try continuousPlayer?.start(atTime: CHHapticTimeImmediate)
             isInsideSphere = true
-            print("📳 [HAPTICS] Started continuous buzz")
+            print("📳 [HAPTICS] Started continuous buzz at intensity \(String(format: "%.2f", startIntensity))")
         } catch {
             print("⚠️ [HAPTICS] Failed to start continuous buzz: \(error.localizedDescription)")
         }
