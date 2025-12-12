@@ -50,6 +50,10 @@ struct ARViewWithOverlays: View {
     @State private var continuousPlayer: CHHapticAdvancedPatternPlayer?
     @State private var isInsideSphere: Bool = false
     
+    // Survey marker dwell timer
+    @State private var dwellTimerValue: Double = -3.0
+    @State private var dwellTimer: Timer?
+    
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
@@ -142,21 +146,23 @@ struct ARViewWithOverlays: View {
                     userContainingTriangleID = newTriangleID
                 }
             }
-            // Survey marker ENTERED - knock + start buzz
+            // Survey marker ENTERED - knock + start buzz + start timer
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SurveyMarkerEntered"))) { notification in
                 if let markerID = notification.userInfo?["markerID"] as? UUID {
                     let intensity = notification.userInfo?["intensity"] as? Float ?? 0.5
                     print("📳 [HAPTIC] ENTER knock for marker \(String(markerID.uuidString.prefix(8))), starting buzz at \(String(format: "%.2f", intensity))")
                     playHardKnock()
                     startContinuousBuzz(initialIntensity: intensity)
+                    startDwellTimer()
                 }
             }
-            // Survey marker EXITED - knock + stop buzz
+            // Survey marker EXITED - knock + stop buzz + stop timer
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SurveyMarkerExited"))) { notification in
                 if let markerID = notification.userInfo?["markerID"] as? UUID {
                     print("📳 [HAPTIC] EXIT knock for marker \(String(markerID.uuidString.prefix(8)))")
                     playHardKnock()
                     stopContinuousBuzz()
+                    stopDwellTimer()
                 }
             }
             // Survey marker PROXIMITY - update buzz intensity
@@ -1000,6 +1006,20 @@ struct ARViewWithOverlays: View {
             // Place AR Marker Button + Strategy Picker (bottom) - only in idle mode with no triangle selected
             // Exclude Swath Survey mode - it has its own workflow
             if currentMode == .idle && selectedTriangle == nil && arViewLaunchContext.launchMode != .swathSurvey {
+                // Dwell Timer Display - centered on screen when inside sphere
+                if isInsideSphere {
+                    VStack(spacing: 4) {
+                        Text(String(format: "%.1f", dwellTimerValue))
+                            .font(.system(size: 72, weight: .heavy, design: .monospaced))
+                            .foregroundColor(dwellTimerColor())
+                        Text("sec")
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundColor(dwellTimerColor().opacity(0.8))
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .zIndex(999)
+                }
+                
                 VStack {
                     Spacer()
                     
@@ -1243,6 +1263,36 @@ struct ARViewWithOverlays: View {
             print("📳 [HAPTICS] Stopped continuous buzz")
         } catch {
             print("⚠️ [HAPTICS] Failed to stop continuous buzz: \(error.localizedDescription)")
+        }
+    }
+    
+    // MARK: - Dwell Timer Helpers
+    
+    /// Start the dwell timer (called on sphere entry)
+    private func startDwellTimer() {
+        dwellTimerValue = -3.0
+        dwellTimer?.invalidate()
+        dwellTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            dwellTimerValue += 0.1
+        }
+        print("⏱️ [DWELL] Timer started at -3.0")
+    }
+    
+    /// Stop the dwell timer (called on sphere exit)
+    private func stopDwellTimer() {
+        dwellTimer?.invalidate()
+        dwellTimer = nil
+        print("⏱️ [DWELL] Timer stopped at \(String(format: "%.1f", dwellTimerValue))")
+    }
+    
+    /// Get color for current dwell timer value
+    private func dwellTimerColor() -> Color {
+        if dwellTimerValue < 0 {
+            return .orange
+        } else if dwellTimerValue < 3.0 {
+            return .yellow
+        } else {
+            return .green
         }
     }
     
