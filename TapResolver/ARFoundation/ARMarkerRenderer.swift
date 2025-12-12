@@ -75,11 +75,19 @@ class ARMarkerRenderer {
         markerNode.addChildNode(sphereNode)
         
         // Inner sphere - visible from inside (flipped normals)
-        // 2mm smaller radius, dark blue, front-face culling shows interior
+        // Gradient texture: dark blue at poles, brighter at equator
         let innerSphere = SCNSphere(radius: options.radius - 0.002)
-        innerSphere.firstMaterial?.diffuse.contents = UIColor(red: 0.1, green: 0.15, blue: 0.4, alpha: 1.0)  // Dark blue
+        let poleColor = UIColor(red: 0.05, green: 0.08, blue: 0.2, alpha: 1.0)      // Dark blue-black
+        let equatorColor = UIColor(red: 0.8, green: 0.4, blue: 0.1, alpha: 1.0)    // Brighter blue
+        let gradientTexture = createEquatorGradientTexture(
+            poleColor: poleColor,
+            equatorColor: equatorColor,
+            falloff: 0.5  // Slightly sharper than linear - nice visible band
+        )
+        innerSphere.firstMaterial?.diffuse.contents = gradientTexture
         innerSphere.firstMaterial?.cullMode = .front  // Flip normals - visible from inside
         innerSphere.firstMaterial?.isDoubleSided = false
+        innerSphere.firstMaterial?.lightingModel = .constant  // Ignore scene lighting for consistent color
         let innerSphereNode = SCNNode(geometry: innerSphere)
         innerSphereNode.position = SCNVector3(0, options.userDeviceHeight, 0)
         innerSphereNode.name = "arMarkerInnerSphere_\(options.markerID.uuidString)"
@@ -250,6 +258,64 @@ class ARMarkerRenderer {
             sphereFinalSettle, 
             ensureFinalPosition
         ]))
+    }
+    
+    // MARK: - Texture Generation
+    
+    /// Creates a vertical gradient texture for inner sphere
+    /// Poles are dark, equator is bright - simulates interior lighting
+    /// - Parameters:
+    ///   - poleColor: Color at top and bottom of sphere
+    ///   - equatorColor: Color at middle band
+    ///   - falloff: Controls gradient sharpness (1.0 = linear, >1 = sharper equator band, <1 = softer)
+    /// - Returns: UIImage texture for sphere diffuse map
+    private static func createEquatorGradientTexture(
+        poleColor: UIColor,
+        equatorColor: UIColor,
+        falloff: CGFloat = 2.0,
+        height: Int = 256
+    ) -> UIImage {
+        let width = 1
+        let size = CGSize(width: width, height: height)
+        
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { context in
+            for y in 0..<height {
+                // Normalize y to 0...1 (pole to pole)
+                let normalizedY = CGFloat(y) / CGFloat(height - 1)
+                
+                // Distance from equator (0 at equator, 1 at poles)
+                // Equator is at normalizedY = 0.5
+                let distanceFromEquator = abs(normalizedY - 0.5) * 2.0  // 0 at equator, 1 at poles
+                
+                // Apply falloff curve
+                let blendFactor = pow(distanceFromEquator, falloff)
+                
+                // Interpolate between equator color (center) and pole color (edges)
+                let color = interpolateColor(from: equatorColor, to: poleColor, factor: blendFactor)
+                
+                context.cgContext.setFillColor(color.cgColor)
+                context.cgContext.fill(CGRect(x: 0, y: y, width: width, height: 1))
+            }
+        }
+    }
+    
+    /// Linear color interpolation
+    private static func interpolateColor(from: UIColor, to: UIColor, factor: CGFloat) -> UIColor {
+        var fromR: CGFloat = 0, fromG: CGFloat = 0, fromB: CGFloat = 0, fromA: CGFloat = 0
+        var toR: CGFloat = 0, toG: CGFloat = 0, toB: CGFloat = 0, toA: CGFloat = 0
+        
+        from.getRed(&fromR, green: &fromG, blue: &fromB, alpha: &fromA)
+        to.getRed(&toR, green: &toG, blue: &toB, alpha: &toA)
+        
+        let clampedFactor = max(0, min(1, factor))
+        
+        return UIColor(
+            red: fromR + (toR - fromR) * clampedFactor,
+            green: fromG + (toG - fromG) * clampedFactor,
+            blue: fromB + (toB - fromB) * clampedFactor,
+            alpha: fromA + (toA - fromA) * clampedFactor
+        )
     }
 }
 
