@@ -10,6 +10,7 @@ import SwiftUI
 import UIKit
 import Combine
 import simd
+import CoreHaptics
 
 struct ARViewWithOverlays: View {
     @Binding var isPresented: Bool
@@ -41,6 +42,9 @@ struct ARViewWithOverlays: View {
     
     // Debounce state to prevent accidental double-taps on Place Marker
     @State private var isPlaceMarkerCoolingDown = false
+    
+    // Haptic engine for custom patterns
+    @State private var hapticEngine: CHHapticEngine?
     
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
@@ -991,9 +995,73 @@ struct ARViewWithOverlays: View {
                         .cornerRadius(12)
                     }
                     .padding(.horizontal, 40)
+                    .padding(.bottom, 12)
+                    
+                    // Haptic Test Buttons Row
+                    HStack(spacing: 12) {
+                        // 1. Hard knock
+                        Button(action: { playHardKnock() }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "hand.point.up.fill")
+                                    .font(.title2)
+                                Text("Hard")
+                                    .font(.caption2)
+                            }
+                            .foregroundColor(.white)
+                            .frame(width: 70, height: 60)
+                            .background(Color.orange.opacity(0.85))
+                            .cornerRadius(10)
+                        }
+                        
+                        // 2. Buzz
+                        Button(action: { playBuzz() }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "waveform")
+                                    .font(.title2)
+                                Text("Buzz")
+                                    .font(.caption2)
+                            }
+                            .foregroundColor(.white)
+                            .frame(width: 70, height: 60)
+                            .background(Color.purple.opacity(0.85))
+                            .cornerRadius(10)
+                        }
+                        
+                        // 3. Fading buzz
+                        Button(action: { playFadingBuzz() }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "waveform.path.ecg")
+                                    .font(.title2)
+                                Text("Fade")
+                                    .font(.caption2)
+                            }
+                            .foregroundColor(.white)
+                            .frame(width: 70, height: 60)
+                            .background(Color.blue.opacity(0.85))
+                            .cornerRadius(10)
+                        }
+                        
+                        // 4. Gentle knock
+                        Button(action: { playGentleKnock() }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "hand.tap.fill")
+                                    .font(.title2)
+                                Text("Soft")
+                                    .font(.caption2)
+                            }
+                            .foregroundColor(.white)
+                            .frame(width: 70, height: 60)
+                            .background(Color.green.opacity(0.85))
+                            .cornerRadius(10)
+                        }
+                    }
+                    .padding(.horizontal, 40)
                     .padding(.bottom, 60)
                 }
                 .zIndex(997)
+                .onAppear {
+                    prepareHaptics()
+                }
             }
             
             // Calibrate / Relocalize buttons - shown when triangle is selected but NOT calibrated or NOT in calibration mode
@@ -1050,6 +1118,107 @@ struct ARViewWithOverlays: View {
                 }
                 .zIndex(990)
             }
+        }
+    }
+    
+    // MARK: - Haptic Feedback Helpers
+    
+    /// Initialize the CoreHaptics engine
+    private func prepareHaptics() {
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else {
+            print("⚠️ [HAPTICS] Device does not support haptics")
+            return
+        }
+        
+        do {
+            hapticEngine = try CHHapticEngine()
+            try hapticEngine?.start()
+            print("✅ [HAPTICS] Engine started")
+        } catch {
+            print("⚠️ [HAPTICS] Engine failed to start: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Hard knock haptic
+    private func playHardKnock() {
+        let generator = UIImpactFeedbackGenerator(style: .heavy)
+        generator.prepare()
+        generator.impactOccurred(intensity: 1.0)
+        print("🔨 [HAPTICS] Hard knock")
+    }
+    
+    /// Gentle knock haptic
+    private func playGentleKnock() {
+        let generator = UIImpactFeedbackGenerator(style: .soft)
+        generator.prepare()
+        generator.impactOccurred(intensity: 0.5)
+        print("👆 [HAPTICS] Gentle knock")
+    }
+    
+    /// Buzz haptic (continuous vibration, ~0.3s)
+    private func playBuzz() {
+        guard let engine = hapticEngine else {
+            print("⚠️ [HAPTICS] Engine not available for buzz")
+            // Fallback to notification haptic
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.warning)
+            return
+        }
+        
+        do {
+            let intensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.8)
+            let sharpness = CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.3)
+            
+            let event = CHHapticEvent(
+                eventType: .hapticContinuous,
+                parameters: [intensity, sharpness],
+                relativeTime: 0,
+                duration: 0.3
+            )
+            
+            let pattern = try CHHapticPattern(events: [event], parameters: [])
+            let player = try engine.makePlayer(with: pattern)
+            try player.start(atTime: 0)
+            print("📳 [HAPTICS] Buzz")
+        } catch {
+            print("⚠️ [HAPTICS] Buzz failed: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Fading buzz haptic (decays over 1 second)
+    private func playFadingBuzz() {
+        guard let engine = hapticEngine else {
+            print("⚠️ [HAPTICS] Engine not available for fading buzz")
+            return
+        }
+        
+        do {
+            let intensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: 1.0)
+            let sharpness = CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5)
+            
+            let event = CHHapticEvent(
+                eventType: .hapticContinuous,
+                parameters: [intensity, sharpness],
+                relativeTime: 0,
+                duration: 1.0
+            )
+            
+            // Create intensity curve that fades from 1.0 to 0.0 over 1 second
+            let fadeStart = CHHapticParameterCurve.ControlPoint(relativeTime: 0, value: 1.0)
+            let fadeEnd = CHHapticParameterCurve.ControlPoint(relativeTime: 1.0, value: 0.0)
+            
+            let intensityCurve = CHHapticParameterCurve(
+                parameterID: .hapticIntensityControl,
+                controlPoints: [fadeStart, fadeEnd],
+                relativeTime: 0
+            )
+            
+            let pattern = try CHHapticPattern(events: [event], parameterCurves: [intensityCurve])
+            let player = try engine.makePlayer(with: pattern)
+            try player.start(atTime: 0)
+            print("📉 [HAPTICS] Fading buzz")
+        } catch {
+            print("⚠️ [HAPTICS] Fading buzz failed: \(error.localizedDescription)")
         }
     }
 }
