@@ -970,53 +970,28 @@ struct ARViewWithOverlays: View {
                 VStack {
                     Spacer()
                     
-                    // Strategy Picker (developer UI)
-                    VStack(spacing: 8) {
-                        Text("Relocalization Strategy")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.8))
-                        
-                        Picker("Strategy", selection: Binding(
-                            get: { relocalizationCoordinator.selectedStrategyName },
-                            set: { newName in
-                                relocalizationCoordinator.selectedStrategyName = newName
-                                // Update selectedStrategyID to match
-                                if let strategy = relocalizationCoordinator.availableStrategies.first(where: { $0.displayName == newName }) {
-                                    relocalizationCoordinator.selectedStrategyID = strategy.id
-                                }
-                            }
-                        )) {
-                            ForEach(relocalizationCoordinator.availableStrategies, id: \.id) { strategy in
-                                Text(strategy.displayName).tag(strategy.displayName)
-                            }
+                    // Test Survey Marker button - for development testing
+                    Button(action: {
+                        print("🧪 [TEST_SURVEY_BTN] Button tapped")
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("PlaceTestSurveyMarker"),
+                            object: nil
+                        )
+                    }) {
+                        HStack {
+                            Image(systemName: "mappin.circle.fill")
+                                .font(.title2)
+                            Text("Place Test Survey Marker")
+                                .font(.headline)
                         }
-                        .pickerStyle(.segmented)
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(8)
+                        .foregroundColor(.white)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(Color.red.opacity(0.85))
+                        .cornerRadius(12)
                     }
                     .padding(.horizontal, 40)
-                    .padding(.bottom, 12)
-                    
-                    // Place AR Marker button - only in idle mode (not during calibration)
-                    if case .idle = arCalibrationCoordinator.calibrationState {
-                        Button(action: {
-                            print("🔍 [PLACE_AR_MARKER_BTN] Button tapped (idle mode)")
-                            NotificationCenter.default.post(
-                                name: NSNotification.Name("PlaceMarkerAtCursor"),
-                                object: nil
-                            )
-                        }) {
-                            Text("Place AR Marker")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .padding()
-                                .frame(maxWidth: .infinity)
-                                .background(.ultraThickMaterial)
-                                .cornerRadius(12)
-                        }
-                        .padding(.horizontal, 40)
-                        .padding(.bottom, 60)
-                    }
+                    .padding(.bottom, 60)
                 }
                 .zIndex(997)
             }

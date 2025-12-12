@@ -201,6 +201,14 @@ struct ARViewContainer: UIViewRepresentable {
                 object: nil
             )
             
+            // Listen for PlaceTestSurveyMarker notification (generic AR view testing)
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handlePlaceTestSurveyMarker),
+                name: NSNotification.Name("PlaceTestSurveyMarker"),
+                object: nil
+            )
+            
             // Fill Swath notification observer
             NotificationCenter.default.addObserver(
                 forName: NSNotification.Name("FillSwathWithSurveyMarkers"),
@@ -337,6 +345,39 @@ struct ARViewContainer: UIViewRepresentable {
                 // Normal marker placement
                 let _ = placeMarker(at: position)
             }
+        }
+        
+        @objc func handlePlaceTestSurveyMarker(_ notification: Notification) {
+            print("🧪 [TEST_SURVEY_MARKER] Button tapped")
+            
+            guard let sceneView = sceneView else {
+                print("⚠️ [TEST_SURVEY_MARKER] No sceneView available")
+                return
+            }
+            
+            guard let position = currentCursorPosition else {
+                print("⚠️ [TEST_SURVEY_MARKER] No cursor position available")
+                return
+            }
+            
+            let markerID = UUID()
+            
+            // Create marker using centralized renderer with red color for survey
+            let options = MarkerOptions(
+                color: UIColor.red,
+                markerID: markerID,
+                userDeviceHeight: userDeviceHeight,
+                radius: 0.035,  // Same as production survey markers
+                animateOnAppearance: true  // Animation for visual feedback
+            )
+            let markerNode = ARMarkerRenderer.createNode(at: position, options: options)
+            markerNode.name = "surveyMarker_\(markerID.uuidString)"
+            
+            sceneView.scene.rootNode.addChildNode(markerNode)
+            surveyMarkers[markerID] = markerNode
+            
+            print("🧪 [TEST_SURVEY_MARKER] Placed at (\(String(format: "%.2f, %.2f, %.2f", position.x, position.y, position.z)))")
+            print("   Total survey markers in scene: \(surveyMarkers.count)")
         }
         
         @objc func handleFillTriangleWithSurveyMarkers(notification: Notification) {
