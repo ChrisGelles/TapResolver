@@ -201,13 +201,78 @@ struct ARViewContainer: UIViewRepresentable {
                 object: nil
             )
             
-            // Listen for FillSwathWithSurveyMarkers notification
+            // Fill Swath notification observer
             NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(handleFillSwathWithSurveyMarkers),
-                name: NSNotification.Name("FillSwathWithSurveyMarkers"),
-                object: nil
-            )
+                forName: NSNotification.Name("FillSwathWithSurveyMarkers"),
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self else { return }
+                
+                print("🟢 [FILL_SWATH] Notification received")
+                
+                guard let spacing = notification.userInfo?["spacing"] as? Float,
+                      let triangleStore = notification.userInfo?["triangleStore"] as? TrianglePatchStore else {
+                    print("⚠️ [FILL_SWATH] Missing required userInfo")
+                    return
+                }
+                
+                // Collect all triangles with valid vertex positions
+                var fillableTriangles: [TrianglePatch] = []
+                var skippedTriangles: [UUID] = []
+                
+                for triangle in triangleStore.triangles {
+                    var allVerticesValid = true
+                    
+                    for vertexID in triangle.vertexIDs {
+                        // Check session position
+                        if self.arCalibrationCoordinator?.mapPointARPositions[vertexID] != nil {
+                            continue
+                        }
+                        
+                        // Check ghost position
+                        if self.ghostMarkerPositions[vertexID] != nil {
+                            continue
+                        }
+                        
+                        // Check baked position
+                        if let mapPoint = self.mapPointStore?.points.first(where: { $0.id == vertexID }),
+                           let bakedPos = mapPoint.bakedCanonicalPosition,
+                           self.arCalibrationCoordinator?.projectBakedToSession(bakedPos) != nil {
+                            continue
+                        }
+                        
+                        // No valid position for this vertex
+                        allVerticesValid = false
+                        break
+                    }
+                    
+                    if allVerticesValid {
+                        fillableTriangles.append(triangle)
+                    } else {
+                        skippedTriangles.append(triangle.id)
+                    }
+                }
+                
+                print("🟢 [FILL_SWATH] Found \(fillableTriangles.count) fillable triangle(s), skipped \(skippedTriangles.count)")
+                
+                guard !fillableTriangles.isEmpty else {
+                    print("⚠️ [FILL_SWATH] No fillable triangles found")
+                    self.arCalibrationCoordinator?.exitSurveyMode()
+                    return
+                }
+                
+                // Create swath region and fill
+                let region = SurveyableRegion.swath(fillableTriangles)
+                
+                print("🟢 [FILL_SWATH] Filling swath with \(region.triangleCount) triangle(s)")
+                
+                self.generateSurveyMarkersForRegion(
+                    region,
+                    spacing: spacing,
+                    arWorldMapStore: self.arCalibrationCoordinator?.arStoreAccess ?? ARWorldMapStore()
+                )
+            }
             
             // Listen for triangle calibration complete
             NotificationCenter.default.addObserver(

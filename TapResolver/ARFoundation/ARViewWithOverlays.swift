@@ -881,6 +881,35 @@ struct ARViewWithOverlays: View {
                             .cornerRadius(10)
                         }
                         .buttonStyle(.plain)
+                        
+                        // Fill Swath button
+                        Button(action: {
+                            print("🟢 [FILL_SWATH_BTN] Fill Swath button tapped")
+                            
+                            arCalibrationCoordinator.enterSurveyMode()
+                            
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("FillSwathWithSurveyMarkers"),
+                                object: nil,
+                                userInfo: [
+                                    "spacing": surveySpacing,
+                                    "triangleStore": arCalibrationCoordinator.triangleStoreAccess
+                                ]
+                            )
+                        }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "square.grid.3x3.topleft.filled")
+                                    .font(.system(size: 22, weight: .semibold))
+                                Text("Fill Swath")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.green.opacity(0.8))
+                            .cornerRadius(10)
+                        }
+                        .buttonStyle(.plain)
                         }
                         .padding(.horizontal, 40)
                         .padding(.bottom, 60)
