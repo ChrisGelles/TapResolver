@@ -39,6 +39,9 @@ struct ARViewWithOverlays: View {
     // Track which calibrated triangle the user is currently standing in
     @State private var userContainingTriangleID: UUID? = nil
     
+    // Debounce state to prevent accidental double-taps on Place Marker
+    @State private var isPlaceMarkerCoolingDown = false
+    
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator

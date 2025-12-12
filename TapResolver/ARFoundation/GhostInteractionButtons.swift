@@ -23,6 +23,9 @@ struct GhostInteractionButtons: View {
     let onPlaceMarker: () -> Void
     let onReposition: () -> Void
     
+    // Debounce state to prevent accidental double-taps
+    @State private var isPlaceMarkerCoolingDown = false
+    
     var body: some View {
         if arCalibrationCoordinator.selectedGhostMapPointID != nil {
             if arCalibrationCoordinator.repositionModeActive {
@@ -123,17 +126,25 @@ struct GhostInteractionButtons: View {
         } else {
             // No ghost nearby - show standard Place Marker button
             Button(action: {
-                print("🔍 [PLACE_MARKER_BTN] Button tapped")
+                guard !isPlaceMarkerCoolingDown else { return }
+                print("📍 [PLACE_MARKER_BTN] Button tapped")
                 onPlaceMarker()
+                
+                // Start cooldown
+                isPlaceMarkerCoolingDown = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    isPlaceMarkerCoolingDown = false
+                }
             }) {
                 Text("Place Marker")
                     .font(.headline)
                     .foregroundColor(.white)
                     .padding()
                     .frame(maxWidth: .infinity)
-                    .background(Color.blue)
+                    .background(isPlaceMarkerCoolingDown ? Color.gray : Color.blue)
                     .cornerRadius(12)
             }
+            .disabled(isPlaceMarkerCoolingDown)
             .padding(.horizontal)
         }
     }
