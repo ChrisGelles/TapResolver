@@ -46,6 +46,10 @@ struct ARViewWithOverlays: View {
     // Haptic engine for custom patterns
     @State private var hapticEngine: CHHapticEngine?
     
+    // Continuous haptic player for sphere interior buzz
+    @State private var continuousPlayer: CHHapticAdvancedPatternPlayer?
+    @State private var isInsideSphere: Bool = false
+    
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
@@ -136,6 +140,28 @@ struct ARViewWithOverlays: View {
                 let newTriangleID = notification.userInfo?["triangleID"] as? UUID
                 if userContainingTriangleID != newTriangleID {
                     userContainingTriangleID = newTriangleID
+                }
+            }
+            // Survey marker ENTERED - knock + start buzz
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SurveyMarkerEntered"))) { notification in
+                if let markerID = notification.userInfo?["markerID"] as? UUID {
+                    print("📳 [HAPTIC] ENTER knock for marker \(String(markerID.uuidString.prefix(8)))")
+                    playHardKnock()
+                    startContinuousBuzz()
+                }
+            }
+            // Survey marker EXITED - knock + stop buzz
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SurveyMarkerExited"))) { notification in
+                if let markerID = notification.userInfo?["markerID"] as? UUID {
+                    print("📳 [HAPTIC] EXIT knock for marker \(String(markerID.uuidString.prefix(8)))")
+                    playHardKnock()
+                    stopContinuousBuzz()
+                }
+            }
+            // Survey marker PROXIMITY - update buzz intensity
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SurveyMarkerProximity"))) { notification in
+                if let intensity = notification.userInfo?["intensity"] as? Float {
+                    updateBuzzIntensity(intensity)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UpdateGhostSelection"))) { notification in
@@ -1153,6 +1179,65 @@ struct ARViewWithOverlays: View {
         generator.prepare()
         generator.impactOccurred(intensity: 0.5)
         print("👆 [HAPTICS] Gentle knock")
+    }
+    
+    /// Start continuous buzz haptic (called on sphere entry)
+    private func startContinuousBuzz() {
+        guard let engine = hapticEngine else {
+            print("⚠️ [HAPTICS] Engine not available for continuous buzz")
+            return
+        }
+        
+        do {
+            // Create a continuous haptic event with initial intensity 0
+            let intensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.0)
+            let sharpness = CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.3)
+            
+            let event = CHHapticEvent(
+                eventType: .hapticContinuous,
+                parameters: [intensity, sharpness],
+                relativeTime: 0,
+                duration: 100  // Long duration, we'll stop it manually
+            )
+            
+            let pattern = try CHHapticPattern(events: [event], parameters: [])
+            continuousPlayer = try engine.makeAdvancedPlayer(with: pattern)
+            try continuousPlayer?.start(atTime: CHHapticTimeImmediate)
+            isInsideSphere = true
+            print("📳 [HAPTICS] Started continuous buzz")
+        } catch {
+            print("⚠️ [HAPTICS] Failed to start continuous buzz: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Update continuous buzz intensity (0.0 = silent at center, 1.0 = max at edge)
+    private func updateBuzzIntensity(_ intensity: Float) {
+        guard let player = continuousPlayer, isInsideSphere else { return }
+        
+        do {
+            let intensityParam = CHHapticDynamicParameter(
+                parameterID: .hapticIntensityControl,
+                value: intensity,
+                relativeTime: 0
+            )
+            try player.sendParameters([intensityParam], atTime: CHHapticTimeImmediate)
+        } catch {
+            // Silent fail - this is called frequently
+        }
+    }
+    
+    /// Stop continuous buzz haptic (called on sphere exit)
+    private func stopContinuousBuzz() {
+        guard let player = continuousPlayer else { return }
+        
+        do {
+            try player.stop(atTime: CHHapticTimeImmediate)
+            continuousPlayer = nil
+            isInsideSphere = false
+            print("📳 [HAPTICS] Stopped continuous buzz")
+        } catch {
+            print("⚠️ [HAPTICS] Failed to stop continuous buzz: \(error.localizedDescription)")
+        }
     }
     
     /// Buzz haptic (continuous vibration, ~0.3s)

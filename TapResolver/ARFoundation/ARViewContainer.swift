@@ -132,10 +132,8 @@ struct ARViewContainer: UIViewRepresentable {
         // User device height (centralized constant)
         var userDeviceHeight: Float = ARVisualDefaults.userDeviceHeight
         
-        // Survey marker collision tracking
-        private var lastHapticTriggerTime: [UUID: TimeInterval] = [:]  // Debounce haptics per marker
-        private let hapticCooldown: TimeInterval = 0.5  // 500ms between haptics for same marker
-        private let collisionRadius: Float = 0.03  // Match sphere radius from ARMarkerRenderer
+        // Track which survey markers have triggered haptic feedback (to prevent continuous firing)
+        private var triggeredSurveyMarkers: Set<UUID> = []
         
         // Timer for updating crosshair
         private var crosshairUpdateTimer: Timer?
@@ -739,9 +737,10 @@ struct ARViewContainer: UIViewRepresentable {
                 sceneView.scene.rootNode.addChildNode(node)
             }
             
-            // Start updating crosshair position
+            // Start updating crosshair position and checking collisions
             crosshairUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
                 self?.updateCrosshair()
+                self?.checkSurveyMarkerCollisions()
             }
             
             // Listen for PlaceGhostMarker notification
@@ -1223,7 +1222,7 @@ struct ARViewContainer: UIViewRepresentable {
                 node.removeFromParentNode()
             }
             surveyMarkers.removeAll()
-            lastHapticTriggerTime.removeAll()  // Clear collision tracking state
+            triggeredSurveyMarkers.removeAll()
             print("🧹 Cleared survey markers")
         }
         
@@ -1363,42 +1362,73 @@ struct ARViewContainer: UIViewRepresentable {
             print("📐 Drew triangle lines connecting 3 vertices")
         }
         
-        /// Check for camera collisions with survey marker spheres
+        /// Check for camera collisions with survey markers
         private func checkSurveyMarkerCollisions() {
-            guard !surveyMarkers.isEmpty else { return }
+            guard let sceneView = sceneView,
+                  let frame = sceneView.session.currentFrame else { return }
             
-            // Get current camera position
-            guard let cameraPosition = getCurrentCameraPosition() else { return }
+            // Get camera position from transform matrix (translation component)
+            let cameraTransform = frame.camera.transform
+            let cameraPosition = simd_float3(
+                cameraTransform.columns.3.x,
+                cameraTransform.columns.3.y,
+                cameraTransform.columns.3.z
+            )
             
-            let currentTime = CACurrentMediaTime()
+            let sphereRadius: Float = 0.035     // Marker sphere radius
+            let deadZoneRadius: Float = 0.010   // 1cm silent zone at center
             
-            // Check distance to each survey marker
             for (markerID, markerNode) in surveyMarkers {
-                let markerPosition = markerNode.simdPosition
-                let distance = simd_distance(cameraPosition, markerPosition)
+                // Sphere topper is at userDeviceHeight above the marker base position
+                let sphereCenterPosition = simd_float3(
+                    markerNode.position.x,
+                    markerNode.position.y + userDeviceHeight,
+                    markerNode.position.z
+                )
                 
-                // Check if camera is inside sphere volume
-                if distance < collisionRadius {
-                    // Check cooldown
-                    let lastTrigger = lastHapticTriggerTime[markerID] ?? 0
-                    let timeSinceLastTrigger = currentTime - lastTrigger
+                let distance = simd_distance(cameraPosition, sphereCenterPosition)
+                let wasInside = triggeredSurveyMarkers.contains(markerID)
+                let isInside = distance < sphereRadius
+                
+                if isInside && !wasInside {
+                    // ENTERED sphere - knock + start buzz
+                    triggeredSurveyMarkers.insert(markerID)
+                    print("💥 [SURVEY_COLLISION] ENTERED marker \(String(markerID.uuidString.prefix(8))) at distance \(String(format: "%.3f", distance))m")
                     
-                    if timeSinceLastTrigger >= hapticCooldown {
-                        // Trigger haptic feedback
-                        triggerCollisionHaptic()
-                        lastHapticTriggerTime[markerID] = currentTime
-                        
-                        print("💥 Camera collision with survey marker \(String(markerID.uuidString.prefix(8))) at distance \(String(format: "%.3f", distance))m")
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("SurveyMarkerEntered"),
+                        object: nil,
+                        userInfo: ["markerID": markerID, "distance": distance, "radius": sphereRadius]
+                    )
+                } else if !isInside && wasInside {
+                    // EXITED sphere - knock + stop buzz
+                    triggeredSurveyMarkers.remove(markerID)
+                    print("💥 [SURVEY_COLLISION] EXITED marker \(String(markerID.uuidString.prefix(8)))")
+                    
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("SurveyMarkerExited"),
+                        object: nil,
+                        userInfo: ["markerID": markerID]
+                    )
+                } else if isInside {
+                    // INSIDE sphere - update buzz intensity based on distance
+                    // Dead zone at center: intensity = 0 within deadZoneRadius
+                    // Then ramps from 0 to 1.0 as distance approaches edge
+                    let intensity: Float
+                    if distance < deadZoneRadius {
+                        intensity = 0.0  // Silent dead zone
+                    } else {
+                        // Remap: deadZone edge → 0, sphere edge → 1.0
+                        intensity = (distance - deadZoneRadius) / (sphereRadius - deadZoneRadius)
                     }
+                    
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("SurveyMarkerProximity"),
+                        object: nil,
+                        userInfo: ["markerID": markerID, "distance": distance, "intensity": intensity]
+                    )
                 }
             }
-        }
-        
-        /// Trigger haptic feedback for survey marker collision
-        private func triggerCollisionHaptic() {
-            let generator = UIImpactFeedbackGenerator(style: .medium)
-            generator.prepare()
-            generator.impactOccurred()
         }
         
         /// Draw lines connecting triangle vertices on the ground
@@ -1496,7 +1526,6 @@ struct ARViewContainer: UIViewRepresentable {
 
         deinit {
             clearSurveyMarkers()
-            lastHapticTriggerTime.removeAll()
             crosshairUpdateTimer?.invalidate()
             NotificationCenter.default.removeObserver(self)
         }
