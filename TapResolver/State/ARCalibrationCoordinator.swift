@@ -43,6 +43,9 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Maps MapPoint ID to AR position for current session (for ghost calculation)
     var mapPointARPositions: [UUID: simd_float3] = [:]
     
+    /// Ghost marker positions tracked by the coordinator (set by ARViewContainer)
+    var ghostMarkerPositions: [UUID: simd_float3] = [:]
+    
     // MARK: - Preloaded Historical Position Index
     
     // Structure: [sessionID: [mapPointID: position]]
@@ -2003,6 +2006,78 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
         
         return fillable
+    }
+    
+    /// Get IDs of triangles fillable using ONLY session markers and ghost markers (not baked data)
+    /// This is for "Fill Known" - triangles where you can see vertices in AR
+    func getFillableTriangleIDsSessionAndGhost() -> [UUID] {
+        let triangleStore = triangleStoreAccess
+        
+        var fillable: [UUID] = []
+        
+        for triangle in triangleStore.triangles {
+            var allVerticesHavePosition = true
+            
+            for vertexID in triangle.vertexIDs {
+                // Check session position (AR marker placed this session)
+                let hasSessionPosition = mapPointARPositions[vertexID] != nil
+                
+                // Check ghost position (ghost marker currently rendered)
+                // We need to check ghostMarkerPositions which is on ARViewContainer
+                // For now, check if coordinator has tracked this via calibration
+                let hasGhostPosition = ghostMarkerPositions[vertexID] != nil
+                
+                if !hasSessionPosition && !hasGhostPosition {
+                    allVerticesHavePosition = false
+                    break
+                }
+            }
+            
+            if allVerticesHavePosition {
+                fillable.append(triangle.id)
+            }
+        }
+        
+        return fillable
+    }
+    
+    /// Count triangles fillable using session+ghost only
+    func countFillableTrianglesSessionAndGhost() -> Int {
+        return getFillableTriangleIDsSessionAndGhost().count
+    }
+    
+    /// Get IDs of ALL triangles that can be filled using baked data
+    /// This is for "Fill Map" - uses historical calibration data
+    func getFillableTriangleIDsBaked() -> [UUID] {
+        let triangleStore = triangleStoreAccess
+        let mapPointStore = safeMapStore
+        
+        var fillable: [UUID] = []
+        
+        for triangle in triangleStore.triangles {
+            var allVerticesHaveBaked = true
+            
+            for vertexID in triangle.vertexIDs {
+                if let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }),
+                   mapPoint.bakedCanonicalPosition != nil {
+                    // Has baked data
+                } else {
+                    allVerticesHaveBaked = false
+                    break
+                }
+            }
+            
+            if allVerticesHaveBaked {
+                fillable.append(triangle.id)
+            }
+        }
+        
+        return fillable
+    }
+    
+    /// Count triangles fillable using baked data
+    func countFillableTrianglesBaked() -> Int {
+        return getFillableTriangleIDsBaked().count
     }
     
     /// Check if session has a valid canonical→session transform

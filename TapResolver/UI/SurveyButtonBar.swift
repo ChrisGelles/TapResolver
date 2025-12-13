@@ -7,78 +7,87 @@
 
 import SwiftUI
 
-// MARK: - Button State
-
-/// Tracks which triangles currently have survey markers
-class SurveyMarkerTracker: ObservableObject {
-    @Published var trianglesWithMarkers: Set<UUID> = []
-    
-    func addTriangle(_ id: UUID) {
-        trianglesWithMarkers.insert(id)
-    }
-    
-    func removeTriangle(_ id: UUID) {
-        trianglesWithMarkers.remove(id)
-    }
-    
-    func hasMarkers(in triangleID: UUID) -> Bool {
-        trianglesWithMarkers.contains(triangleID)
-    }
-}
-
 // MARK: - Survey Button Bar
 
 struct SurveyButtonBar: View {
     // Current state
     let userContainingTriangleID: UUID?
     let hasAnyCalibratedTriangle: Bool
-    let fillableTriangleCount: Int
+    let fillableKnownCount: Int      // Session + ghost markers only
+    let fillableBakedCount: Int      // Using baked historical data
     let canFillCurrentTriangle: Bool
     let currentTriangleHasMarkers: Bool
+    let hasAnySurveyMarkers: Bool
     
     // Actions
     let onFillTriangle: () -> Void
-    let onDefineSwath: () -> Void
-    let onFillKnown: () -> Void
     let onClearTriangle: () -> Void
+    let onFillKnown: () -> Void
+    let onDefineSwath: () -> Void
+    let onFillMap: () -> Void
+    let onClearAll: () -> Void
     
     var body: some View {
-        HStack(spacing: 12) {
-            // Fill Triangle
-            SurveyButton(
-                icon: "circle.grid.3x3.fill",
-                label: "Fill Triangle",
-                color: .red,
-                isEnabled: canFillCurrentTriangle,
-                action: onFillTriangle
-            )
+        VStack(spacing: 8) {
+            // Row 1: Triangle-level operations
+            HStack(spacing: 12) {
+                // Fill Triangle
+                SurveyButton(
+                    icon: "circle.grid.3x3.fill",
+                    label: "Fill Triangle",
+                    color: .red,
+                    isEnabled: canFillCurrentTriangle,
+                    action: onFillTriangle
+                )
+                
+                // Clear Triangle
+                SurveyButton(
+                    icon: "xmark.circle.fill",
+                    label: "Clear Triangle",
+                    color: .orange,
+                    isEnabled: currentTriangleHasMarkers,
+                    action: onClearTriangle
+                )
+                
+                // Fill Known - session + ghost markers only
+                SurveyButton(
+                    icon: "triangle.fill",
+                    label: fillableKnownCount > 0 ? "Fill Known (\(fillableKnownCount)△)" : "Fill Known",
+                    color: .green,
+                    isEnabled: fillableKnownCount > 0,
+                    action: onFillKnown
+                )
+            }
             
-            // Define Swath
-            SurveyButton(
-                icon: "square.3.layers.3d.top.filled",
-                label: "Define Swath",
-                color: .purple,
-                isEnabled: hasAnyCalibratedTriangle,
-                action: onDefineSwath
-            )
-            
-            // Fill Known - fills all triangles with known vertex positions
-            SurveyButton(
-                icon: "triangle.fill",
-                label: fillableTriangleCount > 0 ? "Fill Known (\(fillableTriangleCount)△)" : "Fill Known",
-                color: .green,
-                isEnabled: fillableTriangleCount > 0,
-                action: onFillKnown
-            )
-            
-            // Clear Triangle
-            SurveyButton(
-                icon: "xmark.circle.fill",
-                label: "Clear Triangle",
-                color: .orange,
-                isEnabled: currentTriangleHasMarkers,
-                action: onClearTriangle
-            )
+            // Row 2: Map-level operations
+            HStack(spacing: 12) {
+                // Define Swath
+                SurveyButton(
+                    icon: "square.3.layers.3d.top.filled",
+                    label: "Define Swath",
+                    color: .purple,
+                    isEnabled: hasAnyCalibratedTriangle,
+                    action: onDefineSwath
+                )
+                
+                // Fill Map - uses baked data
+                SurveyButton(
+                    icon: "map.fill",
+                    label: fillableBakedCount > 0 ? "Fill Map (\(fillableBakedCount)△)" : "Fill Map",
+                    color: .blue,
+                    isEnabled: fillableBakedCount > 0,
+                    action: onFillMap
+                )
+                
+                // Clear All
+                SurveyButton(
+                    icon: "trash.fill",
+                    label: "Clear All",
+                    color: .gray,
+                    isEnabled: hasAnySurveyMarkers,
+                    action: onClearAll
+                )
+            }
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 60)
@@ -102,14 +111,15 @@ struct SurveyButton: View {
         }) {
             VStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                 Text(label)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 9, weight: .medium))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.7)
             }
             .foregroundColor(isEnabled ? .white : .white.opacity(0.4))
-            .padding(.horizontal, 10)
+            .frame(minWidth: 80)
+            .padding(.horizontal, 8)
             .padding(.vertical, 8)
             .background(isEnabled ? color.opacity(0.85) : Color.gray.opacity(0.4))
             .cornerRadius(10)
@@ -132,26 +142,36 @@ struct SurveyButton: View {
             SurveyButtonBar(
                 userContainingTriangleID: UUID(),
                 hasAnyCalibratedTriangle: true,
-                fillableTriangleCount: 5,
+                fillableKnownCount: 5,
+                fillableBakedCount: 21,
                 canFillCurrentTriangle: true,
                 currentTriangleHasMarkers: true,
+                hasAnySurveyMarkers: true,
                 onFillTriangle: {},
-                onDefineSwath: {},
+                onClearTriangle: {},
                 onFillKnown: {},
-                onClearTriangle: {}
+                onDefineSwath: {},
+                onFillMap: {},
+                onClearAll: {}
             )
+            
+            Spacer().frame(height: 40)
             
             // Some disabled
             SurveyButtonBar(
                 userContainingTriangleID: nil,
-                hasAnyCalibratedTriangle: true,
-                fillableTriangleCount: 0,
+                hasAnyCalibratedTriangle: false,
+                fillableKnownCount: 0,
+                fillableBakedCount: 0,
                 canFillCurrentTriangle: false,
                 currentTriangleHasMarkers: false,
+                hasAnySurveyMarkers: false,
                 onFillTriangle: {},
-                onDefineSwath: {},
+                onClearTriangle: {},
                 onFillKnown: {},
-                onClearTriangle: {}
+                onDefineSwath: {},
+                onFillMap: {},
+                onClearAll: {}
             )
         }
     }

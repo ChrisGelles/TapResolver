@@ -847,7 +847,8 @@ struct ARViewWithOverlays: View {
                     SurveyButtonBar(
                         userContainingTriangleID: userContainingTriangleID,
                         hasAnyCalibratedTriangle: !arCalibrationCoordinator.sessionCalibratedTriangles.isEmpty,
-                        fillableTriangleCount: arCalibrationCoordinator.countFillableTriangles(),
+                        fillableKnownCount: arCalibrationCoordinator.countFillableTrianglesSessionAndGhost(),
+                        fillableBakedCount: arCalibrationCoordinator.countFillableTrianglesBaked(),
                         canFillCurrentTriangle: {
                             guard let triangleID = userContainingTriangleID else { return false }
                             return arCalibrationCoordinator.sessionCalibratedTriangles.contains(triangleID) ||
@@ -857,6 +858,7 @@ struct ARViewWithOverlays: View {
                             guard let triangleID = userContainingTriangleID else { return false }
                             return trianglesWithSurveyMarkers.contains(triangleID)
                         }(),
+                        hasAnySurveyMarkers: !trianglesWithSurveyMarkers.isEmpty,
                         onFillTriangle: {
                             guard let triangleID = userContainingTriangleID else { return }
                             print("🎯 [FILL_TRIANGLE_BTN] Button tapped for triangle \(String(triangleID.uuidString.prefix(8)))")
@@ -874,8 +876,47 @@ struct ARViewWithOverlays: View {
                                 ]
                             )
                             
-                            // Track that this triangle now has markers
                             trianglesWithSurveyMarkers.insert(triangleID)
+                        },
+                        onClearTriangle: {
+                            guard let triangleID = userContainingTriangleID else { return }
+                            print("🧹 [CLEAR_TRIANGLE_BTN] Button tapped for triangle \(String(triangleID.uuidString.prefix(8)))")
+                            
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("ClearTriangleMarkers"),
+                                object: nil,
+                                userInfo: ["triangleID": triangleID]
+                            )
+                            
+                            trianglesWithSurveyMarkers.remove(triangleID)
+                        },
+                        onFillKnown: {
+                            print("🟢 [FILL_KNOWN_BTN] Fill Known button tapped")
+                            
+                            let fillableTriangleIDs = arCalibrationCoordinator.getFillableTriangleIDsSessionAndGhost()
+                            
+                            guard !fillableTriangleIDs.isEmpty else {
+                                print("⚠️ [FILL_KNOWN_BTN] No fillable triangles (session+ghost)")
+                                return
+                            }
+                            
+                            print("🟢 [FILL_KNOWN_BTN] Found \(fillableTriangleIDs.count) fillable triangle(s) with session/ghost markers")
+                            
+                            arCalibrationCoordinator.enterSurveyMode()
+                            
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("FillKnownTriangles"),
+                                object: nil,
+                                userInfo: [
+                                    "triangleIDs": fillableTriangleIDs,
+                                    "spacing": surveySpacing,
+                                    "triangleStore": arCalibrationCoordinator.triangleStoreAccess
+                                ]
+                            )
+                            
+                            for triangleID in fillableTriangleIDs {
+                                trianglesWithSurveyMarkers.insert(triangleID)
+                            }
                         },
                         onDefineSwath: {
                             print("🟣 [DEFINE_SWATH_BTN] Define Swath button tapped")
@@ -896,48 +937,45 @@ struct ARViewWithOverlays: View {
                                 arWorldMapStore: arWorldMapStore
                             )
                         },
-                        onFillKnown: {
-                            print("🟢 [FILL_KNOWN_BTN] Fill Known button tapped")
+                        onFillMap: {
+                            print("🗺️ [FILL_MAP_BTN] Fill Map button tapped")
                             
-                            // Get all fillable triangle IDs
-                            let fillableTriangleIDs = arCalibrationCoordinator.getFillableTriangleIDs()
+                            let fillableTriangleIDs = arCalibrationCoordinator.getFillableTriangleIDsBaked()
                             
                             guard !fillableTriangleIDs.isEmpty else {
-                                print("⚠️ [FILL_KNOWN_BTN] No fillable triangles found")
+                                print("⚠️ [FILL_MAP_BTN] No fillable triangles with baked data")
                                 return
                             }
                             
-                            print("🟢 [FILL_KNOWN_BTN] Found \(fillableTriangleIDs.count) fillable triangle(s)")
+                            print("🗺️ [FILL_MAP_BTN] Found \(fillableTriangleIDs.count) fillable triangle(s) with baked data")
                             
                             arCalibrationCoordinator.enterSurveyMode()
                             
                             NotificationCenter.default.post(
-                                name: NSNotification.Name("FillKnownTriangles"),
+                                name: NSNotification.Name("FillMapWithSurveyMarkers"),
                                 object: nil,
                                 userInfo: [
                                     "triangleIDs": fillableTriangleIDs,
                                     "spacing": surveySpacing,
-                                    "triangleStore": arCalibrationCoordinator.triangleStoreAccess
+                                    "triangleStore": arCalibrationCoordinator.triangleStoreAccess,
+                                    "clearFirst": true
                                 ]
                             )
                             
-                            // Track all filled triangles as having markers
+                            trianglesWithSurveyMarkers.removeAll()
                             for triangleID in fillableTriangleIDs {
                                 trianglesWithSurveyMarkers.insert(triangleID)
                             }
                         },
-                        onClearTriangle: {
-                            guard let triangleID = userContainingTriangleID else { return }
-                            print("🧹 [CLEAR_TRIANGLE_BTN] Button tapped for triangle \(String(triangleID.uuidString.prefix(8)))")
+                        onClearAll: {
+                            print("🧹 [CLEAR_ALL_BTN] Clear All button tapped")
                             
                             NotificationCenter.default.post(
-                                name: NSNotification.Name("ClearTriangleMarkers"),
-                                object: nil,
-                                userInfo: ["triangleID": triangleID]
+                                name: NSNotification.Name("ClearAllSurveyMarkers"),
+                                object: nil
                             )
                             
-                            // Update tracking
-                            trianglesWithSurveyMarkers.remove(triangleID)
+                            trianglesWithSurveyMarkers.removeAll()
                         }
                     )
                 }

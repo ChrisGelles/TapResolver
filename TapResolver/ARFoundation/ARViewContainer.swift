@@ -296,6 +296,20 @@ struct ARViewContainer: UIViewRepresentable {
                 object: nil
             )
             
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleFillMapWithSurveyMarkers),
+                name: NSNotification.Name("FillMapWithSurveyMarkers"),
+                object: nil
+            )
+            
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleClearAllSurveyMarkers),
+                name: NSNotification.Name("ClearAllSurveyMarkers"),
+                object: nil
+            )
+            
             // Listen for triangle calibration complete
             NotificationCenter.default.addObserver(
                 forName: NSNotification.Name("TriangleCalibrationComplete"),
@@ -474,6 +488,46 @@ struct ARViewContainer: UIViewRepresentable {
             generateSurveyMarkersForRegion(region, spacing: spacing, arWorldMapStore: arWorldMapStore)
         }
         
+        @objc func handleFillMapWithSurveyMarkers(notification: Notification) {
+            print("📬 [ARViewContainer] Received FillMapWithSurveyMarkers notification")
+            
+            guard let userInfo = notification.userInfo,
+                  let triangleIDs = userInfo["triangleIDs"] as? [UUID],
+                  let spacing = userInfo["spacing"] as? Float,
+                  let triangleStore = userInfo["triangleStore"] as? TrianglePatchStore else {
+                print("⚠️ [ARViewContainer] FillMapWithSurveyMarkers missing required data")
+                return
+            }
+            
+            // Check if we should clear first
+            let clearFirst = userInfo["clearFirst"] as? Bool ?? false
+            if clearFirst {
+                print("🧹 [FILL_MAP] Clearing existing markers first")
+                clearSurveyMarkers()
+            }
+            
+            print("🗺️ [ARViewContainer] Processing Fill Map: \(triangleIDs.count) triangles, spacing: \(spacing)m")
+            
+            guard let arWorldMapStore = arCalibrationCoordinator?.arStoreAccess else {
+                print("⚠️ [ARViewContainer] ARWorldMapStore not available")
+                return
+            }
+            
+            let triangles = triangleStore.triangles.filter { triangleIDs.contains($0.id) }
+            guard !triangles.isEmpty else {
+                print("⚠️ [ARViewContainer] No valid triangles found")
+                return
+            }
+            
+            let region = SurveyableRegion.swath(triangles)
+            generateSurveyMarkersForRegion(region, spacing: spacing, arWorldMapStore: arWorldMapStore)
+        }
+        
+        @objc func handleClearAllSurveyMarkers(_ notification: Notification) {
+            print("🧹 [CLEAR_ALL] Clearing all survey markers")
+            clearSurveyMarkers()
+        }
+        
         @objc func handleClearTriangleMarkers(_ notification: Notification) {
             guard let triangleID = notification.userInfo?["triangleID"] as? UUID else {
                 print("⚠️ [CLEAR_TRIANGLE] No triangleID provided")
@@ -521,6 +575,9 @@ struct ARViewContainer: UIViewRepresentable {
             ghostMarkers[mapPointID] = ghostNode
             ghostMarkerPositions[mapPointID] = position
             
+            // Also track in coordinator for fillable triangle counting
+            arCalibrationCoordinator?.ghostMarkerPositions[mapPointID] = position
+            
             // Add to scene
             sceneView?.scene.rootNode.addChildNode(ghostNode)
             
@@ -558,6 +615,9 @@ struct ARViewContainer: UIViewRepresentable {
             ghostMarkers[mapPointID] = ghostNode
             ghostMarkerPositions[mapPointID] = position
             
+            // Also track in coordinator for fillable triangle counting
+            arCalibrationCoordinator?.ghostMarkerPositions[mapPointID] = position
+            
             // Add to scene
             sceneView?.scene.rootNode.addChildNode(ghostNode)
             
@@ -574,6 +634,7 @@ struct ARViewContainer: UIViewRepresentable {
             ghostNode.removeFromParentNode()
             ghostMarkers.removeValue(forKey: mapPointID)
             ghostMarkerPositions.removeValue(forKey: mapPointID)
+            arCalibrationCoordinator?.ghostMarkerPositions.removeValue(forKey: mapPointID)
             print("🗑️ [GHOST_REMOVE] Removed ghost for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
         }
         
@@ -587,6 +648,7 @@ struct ARViewContainer: UIViewRepresentable {
             
             // Remove from tracking dictionary
             ghostMarkerPositions.removeValue(forKey: mapPointID)
+            arCalibrationCoordinator?.ghostMarkerPositions.removeValue(forKey: mapPointID)
             
             // Find and remove the ghost node from scene
             let nodeName = "ghostMarker_\(mapPointID.uuidString)"
@@ -666,6 +728,7 @@ struct ARViewContainer: UIViewRepresentable {
                 ghostNode.removeFromParentNode()
                 ghostMarkers.removeValue(forKey: ghostMapPointID)
                 ghostMarkerPositions.removeValue(forKey: ghostMapPointID)
+                arCalibrationCoordinator?.ghostMarkerPositions.removeValue(forKey: ghostMapPointID)
                 print("🎯 [GHOST_CONFIRM] Removed ghost node from scene")
             }
             
