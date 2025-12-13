@@ -280,6 +280,14 @@ struct ARViewContainer: UIViewRepresentable {
                 )
             }
             
+            // Clear Triangle Markers notification observer
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleClearTriangleMarkers(_:)),
+                name: NSNotification.Name("ClearTriangleMarkers"),
+                object: nil
+            )
+            
             // Listen for triangle calibration complete
             NotificationCenter.default.addObserver(
                 forName: NSNotification.Name("TriangleCalibrationComplete"),
@@ -428,6 +436,16 @@ struct ARViewContainer: UIViewRepresentable {
             
             let region = SurveyableRegion.swath(triangles)
             generateSurveyMarkersForRegion(region, spacing: spacing, arWorldMapStore: arWorldMapStore)
+        }
+        
+        @objc func handleClearTriangleMarkers(_ notification: Notification) {
+            guard let triangleID = notification.userInfo?["triangleID"] as? UUID else {
+                print("⚠️ [CLEAR_TRIANGLE] No triangleID provided")
+                return
+            }
+            
+            print("🧹 [CLEAR_TRIANGLE] Clearing markers for triangle \(String(triangleID.uuidString.prefix(8)))")
+            clearSurveyMarkersForTriangle(triangleID)
         }
         
         @objc func handlePlaceGhostMarker(notification: Notification) {
@@ -1067,9 +1085,6 @@ struct ARViewContainer: UIViewRepresentable {
             spacing: Float,
             arWorldMapStore: ARWorldMapStore
         ) {
-            // Clear existing survey markers
-            clearSurveyMarkers()
-            
             guard let mapPointStore = mapPointStore else {
                 print("⚠️ [REGION_SURVEY] MapPointStore not available")
                 return
@@ -1157,17 +1172,35 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
-            // STEP 4: Generate fill points for entire region
+            // STEP 4: Collect existing marker positions for distance-based deduplication
+            var existingMarkerPositions_m: [CGPoint] = []
+            for (_, marker) in surveyMarkers {
+                if let mapCoord = marker.mapCoordinate {
+                    // Convert from pixels to meters
+                    let pos_m = CGPoint(
+                        x: mapCoord.x / CGFloat(pxPerMeter),
+                        y: mapCoord.y / CGFloat(pxPerMeter)
+                    )
+                    existingMarkerPositions_m.append(pos_m)
+                }
+            }
+            
+            if !existingMarkerPositions_m.isEmpty {
+                print("📍 [REGION_SURVEY] Found \(existingMarkerPositions_m.count) existing markers for distance filtering")
+            }
+            
+            // STEP 5: Generate fill points for entire region (with distance-based deduplication)
             let fillPoints = generateFillPointsForRegion(
                 region: region,
                 spacingMeters: spacing,
                 pxPerMeter: pxPerMeter,
-                triangleVertices: triangleVertices_px
+                triangleVertices: triangleVertices_px,
+                existingMarkerPositions_m: existingMarkerPositions_m
             )
             
             print("📍 [REGION_SURVEY] Generated \(fillPoints.count) survey points at \(spacing)m spacing")
             
-            // STEP 5: Interpolate and place markers
+            // STEP 6: Interpolate and place markers
             var placedCount = 0
             
             for fillPoint in fillPoints {
@@ -1191,7 +1224,7 @@ struct ARViewContainer: UIViewRepresentable {
                 let groundPosition = simd_float3(position3D.x, groundY, position3D.z)
                 
                 // Place marker using the actual fill point's map position
-                if placeSurveyMarkerOnly(at: groundPosition, mapCoordinate: fillPoint.mapPosition_px) != nil {
+                if placeSurveyMarkerOnly(at: groundPosition, mapCoordinate: fillPoint.mapPosition_px, triangleID: fillPoint.containingTriangleID) != nil {
                     placedCount += 1
                 }
             }
@@ -1218,8 +1251,86 @@ struct ARViewContainer: UIViewRepresentable {
             print("🧹 Cleared survey markers")
         }
         
+        /// Clear survey markers for a specific triangle only
+        /// Markers on shared edges with adjacent filled triangles are reassigned, not removed
+        func clearSurveyMarkersForTriangle(_ triangleID: UUID) {
+            // Get map scale for distance calculations
+            guard let pxPerMeter = getPixelsPerMeter() else {
+                // Fallback: remove all markers for this triangle without edge detection
+                print("⚠️ [CLEAR_TRIANGLE] No map scale available, removing all markers without edge detection")
+                var removedCount = 0
+                for (markerID, marker) in surveyMarkers {
+                    if marker.triangleID == triangleID {
+                        marker.removeFromScene()
+                        surveyMarkers.removeValue(forKey: markerID)
+                        triggeredSurveyMarkers.remove(markerID)
+                        removedCount += 1
+                    }
+                }
+                print("🧹 Cleared \(removedCount) survey marker(s) from triangle \(String(triangleID.uuidString.prefix(8)))")
+                return
+            }
+            
+            // Minimum separation in pixels (0.8m * pxPerMeter)
+            let minSeparationPx = CGFloat(0.3 * pxPerMeter)
+            
+            // Collect markers from OTHER triangles (potential neighbors)
+            var otherTriangleMarkers: [(triangleID: UUID, position: CGPoint)] = []
+            for (_, marker) in surveyMarkers {
+                if let otherTriangleID = marker.triangleID,
+                   otherTriangleID != triangleID,
+                   let pos = marker.mapCoordinate {
+                    otherTriangleMarkers.append((otherTriangleID, pos))
+                }
+            }
+            
+            var removedCount = 0
+            var reassignedCount = 0
+            var markersToRemove: [UUID] = []
+            
+            for (markerID, marker) in surveyMarkers {
+                if marker.triangleID == triangleID {
+                    // Check if this marker is on a shared edge with another filled triangle
+                    var nearestAdjacentTriangleID: UUID? = nil
+                    var nearestDistance: CGFloat = .greatestFiniteMagnitude
+                    
+                    if let markerPos = marker.mapCoordinate {
+                        for (otherTriangleID, otherPos) in otherTriangleMarkers {
+                            let dx = markerPos.x - otherPos.x
+                            let dy = markerPos.y - otherPos.y
+                            let distance = sqrt(dx * dx + dy * dy)
+                            
+                            if distance < minSeparationPx && distance < nearestDistance {
+                                nearestDistance = distance
+                                nearestAdjacentTriangleID = otherTriangleID
+                            }
+                        }
+                    }
+                    
+                    if let adjacentTriangleID = nearestAdjacentTriangleID {
+                        // Reassign to adjacent triangle instead of removing
+                        marker.triangleID = adjacentTriangleID
+                        reassignedCount += 1
+                        print("🔄 [CLEAR_TRIANGLE] Reassigned marker to adjacent triangle \(String(adjacentTriangleID.uuidString.prefix(8)))")
+                    } else {
+                        // No adjacent triangle - safe to remove
+                        marker.removeFromScene()
+                        markersToRemove.append(markerID)
+                        triggeredSurveyMarkers.remove(markerID)
+                        removedCount += 1
+                    }
+                }
+            }
+            
+            for markerID in markersToRemove {
+                surveyMarkers.removeValue(forKey: markerID)
+            }
+            
+            print("🧹 [CLEAR_TRIANGLE] Triangle \(String(triangleID.uuidString.prefix(8))): removed \(removedCount), reassigned \(reassignedCount) edge marker(s)")
+        }
+        
         /// Places a survey marker WITHOUT calling registerMarker (no photo, no MapPoint updates)
-        func placeSurveyMarkerOnly(at position: simd_float3, mapCoordinate: CGPoint) -> UUID? {
+        func placeSurveyMarkerOnly(at position: simd_float3, mapCoordinate: CGPoint, triangleID: UUID? = nil) -> UUID? {
             guard let sceneView = sceneView else {
                 print("⚠️ ARView not available for survey marker placement")
                 return nil
@@ -1230,6 +1341,7 @@ struct ARViewContainer: UIViewRepresentable {
                 at: position,
                 userDeviceHeight: userDeviceHeight,
                 mapCoordinate: mapCoordinate,
+                triangleID: triangleID,
                 animated: false
             )
             

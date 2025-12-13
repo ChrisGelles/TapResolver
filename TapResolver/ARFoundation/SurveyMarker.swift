@@ -37,6 +37,10 @@ class SurveyMarker {
     /// Map coordinates for this survey point (nil for test markers)
     let mapCoordinate: CGPoint?
     
+    /// Triangle this marker belongs to (nil for test markers)
+    /// Mutable to allow reassignment when adjacent triangles are cleared
+    var triangleID: UUID?
+    
     /// Computed sphere center position for collision detection
     var sphereCenter: simd_float3 {
         simd_float3(
@@ -51,11 +55,13 @@ class SurveyMarker {
     ///   - position: AR world position (floor level)
     ///   - userDeviceHeight: Height from floor to device (sphere top)
     ///   - mapCoordinate: Optional map XY for data collection
+    ///   - triangleID: Optional triangle ID this marker belongs to
     ///   - animated: Whether to animate marker appearance
-    init(at position: simd_float3, userDeviceHeight: Float, mapCoordinate: CGPoint? = nil, animated: Bool = false) {
+    init(at position: simd_float3, userDeviceHeight: Float, mapCoordinate: CGPoint? = nil, triangleID: UUID? = nil, animated: Bool = false) {
         self.id = UUID()
         self.userDeviceHeight = userDeviceHeight
         self.mapCoordinate = mapCoordinate
+        self.triangleID = triangleID
         
         let options = MarkerOptions(
             color: SurveyMarkerConfig.exteriorColor,

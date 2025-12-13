@@ -40,6 +40,9 @@ struct ARViewWithOverlays: View {
     // Track which calibrated triangle the user is currently standing in
     @State private var userContainingTriangleID: UUID? = nil
     
+    // Track which triangles have survey markers for Clear Triangle button
+    @State private var trianglesWithSurveyMarkers: Set<UUID> = []
+    
     // Debounce state to prevent accidental double-taps on Place Marker
     @State private var isPlaceMarkerCoolingDown = false
     
@@ -840,60 +843,44 @@ struct ARViewWithOverlays: View {
                         .padding(.bottom, 40)
                     }
                     
-                    // Survey Marker Generation Button - shows when user is standing in a fillable triangle
-                    // A triangle is fillable if all 3 vertices have known positions (session or baked)
-                    if let containingTriangleID = userContainingTriangleID,
-                       let _ = arCalibrationCoordinator.triangleStoreAccess.triangle(withID: containingTriangleID),
-                       (arCalibrationCoordinator.sessionCalibratedTriangles.contains(containingTriangleID) ||
-                        arCalibrationCoordinator.triangleCanBeFilled(containingTriangleID)) {
-                        
-                        HStack(spacing: 16) {
-                            Button(action: {
-                                print("🎯 [FILL_TRIANGLE_BTN] Button tapped")
-                                print("   Current state: \(arCalibrationCoordinator.stateDescription)")
-                                
-                                arCalibrationCoordinator.enterSurveyMode()
-                                
-                                print("🎯 [FILL_TRIANGLE_BTN] Entering survey mode")
-                                print("   New state: \(arCalibrationCoordinator.stateDescription)")
-                                
-                                // Post notification to trigger survey marker generation
-                                // CRITICAL: Pass triangleStore so we can look up triangle by ID
-                                // Don't rely on selectedTriangle which might be stale
-                                NotificationCenter.default.post(
-                                    name: NSNotification.Name("FillTriangleWithSurveyMarkers"),
-                                    object: nil,
-                                    userInfo: [
-                                        "triangleID": containingTriangleID,
-                                        "spacing": surveySpacing,
-                                        "arWorldMapStore": arCalibrationCoordinator.arStoreAccess,
-                                        "triangleStore": arCalibrationCoordinator.triangleStoreAccess
-                                    ]
-                                )
-                        }) {
-                            VStack(spacing: 4) {
-                                Image(systemName: "circle.grid.3x3.fill")
-                                    .font(.system(size: 22, weight: .semibold))
-                                Text("Fill Triangle")
-                                    .font(.system(size: 12, weight: .medium))
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.red.opacity(0.8))
-                            .cornerRadius(10)
-                        }
-                        .buttonStyle(.plain)
-                        
-                        // Define Swath button
-                        // FUTURE: Swaths are user-defined collections of triangle patches.
-                        // This will eventually let users select which triangles to include
-                        // in a survey swath. For now, we plant ghosts for ALL triangles
-                        // to show the full spatial extent of the calibrated map.
-                        Button(action: {
+                    // Survey Button Bar - always visible, buttons enable/disable based on state
+                    SurveyButtonBar(
+                        userContainingTriangleID: userContainingTriangleID,
+                        hasAnyCalibratedTriangle: !arCalibrationCoordinator.sessionCalibratedTriangles.isEmpty,
+                        swathIsDefined: arViewLaunchContext.swathTriangleIDs.count > 0,
+                        swathTriangleCount: arViewLaunchContext.swathTriangleIDs.count,
+                        canFillCurrentTriangle: {
+                            guard let triangleID = userContainingTriangleID else { return false }
+                            return arCalibrationCoordinator.sessionCalibratedTriangles.contains(triangleID) ||
+                                   arCalibrationCoordinator.triangleCanBeFilled(triangleID)
+                        }(),
+                        currentTriangleHasMarkers: {
+                            guard let triangleID = userContainingTriangleID else { return false }
+                            return trianglesWithSurveyMarkers.contains(triangleID)
+                        }(),
+                        onFillTriangle: {
+                            guard let triangleID = userContainingTriangleID else { return }
+                            print("🎯 [FILL_TRIANGLE_BTN] Button tapped for triangle \(String(triangleID.uuidString.prefix(8)))")
+                            
+                            arCalibrationCoordinator.enterSurveyMode()
+                            
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("FillTriangleWithSurveyMarkers"),
+                                object: nil,
+                                userInfo: [
+                                    "triangleID": triangleID,
+                                    "spacing": surveySpacing,
+                                    "arWorldMapStore": arCalibrationCoordinator.arStoreAccess,
+                                    "triangleStore": arCalibrationCoordinator.triangleStoreAccess
+                                ]
+                            )
+                            
+                            // Track that this triangle now has markers
+                            trianglesWithSurveyMarkers.insert(triangleID)
+                        },
+                        onDefineSwath: {
                             print("🟣 [DEFINE_SWATH_BTN] Define Swath button tapped")
                             
-                            // Get the reference triangle (the one we just calibrated)
                             guard let referenceTriangleID = userContainingTriangleID,
                                   let referenceTriangle = arCalibrationCoordinator.triangleStoreAccess.triangle(withID: referenceTriangleID) else {
                                 print("⚠️ [DEFINE_SWATH_BTN] No reference triangle available")
@@ -902,7 +889,6 @@ struct ARViewWithOverlays: View {
                             
                             print("🟣 [DEFINE_SWATH_BTN] Reference triangle: \(String(referenceTriangleID.uuidString.prefix(8)))")
                             
-                            // Plant ghosts for ALL triangle vertices
                             arCalibrationCoordinator.plantGhostsForScope(
                                 scope: .allTriangles,
                                 referenceTriangle: referenceTriangle,
@@ -910,23 +896,8 @@ struct ARViewWithOverlays: View {
                                 mapPointStore: mapPointStore,
                                 arWorldMapStore: arWorldMapStore
                             )
-                        }) {
-                            VStack(spacing: 4) {
-                                Image(systemName: "square.3.layers.3d.top.filled")
-                                    .font(.system(size: 22, weight: .semibold))
-                                Text("Define Swath")
-                                    .font(.system(size: 12, weight: .medium))
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.purple.opacity(0.8))
-                            .cornerRadius(10)
-                        }
-                        .buttonStyle(.plain)
-                        
-                        // Fill Swath button
-                        Button(action: {
+                        },
+                        onFillSwath: {
                             print("🟢 [FILL_SWATH_BTN] Fill Swath button tapped")
                             
                             arCalibrationCoordinator.enterSurveyMode()
@@ -939,67 +910,26 @@ struct ARViewWithOverlays: View {
                                     "triangleStore": arCalibrationCoordinator.triangleStoreAccess
                                 ]
                             )
-                        }) {
-                            VStack(spacing: 4) {
-                                Image(systemName: "square.grid.3x3.topleft.filled")
-                                    .font(.system(size: 22, weight: .semibold))
-                                Text("Fill Swath")
-                                    .font(.system(size: 12, weight: .medium))
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.green.opacity(0.8))
-                            .cornerRadius(10)
-                        }
-                        .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal, 40)
-                        .padding(.bottom, 60)
-                    } else {
-                        // Spacer to maintain layout when button is hidden
-                        Spacer()
-                            .frame(height: 60)
-                            .padding(.bottom, 60)
-                    }
-                    
-                    // Fill Swath button - appears in Swath Survey mode with valid transform
-                    if arViewLaunchContext.launchMode == .swathSurvey,
-                       arCalibrationCoordinator.hasValidSessionTransform {
-                        
-                        Button(action: {
-                            print("🎯 [FILL_SWATH_BTN] Button tapped")
                             
-                            let triangleIDs = arViewLaunchContext.swathTriangleIDs
-                            guard !triangleIDs.isEmpty else {
-                                print("⚠️ [FILL_SWATH_BTN] No triangles in swath")
-                                return
+                            // Track all swath triangles as having markers
+                            for triangleID in arViewLaunchContext.swathTriangleIDs {
+                                trianglesWithSurveyMarkers.insert(triangleID)
                             }
+                        },
+                        onClearTriangle: {
+                            guard let triangleID = userContainingTriangleID else { return }
+                            print("🧹 [CLEAR_TRIANGLE_BTN] Button tapped for triangle \(String(triangleID.uuidString.prefix(8)))")
                             
                             NotificationCenter.default.post(
-                                name: NSNotification.Name("FillSwathWithSurveyMarkers"),
+                                name: NSNotification.Name("ClearTriangleMarkers"),
                                 object: nil,
-                                userInfo: [
-                                    "triangleIDs": triangleIDs,
-                                    "spacing": surveySpacing,
-                                    "arWorldMapStore": arCalibrationCoordinator.arStoreAccess as Any,
-                                    "triangleStore": arCalibrationCoordinator.triangleStoreAccess as Any
-                                ]
+                                userInfo: ["triangleID": triangleID]
                             )
-                        }) {
-                            HStack {
-                                Image(systemName: "square.grid.3x3.fill")
-                                Text("Fill Swath (\(arViewLaunchContext.swathTriangleIDs.count)△)")
-                            }
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
-                            .background(Color.green)
-                            .cornerRadius(12)
+                            
+                            // Update tracking
+                            trianglesWithSurveyMarkers.remove(triangleID)
                         }
-                        .padding(.bottom, 20)
-                    }
+                    )
                 }
                 .zIndex(997)
             }

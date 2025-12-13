@@ -151,15 +151,28 @@ func generateTriangleFillPoints(
 ///   - spacingMeters: Desired spacing in meters
 ///   - pxPerMeter: Map scale (pixels per meter)
 ///   - triangleVertices: Dictionary mapping triangle ID to its 3 vertices as CGPoints (pixels)
+///   - existingMarkerPositions_m: Array of existing marker positions in meters (for distance-based deduplication)
+///   - minSeparationFactor: Minimum separation as fraction of spacing (default 0.8 = 80%)
 /// - Returns: Array of deduplicated RegionFillPoints
 func generateFillPointsForRegion(
     region: SurveyableRegion,
     spacingMeters: Float,
     pxPerMeter: Float,
-    triangleVertices: [UUID: [CGPoint]]
+    triangleVertices: [UUID: [CGPoint]],
+    existingMarkerPositions_m: [CGPoint] = [],
+    minSeparationFactor: Float = 0.8
 ) -> [RegionFillPoint] {
     var seenKeys = Set<String>()
     var result: [RegionFillPoint] = []
+    
+    // Calculate minimum separation distance
+    let minSeparation = CGFloat(spacingMeters * minSeparationFactor)
+    
+    // Track positions of newly accepted points (in meters) for intra-fill dedup
+    var acceptedPositions_m: [CGPoint] = existingMarkerPositions_m
+    
+    // Track skipped count for logging
+    var skippedTooClose = 0
     
     for triangle in region.triangles {
         guard let vertices_px = triangleVertices[triangle.id],
@@ -191,10 +204,21 @@ func generateFillPointsForRegion(
             if !seenKeys.contains(coordKey) {
                 seenKeys.insert(coordKey)
                 
+                let candidatePos_m = CGPoint(x: roundedX, y: roundedY)
+                
+                // Distance-based filtering: skip if too close to existing or already-accepted markers
+                if isTooCloseToExisting(point: candidatePos_m, existingPoints: acceptedPositions_m, minSeparation: minSeparation) {
+                    skippedTooClose += 1
+                    continue
+                }
+                
+                // Accept this point
+                acceptedPositions_m.append(candidatePos_m)
+                
                 let fillPoint = RegionFillPoint(
                     coordinateKey: coordKey,
                     mapPosition_px: point_px,
-                    mapPosition_m: CGPoint(x: roundedX, y: roundedY),
+                    mapPosition_m: candidatePos_m,
                     containingTriangleID: triangle.id
                 )
                 result.append(fillPoint)
@@ -203,6 +227,38 @@ func generateFillPointsForRegion(
     }
     
     print("📐 [RegionFill] Generated \(result.count) unique fill points from \(region.triangleCount) triangle(s)")
+    if skippedTooClose > 0 {
+        print("   ↳ Skipped \(skippedTooClose) points too close to existing markers (min separation: \(String(format: "%.2f", minSeparation))m)")
+    }
     return result
+}
+
+// MARK: - Distance Utilities
+
+/// Calculate 2D distance between two points in meters
+@inline(__always)
+func distance2D(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
+    let dx = a.x - b.x
+    let dy = a.y - b.y
+    return sqrt(dx * dx + dy * dy)
+}
+
+/// Check if a point is too close to any point in a collection
+/// - Parameters:
+///   - point: The candidate point (in meters)
+///   - existingPoints: Array of existing positions (in meters)
+///   - minSeparation: Minimum allowed distance (in meters)
+/// - Returns: true if point is too close to any existing point
+func isTooCloseToExisting(
+    point: CGPoint,
+    existingPoints: [CGPoint],
+    minSeparation: CGFloat
+) -> Bool {
+    for existing in existingPoints {
+        if distance2D(point, existing) < minSeparation {
+            return true
+        }
+    }
+    return false
 }
 
