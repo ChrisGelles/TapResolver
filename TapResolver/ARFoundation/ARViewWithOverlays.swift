@@ -168,11 +168,9 @@ struct ARViewWithOverlays: View {
                     stopDwellTimer()
                 }
             }
-            // Survey marker PROXIMITY - update buzz intensity
+            // Survey marker PROXIMITY - update buzz intensity (no logging - too spammy)
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SurveyMarkerProximity"))) { notification in
-                if let intensity = notification.userInfo?["intensity"] as? Float,
-                   let distance = notification.userInfo?["distance"] as? Float {
-                    print("📶 [HAPTIC] Proximity update: distance=\(String(format: "%.3f", distance))m, intensity=\(String(format: "%.2f", intensity))")
+                if let intensity = notification.userInfo?["intensity"] as? Float {
                     updateBuzzIntensity(intensity)
                 }
             }
