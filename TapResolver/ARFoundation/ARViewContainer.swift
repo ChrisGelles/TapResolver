@@ -288,6 +288,14 @@ struct ARViewContainer: UIViewRepresentable {
                 object: nil
             )
             
+            // Fill Known Triangles notification observer
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleFillKnownTriangles),
+                name: NSNotification.Name("FillKnownTriangles"),
+                object: nil
+            )
+            
             // Listen for triangle calibration complete
             NotificationCenter.default.addObserver(
                 forName: NSNotification.Name("TriangleCalibrationComplete"),
@@ -431,6 +439,34 @@ struct ARViewContainer: UIViewRepresentable {
             let triangles = triangleStore.triangles.filter { triangleIDs.contains($0.id) }
             guard !triangles.isEmpty else {
                 print("⚠️ [ARViewContainer] No valid triangles found for swath")
+                return
+            }
+            
+            let region = SurveyableRegion.swath(triangles)
+            generateSurveyMarkersForRegion(region, spacing: spacing, arWorldMapStore: arWorldMapStore)
+        }
+        
+        @objc func handleFillKnownTriangles(notification: Notification) {
+            print("📬 [ARViewContainer] Received FillKnownTriangles notification")
+            
+            guard let userInfo = notification.userInfo,
+                  let triangleIDs = userInfo["triangleIDs"] as? [UUID],
+                  let spacing = userInfo["spacing"] as? Float,
+                  let triangleStore = userInfo["triangleStore"] as? TrianglePatchStore else {
+                print("⚠️ [ARViewContainer] FillKnownTriangles missing required data")
+                return
+            }
+            
+            print("🔍 [ARViewContainer] Processing Fill Known: \(triangleIDs.count) triangles, spacing: \(spacing)m")
+            
+            guard let arWorldMapStore = arCalibrationCoordinator?.arStoreAccess else {
+                print("⚠️ [ARViewContainer] ARWorldMapStore not available")
+                return
+            }
+            
+            let triangles = triangleStore.triangles.filter { triangleIDs.contains($0.id) }
+            guard !triangles.isEmpty else {
+                print("⚠️ [ARViewContainer] No valid triangles found")
                 return
             }
             

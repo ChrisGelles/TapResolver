@@ -1984,6 +1984,27 @@ final class ARCalibrationCoordinator: ObservableObject {
         return true
     }
     
+    /// Count how many triangles can currently be filled (all 3 vertices have positions)
+    func countFillableTriangles() -> Int {
+        return getFillableTriangleIDs().count
+    }
+    
+    /// Get IDs of all triangles that can be filled (all 3 vertices have known positions)
+    /// A vertex has a known position if it's in mapPointARPositions (session), ghostMarkerPositions, or has baked data
+    func getFillableTriangleIDs() -> [UUID] {
+        let triangleStore = triangleStoreAccess
+        
+        var fillable: [UUID] = []
+        
+        for triangle in triangleStore.triangles {
+            if triangleCanBeFilled(triangle.id) {
+                fillable.append(triangle.id)
+            }
+        }
+        
+        return fillable
+    }
+    
     /// Check if session has a valid canonical→session transform
     public var hasValidSessionTransform: Bool {
         return cachedCanonicalToSessionTransform != nil

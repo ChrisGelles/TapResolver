@@ -847,8 +847,7 @@ struct ARViewWithOverlays: View {
                     SurveyButtonBar(
                         userContainingTriangleID: userContainingTriangleID,
                         hasAnyCalibratedTriangle: !arCalibrationCoordinator.sessionCalibratedTriangles.isEmpty,
-                        swathIsDefined: arViewLaunchContext.swathTriangleIDs.count > 0,
-                        swathTriangleCount: arViewLaunchContext.swathTriangleIDs.count,
+                        fillableTriangleCount: arCalibrationCoordinator.countFillableTriangles(),
                         canFillCurrentTriangle: {
                             guard let triangleID = userContainingTriangleID else { return false }
                             return arCalibrationCoordinator.sessionCalibratedTriangles.contains(triangleID) ||
@@ -897,22 +896,33 @@ struct ARViewWithOverlays: View {
                                 arWorldMapStore: arWorldMapStore
                             )
                         },
-                        onFillSwath: {
-                            print("🟢 [FILL_SWATH_BTN] Fill Swath button tapped")
+                        onFillKnown: {
+                            print("🟢 [FILL_KNOWN_BTN] Fill Known button tapped")
+                            
+                            // Get all fillable triangle IDs
+                            let fillableTriangleIDs = arCalibrationCoordinator.getFillableTriangleIDs()
+                            
+                            guard !fillableTriangleIDs.isEmpty else {
+                                print("⚠️ [FILL_KNOWN_BTN] No fillable triangles found")
+                                return
+                            }
+                            
+                            print("🟢 [FILL_KNOWN_BTN] Found \(fillableTriangleIDs.count) fillable triangle(s)")
                             
                             arCalibrationCoordinator.enterSurveyMode()
                             
                             NotificationCenter.default.post(
-                                name: NSNotification.Name("FillSwathWithSurveyMarkers"),
+                                name: NSNotification.Name("FillKnownTriangles"),
                                 object: nil,
                                 userInfo: [
+                                    "triangleIDs": fillableTriangleIDs,
                                     "spacing": surveySpacing,
                                     "triangleStore": arCalibrationCoordinator.triangleStoreAccess
                                 ]
                             )
                             
-                            // Track all swath triangles as having markers
-                            for triangleID in arViewLaunchContext.swathTriangleIDs {
+                            // Track all filled triangles as having markers
+                            for triangleID in fillableTriangleIDs {
                                 trianglesWithSurveyMarkers.insert(triangleID)
                             }
                         },

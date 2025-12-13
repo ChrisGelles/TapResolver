@@ -32,15 +32,14 @@ struct SurveyButtonBar: View {
     // Current state
     let userContainingTriangleID: UUID?
     let hasAnyCalibratedTriangle: Bool
-    let swathIsDefined: Bool
-    let swathTriangleCount: Int
+    let fillableTriangleCount: Int
     let canFillCurrentTriangle: Bool
     let currentTriangleHasMarkers: Bool
     
     // Actions
     let onFillTriangle: () -> Void
     let onDefineSwath: () -> Void
-    let onFillSwath: () -> Void
+    let onFillKnown: () -> Void
     let onClearTriangle: () -> Void
     
     var body: some View {
@@ -63,13 +62,13 @@ struct SurveyButtonBar: View {
                 action: onDefineSwath
             )
             
-            // Fill Swath
+            // Fill Known - fills all triangles with known vertex positions
             SurveyButton(
-                icon: "square.grid.3x3.topleft.filled",
-                label: swathTriangleCount > 0 ? "Fill Swath (\(swathTriangleCount)△)" : "Fill Swath",
+                icon: "triangle.fill",
+                label: fillableTriangleCount > 0 ? "Fill Known (\(fillableTriangleCount)△)" : "Fill Known",
                 color: .green,
-                isEnabled: swathIsDefined && swathTriangleCount > 0,
-                action: onFillSwath
+                isEnabled: fillableTriangleCount > 0,
+                action: onFillKnown
             )
             
             // Clear Triangle
@@ -133,13 +132,12 @@ struct SurveyButton: View {
             SurveyButtonBar(
                 userContainingTriangleID: UUID(),
                 hasAnyCalibratedTriangle: true,
-                swathIsDefined: true,
-                swathTriangleCount: 5,
+                fillableTriangleCount: 5,
                 canFillCurrentTriangle: true,
                 currentTriangleHasMarkers: true,
                 onFillTriangle: {},
                 onDefineSwath: {},
-                onFillSwath: {},
+                onFillKnown: {},
                 onClearTriangle: {}
             )
             
@@ -147,13 +145,12 @@ struct SurveyButton: View {
             SurveyButtonBar(
                 userContainingTriangleID: nil,
                 hasAnyCalibratedTriangle: true,
-                swathIsDefined: false,
-                swathTriangleCount: 0,
+                fillableTriangleCount: 0,
                 canFillCurrentTriangle: false,
                 currentTriangleHasMarkers: false,
                 onFillTriangle: {},
                 onDefineSwath: {},
-                onFillSwath: {},
+                onFillKnown: {},
                 onClearTriangle: {}
             )
         }
