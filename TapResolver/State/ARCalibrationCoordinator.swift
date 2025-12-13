@@ -1384,23 +1384,32 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // Check prerequisites
         guard let transform = cachedCanonicalToSessionTransform else {
-            print("👻 [BAKED_GHOST] No cached transform - computing...")
+            print("")
+            print("┌─────────────────────────────────────────────────────────────────────┐")
+            print("│ 👻 [BAKED_GHOST] No cached transform - attempting to compute...    │")
+            print("└─────────────────────────────────────────────────────────────────────┘")
             
             // Try to compute transform if we have the data
             if let mapSize = cachedMapSize, let metersPerPixel = cachedMetersPerPixel {
+                print("   ├─ Map params available: \(Int(mapSize.width))×\(Int(mapSize.height)), \(String(format: "%.4f", metersPerPixel)) m/px")
                 guard computeSessionTransformForBakedData(mapSize: mapSize, metersPerPixel: metersPerPixel) else {
-                    print("👻 [BAKED_GHOST] Failed to compute transform, falling back to legacy")
+                    print("   └─ ❌ Transform computation FAILED")
+                    print("      Reason: computeSessionTransformForBakedData returned false")
                     return nil
                 }
             } else {
-                print("👻 [BAKED_GHOST] No map parameters cached, falling back to legacy")
+                print("   └─ ❌ Cannot compute transform - missing map parameters:")
+                print("      cachedMapSize: \(cachedMapSize != nil ? "✅" : "❌ NIL")")
+                print("      cachedMetersPerPixel: \(cachedMetersPerPixel != nil ? "✅" : "❌ NIL")")
                 return nil
             }
             
             guard let newTransform = cachedCanonicalToSessionTransform else {
+                print("   └─ ❌ Transform still nil after computation attempt")
                 return nil
             }
             
+            print("   └─ ✅ Transform computed successfully")
             return calculateGhostPositionFromBakedDataInternal(for: targetMapPointID, using: newTransform, startTime: startTime)
         }
         
@@ -1413,9 +1422,30 @@ final class ARCalibrationCoordinator: ObservableObject {
         startTime: Date
     ) -> SIMD3<Float>? {
         // Look up baked position
-        guard let targetMapPoint = safeMapStore.points.first(where: { $0.id == targetMapPointID }),
-              let bakedPosition = targetMapPoint.bakedCanonicalPosition else {
-            print("👻 [BAKED_GHOST] No baked position for \(String(targetMapPointID.uuidString.prefix(8))), falling back to legacy")
+        guard let targetMapPoint = safeMapStore.points.first(where: { $0.id == targetMapPointID }) else {
+            print("┌─────────────────────────────────────────────────────────────────────┐")
+            print("│ ❌ [BAKED_GHOST] MapPoint NOT FOUND: \(String(targetMapPointID.uuidString.prefix(8)))")
+            print("└─────────────────────────────────────────────────────────────────────┘")
+            return nil
+        }
+        
+        guard let bakedPosition = targetMapPoint.bakedCanonicalPosition else {
+            print("┌─────────────────────────────────────────────────────────────────────┐")
+            print("│ ❌ [BAKED_GHOST] No bakedCanonicalPosition for \(String(targetMapPointID.uuidString.prefix(8)))")
+            print("├─────────────────────────────────────────────────────────────────────┤")
+            print("│ MapPoint exists but has no baked data:")
+            print("│   bakedConfidence: \(targetMapPoint.bakedConfidence != nil ? String(format: "%.2f", targetMapPoint.bakedConfidence!) : "NIL")")
+            print("│   bakedSampleCount: \(targetMapPoint.bakedSampleCount)")
+            print("│   arPositionHistory: \(targetMapPoint.arPositionHistory.count) record(s)")
+            if !targetMapPoint.arPositionHistory.isEmpty {
+                print("│   Sessions in history:")
+                let sessions = Set(targetMapPoint.arPositionHistory.map { $0.sessionID })
+                for (i, sid) in sessions.enumerated() {
+                    let count = targetMapPoint.arPositionHistory.filter { $0.sessionID == sid }.count
+                    print("│     [\(i)] \(String(sid.uuidString.prefix(8))): \(count) record(s)")
+                }
+            }
+            print("└─────────────────────────────────────────────────────────────────────┘")
             return nil
         }
         
@@ -1435,11 +1465,63 @@ final class ARCalibrationCoordinator: ObservableObject {
         placedVertexIDs: [UUID],
         placedARPositions: [simd_float3]
     ) -> simd_float3? {
+        // ╔════════════════════════════════════════════════════════════════════════╗
+        // ║                    GHOST POSITION DIAGNOSTIC                            ║
+        // ╚════════════════════════════════════════════════════════════════════════╝
+        let diagStart = Date()
+        print("")
+        print("╔════════════════════════════════════════════════════════════════════════╗")
+        print("║              👻 GHOST POSITION CALCULATION START                       ║")
+        print("╠════════════════════════════════════════════════════════════════════════╣")
+        print("║ Target vertex: \(String(thirdVertexID.uuidString.prefix(8)))")
+        print("║ Placed markers: \(placedVertexIDs.count)")
+        for (i, vid) in placedVertexIDs.enumerated() {
+            print("║   [\(i)] \(String(vid.uuidString.prefix(8))) → AR pos: (\(String(format: "%.2f", placedARPositions[i].x)), \(String(format: "%.2f", placedARPositions[i].y)), \(String(format: "%.2f", placedARPositions[i].z)))")
+        }
+        print("╠════════════════════════════════════════════════════════════════════════╣")
+        print("║ PREREQUISITES CHECK:")
+        print("║   cachedCanonicalToSessionTransform: \(cachedCanonicalToSessionTransform != nil ? "✅ EXISTS" : "❌ NIL")")
+        print("║   cachedMapSize: \(cachedMapSize != nil ? "✅ \(Int(cachedMapSize!.width))×\(Int(cachedMapSize!.height))" : "❌ NIL")")
+        print("║   cachedMetersPerPixel: \(cachedMetersPerPixel != nil ? "✅ \(String(format: "%.4f", cachedMetersPerPixel!))" : "❌ NIL")")
+        
+        // Check target MapPoint's baked status
+        if let targetMP = safeMapStore.points.first(where: { $0.id == thirdVertexID }) {
+            print("║   Target MapPoint baked status:")
+            if let baked = targetMP.bakedCanonicalPosition {
+                print("║     bakedCanonicalPosition: ✅ (\(String(format: "%.2f", baked.x)), \(String(format: "%.2f", baked.y)), \(String(format: "%.2f", baked.z)))")
+            } else {
+                print("║     bakedCanonicalPosition: ❌ NIL")
+            }
+            print("║     bakedConfidence: \(targetMP.bakedConfidence != nil ? String(format: "%.2f", targetMP.bakedConfidence!) : "NIL")")
+            print("║     bakedSampleCount: \(targetMP.bakedSampleCount)")
+            print("║     arPositionHistory count: \(targetMP.arPositionHistory.count)")
+        } else {
+            print("║   Target MapPoint: ❌ NOT FOUND IN STORE")
+        }
+        print("╠════════════════════════════════════════════════════════════════════════╣")
+        print("║ ATTEMPTING PATH SELECTION...")
+        print("╚════════════════════════════════════════════════════════════════════════╝")
+        
         // MILESTONE 5: Try baked data first (fast path)
         if let bakedPosition = calculateGhostPositionFromBakedData(for: thirdVertexID) {
+            let diagDuration = Date().timeIntervalSince(diagStart) * 1000
+            print("")
+            print("╔════════════════════════════════════════════════════════════════════════╗")
+            print("║ ✅ BAKED PATH SUCCEEDED                                                ║")
+            print("╠════════════════════════════════════════════════════════════════════════╣")
+            print("║ Result: (\(String(format: "%.2f", bakedPosition.x)), \(String(format: "%.2f", bakedPosition.y)), \(String(format: "%.2f", bakedPosition.z)))")
+            print("║ Duration: \(String(format: "%.2f", diagDuration))ms")
+            print("╚════════════════════════════════════════════════════════════════════════╝")
+            print("")
             return bakedPosition
         }
-        print("👻 [GHOST_CALC] Using legacy calculation (no baked data available)")
+        print("")
+        print("╔════════════════════════════════════════════════════════════════════════╗")
+        print("║ ⚠️  LEGACY PATH ACTIVATED (baked data unavailable)                     ║")
+        print("╠════════════════════════════════════════════════════════════════════════╣")
+        print("║ This path uses consensusPosition which may average incompatible")
+        print("║ coordinate frames from different AR sessions.")
+        print("╚════════════════════════════════════════════════════════════════════════╝")
         
         let calcStart = Date()
         var timingLog: [(String, TimeInterval)] = []
@@ -1591,6 +1673,19 @@ final class ARCalibrationCoordinator: ObservableObject {
         for (label, duration) in timingLog {
             print("   └─ \(label): \(String(format: "%.1f", duration * 1000))ms")
         }
+        
+        let calcDuration = Date().timeIntervalSince(calcStart) * 1000
+        print("")
+        print("╔════════════════════════════════════════════════════════════════════════╗")
+        print("║ ⚠️  LEGACY/BARYCENTRIC PATH COMPLETED                                  ║")
+        print("╠════════════════════════════════════════════════════════════════════════╣")
+        print("║ Final position: (\(String(format: "%.2f", ghostPosition.x)), \(String(format: "%.2f", ghostPosition.y)), \(String(format: "%.2f", ghostPosition.z)))")
+        print("║ Duration: \(String(format: "%.1f", calcDuration))ms")
+        print("║")
+        print("║ ⚡ NOTE: This position was NOT derived from baked canonical data.")
+        print("║ Cross-session accuracy may be degraded.")
+        print("╚════════════════════════════════════════════════════════════════════════╝")
+        print("")
         
         return ghostPosition
     }
@@ -2938,6 +3033,15 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// - Returns: true if transform was computed successfully
     @discardableResult
     func computeSessionTransformForBakedData(mapSize: CGSize, metersPerPixel: Float) -> Bool {
+        print("")
+        print("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+        print("┃ 🔄 SESSION TRANSFORM COMPUTATION                                      ┃")
+        print("┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+        print("┃ Input parameters:")
+        print("┃   mapSize: \(Int(mapSize.width))×\(Int(mapSize.height)) pixels")
+        print("┃   metersPerPixel: \(String(format: "%.4f", metersPerPixel))")
+        print("┃   placedMarkers count: \(placedMarkers.count)")
+        print("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
         print("📐 [SESSION_TRANSFORM] Computing canonical↔session transform...")
         
         // Cache parameters for later use

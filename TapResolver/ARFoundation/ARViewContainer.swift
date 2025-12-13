@@ -1190,13 +1190,9 @@ struct ARViewContainer: UIViewRepresentable {
                 let groundY = (tri_3D[0].y + tri_3D[1].y + tri_3D[2].y) / 3.0
                 let groundPosition = simd_float3(position3D.x, groundY, position3D.z)
                 
-                // Place marker - get a MapPoint from the containing triangle for logging
-                if let containingTriangle = region.triangles.first(where: { $0.id == fillPoint.containingTriangleID }),
-                   let firstVertexID = containingTriangle.vertexIDs.first,
-                   let mapPoint = mapPointStore.points.first(where: { $0.id == firstVertexID }) {
-                    if placeSurveyMarkerOnly(at: groundPosition, mapPoint: mapPoint) != nil {
-                        placedCount += 1
-                    }
+                // Place marker using the actual fill point's map position
+                if placeSurveyMarkerOnly(at: groundPosition, mapCoordinate: fillPoint.mapPosition_px) != nil {
+                    placedCount += 1
                 }
             }
             
@@ -1223,14 +1219,13 @@ struct ARViewContainer: UIViewRepresentable {
         }
         
         /// Places a survey marker WITHOUT calling registerMarker (no photo, no MapPoint updates)
-        func placeSurveyMarkerOnly(at position: simd_float3, mapPoint: MapPointStore.MapPoint) -> UUID? {
+        func placeSurveyMarkerOnly(at position: simd_float3, mapCoordinate: CGPoint) -> UUID? {
             guard let sceneView = sceneView else {
                 print("⚠️ ARView not available for survey marker placement")
                 return nil
             }
             
             // Create survey marker using consolidated class
-            let mapCoordinate = CGPoint(x: CGFloat(mapPoint.mapPoint.x), y: CGFloat(mapPoint.mapPoint.y))
             let marker = SurveyMarker(
                 at: position,
                 userDeviceHeight: userDeviceHeight,
@@ -1241,7 +1236,7 @@ struct ARViewContainer: UIViewRepresentable {
             sceneView.scene.rootNode.addChildNode(marker.node)
             surveyMarkers[marker.id] = marker
             
-            print("📍 Placed survey marker at map(\(String(format: "%.1f, %.1f", mapPoint.mapPoint.x, mapPoint.mapPoint.y))) → AR\(String(format: "(%.2f, %.2f, %.2f)", position.x, position.y, position.z))")
+            print("📍 Placed survey marker at map(\(String(format: "%.1f, %.1f", mapCoordinate.x, mapCoordinate.y))) → AR\(String(format: "(%.2f, %.2f, %.2f)", position.x, position.y, position.z))")
             
             return marker.id
         }
