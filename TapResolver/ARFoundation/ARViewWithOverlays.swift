@@ -127,6 +127,9 @@ struct ARViewWithOverlays: View {
                 
                 print("🧪 ARView ID: triangle viewing mode for \(selectedTriangle.map { String($0.id.uuidString.prefix(8)) } ?? "none")")
                 print("🧪 ARViewWithOverlays instance: \(instanceAddress)")
+                
+                // Initialize haptic engine for survey marker feedback
+                prepareHaptics()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PlacementBlocked"))) { notification in
                 if let distance = notification.userInfo?["distance"] as? Float,
@@ -1003,23 +1006,24 @@ struct ARViewWithOverlays: View {
                 .zIndex(997)
             }
 
+            // Dwell Timer Display - centered on screen when inside ANY survey marker sphere
+            // This displays regardless of mode (idle, swath survey, etc.)
+            if isInsideSphere {
+                VStack(spacing: 4) {
+                    Text(String(format: "%.1f", dwellTimerValue))
+                        .font(.system(size: 72, weight: .heavy, design: .monospaced))
+                        .foregroundColor(dwellTimerColor())
+                    Text("sec")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundColor(dwellTimerColor().opacity(0.8))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .zIndex(999)
+            }
+            
             // Place AR Marker Button + Strategy Picker (bottom) - only in idle mode with no triangle selected
             // Exclude Swath Survey mode - it has its own workflow
             if currentMode == .idle && selectedTriangle == nil && arViewLaunchContext.launchMode != .swathSurvey {
-                // Dwell Timer Display - centered on screen when inside sphere
-                if isInsideSphere {
-                    VStack(spacing: 4) {
-                        Text(String(format: "%.1f", dwellTimerValue))
-                            .font(.system(size: 72, weight: .heavy, design: .monospaced))
-                            .foregroundColor(dwellTimerColor())
-                        Text("sec")
-                            .font(.system(size: 24, weight: .medium))
-                            .foregroundColor(dwellTimerColor().opacity(0.8))
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .zIndex(999)
-                }
-                
                 VStack {
                     Spacer()
                     
@@ -1108,9 +1112,6 @@ struct ARViewWithOverlays: View {
                     .padding(.bottom, 60)
                 }
                 .zIndex(997)
-                .onAppear {
-                    prepareHaptics()
-                }
             }
             
             // Calibrate / Relocalize buttons - shown when triangle is selected but NOT calibrated or NOT in calibration mode

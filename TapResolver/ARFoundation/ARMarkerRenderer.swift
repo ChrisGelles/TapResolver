@@ -18,6 +18,7 @@ struct MarkerOptions {
     var animateOnAppearance: Bool = false
     var animationOvershoot: Float = 0.04  // Overshoot in meters (default 4cm)
     var isGhost: Bool = false  // Ghost markers are semi-transparent and pulsing
+    var isSurveyMarker: Bool = false  // Survey markers get gradient inner sphere; others get solid
 }
 
 class ARMarkerRenderer {
@@ -75,16 +76,23 @@ class ARMarkerRenderer {
         markerNode.addChildNode(sphereNode)
         
         // Inner sphere - visible from inside (flipped normals)
-        // Gradient texture: dark blue at poles, brighter at equator
         let innerSphere = SCNSphere(radius: options.radius - 0.002)
-        let poleColor = UIColor(red: 0.05, green: 0.08, blue: 0.2, alpha: 1.0)      // Dark blue-black
-        let equatorColor = UIColor(red: 0.8, green: 0.4, blue: 0.1, alpha: 1.0)    // Brighter blue
-        let gradientTexture = createEquatorGradientTexture(
-            poleColor: poleColor,
-            equatorColor: equatorColor,
-            falloff: 0.5  // Slightly sharper than linear - nice visible band
-        )
-        innerSphere.firstMaterial?.diffuse.contents = gradientTexture
+        
+        if options.isSurveyMarker {
+            // Survey markers: gradient texture for visibility when inside
+            let poleColor = UIColor(red: 0.05, green: 0.08, blue: 0.2, alpha: 1.0)      // Dark blue-black
+            let equatorColor = UIColor(red: 0.8, green: 0.4, blue: 0.1, alpha: 1.0)    // Orange equator band
+            let gradientTexture = createEquatorGradientTexture(
+                poleColor: poleColor,
+                equatorColor: equatorColor,
+                falloff: 0.5  // Slightly sharper than linear - nice visible band
+            )
+            innerSphere.firstMaterial?.diffuse.contents = gradientTexture
+        } else {
+            // All other markers: solid color matching exterior
+            innerSphere.firstMaterial?.diffuse.contents = options.color
+        }
+        
         innerSphere.firstMaterial?.cullMode = .front  // Flip normals - visible from inside
         innerSphere.firstMaterial?.isDoubleSided = false
         innerSphere.firstMaterial?.lightingModel = .constant  // Ignore scene lighting for consistent color

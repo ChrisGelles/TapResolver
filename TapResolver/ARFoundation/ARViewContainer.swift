@@ -114,7 +114,7 @@ struct ARViewContainer: UIViewRepresentable {
         /// Stores estimated AR positions for ghost markers (mapPointID → estimated position)
         /// Used for distortion calculation when user adjusts a ghost
         var ghostMarkerPositions: [UUID: simd_float3] = [:]
-        var surveyMarkers: [UUID: SCNNode] = [:]  // markerID -> node
+        var surveyMarkers: [UUID: SurveyMarker] = [:]  // markerID -> SurveyMarker instance
         weak var metricSquareStore: MetricSquareStore?
         weak var mapPointStore: MapPointStore?
         /// Reference to calibration coordinator for ghost selection updates
@@ -358,21 +358,16 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
-            let markerID = UUID()
-            
-            // Create marker using centralized renderer with red color for survey
-            let options = MarkerOptions(
-                color: UIColor.red,
-                markerID: markerID,
+            // Create survey marker using consolidated class
+            let marker = SurveyMarker(
+                at: position,
                 userDeviceHeight: userDeviceHeight,
-                radius: 0.035,  // Same as production survey markers
-                animateOnAppearance: true  // Animation for visual feedback
+                mapCoordinate: nil,  // Test markers don't have map coordinates
+                animated: true
             )
-            let markerNode = ARMarkerRenderer.createNode(at: position, options: options)
-            markerNode.name = "surveyMarker_\(markerID.uuidString)"
             
-            sceneView.scene.rootNode.addChildNode(markerNode)
-            surveyMarkers[markerID] = markerNode
+            sceneView.scene.rootNode.addChildNode(marker.node)
+            surveyMarkers[marker.id] = marker
             
             print("🧪 [TEST_SURVEY_MARKER] Placed at (\(String(format: "%.2f, %.2f, %.2f", position.x, position.y, position.z)))")
             print("   Total survey markers in scene: \(surveyMarkers.count)")
@@ -1217,9 +1212,10 @@ struct ARViewContainer: UIViewRepresentable {
         }
         
         /// Clear all survey markers from scene
+        /// Clear all survey markers from scene
         func clearSurveyMarkers() {
-            for (_, node) in surveyMarkers {
-                node.removeFromParentNode()
+            for (_, marker) in surveyMarkers {
+                marker.removeFromScene()
             }
             surveyMarkers.removeAll()
             triggeredSurveyMarkers.removeAll()
@@ -1233,29 +1229,21 @@ struct ARViewContainer: UIViewRepresentable {
                 return nil
             }
             
-            let markerID = UUID()
-            
-            print("📍 Survey Marker placed at \(String(format: "(%.2f, %.2f, %.2f)", position.x, position.y, position.z))")
-            
-            // Create marker using centralized renderer with red color for survey
-            let options = MarkerOptions(
-                color: UIColor.red,
-                markerID: markerID,
+            // Create survey marker using consolidated class
+            let mapCoordinate = CGPoint(x: CGFloat(mapPoint.mapPoint.x), y: CGFloat(mapPoint.mapPoint.y))
+            let marker = SurveyMarker(
+                at: position,
                 userDeviceHeight: userDeviceHeight,
-                radius: 0.035,  // Larger radius for survey markers
-                animateOnAppearance: false
+                mapCoordinate: mapCoordinate,
+                animated: false
             )
-            let markerNode = ARMarkerRenderer.createNode(at: position, options: options)
-            markerNode.name = "surveyMarker_\(markerID.uuidString)"
             
-            sceneView.scene.rootNode.addChildNode(markerNode)
-            
-            // Store in surveyMarkers, NOT in placedMarkers (to avoid MapPoint updates)
-            surveyMarkers[markerID] = markerNode
+            sceneView.scene.rootNode.addChildNode(marker.node)
+            surveyMarkers[marker.id] = marker
             
             print("📍 Placed survey marker at map(\(String(format: "%.1f, %.1f", mapPoint.mapPoint.x, mapPoint.mapPoint.y))) → AR\(String(format: "(%.2f, %.2f, %.2f)", position.x, position.y, position.z))")
             
-            return markerID
+            return marker.id
         }
         
         /// Clear all calibration AR markers from scene
@@ -1375,16 +1363,13 @@ struct ARViewContainer: UIViewRepresentable {
                 cameraTransform.columns.3.z
             )
             
-            let sphereRadius: Float = 0.035     // Marker sphere radius
-            let deadZoneRadius: Float = 0.010   // 1cm silent zone at center
+            // Use config constants
+            let sphereRadius = SurveyMarkerConfig.sphereRadius
+            let deadZoneRadius = SurveyMarkerConfig.deadZoneRadius
             
-            for (markerID, markerNode) in surveyMarkers {
-                // Sphere topper is at userDeviceHeight above the marker base position
-                let sphereCenterPosition = simd_float3(
-                    markerNode.position.x,
-                    markerNode.position.y + userDeviceHeight,
-                    markerNode.position.z
-                )
+            for (markerID, marker) in surveyMarkers {
+                // Use marker's computed sphere center
+                let sphereCenterPosition = marker.sphereCenter
                 
                 let distance = simd_distance(cameraPosition, sphereCenterPosition)
                 let wasInside = triggeredSurveyMarkers.contains(markerID)
@@ -1407,7 +1392,13 @@ struct ARViewContainer: UIViewRepresentable {
                     NotificationCenter.default.post(
                         name: NSNotification.Name("SurveyMarkerEntered"),
                         object: nil,
-                        userInfo: ["markerID": markerID, "distance": distance, "radius": sphereRadius, "intensity": initialIntensity]
+                        userInfo: [
+                            "markerID": markerID,
+                            "distance": distance,
+                            "radius": sphereRadius,
+                            "intensity": initialIntensity,
+                            "mapCoordinate": marker.mapCoordinate as Any
+                        ]
                     )
                 } else if !isInside && wasInside {
                     // EXITED sphere - knock + stop buzz
@@ -1417,7 +1408,10 @@ struct ARViewContainer: UIViewRepresentable {
                     NotificationCenter.default.post(
                         name: NSNotification.Name("SurveyMarkerExited"),
                         object: nil,
-                        userInfo: ["markerID": markerID]
+                        userInfo: [
+                            "markerID": markerID,
+                            "mapCoordinate": marker.mapCoordinate as Any
+                        ]
                     )
                 } else if isInside {
                     // INSIDE sphere - update buzz intensity based on distance
