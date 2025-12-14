@@ -769,8 +769,19 @@ struct ARViewContainer: UIViewRepresentable {
             }
             
             // Disable tap-to-place in triangle calibration mode - use Place Marker button instead
+            // But allow tapping on existing AR markers to demote them to ghosts
             if case .triangleCalibration = currentMode {
-                print("👆 [TAP_TRACE] Tap ignored in triangle calibration mode — use Place Marker button")
+                guard let sceneView = sceneView else { return }
+                
+                // Check if user tapped on an existing AR marker for re-adjustment
+                let tapLocation = sender.location(in: sceneView)
+                if let tappedMarkerID = hitTestARMarker(at: tapLocation, in: sceneView) {
+                    print("👆 [TAP_MARKER] Tapped AR marker \(String(tappedMarkerID.uuidString.prefix(8))) - demoting to ghost")
+                    demoteMarkerToGhost(markerID: tappedMarkerID)
+                    return
+                }
+                
+                print("👆 [TAP_TRACE] Tap ignored in triangle calibration mode — use Place Marker button or tap an AR marker to adjust")
                 return
             }
             
@@ -796,6 +807,87 @@ struct ARViewContainer: UIViewRepresentable {
             
             print("👆 Tap detected at screen: \(location), world: \(position)")
             placeMarker(at: position)
+        }
+        
+        /// Hit-test to find if tap intersects an AR marker's sphere topper
+        /// - Parameters:
+        ///   - point: Screen point of tap
+        ///   - sceneView: The AR scene view
+        /// - Returns: The marker UUID if hit, nil otherwise
+        private func hitTestARMarker(at point: CGPoint, in sceneView: ARSCNView) -> UUID? {
+            let hitResults = sceneView.hitTest(point, options: [
+                .searchMode: SCNHitTestSearchMode.all.rawValue,
+                .ignoreHiddenNodes: false
+            ])
+            
+            for result in hitResults {
+                // Check if we hit a marker node (sphere topper or pole)
+                var node: SCNNode? = result.node
+                
+                // Walk up the hierarchy to find the marker root
+                while let current = node {
+                    if let name = current.name {
+                        // Check for marker root node: "arMarker_<UUID>"
+                        if name.hasPrefix("arMarker_") && !name.hasPrefix("arMarkerSphere_") {
+                            let uuidString = String(name.dropFirst("arMarker_".count))
+                            if let uuid = UUID(uuidString: uuidString) {
+                                print("🎯 [HIT_TEST] Hit AR marker node: \(String(uuid.uuidString.prefix(8)))")
+                                return uuid
+                            }
+                        }
+                        // Check for sphere node: "arMarkerSphere_<UUID>"
+                        if name.hasPrefix("arMarkerSphere_") {
+                            let uuidString = String(name.dropFirst("arMarkerSphere_".count))
+                            if let uuid = UUID(uuidString: uuidString) {
+                                print("🎯 [HIT_TEST] Hit AR marker sphere: \(String(uuid.uuidString.prefix(8)))")
+                                return uuid
+                            }
+                        }
+                    }
+                    node = current.parent
+                }
+            }
+            
+            return nil
+        }
+        
+        /// Demote an AR marker to a ghost marker for re-adjustment
+        /// - Parameter markerID: The AR marker's UUID
+        private func demoteMarkerToGhost(markerID: UUID) {
+            guard let sceneView = sceneView else {
+                print("⚠️ [DEMOTE] sceneView is nil")
+                return
+            }
+            
+            // Find the marker node - check placedMarkers dictionary first
+            let markerNode: SCNNode?
+            if let node = placedMarkers[markerID] {
+                markerNode = node
+            } else {
+                // Fallback: search scene for node with matching name
+                markerNode = sceneView.scene.rootNode.childNodes.first(where: {
+                    $0.name == "arMarker_\(markerID.uuidString)"
+                })
+            }
+            
+            guard let node = markerNode else {
+                print("⚠️ [DEMOTE] Could not find marker node for \(String(markerID.uuidString.prefix(8)))")
+                return
+            }
+            
+            // Get the marker's current position
+            let currentPosition = node.simdWorldPosition
+            
+            // Post notification with marker ID and let coordinator resolve
+            print("🔄 [DEMOTE] Posting DemoteMarkerToGhost notification")
+            NotificationCenter.default.post(
+                name: NSNotification.Name("DemoteMarkerToGhost"),
+                object: nil,
+                userInfo: [
+                    "markerID": markerID,
+                    "currentPosition": [Float(currentPosition.x), Float(currentPosition.y), Float(currentPosition.z)]
+                ]
+            )
         }
 
         @discardableResult
@@ -941,6 +1033,40 @@ struct ARViewContainer: UIViewRepresentable {
                 name: NSNotification.Name("RemoveGhostMarker"),
                 object: nil
             )
+            
+            // Listen for DemoteMarkerResponse (coordinator tells us which MapPoint to convert)
+            NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("DemoteMarkerResponse"),
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self,
+                      let markerID = notification.userInfo?["markerID"] as? UUID,
+                      let mapPointID = notification.userInfo?["mapPointID"] as? UUID,
+                      let positionArray = notification.userInfo?["position"] as? [Float],
+                      positionArray.count == 3 else {
+                    print("⚠️ [DEMOTE_RESPONSE] Missing required data in notification")
+                    return
+                }
+                
+                let position = simd_float3(positionArray[0], positionArray[1], positionArray[2])
+                
+                print("🔄 [DEMOTE_RESPONSE] Converting marker \(String(markerID.uuidString.prefix(8))) for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+                
+                // Remove AR marker visual
+                if let markerNode = self.placedMarkers[markerID] {
+                    markerNode.removeFromParentNode()
+                    self.placedMarkers.removeValue(forKey: markerID)
+                }
+                
+                // Create ghost marker at same position
+                self.createGhostMarker(at: position, for: mapPointID)
+                
+                // Store in ghostMarkerPositions for proximity detection
+                self.ghostMarkerPositions[mapPointID] = position
+                
+                print("✅ [DEMOTE] AR marker demoted to ghost - ready for adjustment")
+            }
             
             print("👻 Ghost marker notification listener registered")
             

@@ -174,6 +174,24 @@ final class ARCalibrationCoordinator: ObservableObject {
         self.triangleStore = triangleStore
         self.metricSquareStore = metricSquareStore
         print("🎯 [ARCalibrationCoordinator] Configured with stores")
+        
+        // Listen for DemoteMarkerToGhost requests
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("DemoteMarkerToGhost"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let markerID = notification.userInfo?["markerID"] as? UUID,
+                  let positionArray = notification.userInfo?["currentPosition"] as? [Float],
+                  positionArray.count == 3 else {
+                print("⚠️ [DEMOTE] Missing required data in notification")
+                return
+            }
+            
+            let position = simd_float3(positionArray[0], positionArray[1], positionArray[2])
+            self.handleDemoteRequest(markerID: markerID, currentPosition: position)
+        }
     }
     
     // MARK: - Public Store Access (for external code that needs read-only access)
@@ -721,8 +739,16 @@ final class ARCalibrationCoordinator: ObservableObject {
             // Track this marker's position for current session (used by ghost planting)
             sessionMarkerPositions[marker.id.uuidString] = marker.arPosition
             mapPointARPositions[mapPointID] = marker.arPosition  // Key by MapPoint ID for easy lookup
+            
+            // ALWAYS track marker → MapPoint mapping (for demote-to-ghost feature)
+            // This must be set for ALL markers: initial placements AND ghost confirmations
             sessionMarkerToMapPoint[marker.id.uuidString] = mapPointID  // Map marker ID to MapPoint ID for drift detection
-            print("📍 [SESSION_MARKERS] Stored position for \(String(marker.id.uuidString.prefix(8))) → MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            
+            if sourceType == .ghostConfirm || sourceType == .ghostAdjust {
+                print("🔗 [MARKER_TRACK] Registered ghost-confirmed marker \(String(marker.id.uuidString.prefix(8))) → MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            } else {
+                print("📍 [SESSION_MARKERS] Stored position for \(String(marker.id.uuidString.prefix(8))) → MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            }
             
             // MILESTONE 3: Validate placement against ghost (if exists)
             if let coordinator = ARViewContainer.Coordinator.current,
@@ -1175,6 +1201,44 @@ final class ARCalibrationCoordinator: ObservableObject {
                 object: nil
             )
         }
+    }
+    
+    /// Handle request to demote an AR marker to ghost for re-adjustment
+    func handleDemoteRequest(markerID: UUID, currentPosition: simd_float3) {
+        // Look up which MapPoint this marker belongs to
+        let markerIDString = markerID.uuidString
+        guard let mapPointID = sessionMarkerToMapPoint[markerIDString] else {
+            print("⚠️ [DEMOTE] No MapPoint found for marker \(String(markerID.uuidString.prefix(8)))")
+            return
+        }
+        
+        print("🔄 [DEMOTE] Demoting marker for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+        
+        // Store original position for potential replacement (not append)
+        originalMarkerPositions[mapPointID] = currentPosition
+        
+        // Mark this MapPoint as pending adjustment
+        if !markersPendingDriftCorrection.contains(mapPointID) {
+            markersPendingDriftCorrection.append(mapPointID)
+        }
+        
+        // Remove from session tracking (will be re-added when confirmed)
+        sessionMarkerToMapPoint.removeValue(forKey: markerIDString)
+        
+        // Post response to trigger visual conversion
+        NotificationCenter.default.post(
+            name: NSNotification.Name("DemoteMarkerResponse"),
+            object: nil,
+            userInfo: [
+                "markerID": markerID,
+                "mapPointID": mapPointID,
+                "position": [Float(currentPosition.x), Float(currentPosition.y), Float(currentPosition.z)]
+            ]
+        )
+        
+        // Update calibration state to indicate adjustment in progress
+        // This will show the ghost confirm/adjust UI
+        print("✅ [DEMOTE] MapPoint \(String(mapPointID.uuidString.prefix(8))) ready for re-adjustment")
     }
     
     // MARK: - Shared Vertex Helper
