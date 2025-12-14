@@ -355,7 +355,11 @@ public class SurveyPointStore: ObservableObject {
     // MARK: - Private Properties
     
     private let defaults = UserDefaults.standard
-    private var locationID: String = ""
+    
+    // MARK: - Public Properties
+    
+    /// Current location ID
+    public private(set) var locationID: String = ""
     
     private var storageKey: String {
         "surveyPoints_\(locationID)"
@@ -432,6 +436,76 @@ public class SurveyPointStore: ObservableObject {
         }
         
         save()
+    }
+    
+    // MARK: - Session Management
+    
+    /// Add a survey session at the given map coordinate
+    /// Handles spatial merging (0-3cm) and creates new points as needed
+    public func addSession(_ session: SurveySession, atMapCoordinate coordinate: CGPoint) {
+        let mapX = Double(coordinate.x)
+        let mapY = Double(coordinate.y)
+        
+        // Find nearest existing point
+        let (nearestPoint, distance) = findNearestPoint(to: coordinate)
+        
+        // Merge zone: 0-3cm (0.03 meters, but coordinates are in pixels)
+        // Convert 3cm to pixels using approximate scale (will need refinement)
+        // For now, use 3 pixels as rough equivalent
+        let mergeThresholdPixels: Double = 3.0
+        
+        if let existingPoint = nearestPoint, distance < mergeThresholdPixels {
+            // Merge into existing point
+            mergeSession(session, into: existingPoint.id, atMapX: mapX, atMapY: mapY)
+            print("📊 [SurveyPointStore] Merged session into existing point \(String(existingPoint.id.prefix(8))) (distance: \(String(format: "%.2f", distance)) px)")
+        } else {
+            // Create new point
+            let newPointID = UUID().uuidString
+            var newPoint = SurveyPoint(
+                id: newPointID,
+                mapX: mapX,
+                mapY: mapY
+            )
+            newPoint.addSession(session, atMapX: mapX, atMapY: mapY)
+            surveyPoints[newPointID] = newPoint
+            save()
+            print("📊 [SurveyPointStore] Created new survey point \(String(newPointID.prefix(8))) at (\(String(format: "%.1f", mapX)), \(String(format: "%.1f", mapY)))")
+        }
+    }
+    
+    /// Merge a session into an existing point with weighted coordinate averaging
+    private func mergeSession(_ session: SurveySession, into pointID: String, atMapX: Double, atMapY: Double) {
+        guard var point = surveyPoints[pointID] else {
+            print("⚠️ [SurveyPointStore] Cannot merge - point \(pointID) not found")
+            return
+        }
+        
+        point.addSession(session, atMapX: atMapX, atMapY: atMapY)
+        surveyPoints[pointID] = point
+        save()
+    }
+    
+    /// Find the nearest survey point to given coordinates
+    /// Returns (point, distance) or (nil, .infinity) if no points exist
+    private func findNearestPoint(to coordinate: CGPoint) -> (SurveyPoint?, Double) {
+        var nearest: SurveyPoint?
+        var minDistance = Double.infinity
+        
+        let x = Double(coordinate.x)
+        let y = Double(coordinate.y)
+        
+        for point in surveyPoints.values {
+            let dx = point.mapX - x
+            let dy = point.mapY - y
+            let distance = sqrt(dx * dx + dy * dy)
+            
+            if distance < minDistance {
+                minDistance = distance
+                nearest = point
+            }
+        }
+        
+        return (nearest, minDistance)
     }
     
     /// Remove a specific session from a survey point
