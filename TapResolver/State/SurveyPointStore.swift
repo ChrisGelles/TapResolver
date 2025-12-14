@@ -8,17 +8,39 @@
 
 import Foundation
 import Combine
+import UIKit
 
 // MARK: - Data Structures
 
-/// A single RSSI sample with timestamp
-public struct RssiSample: Codable, Equatable {
-    public let ms: Int64      // Milliseconds from session start
-    public let rssi: Int      // dBm value, 0 = signal gap marker
+/// A single RSSI sample with synchronized device pose
+public struct RssiPoseSample: Codable, Equatable {
+    public let ms: Int64              // Milliseconds since session start
+    public let rssi: Int              // Signal strength (dBm), 0 = boundary marker
     
-    public init(ms: Int64, rssi: Int) {
+    // Device pose at moment of BLE callback (AR session coordinates)
+    public let x: Float               // Position X (meters)
+    public let y: Float               // Position Y (meters)
+    public let z: Float               // Position Z (meters)
+    public let qx: Float              // Quaternion X
+    public let qy: Float              // Quaternion Y
+    public let qz: Float              // Quaternion Z
+    public let qw: Float              // Quaternion W
+    
+    public init(ms: Int64, rssi: Int, x: Float, y: Float, z: Float, qx: Float, qy: Float, qz: Float, qw: Float) {
         self.ms = ms
         self.rssi = rssi
+        self.x = x
+        self.y = y
+        self.z = z
+        self.qx = qx
+        self.qy = qy
+        self.qz = qz
+        self.qw = qw
+    }
+    
+    /// Create a boundary marker (rssi=0) with the given pose
+    public static func boundaryMarker(ms: Int64, pose: SurveyDevicePose) -> RssiPoseSample {
+        RssiPoseSample(ms: ms, rssi: 0, x: pose.x, y: pose.y, z: pose.z, qx: pose.qx, qy: pose.qy, qz: pose.qz, qw: pose.qw)
     }
 }
 
@@ -95,15 +117,125 @@ public struct SurveyDevicePose: Codable, Equatable {
     public static let identity = SurveyDevicePose(x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1)
 }
 
+// MARK: - Quality Tracking
+
+/// Angular coverage tracking across 8 compass sectors
+public struct AngularCoverage: Codable, Equatable {
+    /// Accumulated dwell time per compass sector (seconds)
+    /// Index 0 = North (337.5? to 22.5?), proceeding clockwise
+    /// Index 1 = NE, 2 = E, 3 = SE, 4 = S, 5 = SW, 6 = W, 7 = NW
+    public var sectorTime_s: [Double]
+    
+    public init() {
+        sectorTime_s = Array(repeating: 0.0, count: 8)
+    }
+    
+    public init(sectorTime_s: [Double]) {
+        self.sectorTime_s = sectorTime_s
+    }
+    
+    /// Number of sectors with meaningful data (?1 second)
+    public var coveredSectorCount: Int {
+        sectorTime_s.filter { $0 >= 1.0 }.count
+    }
+    
+    /// Add time to appropriate sector(s) based on heading
+    /// Includes blurring: headings within 10? of boundary credit both sectors partially
+    public mutating func addTime(_ seconds: Double, atHeading heading: Double) {
+        // Normalize heading to 0-360
+        var h = heading.truncatingRemainder(dividingBy: 360.0)
+        if h < 0 { h += 360.0 }
+        
+        // Each sector is 45?, starting at -22.5? from north
+        // Sector 0: 337.5? to 22.5? (North)
+        let sectorSize = 45.0
+        let halfSector = sectorSize / 2.0
+        
+        // Calculate primary sector
+        let adjustedHeading = (h + halfSector).truncatingRemainder(dividingBy: 360.0)
+        let primarySector = Int(adjustedHeading / sectorSize) % 8
+        
+        // Calculate distance to nearest boundary for blurring
+        let sectorCenter = Double(primarySector) * sectorSize
+        let distanceFromCenter = abs(h - sectorCenter)
+        let normalizedDistance = min(distanceFromCenter, 360.0 - distanceFromCenter)
+        
+        // Blur zone: within 10? of boundary
+        let blurZone = 10.0
+        let boundaryDistance = halfSector - normalizedDistance
+        
+        if boundaryDistance < blurZone && boundaryDistance > 0 {
+            // Near boundary: split time between sectors
+            let blurFactor = boundaryDistance / blurZone  // 0 at boundary, 1 at edge of blur zone
+            let primaryWeight = 0.5 + (blurFactor * 0.5)  // 0.5 to 1.0
+            let secondaryWeight = 1.0 - primaryWeight      // 0.5 to 0.0
+            
+            // Determine secondary sector (clockwise or counter-clockwise neighbor)
+            let secondarySector: Int
+            if normalizedDistance > 0 {
+                secondarySector = (primarySector + 1) % 8
+            } else {
+                secondarySector = (primarySector + 7) % 8
+            }
+            
+            sectorTime_s[primarySector] += seconds * primaryWeight
+            sectorTime_s[secondarySector] += seconds * secondaryWeight
+        } else {
+            // Not near boundary: all time to primary sector
+            sectorTime_s[primarySector] += seconds
+        }
+    }
+}
+
+/// Quality tier for visual feedback
+public enum DataQualityTier: String, Codable {
+    case red      // No data or < 3 seconds
+    case yellow   // 3-9 seconds
+    case green    // 9+ seconds, limited angular coverage
+    case blue     // 9+ seconds AND 3+ sectors covered
+}
+
+/// Quality metrics for a survey point
+public struct SurveyPointQuality: Codable, Equatable {
+    public var totalDwellTime_s: Double
+    public var angularCoverage: AngularCoverage
+    public var sessionCount: Int
+    
+    public init() {
+        totalDwellTime_s = 0.0
+        angularCoverage = AngularCoverage()
+        sessionCount = 0
+    }
+    
+    public init(totalDwellTime_s: Double, angularCoverage: AngularCoverage, sessionCount: Int) {
+        self.totalDwellTime_s = totalDwellTime_s
+        self.angularCoverage = angularCoverage
+        self.sessionCount = sessionCount
+    }
+    
+    /// Compute display color tier
+    public var colorTier: DataQualityTier {
+        if totalDwellTime_s < 3.0 {
+            return .red
+        } else if totalDwellTime_s < 9.0 {
+            return .yellow
+        } else if angularCoverage.coveredSectorCount >= 3 {
+            return .blue
+        } else {
+            return .green
+        }
+    }
+}
+
 /// RSSI measurements for a single beacon during one survey session
 public struct SurveyBeaconMeasurement: Codable, Equatable {
     public let beaconID: String
     public let stats: SurveyStats
     public let histogram: SurveyHistogram
-    public let samples: [RssiSample]     // Always present, zero-bookended for gaps
+    public let samples: [RssiPoseSample]  // Raw timeline with pose, bookended with rssi=0
     public let meta: SurveyBeaconMeta
     
-    public init(beaconID: String, stats: SurveyStats, histogram: SurveyHistogram, samples: [RssiSample], meta: SurveyBeaconMeta) {
+    public init(beaconID: String, stats: SurveyStats, histogram: SurveyHistogram, samples: [RssiPoseSample], meta: SurveyBeaconMeta) {
         self.beaconID = beaconID
         self.stats = stats
         self.histogram = histogram
@@ -122,39 +254,76 @@ public struct SurveySession: Codable, Identifiable, Equatable {
     public let endISO: String            // ISO8601 timestamp
     public let duration_s: Double        // Should be 3+ seconds
     
-    // Device pose during collection
+    // Device pose during collection (reference snapshot)
     public let devicePose: SurveyDevicePose
+    
+    // Compass snapshot for magnetic distortion mapping
+    public let compassHeading_deg: Float
     
     // Beacon measurements
     public let beacons: [SurveyBeaconMeasurement]
     
-    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, beacons: [SurveyBeaconMeasurement]) {
+    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, compassHeading_deg: Float, beacons: [SurveyBeaconMeasurement]) {
         self.id = id
         self.locationID = locationID
         self.startISO = startISO
         self.endISO = endISO
         self.duration_s = duration_s
         self.devicePose = devicePose
+        self.compassHeading_deg = compassHeading_deg
         self.beacons = beacons
     }
 }
 
-/// A survey point identified by its 2D map coordinates
+/// A survey location with accumulated sessions and quality metrics
 public struct SurveyPoint: Codable, Identifiable, Equatable {
-    public var id: String { coordinateKey }
+    public let id: String                     // Stable ID (derived from initial coordinates)
+    public var mapX: Double                   // Map X coordinate (pixels) - weighted average
+    public var mapY: Double                   // Map Y coordinate (pixels) - weighted average
+    public var sessions: [SurveySession]
+    public var quality: SurveyPointQuality
     
-    public let coordinateKey: String     // "XX.XX,YY.YY" format
-    public let mapX_m: Double            // Parsed X coordinate in meters
-    public let mapY_m: Double            // Parsed Y coordinate in meters
-    public let createdISO: String        // Timestamp of first session
-    public var sessions: [SurveySession] // Multiple sessions can accumulate
+    // For weighted coordinate averaging when merging nearby points
+    public var weightedSumX: Double           // ?(mapX ? dwellTime)
+    public var weightedSumY: Double           // ?(mapY ? dwellTime)
+    // Note: totalWeight is quality.totalDwellTime_s
     
-    public init(coordinateKey: String, mapX_m: Double, mapY_m: Double, createdISO: String, sessions: [SurveySession]) {
-        self.coordinateKey = coordinateKey
-        self.mapX_m = mapX_m
-        self.mapY_m = mapY_m
-        self.createdISO = createdISO
+    public init(id: String, mapX: Double, mapY: Double, sessions: [SurveySession] = [], quality: SurveyPointQuality = SurveyPointQuality()) {
+        self.id = id
+        self.mapX = mapX
+        self.mapY = mapY
         self.sessions = sessions
+        self.quality = quality
+        // Initialize weighted sums from current coordinates and quality
+        self.weightedSumX = mapX * quality.totalDwellTime_s
+        self.weightedSumY = mapY * quality.totalDwellTime_s
+    }
+    
+    /// Recalculate mapX/mapY from weighted sums after adding new data
+    public mutating func recalculateCoordinates() {
+        guard quality.totalDwellTime_s > 0 else { return }
+        mapX = weightedSumX / quality.totalDwellTime_s
+        mapY = weightedSumY / quality.totalDwellTime_s
+    }
+    
+    /// Add a session and update quality metrics
+    /// - Parameters:
+    ///   - session: The session to add
+    ///   - atMapX: Map X coordinate where session was collected
+    ///   - atMapY: Map Y coordinate where session was collected
+    public mutating func addSession(_ session: SurveySession, atMapX: Double, atMapY: Double) {
+        sessions.append(session)
+        
+        // Update quality metrics
+        quality.sessionCount += 1
+        quality.totalDwellTime_s += session.duration_s
+        
+        // Update weighted coordinate sums
+        weightedSumX += atMapX * session.duration_s
+        weightedSumY += atMapY * session.duration_s
+        
+        // Recalculate centroid
+        recalculateCoordinates()
     }
     
     /// Create a coordinate key from map coordinates (2 decimal places)
@@ -210,7 +379,7 @@ public class SurveyPointStore: ObservableObject {
     
     @objc private func locationDidChange() {
         let newLocationID = PersistenceContext.shared.locationID
-        print("📍 [SurveyPointStore] Location changed → \(newLocationID)")
+        print("?? [SurveyPointStore] Location changed ? \(newLocationID)")
         setLocation(newLocationID)
     }
     
@@ -220,7 +389,7 @@ public class SurveyPointStore: ObservableObject {
     public func setLocation(_ locationID: String) {
         self.locationID = locationID
         load()
-        print("📍 [SurveyPointStore] Set location: \(locationID), loaded \(surveyPoints.count) survey points")
+        print("?? [SurveyPointStore] Set location: \(locationID), loaded \(surveyPoints.count) survey points")
     }
     
     // MARK: - Public API
@@ -246,21 +415,20 @@ public class SurveyPointStore: ObservableObject {
         let key = SurveyPoint.makeKey(x: x, y: y)
         
         if var existing = surveyPoints[key] {
-            // Append to existing point
-            existing.sessions.append(session)
+            // Append to existing point using new addSession method
+            existing.addSession(session, atMapX: x, atMapY: y)
             surveyPoints[key] = existing
-            print("📊 [SurveyPointStore] Added session to existing point \(key), now has \(existing.sessions.count) sessions")
+            print("?? [SurveyPointStore] Added session to existing point \(key), now has \(existing.sessions.count) sessions")
         } else {
             // Create new point
-            let newPoint = SurveyPoint(
-                coordinateKey: key,
-                mapX_m: x,
-                mapY_m: y,
-                createdISO: session.startISO,
-                sessions: [session]
+            var newPoint = SurveyPoint(
+                id: key,
+                mapX: x,
+                mapY: y
             )
+            newPoint.addSession(session, atMapX: x, atMapY: y)
             surveyPoints[key] = newPoint
-            print("📊 [SurveyPointStore] Created new survey point \(key)")
+            print("?? [SurveyPointStore] Created new survey point \(key)")
         }
         
         save()
@@ -269,7 +437,7 @@ public class SurveyPointStore: ObservableObject {
     /// Remove a specific session from a survey point
     public func removeSession(sessionID: String, from coordinateKey: String) {
         guard var point = surveyPoints[coordinateKey] else {
-            print("⚠️ [SurveyPointStore] Cannot remove session - point \(coordinateKey) not found")
+            print("?? [SurveyPointStore] Cannot remove session - point \(coordinateKey) not found")
             return
         }
         
@@ -279,10 +447,10 @@ public class SurveyPointStore: ObservableObject {
         if point.sessions.isEmpty {
             // Remove point entirely if no sessions remain
             surveyPoints.removeValue(forKey: coordinateKey)
-            print("🗑️ [SurveyPointStore] Removed point \(coordinateKey) (last session deleted)")
+            print("??? [SurveyPointStore] Removed point \(coordinateKey) (last session deleted)")
         } else {
             surveyPoints[coordinateKey] = point
-            print("🗑️ [SurveyPointStore] Removed session from \(coordinateKey), \(beforeCount) → \(point.sessions.count) sessions")
+            print("??? [SurveyPointStore] Removed session from \(coordinateKey), \(beforeCount) ? \(point.sessions.count) sessions")
         }
         
         save()
@@ -291,7 +459,7 @@ public class SurveyPointStore: ObservableObject {
     /// Remove an entire survey point and all its sessions
     public func removePoint(at coordinateKey: String) {
         if surveyPoints.removeValue(forKey: coordinateKey) != nil {
-            print("🗑️ [SurveyPointStore] Removed survey point \(coordinateKey)")
+            print("??? [SurveyPointStore] Removed survey point \(coordinateKey)")
             save()
         }
     }
@@ -301,7 +469,7 @@ public class SurveyPointStore: ObservableObject {
         let count = surveyPoints.count
         surveyPoints.removeAll()
         save()
-        print("🗑️ [SurveyPointStore] Cleared all \(count) survey points for location \(locationID)")
+        print("??? [SurveyPointStore] Cleared all \(count) survey points for location \(locationID)")
     }
     
     /// Get total session count across all points
@@ -313,7 +481,7 @@ public class SurveyPointStore: ObservableObject {
     
     private func save() {
         guard !locationID.isEmpty else {
-            print("⚠️ [SurveyPointStore] Cannot save - no location set")
+            print("?? [SurveyPointStore] Cannot save - no location set")
             return
         }
         
@@ -322,9 +490,9 @@ public class SurveyPointStore: ObservableObject {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(Array(surveyPoints.values))
             defaults.set(data, forKey: storageKey)
-            print("💾 [SurveyPointStore] Saved \(surveyPoints.count) points to \(storageKey)")
+            print("?? [SurveyPointStore] Saved \(surveyPoints.count) points to \(storageKey)")
         } catch {
-            print("❌ [SurveyPointStore] Save failed: \(error)")
+            print("? [SurveyPointStore] Save failed: \(error)")
         }
     }
     
@@ -336,17 +504,17 @@ public class SurveyPointStore: ObservableObject {
         
         guard let data = defaults.data(forKey: storageKey) else {
             surveyPoints = [:]
-            print("📂 [SurveyPointStore] No existing data for \(storageKey)")
+            print("?? [SurveyPointStore] No existing data for \(storageKey)")
             return
         }
         
         do {
             let decoder = JSONDecoder()
             let points = try decoder.decode([SurveyPoint].self, from: data)
-            surveyPoints = Dictionary(uniqueKeysWithValues: points.map { ($0.coordinateKey, $0) })
-            print("📂 [SurveyPointStore] Loaded \(surveyPoints.count) points from \(storageKey)")
+            surveyPoints = Dictionary(uniqueKeysWithValues: points.map { ($0.id, $0) })
+            print("?? [SurveyPointStore] Loaded \(surveyPoints.count) points from \(storageKey)")
         } catch {
-            print("❌ [SurveyPointStore] Load failed: \(error)")
+            print("? [SurveyPointStore] Load failed: \(error)")
             surveyPoints = [:]
         }
     }
@@ -361,7 +529,7 @@ public class SurveyPointStore: ObservableObject {
             encoder.dateEncodingStrategy = .iso8601
             return try encoder.encode(Array(surveyPoints.values))
         } catch {
-            print("❌ [SurveyPointStore] Export failed: \(error)")
+            print("? [SurveyPointStore] Export failed: \(error)")
             return nil
         }
     }
@@ -374,23 +542,39 @@ public class SurveyPointStore: ObservableObject {
         if merge {
             // Merge: append sessions to existing points, add new points
             for point in importedPoints {
-                if var existing = surveyPoints[point.coordinateKey] {
+                if var existing = surveyPoints[point.id] {
                     // Avoid duplicate session IDs
                     let existingIDs = Set(existing.sessions.map { $0.id })
                     let newSessions = point.sessions.filter { !existingIDs.contains($0.id) }
-                    existing.sessions.append(contentsOf: newSessions)
-                    surveyPoints[point.coordinateKey] = existing
+                    // Add each new session using addSession to update quality metrics
+                    for session in newSessions {
+                        existing.addSession(session, atMapX: point.mapX, atMapY: point.mapY)
+                    }
+                    surveyPoints[point.id] = existing
                 } else {
-                    surveyPoints[point.coordinateKey] = point
+                    surveyPoints[point.id] = point
                 }
             }
-            print("📥 [SurveyPointStore] Merged \(importedPoints.count) points")
+            print("?? [SurveyPointStore] Merged \(importedPoints.count) points")
         } else {
             // Replace: clear and load
-            surveyPoints = Dictionary(uniqueKeysWithValues: importedPoints.map { ($0.coordinateKey, $0) })
-            print("📥 [SurveyPointStore] Replaced with \(importedPoints.count) points")
+            surveyPoints = Dictionary(uniqueKeysWithValues: importedPoints.map { ($0.id, $0) })
+            print("?? [SurveyPointStore] Replaced with \(importedPoints.count) points")
         }
         
         save()
+    }
+}
+
+// MARK: - UIColor Extension for DataQualityTier
+
+extension DataQualityTier {
+    public var uiColor: UIColor {
+        switch self {
+        case .red: return .systemRed
+        case .yellow: return .systemYellow
+        case .green: return .systemGreen
+        case .blue: return .systemBlue
+        }
     }
 }
