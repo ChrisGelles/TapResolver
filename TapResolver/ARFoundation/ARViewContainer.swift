@@ -948,25 +948,45 @@ struct ARViewContainer: UIViewRepresentable {
         }
         
         /// Check if a 3D position is visible in the camera's field of view
+        /// Thread-safe implementation using only ARKit camera matrices (no UIKit)
         /// - Parameters:
         ///   - position: The 3D world position to check
-        ///   - margin: Screen margin in points (default 50) - positions near edges are considered not visible
-        /// - Returns: true if the position projects to a point within the screen bounds
-        func isPositionInCameraView(_ position: simd_float3, margin: CGFloat = 50) -> Bool {
-            guard let sceneView = sceneView else { return false }
+        ///   - margin: NDC margin (0.0 to 1.0) - e.g., 0.1 means 10% inset from edges
+        /// - Returns: true if the position is in front of camera and within the field of view
+        func isPositionInCameraView(_ position: simd_float3, margin: Float = 0.1) -> Bool {
+            guard let sceneView = sceneView,
+                  let frame = sceneView.session.currentFrame else { return false }
             
-            let screenPoint = sceneView.projectPoint(SCNVector3(position))
+            let camera = frame.camera
             
-            // Check if point is behind camera (z > 1.0 means behind)
-            if screenPoint.z > 1.0 {
+            // Get camera matrices
+            let viewMatrix = camera.viewMatrix(for: .portrait)
+            let projectionMatrix = camera.projectionMatrix(for: .portrait, 
+                                                            viewportSize: CGSize(width: 1, height: 1), 
+                                                            zNear: 0.001, 
+                                                            zFar: 1000)
+            
+            // Create homogeneous world position
+            let worldPos = simd_float4(position.x, position.y, position.z, 1.0)
+            
+            // Transform to view space, then to clip space
+            let viewPos = viewMatrix * worldPos
+            let clipPos = projectionMatrix * viewPos
+            
+            // Check if point is behind camera (w <= 0 means behind or at camera plane)
+            if clipPos.w <= 0 {
                 return false
             }
             
-            let screenBounds = sceneView.bounds
-            let insetBounds = screenBounds.insetBy(dx: margin, dy: margin)
-            let point2D = CGPoint(x: CGFloat(screenPoint.x), y: CGFloat(screenPoint.y))
+            // Convert to normalized device coordinates (NDC): [-1, 1] range
+            let ndcX = clipPos.x / clipPos.w
+            let ndcY = clipPos.y / clipPos.w
             
-            return insetBounds.contains(point2D)
+            // Check if within bounds (with margin)
+            // NDC range is -1 to 1, so threshold is (1 - margin)
+            let threshold = 1.0 - margin
+            
+            return abs(ndcX) < threshold && abs(ndcY) < threshold
         }
         
         func updateCrosshair() {
