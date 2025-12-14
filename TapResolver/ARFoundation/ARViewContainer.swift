@@ -143,6 +143,9 @@ struct ARViewContainer: UIViewRepresentable {
         // Track which survey markers have triggered haptic feedback (to prevent continuous firing)
         private var triggeredSurveyMarkers: Set<UUID> = []
         
+        /// The survey marker the user's device is currently inside (for inner sphere orientation updates)
+        private var currentlyInsideSurveyMarkerID: UUID?
+        
         // Timer for updating crosshair
         private var crosshairUpdateTimer: Timer?
         
@@ -1220,6 +1223,9 @@ struct ARViewContainer: UIViewRepresentable {
             
             // Check for survey marker collisions
             checkSurveyMarkerCollisions()
+            
+            // Update inner sphere orientation for the survey marker user is inside
+            updateActiveInnerSphereOrientation()
         }
         
         private func isPlaneConfident(_ result: ARRaycastResult) -> Bool {
@@ -1779,6 +1785,38 @@ struct ARViewContainer: UIViewRepresentable {
             print("📐 Drew triangle lines connecting 3 vertices")
         }
         
+        /// Updates inner sphere orientation for the survey marker the user is currently inside
+        /// Orients the pole toward the camera so the orange equator band appears at the periphery
+        func updateActiveInnerSphereOrientation() {
+            guard let markerID = currentlyInsideSurveyMarkerID,
+                  let surveyMarker = surveyMarkers[markerID],
+                  let sceneView = sceneView,
+                  let frame = sceneView.session.currentFrame else { return }
+            
+            let innerSphereName = "arMarkerInnerSphere_\(markerID.uuidString)"
+            guard let innerSphereNode = surveyMarker.node.childNode(withName: innerSphereName, recursively: false) else {
+                return
+            }
+            
+            let cameraPosition = simd_float3(
+                frame.camera.transform.columns.3.x,
+                frame.camera.transform.columns.3.y,
+                frame.camera.transform.columns.3.z
+            )
+            
+            let sphereWorldPos = innerSphereNode.simdWorldPosition
+            let toCamera = cameraPosition - sphereWorldPos
+            let distance = simd_length(toCamera)
+            
+            guard distance > 0.001 else { return }
+            
+            let direction = simd_normalize(toCamera)
+            let defaultPole = simd_float3(0, 1, 0)
+            let rotation = simd_quatf(from: defaultPole, to: direction)
+            
+            innerSphereNode.simdOrientation = rotation
+        }
+        
         /// Check for camera collisions with survey markers
         private func checkSurveyMarkerCollisions() {
             guard let sceneView = sceneView,
@@ -1818,6 +1856,8 @@ struct ARViewContainer: UIViewRepresentable {
                     
                     print("💥 [SURVEY_COLLISION] ENTERED marker \(String(markerID.uuidString.prefix(8))) at distance \(String(format: "%.3f", distance))m, intensity \(String(format: "%.2f", initialIntensity))")
                     
+                    currentlyInsideSurveyMarkerID = markerID
+                    
                     NotificationCenter.default.post(
                         name: NSNotification.Name("SurveyMarkerEntered"),
                         object: nil,
@@ -1833,6 +1873,10 @@ struct ARViewContainer: UIViewRepresentable {
                     // EXITED sphere - knock + stop buzz
                     triggeredSurveyMarkers.remove(markerID)
                     print("💥 [SURVEY_COLLISION] EXITED marker \(String(markerID.uuidString.prefix(8)))")
+                    
+                    if currentlyInsideSurveyMarkerID == markerID {
+                        currentlyInsideSurveyMarkerID = nil
+                    }
                     
                     NotificationCenter.default.post(
                         name: NSNotification.Name("SurveyMarkerExited"),
@@ -1981,20 +2025,21 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
         }
         lastFrameTime = currentTime
         
+        // DISABLED: Origin reset heuristic fires too frequently near origin - needs improvement
         // World origin monitoring (detect coordinate frame resets)
-        if let frame = sceneView?.session.currentFrame {
-            let cameraPos = frame.camera.transform.columns.3
-            let distanceFromOrigin = sqrt(cameraPos.x * cameraPos.x + cameraPos.z * cameraPos.z)
-            let elapsedTime = Date().timeIntervalSince(sessionStartTime)
-            
-            // If camera suddenly appears very close to origin after being far away, origin may have reset
-            // This is a heuristic - adjust threshold based on your space
-            if distanceFromOrigin < 0.5 && elapsedTime > 5.0 {
-                // Only log this once per potential reset (use a flag if needed)
-                let timestamp = String(format: "%.3f", elapsedTime)
-                print("🎥 [ARKIT] [\(timestamp)s] 🔄 POSSIBLE ORIGIN RESET: Camera at (\(String(format: "%.2f", cameraPos.x)), \(String(format: "%.2f", cameraPos.z))) - very close to origin after \(String(format: "%.1f", elapsedTime))s")
-            }
-        }
+        // if let frame = sceneView?.session.currentFrame {
+        //     let cameraPos = frame.camera.transform.columns.3
+        //     let distanceFromOrigin = sqrt(cameraPos.x * cameraPos.x + cameraPos.z * cameraPos.z)
+        //     let elapsedTime = Date().timeIntervalSince(sessionStartTime)
+        //     
+        //     // If camera suddenly appears very close to origin after being far away, origin may have reset
+        //     // This is a heuristic - adjust threshold based on your space
+        //     if distanceFromOrigin < 0.5 && elapsedTime > 5.0 {
+        //         // Only log this once per potential reset (use a flag if needed)
+        //         let timestamp = String(format: "%.3f", elapsedTime)
+        //         print("🎥 [ARKIT] [\(timestamp)s] 🔄 POSSIBLE ORIGIN RESET: Camera at (\(String(format: "%.2f", cameraPos.x)), \(String(format: "%.2f", cameraPos.z))) - very close to origin after \(String(format: "%.1f", elapsedTime))s")
+        //     }
+        // }
         
         // MARK: - Ghost Proximity Selection
         
