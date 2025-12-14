@@ -113,6 +113,20 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Meters per pixel for canonical frame (cached from MetricSquare)
     private var cachedMetersPerPixel: Float?
     
+    // MARK: - Drift Detection
+    
+    /// Maximum acceptable drift (in meters) before requiring marker adjustment
+    private let driftThreshold: Float = 0.06  // 6cm
+    
+    /// Markers that need drift correction (converted from AR markers to ghosts)
+    var markersPendingDriftCorrection: [UUID] = []  // MapPoint IDs
+    
+    /// Original AR positions for markers being drift-corrected (for replacement, not append)
+    var originalMarkerPositions: [UUID: simd_float3] = [:]  // MapPoint ID → original AR position
+    
+    /// Maps marker ID (UUID string) to MapPoint ID for drift detection
+    private var sessionMarkerToMapPoint: [String: UUID] = [:]
+    
     // MARK: - Session Transform
     
     /// Represents the rigid body transform from an AR session's coordinate frame to the canonical frame
@@ -707,6 +721,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             // Track this marker's position for current session (used by ghost planting)
             sessionMarkerPositions[marker.id.uuidString] = marker.arPosition
             mapPointARPositions[mapPointID] = marker.arPosition  // Key by MapPoint ID for easy lookup
+            sessionMarkerToMapPoint[marker.id.uuidString] = mapPointID  // Map marker ID to MapPoint ID for drift detection
             print("📍 [SESSION_MARKERS] Stored position for \(String(marker.id.uuidString.prefix(8))) → MapPoint \(String(mapPointID.uuidString.prefix(8)))")
             
             // MILESTONE 3: Validate placement against ghost (if exists)
@@ -889,6 +904,22 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("✅ ARCalibrationCoordinator: Registered marker for MapPoint \(String(mapPointID.uuidString.prefix(8))) (\(count)/3)")
         
         if placedMarkers.count == 3 {
+            // DRIFT DETECTION: Check if earlier markers have drifted
+            if let coordinator = ARViewContainer.Coordinator.current,
+               let sceneView = coordinator.sceneView {
+                let driftedMarkers = detectDriftedMarkers(
+                    sceneView: sceneView,
+                    sessionMarkerPositions: sessionMarkerPositions
+                )
+                
+                if !driftedMarkers.isEmpty {
+                    print("⚠️ [DRIFT_DETECTED] \(driftedMarkers.count) marker(s) have drifted beyond \(driftThreshold * 100)cm threshold")
+                    initiateDriftCorrection(driftedMarkers: driftedMarkers)
+                    // Return early - don't finalize calibration until drift is corrected
+                    return
+                }
+            }
+            
             // Use primary triangle for completion check (handles shared vertices correctly)
             let triangleForCompletion = updatedPrimaryTriangle ?? finalTriangle
             finalizeCalibration(for: triangleForCompletion)
@@ -960,6 +991,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             // Track position for transform computation
             sessionMarkerPositions[marker.id.uuidString] = marker.arPosition
             mapPointARPositions[mapPointID] = marker.arPosition
+            sessionMarkerToMapPoint[marker.id.uuidString] = mapPointID  // Map marker ID to MapPoint ID for drift detection
             print("📍 [SWATH_ANCHOR] Stored position for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
             
             // REFACTOR CANDIDATE: recordPositionHistory() - shared with registerMarker
@@ -1021,6 +1053,128 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
         
         print("📍 [SWATH_ANCHOR] registerSwathAnchor END: \(formatter.string(from: Date()))")
+    }
+    
+    // MARK: - Drift Detection
+    
+    /// Check if previously-planted markers have drifted from their recorded positions
+    /// - Parameters:
+    ///   - sceneView: The AR scene view to check marker positions
+    ///   - sessionMarkerPositions: Dictionary of marker ID (UUID string) to recorded AR position
+    /// - Returns: Array of MapPoint IDs that have drifted beyond threshold
+    func detectDriftedMarkers(
+        sceneView: ARSCNView,
+        sessionMarkerPositions: [String: simd_float3]  // markerID → recorded AR position
+    ) -> [(mapPointID: UUID, recordedPosition: simd_float3, currentPosition: simd_float3, drift: Float)] {
+        
+        guard let frame = sceneView.session.currentFrame else {
+            print("⚠️ [DRIFT_CHECK] No current frame available")
+            return []
+        }
+        
+        var driftedMarkers: [(mapPointID: UUID, recordedPosition: simd_float3, currentPosition: simd_float3, drift: Float)] = []
+        
+        // Get the markers we placed earlier in this session (excluding the one just placed)
+        // sessionMarkerPositions maps markerID → AR position
+        // We need to map back to MapPoint IDs
+        
+        for (markerIDString, recordedPosition) in sessionMarkerPositions {
+            // Find the corresponding MapPoint ID
+            guard let mapPointID = sessionMarkerToMapPoint[markerIDString] else {
+                continue
+            }
+            
+            // Skip the most recently placed marker (it's our reference point)
+            if mapPointID == triangleVertices.last {
+                continue
+            }
+            
+            // Find the marker node in the scene
+            guard let markerUUID = UUID(uuidString: markerIDString),
+                  let markerNode = sceneView.scene.rootNode.childNodes.first(where: { 
+                $0.name == "arMarker_\(markerUUID.uuidString)" || $0.name?.contains(markerUUID.uuidString.prefix(8).description) == true
+            }) else {
+                print("⚠️ [DRIFT_CHECK] Could not find node for marker \(String(markerIDString.prefix(8)))")
+                continue
+            }
+            
+            // Get current world position of the marker node
+            let currentPosition = markerNode.simdWorldPosition
+            
+            // Calculate drift (3D distance)
+            let drift = simd_distance(recordedPosition, currentPosition)
+            
+            print("🔍 [DRIFT_CHECK] Marker \(String(mapPointID.uuidString.prefix(8))): recorded=(\(String(format: "%.2f", recordedPosition.x)), \(String(format: "%.2f", recordedPosition.z))) current=(\(String(format: "%.2f", currentPosition.x)), \(String(format: "%.2f", currentPosition.z))) drift=\(String(format: "%.3f", drift))m")
+            
+            if drift > driftThreshold {
+                driftedMarkers.append((mapPointID: mapPointID, recordedPosition: recordedPosition, currentPosition: currentPosition, drift: drift))
+            }
+        }
+        
+        return driftedMarkers
+    }
+    
+    /// Convert drifted AR markers to ghost markers for user adjustment
+    func initiateDriftCorrection(
+        driftedMarkers: [(mapPointID: UUID, recordedPosition: simd_float3, currentPosition: simd_float3, drift: Float)]
+    ) {
+        guard !driftedMarkers.isEmpty else { return }
+        
+        print("🔄 [DRIFT_CORRECTION] Initiating drift correction for \(driftedMarkers.count) marker(s)")
+        
+        for marker in driftedMarkers {
+            print("   ⚠️ MapPoint \(String(marker.mapPointID.uuidString.prefix(8))): drifted \(String(format: "%.1f", marker.drift * 100))cm")
+            
+            // Store original position for potential replacement
+            originalMarkerPositions[marker.mapPointID] = marker.recordedPosition
+            
+            // Add to pending correction list
+            markersPendingDriftCorrection.append(marker.mapPointID)
+        }
+        
+        // Notify UI to convert these markers to ghosts
+        NotificationCenter.default.post(
+            name: NSNotification.Name("ConvertMarkersToGhosts"),
+            object: nil,
+            userInfo: [
+                "mapPointIDs": markersPendingDriftCorrection,
+                "originalPositions": originalMarkerPositions
+            ]
+        )
+        
+        print("🔄 [DRIFT_CORRECTION] Posted ConvertMarkersToGhosts notification")
+    }
+    
+    /// Handle a drift-corrected marker position (replaces original, doesn't append)
+    func recordDriftCorrectedPosition(mapPointID: UUID, correctedPosition: simd_float3) {
+        print("✅ [DRIFT_CORRECTION] Recording corrected position for \(String(mapPointID.uuidString.prefix(8)))")
+        print("   Original: \(originalMarkerPositions[mapPointID].map { "(\(String(format: "%.2f", $0.x)), \(String(format: "%.2f", $0.z)))" } ?? "unknown")")
+        print("   Corrected: (\(String(format: "%.2f", correctedPosition.x)), \(String(format: "%.2f", correctedPosition.z)))")
+        
+        // Update the session marker position (replace, not append)
+        if let markerIDString = sessionMarkerToMapPoint.first(where: { $0.value == mapPointID })?.key {
+            // Update in sessionMarkerPositions
+            sessionMarkerPositions[markerIDString] = correctedPosition
+            // Update in mapPointARPositions
+            mapPointARPositions[mapPointID] = correctedPosition
+        }
+        
+        // Remove from pending list
+        markersPendingDriftCorrection.removeAll { $0 == mapPointID }
+        
+        // Clear original position
+        originalMarkerPositions.removeValue(forKey: mapPointID)
+        
+        print("   Remaining pending corrections: \(markersPendingDriftCorrection.count)")
+        
+        // If all corrections complete, notify to proceed
+        if markersPendingDriftCorrection.isEmpty {
+            print("✅ [DRIFT_CORRECTION] All markers corrected - ready to proceed")
+            NotificationCenter.default.post(
+                name: NSNotification.Name("DriftCorrectionComplete"),
+                object: nil
+            )
+        }
     }
     
     // MARK: - Shared Vertex Helper
