@@ -125,6 +125,11 @@ struct ARViewContainer: UIViewRepresentable {
         private var crosshairNode: GroundCrosshairNode?
         var currentCursorPosition: simd_float3?
         
+        /// Last valid cursor position (lingers for 200ms after raycast gaps)
+        private var lastValidCursorPosition: simd_float3?
+        
+        private var lastValidCursorTimestamp: Date?
+        
         // Calibration mode state
         var isCalibrationMode: Bool = false
         var selectedTriangle: TrianglePatch? = nil
@@ -337,8 +342,18 @@ struct ARViewContainer: UIViewRepresentable {
         @objc func handlePlaceMarkerAtCursor(_ notification: Notification) {
             print("🔍 [PLACE_MARKER_CROSSHAIR] Called")
             
-            guard let position = currentCursorPosition else {
-                print("⚠️ [PLACE_MARKER_CROSSHAIR] No cursor position available")
+            // Use live position, or fall back to lingered position within 200ms window
+            let lingerDuration: TimeInterval = 0.2
+            let position: simd_float3
+            if let livePosition = currentCursorPosition {
+                position = livePosition
+            } else if let lingeredPosition = lastValidCursorPosition,
+                      let timestamp = lastValidCursorTimestamp,
+                      Date().timeIntervalSince(timestamp) < lingerDuration {
+                position = lingeredPosition
+                print("📍 [PLACE_MARKER_CROSSHAIR] Using lingered position (age: \(String(format: "%.0f", Date().timeIntervalSince(timestamp) * 1000))ms)")
+            } else {
+                print("⚠️ [PLACE_MARKER_CROSSHAIR] No cursor position available (live: nil, lingered: expired)")
                 return
             }
             
@@ -394,8 +409,18 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
-            guard let position = currentCursorPosition else {
-                print("⚠️ [TEST_SURVEY_MARKER] No cursor position available")
+            // Use live position, or fall back to lingered position within 200ms window
+            let lingerDuration: TimeInterval = 0.2
+            let position: simd_float3
+            if let livePosition = currentCursorPosition {
+                position = livePosition
+            } else if let lingeredPosition = lastValidCursorPosition,
+                      let timestamp = lastValidCursorTimestamp,
+                      Date().timeIntervalSince(timestamp) < lingerDuration {
+                position = lingeredPosition
+                print("🧪 [TEST_SURVEY_MARKER] Using lingered position (age: \(String(format: "%.0f", Date().timeIntervalSince(timestamp) * 1000))ms)")
+            } else {
+                print("⚠️ [TEST_SURVEY_MARKER] No cursor position available (live: nil, lingered: expired)")
                 return
             }
             
@@ -1120,10 +1145,28 @@ struct ARViewContainer: UIViewRepresentable {
                   let crosshair = crosshairNode else { return }
             
             let screenCenter = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
+            let lingerDuration: TimeInterval = 0.2  // 200ms linger window
             
             guard let query = sceneView.raycastQuery(from: screenCenter, allowing: .estimatedPlane, alignment: .horizontal) else {
-                crosshair.hide()
+                // Raycast query failed - check if we should linger
                 currentCursorPosition = nil
+                
+                if let lastPos = lastValidCursorPosition,
+                   let lastTime = lastValidCursorTimestamp {
+                    let staleness = Date().timeIntervalSince(lastTime)
+                    if staleness < lingerDuration {
+                        // Linger: keep crosshair visible but fade opacity
+                        let opacity = CGFloat(1.0 - (staleness / lingerDuration))
+                        crosshair.opacity = opacity
+                        crosshair.update(position: lastPos, snapped: false, confident: false)
+                    } else {
+                        // Linger expired
+                        crosshair.hide()
+                        crosshair.opacity = 1.0
+                    }
+                } else {
+                    crosshair.hide()
+                }
                 return
             }
             
@@ -1141,15 +1184,38 @@ struct ARViewContainer: UIViewRepresentable {
                 let isSnapped = snappedPosition != rawPosition
                 let isConfident = isPlaneConfident(result)
                 
-                crosshair.update(position: snappedPosition, snapped: isSnapped, confident: isConfident)
+                // Update live position and linger cache
                 currentCursorPosition = snappedPosition
+                lastValidCursorPosition = snappedPosition
+                lastValidCursorTimestamp = Date()
+                
+                // Full opacity for live position
+                crosshair.opacity = 1.0
+                crosshair.update(position: snappedPosition, snapped: isSnapped, confident: isConfident)
                 
                 if isSnapped {
                     print("📍 Crosshair snapped to corner")
                 }
             } else {
-                crosshair.hide()
+                // Raycast returned no results - check if we should linger
                 currentCursorPosition = nil
+                
+                if let lastPos = lastValidCursorPosition,
+                   let lastTime = lastValidCursorTimestamp {
+                    let staleness = Date().timeIntervalSince(lastTime)
+                    if staleness < lingerDuration {
+                        // Linger: keep crosshair visible but fade opacity
+                        let opacity = CGFloat(1.0 - (staleness / lingerDuration))
+                        crosshair.opacity = opacity
+                        crosshair.update(position: lastPos, snapped: false, confident: false)
+                    } else {
+                        // Linger expired
+                        crosshair.hide()
+                        crosshair.opacity = 1.0
+                    }
+                } else {
+                    crosshair.hide()
+                }
             }
             
             // Check for survey marker collisions
