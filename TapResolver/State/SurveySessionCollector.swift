@@ -17,6 +17,8 @@ class SurveySessionCollector: ObservableObject {
     // MARK: - Dependencies
     
     private weak var surveyPointStore: SurveyPointStore?
+    private weak var bluetoothScanner: BluetoothScanner?
+    private var bleSubscription: AnyCancellable?
     
     // MARK: - Session State
     
@@ -72,9 +74,10 @@ class SurveySessionCollector: ObservableObject {
     // MARK: - Configuration
     
     /// Configure with required dependencies
-    func configure(surveyPointStore: SurveyPointStore) {
+    func configure(surveyPointStore: SurveyPointStore, bluetoothScanner: BluetoothScanner) {
         self.surveyPointStore = surveyPointStore
-        print("📊 [SurveySessionCollector] Configured with SurveyPointStore")
+        self.bluetoothScanner = bluetoothScanner
+        print("📊 [SurveySessionCollector] Configured with SurveyPointStore and BluetoothScanner")
     }
     
     // MARK: - Notification Setup
@@ -157,6 +160,9 @@ class SurveySessionCollector: ObservableObject {
         // TODO: Milestone 3 - Get beacon list from BeaconListsStore
         insertBoundaryMarkers(atMs: 0, pose: currentPose)
         
+        // Start listening for BLE updates
+        startBLESubscription()
+        
         // Update published state
         DispatchQueue.main.async {
             self.isCollecting = true
@@ -199,11 +205,57 @@ class SurveySessionCollector: ObservableObject {
     
     private func clearSession() {
         activeSession = nil
+        stopBLESubscription()
         
         DispatchQueue.main.async {
             self.isCollecting = false
             self.activeMarkerID = nil
             self.currentDwellTime = 0.0
+        }
+    }
+    
+    // MARK: - BLE Subscription
+    
+    /// Start listening to BLE updates during dwell
+    private func startBLESubscription() {
+        guard let scanner = bluetoothScanner else {
+            print("⚠️ [SurveySessionCollector] Cannot start BLE subscription - no BluetoothScanner")
+            return
+        }
+        
+        // Subscribe to device updates
+        bleSubscription = scanner.$devices
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] devices in
+                self?.handleBLEUpdate(devices: devices)
+            }
+        
+        print("📊 [SurveySessionCollector] BLE subscription started")
+    }
+    
+    /// Stop listening to BLE updates
+    private func stopBLESubscription() {
+        bleSubscription?.cancel()
+        bleSubscription = nil
+        print("📊 [SurveySessionCollector] BLE subscription stopped")
+    }
+    
+    /// Handle incoming BLE device updates
+    private func handleBLEUpdate(devices: [BluetoothScanner.DiscoveredDevice]) {
+        guard activeSession != nil else { return }
+        
+        // TODO: Milestone 4 - Get actual pose from ARKit
+        let currentPose = SurveyDevicePose.identity
+        
+        for device in devices {
+            // Use device identifier as beacon ID
+            let beaconID = device.id.uuidString
+            let rssi = device.rssi
+            
+            // Skip invalid RSSI values
+            guard rssi < 0 else { continue }
+            
+            ingestSample(beaconID: beaconID, rssi: rssi, pose: currentPose)
         }
     }
     
@@ -268,6 +320,12 @@ class SurveySessionCollector: ObservableObject {
         // Update dwell time for UI
         DispatchQueue.main.async {
             self.currentDwellTime = session.elapsedSeconds()
+        }
+        
+        // Log periodically (every 10th sample per beacon to reduce spam)
+        let sampleCount = activeSession?.beaconSamples[beaconID]?.count ?? 0
+        if sampleCount % 10 == 1 {
+            print("📊 [BLE_SAMPLE] Beacon \(String(beaconID.prefix(8))): \(sampleCount) samples, RSSI=\(rssi)")
         }
     }
     

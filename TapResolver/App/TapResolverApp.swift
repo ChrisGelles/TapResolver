@@ -108,7 +108,7 @@ struct TapResolverApp: App {
                     )
                     
                     // Configure survey session collector
-                    surveySessionCollector.configure(surveyPointStore: surveyPointStore)
+                    surveySessionCollector.configure(surveyPointStore: surveyPointStore, bluetoothScanner: btScanner)
                     
                     LocationMigration.runIfNeeded()
                     squareMetrics.setMetricSquareStore(metricSquares)
