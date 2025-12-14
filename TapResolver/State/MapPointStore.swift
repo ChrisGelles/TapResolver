@@ -759,6 +759,11 @@ public final class MapPointStore: ObservableObject {
         let triangleMemberships: [UUID]?
         let isLocked: Bool?  // ✅ Optional for backward compatibility
         let arPositionHistory: [ARPositionRecord]?  // Optional for migration from old data
+        
+        // Baked canonical position (Milestone 5)
+        let bakedCanonicalPositionArray: [Float]?  // [x, y, z] in canonical frame
+        let bakedConfidence: Float?
+        let bakedSampleCount: Int?
     }
 
     internal func save() {
@@ -806,7 +811,11 @@ public final class MapPointStore: ObservableObject {
                 photoCapturedAtPositionY: point.photoCapturedAtPosition?.y,
                 triangleMemberships: point.triangleMemberships.isEmpty ? nil : point.triangleMemberships,
                 isLocked: point.isLocked,
-                arPositionHistory: point.arPositionHistory.isEmpty ? nil : point.arPositionHistory
+                arPositionHistory: point.arPositionHistory.isEmpty ? nil : point.arPositionHistory,
+                // Baked canonical position (Milestone 5)
+                bakedCanonicalPositionArray: point.bakedCanonicalPosition.map { [$0.x, $0.y, $0.z] },
+                bakedConfidence: point.bakedConfidence,
+                bakedSampleCount: point.bakedSampleCount > 0 ? point.bakedSampleCount : nil
             )
         }
         
@@ -938,6 +947,14 @@ public final class MapPointStore: ObservableObject {
                     return nil
                 }()
                 
+                // Reconstruct baked canonical position from array
+                let bakedPosition: SIMD3<Float>? = {
+                    if let arr = dtoItem.bakedCanonicalPositionArray, arr.count == 3 {
+                        return SIMD3<Float>(arr[0], arr[1], arr[2])
+                    }
+                    return nil
+                }()
+                
                 var point = MapPoint(
                     id: dtoItem.id,
                     mapPoint: CGPoint(x: dtoItem.x, y: dtoItem.y),
@@ -949,7 +966,11 @@ public final class MapPointStore: ObservableObject {
                     photoFilename: dtoItem.photoFilename,  // NEW
                     triangleMemberships: dtoItem.triangleMemberships ?? [],
                     isLocked: dtoItem.isLocked ?? true,  // Default to locked for backward compatibility
-                    arPositionHistory: dtoItem.arPositionHistory ?? []
+                    arPositionHistory: dtoItem.arPositionHistory ?? [],
+                    // Baked canonical position (Milestone 5)
+                    bakedCanonicalPosition: bakedPosition,
+                    bakedConfidence: dtoItem.bakedConfidence,
+                    bakedSampleCount: dtoItem.bakedSampleCount ?? 0
                 )
                 
                 // Set photo tracking fields

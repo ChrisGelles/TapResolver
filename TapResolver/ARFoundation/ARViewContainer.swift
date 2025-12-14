@@ -60,6 +60,9 @@ struct ARViewContainer: UIViewRepresentable {
         // Set delegate for plane visualization
         sceneView.delegate = context.coordinator
         
+        // Set session delegate for tracking state diagnostics
+        sceneView.session.delegate = context.coordinator
+        
         // Enable ARKit debug visuals
         sceneView.debugOptions = [
             .showFeaturePoints,
@@ -137,6 +140,14 @@ struct ARViewContainer: UIViewRepresentable {
         
         // Timer for updating crosshair
         private var crosshairUpdateTimer: Timer?
+        
+        // MARK: - Diagnostic Timing
+        
+        private let sessionStartTime = Date()
+        
+        private var lastFrameTime: TimeInterval = 0
+        
+        private var frameDropThreshold: TimeInterval = 0.5 // Log if gap > 500ms
 
         func setMode(_ mode: ARMode) {
             guard mode != currentMode else { return }
@@ -1747,6 +1758,32 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
     // MARK: - Ghost Proximity Selection (per-frame updates)
     
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        // Frame timing diagnostic
+        let currentTime = time
+        if lastFrameTime > 0 {
+            let frameDelta = currentTime - lastFrameTime
+            if frameDelta > frameDropThreshold {
+                let timestamp = String(format: "%.3f", Date().timeIntervalSince(sessionStartTime))
+                print("🎥 [ARKIT] [\(timestamp)s] 🐌 FRAME GAP DETECTED: \(String(format: "%.2f", frameDelta))s (threshold: \(frameDropThreshold)s)")
+            }
+        }
+        lastFrameTime = currentTime
+        
+        // World origin monitoring (detect coordinate frame resets)
+        if let frame = sceneView?.session.currentFrame {
+            let cameraPos = frame.camera.transform.columns.3
+            let distanceFromOrigin = sqrt(cameraPos.x * cameraPos.x + cameraPos.z * cameraPos.z)
+            let elapsedTime = Date().timeIntervalSince(sessionStartTime)
+            
+            // If camera suddenly appears very close to origin after being far away, origin may have reset
+            // This is a heuristic - adjust threshold based on your space
+            if distanceFromOrigin < 0.5 && elapsedTime > 5.0 {
+                // Only log this once per potential reset (use a flag if needed)
+                let timestamp = String(format: "%.3f", elapsedTime)
+                print("🎥 [ARKIT] [\(timestamp)s] 🔄 POSSIBLE ORIGIN RESET: Camera at (\(String(format: "%.2f", cameraPos.x)), \(String(format: "%.2f", cameraPos.z))) - very close to origin after \(String(format: "%.1f", elapsedTime))s")
+            }
+        }
+        
         // MARK: - Ghost Proximity Selection
         
         // Throttle logging to once per second to avoid spam
@@ -1879,6 +1916,60 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
             planeNode.position = SCNVector3(planeAnchor.center.x, 0, planeAnchor.center.z)
         } else {
             planeNode.position = SCNVector3(planeAnchor.center.x, planeAnchor.center.y, planeAnchor.center.z)
+        }
+    }
+}
+
+// MARK: - ARSessionDelegate for Tracking State Diagnostics
+extension ARViewContainer.ARViewCoordinator: ARSessionDelegate {
+    
+    // MARK: - ARSession Tracking State Logging
+    
+    func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
+        let timestamp = String(format: "%.3f", Date().timeIntervalSince(sessionStartTime))
+        
+        switch camera.trackingState {
+        case .notAvailable:
+            print("🎥 [ARKIT] [\(timestamp)s] ❌ Tracking NOT AVAILABLE")
+            
+        case .limited(let reason):
+            let reasonString: String
+            switch reason {
+            case .initializing:
+                reasonString = "INITIALIZING"
+            case .excessiveMotion:
+                reasonString = "EXCESSIVE MOTION"
+            case .insufficientFeatures:
+                reasonString = "INSUFFICIENT FEATURES"
+            case .relocalizing:
+                reasonString = "⚠️ RELOCALIZING (world map matching)"
+            @unknown default:
+                reasonString = "UNKNOWN REASON"
+            }
+            print("🎥 [ARKIT] [\(timestamp)s] ⚠️ Tracking LIMITED: \(reasonString)")
+            
+        case .normal:
+            print("🎥 [ARKIT] [\(timestamp)s] ✅ Tracking NORMAL")
+        }
+    }
+    
+    func sessionWasInterrupted(_ session: ARSession) {
+        let timestamp = String(format: "%.3f", Date().timeIntervalSince(sessionStartTime))
+        print("🎥 [ARKIT] [\(timestamp)s] 🛑 SESSION INTERRUPTED")
+    }
+    
+    func sessionInterruptionEnded(_ session: ARSession) {
+        let timestamp = String(format: "%.3f", Date().timeIntervalSince(sessionStartTime))
+        print("🎥 [ARKIT] [\(timestamp)s] ▶️ SESSION INTERRUPTION ENDED")
+    }
+    
+    func session(_ session: ARSession, didFailWithError error: Error) {
+        let timestamp = String(format: "%.3f", Date().timeIntervalSince(sessionStartTime))
+        print("🎥 [ARKIT] [\(timestamp)s] 💥 SESSION FAILED: \(error.localizedDescription)")
+        
+        if let arError = error as? ARError {
+            print("🎥 [ARKIT] [\(timestamp)s]    Error code: \(arError.code.rawValue)")
+            print("🎥 [ARKIT] [\(timestamp)s]    Error domain: \(arError.errorCode)")
         }
     }
 }
