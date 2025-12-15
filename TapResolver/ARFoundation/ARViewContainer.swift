@@ -3,6 +3,7 @@ import ARKit
 import SceneKit
 import simd
 import CoreImage
+import QuartzCore
 
 struct ARViewContainer: UIViewRepresentable {
     @Binding var mode: ARMode
@@ -1828,6 +1829,8 @@ struct ARViewContainer: UIViewRepresentable {
         
         /// Check for camera collisions with survey markers
         private func checkSurveyMarkerCollisions() {
+            let collisionStart = CACurrentMediaTime()
+            
             guard let sceneView = sceneView,
                   let frame = sceneView.session.currentFrame else { return }
             
@@ -1919,6 +1922,11 @@ struct ARViewContainer: UIViewRepresentable {
                         userInfo: ["markerID": markerID, "distance": distance, "intensity": intensity]
                     )
                 }
+            }
+            
+            let collisionDuration = (CACurrentMediaTime() - collisionStart) * 1000
+            if collisionDuration > 2.0 {
+                print("⚠️ [PERF] Collision detection took \(String(format: "%.1f", collisionDuration))ms")
             }
         }
         
@@ -2029,6 +2037,9 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
     // MARK: - Ghost Proximity Selection (per-frame updates)
     
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        let frameStart = CACurrentMediaTime()
+        var insideSphereWork = false
+        
         // Frame timing diagnostic
         let currentTime = time
         if lastFrameTime > 0 {
@@ -2057,6 +2068,8 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
         // }
         
         // MARK: - Ghost Proximity Selection
+        
+        let ghostStart = CACurrentMediaTime()
         
         // Throttle logging to once per second to avoid spam
         let now = Date().timeIntervalSince1970
@@ -2126,6 +2139,18 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
                 ghostPositions: self.ghostMarkerPositions,
                 visibleGhostIDs: visibleGhostIDs
             )
+        }
+        
+        let ghostDuration = (CACurrentMediaTime() - ghostStart) * 1000
+        if ghostDuration > 2.0 {
+            print("⚠️ [PERF] Ghost proximity took \(String(format: "%.1f", ghostDuration))ms")
+        }
+        
+        if currentlyInsideSurveyMarkerID != nil {
+            let frameDuration = (CACurrentMediaTime() - frameStart) * 1000
+            if frameDuration > 16.0 { // Flag frames taking longer than 16ms (60fps budget)
+                print("⚠️ [PERF] Frame took \(String(format: "%.1f", frameDuration))ms while inside sphere")
+            }
         }
     }
     

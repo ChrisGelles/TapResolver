@@ -207,12 +207,20 @@ class SurveySessionCollector: ObservableObject {
         let endPose = SurveyDevicePose.identity
         insertBoundaryMarkers(atMs: session.elapsedMs(), pose: endPose)
         
-        // Finalize and persist
-        finalizeSession(session, duration: duration, endPose: endPose)
+        // Capture session data for async processing
+        let sessionCopy = session
+        let storeCopy = surveyPointStore
         
+        // Clear session immediately so main thread is unblocked
+        clearSession()
+        
+        // Log completion on main thread before async work
         print("📊 [SurveySessionCollector] Session COMPLETED for marker \(markerIDShort) - duration \(String(format: "%.1f", duration))s")
         
-        clearSession()
+        // Dispatch finalization to background queue
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.finalizeSession(sessionCopy, duration: duration, endPose: endPose, store: storeCopy)
+        }
     }
     
     private func clearSession() {
@@ -368,13 +376,13 @@ class SurveySessionCollector: ObservableObject {
     
     // MARK: - Session Finalization
     
-    private func finalizeSession(_ session: ActiveDwellSession, duration: Double, endPose: SurveyDevicePose) {
+    private func finalizeSession(_ session: ActiveDwellSession, duration: Double, endPose: SurveyDevicePose, store: SurveyPointStore? = nil) {
         guard let mapCoordinate = session.mapCoordinate else {
             print("⚠️ [SurveySessionCollector] Cannot finalize - no map coordinate (test marker?)")
             return
         }
         
-        guard let store = surveyPointStore else {
+        guard let store = store ?? surveyPointStore else {
             print("⚠️ [SurveySessionCollector] Cannot finalize - no SurveyPointStore configured")
             return
         }

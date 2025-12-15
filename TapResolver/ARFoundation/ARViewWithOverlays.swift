@@ -11,6 +11,7 @@ import UIKit
 import Combine
 import simd
 import CoreHaptics
+import QuartzCore
 
 struct ARViewWithOverlays: View {
     @Binding var isPresented: Bool
@@ -57,6 +58,7 @@ struct ARViewWithOverlays: View {
     @State private var dwellTimerValue: Double = -3.0
     @State private var dwellTimer: Timer?
     @State private var showDwellTimer: Bool = false
+    @State private var didFireThresholdHaptic: Bool = false
     
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
@@ -1184,6 +1186,30 @@ struct ARViewWithOverlays: View {
         print("👆 [HAPTICS] Gentle knock")
     }
     
+    /// Double knock haptic (two quick taps to signal threshold reached)
+    private func playDoubleKnock() {
+        guard let engine = hapticEngine else {
+            print("⚠️ [HAPTICS] Engine not available for double knock")
+            return
+        }
+        
+        do {
+            let intensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.8)
+            let sharpness = CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.6)
+            
+            // Two quick knocks with 100ms gap
+            let knock1 = CHHapticEvent(eventType: .hapticTransient, parameters: [intensity, sharpness], relativeTime: 0)
+            let knock2 = CHHapticEvent(eventType: .hapticTransient, parameters: [intensity, sharpness], relativeTime: 0.1)
+            
+            let pattern = try CHHapticPattern(events: [knock1, knock2], parameters: [])
+            let player = try engine.makePlayer(with: pattern)
+            try player.start(atTime: CHHapticTimeImmediate)
+            print("🔔 [HAPTICS] Double knock (threshold reached)")
+        } catch {
+            print("⚠️ [HAPTICS] Failed to play double knock: \(error.localizedDescription)")
+        }
+    }
+    
     /// Start continuous buzz haptic (called on sphere entry)
     private func startContinuousBuzz(initialIntensity: Float) {
         guard let engine = hapticEngine else {
@@ -1211,6 +1237,14 @@ struct ARViewWithOverlays: View {
             try continuousPlayer?.start(atTime: CHHapticTimeImmediate)
             isInsideSphere = true
             ARViewContainer.Coordinator.current?.crosshairNode?.isHidden = true
+            
+            let coordinator = ARViewContainer.Coordinator.current
+            print("🔬 [DIAG] Entered sphere - active systems:")
+            print("   - BLE scanning: \(btScanner.isScanning)")
+            print("   - Ghost markers tracked: \(coordinator?.ghostMarkerPositions.count ?? 0)")
+            print("   - Survey markers in scene: \(coordinator?.surveyMarkers.count ?? 0)")
+            print("   - Dwell timer active: \(dwellTimer != nil)")
+            
             print("📳 [HAPTICS] Started continuous buzz at intensity \(String(format: "%.2f", startIntensity))")
         } catch {
             print("⚠️ [HAPTICS] Failed to start continuous buzz: \(error.localizedDescription)")
@@ -1254,9 +1288,23 @@ struct ARViewWithOverlays: View {
     private func startDwellTimer() {
         showDwellTimer = true
         dwellTimerValue = -3.0
+        didFireThresholdHaptic = false
         dwellTimer?.invalidate()
         dwellTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            let timerStart = CACurrentMediaTime()
+            let wasNegative = dwellTimerValue < 0
             dwellTimerValue += 0.1
+            
+            // Fire double-knock when crossing zero threshold
+            if wasNegative && dwellTimerValue >= 0 && !didFireThresholdHaptic {
+                didFireThresholdHaptic = true
+                playDoubleKnock()
+            }
+            
+            let timerDuration = (CACurrentMediaTime() - timerStart) * 1000
+            if timerDuration > 1.0 {
+                print("⚠️ [PERF] Dwell timer update took \(String(format: "%.1f", timerDuration))ms")
+            }
         }
         print("⏱️ [DWELL] Timer started at -3.0")
     }
