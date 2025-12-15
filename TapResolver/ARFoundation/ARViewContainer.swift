@@ -1854,7 +1854,8 @@ struct ARViewContainer: UIViewRepresentable {
                         initialIntensity = (distance - deadZoneRadius) / (sphereRadius - deadZoneRadius)
                     }
                     
-                    print("💥 [SURVEY_COLLISION] ENTERED marker \(String(markerID.uuidString.prefix(8))) at distance \(String(format: "%.3f", distance))m, intensity \(String(format: "%.2f", initialIntensity))")
+                    let timestamp = String(format: "%.3f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 1000))
+                    print("💥 [SURVEY_COLLISION] ENTERED marker \(String(markerID.uuidString.prefix(8))) at distance \(String(format: "%.3f", distance))m, intensity \(String(format: "%.2f", initialIntensity)) [t=\(timestamp)]")
                     
                     currentlyInsideSurveyMarkerID = markerID
                     
@@ -1872,7 +1873,8 @@ struct ARViewContainer: UIViewRepresentable {
                 } else if !isInside && wasInside {
                     // EXITED sphere - knock + stop buzz
                     triggeredSurveyMarkers.remove(markerID)
-                    print("💥 [SURVEY_COLLISION] EXITED marker \(String(markerID.uuidString.prefix(8)))")
+                    let exitTimestamp = String(format: "%.3f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 1000))
+                    print("💥 [SURVEY_COLLISION] EXITED marker \(String(markerID.uuidString.prefix(8))) [t=\(exitTimestamp)]")
                     
                     if currentlyInsideSurveyMarkerID == markerID {
                         currentlyInsideSurveyMarkerID = nil
