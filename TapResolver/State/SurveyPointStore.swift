@@ -9,6 +9,7 @@
 import Foundation
 import Combine
 import UIKit
+import simd
 
 // MARK: - Data Structures
 
@@ -159,6 +160,21 @@ public struct SurveyDevicePose: Codable, Equatable {
         self.qw = qw
     }
     
+    /// Extract pose from ARKit camera transform matrix
+    public init(transform: simd_float4x4) {
+        // Position from translation column
+        self.x = transform.columns.3.x
+        self.y = transform.columns.3.y
+        self.z = transform.columns.3.z
+        
+        // Quaternion from rotation matrix
+        let quat = simd_quatf(transform)
+        self.qx = quat.imag.x
+        self.qy = quat.imag.y
+        self.qz = quat.imag.z
+        self.qw = quat.real
+    }
+    
     /// Identity pose (no translation, no rotation)
     public static let identity = SurveyDevicePose(x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1)
 }
@@ -290,6 +306,33 @@ public struct SurveyBeaconMeasurement: Codable, Equatable {
     }
 }
 
+/// Snapshot of AR session-to-canonical transform for pose interpretation
+public struct SessionTransformSnapshot: Codable, Equatable {
+    public let rotationY: Float        // Y-axis rotation (radians)
+    public let translationX: Float
+    public let translationY: Float
+    public let translationZ: Float
+    public let scale: Float            // AR meters / canonical meters
+    
+    public init(rotationY: Float, translationX: Float, translationY: Float, translationZ: Float, scale: Float) {
+        self.rotationY = rotationY
+        self.translationX = translationX
+        self.translationY = translationY
+        self.translationZ = translationZ
+        self.scale = scale
+    }
+    
+    /// Invalid/unavailable transform sentinel
+    public static let invalid = SessionTransformSnapshot(
+        rotationY: 0, translationX: 0, translationY: 0, translationZ: 0, scale: 0
+    )
+    
+    /// Check if this is a valid (non-sentinel) transform
+    public var isValid: Bool {
+        return scale != 0
+    }
+}
+
 /// A single survey collection session at a grid point
 public struct SurveySession: Codable, Identifiable, Equatable {
     public let id: String                // UUID string
@@ -306,13 +349,16 @@ public struct SurveySession: Codable, Identifiable, Equatable {
     // Compass snapshot for magnetic distortion mapping
     public let compassHeading_deg: Float
     
+    // AR Session transform for converting poseTrack to canonical space
+    public let sessionTransform: SessionTransformSnapshot?
+    
     // Device pose track (sampled at 4 Hz)
     public let poseTrack: [PoseSample]
     
     // Beacon measurements
     public let beacons: [SurveyBeaconMeasurement]
     
-    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, compassHeading_deg: Float, poseTrack: [PoseSample], beacons: [SurveyBeaconMeasurement]) {
+    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, compassHeading_deg: Float, sessionTransform: SessionTransformSnapshot?, poseTrack: [PoseSample], beacons: [SurveyBeaconMeasurement]) {
         self.id = id
         self.locationID = locationID
         self.startISO = startISO
@@ -320,6 +366,7 @@ public struct SurveySession: Codable, Identifiable, Equatable {
         self.duration_s = duration_s
         self.devicePose = devicePose
         self.compassHeading_deg = compassHeading_deg
+        self.sessionTransform = sessionTransform
         self.poseTrack = poseTrack
         self.beacons = beacons
     }

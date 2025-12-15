@@ -20,6 +20,7 @@ class SurveySessionCollector: ObservableObject {
     private weak var surveyPointStore: SurveyPointStore?
     private weak var bluetoothScanner: BluetoothScanner?
     private weak var beaconLists: BeaconListsStore?
+    private weak var arCalibrationCoordinator: ARCalibrationCoordinator?
     private var bleSubscription: AnyCancellable?
     
     // MARK: - Session State
@@ -52,6 +53,7 @@ class SurveySessionCollector: ObservableObject {
         let startPose: SurveyDevicePose
         let mapCoordinate: CGPoint?
         var compassHeading: Float = 0.0
+        let sessionTransform: SessionTransformSnapshot?
         
         // Separate tracks for pose and RSSI
         var poseTrack: [PoseSample] = []
@@ -83,11 +85,12 @@ class SurveySessionCollector: ObservableObject {
     // MARK: - Configuration
     
     /// Configure with required dependencies
-    func configure(surveyPointStore: SurveyPointStore, bluetoothScanner: BluetoothScanner, beaconLists: BeaconListsStore) {
+    func configure(surveyPointStore: SurveyPointStore, bluetoothScanner: BluetoothScanner, beaconLists: BeaconListsStore, arCalibrationCoordinator: ARCalibrationCoordinator) {
         self.surveyPointStore = surveyPointStore
         self.bluetoothScanner = bluetoothScanner
         self.beaconLists = beaconLists
-        print("📊 [SurveySessionCollector] Configured with SurveyPointStore, BluetoothScanner, and BeaconListsStore (\(beaconLists.beacons.count) beacons)")
+        self.arCalibrationCoordinator = arCalibrationCoordinator
+        print("📊 [SurveySessionCollector] Configured with SurveyPointStore, BluetoothScanner, BeaconListsStore (\(beaconLists.beacons.count) beacons), and ARCalibrationCoordinator")
     }
     
     // MARK: - Notification Setup
@@ -152,8 +155,14 @@ class SurveySessionCollector: ObservableObject {
     private func startSession(markerID: UUID, mapCoordinate: CGPoint?) {
         let now = Date()
         
-        // TODO: Milestone 4 - Get actual pose from ARKit
-        let currentPose = SurveyDevicePose.identity
+        // Milestone 4a: Capture session transform snapshot (decipher key)
+        let sessionTransform = arCalibrationCoordinator?.getSessionTransformSnapshot()
+        if sessionTransform == nil {
+            print("⚠️ [SurveySessionCollector] No valid session transform - poses will be in raw AR coordinates")
+        }
+        
+        // Milestone 4a: Get actual pose from ARKit
+        let currentPose = ARViewContainer.Coordinator.current?.getCurrentPose() ?? SurveyDevicePose.identity
         
         // TODO: Milestone 5 - Get actual compass heading
         let compassHeading: Float = -1.0  // Sentinel for "unavailable"
@@ -163,7 +172,8 @@ class SurveySessionCollector: ObservableObject {
             startTime: now,
             startPose: currentPose,
             mapCoordinate: mapCoordinate,
-            compassHeading: compassHeading
+            compassHeading: compassHeading,
+            sessionTransform: sessionTransform
         )
         
         // Reset throttle state for new session
@@ -261,9 +271,8 @@ class SurveySessionCollector: ObservableObject {
         // Get whitelist for filtering
         let whitelist = beaconLists?.beacons ?? []
         
-        // Get current pose from ARKit (Milestone 4)
-        // TODO: Get actual pose from ARKit via notification or shared reference
-        let currentPose = SurveyDevicePose.identity
+        // Milestone 4a: Get current pose from ARKit via static coordinator reference
+        let currentPose = ARViewContainer.Coordinator.current?.getCurrentPose() ?? SurveyDevicePose.identity
         let currentMs = session.elapsedMs()
         
         // Sample pose at same throttle rate as RSSI (4 Hz)
@@ -396,6 +405,7 @@ class SurveySessionCollector: ObservableObject {
             duration_s: duration,
             devicePose: session.startPose,
             compassHeading_deg: session.compassHeading,
+            sessionTransform: session.sessionTransform,
             poseTrack: session.poseTrack,
             beacons: beaconMeasurements
         )

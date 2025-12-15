@@ -1308,6 +1308,16 @@ struct ARViewContainer: UIViewRepresentable {
             return position
         }
         
+        /// Get current AR camera pose as SurveyDevicePose
+        /// Returns nil if AR session not available
+        func getCurrentPose() -> SurveyDevicePose? {
+            guard let sceneView = sceneView,
+                  let frame = sceneView.session.currentFrame else {
+                return nil
+            }
+            return SurveyDevicePose(transform: frame.camera.transform)
+        }
+        
         // MARK: - DEPRECATED
         /// DO NOT USE - Legacy function with incorrect interpolation.
         /// Use plantGhostMarkers(calibratedTriangle:, triangleStore:, filter:) instead.

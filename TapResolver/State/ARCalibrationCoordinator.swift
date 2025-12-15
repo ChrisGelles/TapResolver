@@ -2303,6 +2303,20 @@ final class ARCalibrationCoordinator: ObservableObject {
         return cachedCanonicalToSessionTransform != nil
     }
     
+    /// Get a codable snapshot of the current session transform for survey data persistence
+    public func getSessionTransformSnapshot() -> SessionTransformSnapshot? {
+        guard let transform = cachedCanonicalToSessionTransform else {
+            return nil
+        }
+        return SessionTransformSnapshot(
+            rotationY: transform.rotationY,
+            translationX: transform.translation.x,
+            translationY: transform.translation.y,
+            translationZ: transform.translation.z,
+            scale: transform.scale
+        )
+    }
+    
     /// Project a baked canonical position to current session AR space
     /// Returns nil if no valid transform is cached
     public func projectBakedToSession(_ bakedPosition: SIMD3<Float>) -> SIMD3<Float>? {
