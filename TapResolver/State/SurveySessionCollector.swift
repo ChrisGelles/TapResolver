@@ -338,12 +338,6 @@ class SurveySessionCollector: ObservableObject {
         DispatchQueue.main.async {
             self.currentDwellTime = session.elapsedSeconds()
         }
-        
-        // Log periodically (every 10th sample per beacon to reduce spam)
-        let sampleCount = activeSession?.beaconSamples[beaconID]?.count ?? 0
-        if sampleCount % 10 == 1 {
-            print("📊 [BLE_SAMPLE] Beacon \(String(beaconID.prefix(8))): \(sampleCount) samples, RSSI=\(rssi)")
-        }
     }
     
     // MARK: - Session Finalization

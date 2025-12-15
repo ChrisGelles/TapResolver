@@ -2076,23 +2076,14 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
         let shouldLog = (Int(now) % 5 == 0) && (Int(now * 10) % 10 == 0)  // Log roughly every 5 seconds
         
         if ghostMarkerPositions.isEmpty {
-            if shouldLog {
-                print("👻 [GHOST_PROXIMITY] No ghost positions tracked (ghostMarkerPositions is empty)")
-            }
             return
         }
         
         guard let sceneView = sceneView else {
-            if shouldLog {
-                print("👻 [GHOST_PROXIMITY] sceneView is nil")
-            }
             return
         }
         
         guard let cameraTransform = sceneView.session.currentFrame?.camera.transform else {
-            if shouldLog {
-                print("👻 [GHOST_PROXIMITY] No camera transform available")
-            }
             return
         }
         
@@ -2101,18 +2092,6 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
             cameraTransform.columns.3.y,
             cameraTransform.columns.3.z
         )
-        
-        // Log ghost check status periodically
-        if shouldLog {
-            print("👻 [GHOST_PROXIMITY] Checking \(ghostMarkerPositions.count) ghost(s), camera at (\(String(format: "%.2f", cameraPosition.x)), \(String(format: "%.2f", cameraPosition.y)), \(String(format: "%.2f", cameraPosition.z)))")
-            for (mapPointID, ghostPos) in ghostMarkerPositions {
-                let horizontalDistance = simd_distance(
-                    simd_float2(cameraPosition.x, cameraPosition.z),
-                    simd_float2(ghostPos.x, ghostPos.z)
-                )
-                print("   Ghost \(String(mapPointID.uuidString.prefix(8))): \(String(format: "%.2f", horizontalDistance))m away (horizontal)")
-            }
-        }
         
         // Calculate which ghosts are visible in camera view
         var visibleGhostIDs = Set<UUID>()
@@ -2125,13 +2104,9 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
         // Update ghost selection on main thread (touches @Published properties)
         DispatchQueue.main.async { [weak self] in
             guard let self = self else {
-                print("👻 [GHOST_PROXIMITY] self is nil in async block")
                 return
             }
             guard let coordinator = self.arCalibrationCoordinator else {
-                if shouldLog {
-                    print("👻 [GHOST_PROXIMITY] arCalibrationCoordinator is nil!")
-                }
                 return
             }
             coordinator.updateGhostSelection(

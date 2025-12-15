@@ -1010,11 +1010,6 @@ public final class MapPointStore: ObservableObject {
             let uniqueSessions = Set(points.flatMap { $0.arPositionHistory.map { $0.sessionID } })
             let pointsWithHistory = points.filter { !$0.arPositionHistory.isEmpty }.count
             print("📊 [DATA_SUMMARY] \(points.count) MapPoints, \(pointsWithHistory) with history, \(totalRecords) total position records across \(uniqueSessions.count) sessions")
-            
-            // Verbose per-MapPoint logging (comment out if too noisy)
-            for point in points where !point.arPositionHistory.isEmpty {
-                print("   └─ MP \(point.id.uuidString.prefix(8)): \(point.arPositionHistory.count) records")
-            }
         } else {
             self.points = []
             print("✅ MapPointStore: No saved data found - starting fresh")

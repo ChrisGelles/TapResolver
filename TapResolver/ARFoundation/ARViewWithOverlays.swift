@@ -2439,7 +2439,6 @@ struct ARPiPMapView: View {
             guard orderedPositions.count == 3 else { continue }
             
             if pointInTriangleXZ(cameraPosition, vertices: orderedPositions) {
-                print("📍 [USER_TRIANGLE] Found containing triangle \(String(triangle.id.uuidString.prefix(8))) via baked data")
                 return triangle.id
             }
         }
