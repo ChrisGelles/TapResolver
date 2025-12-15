@@ -18,6 +18,7 @@ class SurveySessionCollector: ObservableObject {
     
     private weak var surveyPointStore: SurveyPointStore?
     private weak var bluetoothScanner: BluetoothScanner?
+    private weak var beaconLists: BeaconListsStore?
     private var bleSubscription: AnyCancellable?
     
     // MARK: - Session State
@@ -74,10 +75,11 @@ class SurveySessionCollector: ObservableObject {
     // MARK: - Configuration
     
     /// Configure with required dependencies
-    func configure(surveyPointStore: SurveyPointStore, bluetoothScanner: BluetoothScanner) {
+    func configure(surveyPointStore: SurveyPointStore, bluetoothScanner: BluetoothScanner, beaconLists: BeaconListsStore) {
         self.surveyPointStore = surveyPointStore
         self.bluetoothScanner = bluetoothScanner
-        print("📊 [SurveySessionCollector] Configured with SurveyPointStore and BluetoothScanner")
+        self.beaconLists = beaconLists
+        print("📊 [SurveySessionCollector] Configured with SurveyPointStore, BluetoothScanner, and BeaconListsStore (\(beaconLists.beacons.count) beacons)")
     }
     
     // MARK: - Notification Setup
@@ -244,18 +246,28 @@ class SurveySessionCollector: ObservableObject {
     private func handleBLEUpdate(devices: [BluetoothScanner.DiscoveredDevice]) {
         guard activeSession != nil else { return }
         
+        // Get whitelist for filtering
+        let whitelist = beaconLists?.beacons ?? []
+        
         // TODO: Milestone 4 - Get actual pose from ARKit
         let currentPose = SurveyDevicePose.identity
         
         for device in devices {
-            // Use device identifier as beacon ID
-            let beaconID = device.id.uuidString
+            // Use device name as beacon ID (matches BeaconListsStore convention)
+            let beaconName = device.name
+            
+            // Skip devices without names
+            guard !beaconName.isEmpty else { continue }
+            
+            // Skip devices not in whitelist
+            guard whitelist.contains(beaconName) else { continue }
+            
             let rssi = device.rssi
             
             // Skip invalid RSSI values
             guard rssi < 0 else { continue }
             
-            ingestSample(beaconID: beaconID, rssi: rssi, pose: currentPose)
+            ingestSample(beaconID: beaconName, rssi: rssi, pose: currentPose)
         }
     }
     
