@@ -135,7 +135,6 @@ struct HUDContainer: View {
                         MapPointDrawer()
                         MapPointLogButton() //This log panel is a good example for the Debug/Settings panel I'd like to see.
                         ResetMapButton()
-                        BluetoothScanButton()
                         RSSIMeterButton()
                         DebugSettingsButton() // Opens Debug/Settings Panel with moved buttons
                         // MARK: - Initial Diagnostic Buttons (Hidden - can be restored if needed)
@@ -1146,6 +1145,8 @@ private struct DebugSettingsPanel: View {
     @EnvironmentObject private var triangleStore: TrianglePatchStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var mapTransform: MapTransformStore
+    @EnvironmentObject private var btScanner: BluetoothScanner
+    @EnvironmentObject private var surveyPointStore: SurveyPointStore
     
     @Binding var showRelocalizationDebug: Bool
     @State private var showingSoftResetAlert = false
@@ -1219,6 +1220,27 @@ private struct DebugSettingsPanel: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
                             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // BLE Scanning Toggle
+                        Button {
+                            if btScanner.isScanning {
+                                btScanner.stopContinuous()
+                            } else {
+                                btScanner.startContinuous()
+                            }
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "dot.radiowaves.left.and.right")
+                                    .font(.system(size: 24))
+                                Text("BLE Scan")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(btScanner.isScanning ? .green : .gray)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
                         }
                         .buttonStyle(.plain)
                         
@@ -1393,6 +1415,23 @@ private struct DebugSettingsPanel: View {
                                     .font(.system(size: 12, weight: .medium))
                             }
                             .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Purge Survey Data Button
+                        Button {
+                            surveyPointStore.purgeAll()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 24))
+                                Text("Purge Surveys")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
                             .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))

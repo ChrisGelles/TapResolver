@@ -546,6 +546,20 @@ public class SurveyPointStore: ObservableObject {
         print("??? [SurveyPointStore] Cleared all \(count) survey points for location \(locationID)")
     }
     
+    /// Purge all survey points (alias for clearAll for consistency)
+    public func purgeAll() {
+        let count = surveyPoints.count
+        let key = storageKey
+        surveyPoints.removeAll()
+        save()
+        print("🗑️ [SurveyPointStore] Purged \(count) points from \(key)")
+    }
+    
+    /// Get all survey points as an array (alias for allPoints for consistency)
+    public var points: [SurveyPoint] {
+        allPoints
+    }
+    
     /// Get total session count across all points
     public var totalSessionCount: Int {
         surveyPoints.values.reduce(0) { $0 + $1.sessions.count }

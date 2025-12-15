@@ -63,6 +63,7 @@ struct ARViewWithOverlays: View {
     @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
     @EnvironmentObject private var metricSquares: MetricSquareStore
     @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
+    @EnvironmentObject private var btScanner: BluetoothScanner
     
     // Relocalization coordinator for strategy selection (developer UI)
     @StateObject private var relocalizationCoordinator: RelocalizationCoordinator
@@ -90,7 +91,8 @@ struct ARViewWithOverlays: View {
                 showPlaneVisualization: $showPlaneVisualization,
                 metricSquareStore: metricSquares,
                 mapPointStore: mapPointStore,
-                arCalibrationCoordinator: arCalibrationCoordinator
+                arCalibrationCoordinator: arCalibrationCoordinator,
+                bluetoothScanner: btScanner
             )
             .edgesIgnoringSafeArea(.all)
             .onAppear {

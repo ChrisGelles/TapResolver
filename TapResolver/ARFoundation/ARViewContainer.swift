@@ -23,6 +23,9 @@ struct ARViewContainer: UIViewRepresentable {
 
     // AR calibration coordinator for ghost selection
     var arCalibrationCoordinator: ARCalibrationCoordinator?
+    
+    // Bluetooth scanner for auto-start/stop during survey
+    var bluetoothScanner: BluetoothScanner?
 
     func makeCoordinator() -> ARViewCoordinator {
         let coordinator = ARViewCoordinator()
@@ -37,6 +40,7 @@ struct ARViewContainer: UIViewRepresentable {
         coordinator.metricSquareStore = metricSquareStore
         coordinator.mapPointStore = mapPointStore
         coordinator.arCalibrationCoordinator = arCalibrationCoordinator
+        coordinator.bluetoothScanner = bluetoothScanner
         return coordinator
     }
 
@@ -102,6 +106,7 @@ struct ARViewContainer: UIViewRepresentable {
         context.coordinator.metricSquareStore = metricSquareStore
         context.coordinator.mapPointStore = mapPointStore
         context.coordinator.arCalibrationCoordinator = arCalibrationCoordinator
+        context.coordinator.bluetoothScanner = bluetoothScanner
         
         // Store coordinator reference for world map access
         ARViewContainer.Coordinator.current = context.coordinator
@@ -122,6 +127,7 @@ struct ARViewContainer: UIViewRepresentable {
         weak var mapPointStore: MapPointStore?
         /// Reference to calibration coordinator for ghost selection updates
         weak var arCalibrationCoordinator: ARCalibrationCoordinator?
+        weak var bluetoothScanner: BluetoothScanner?
         private var crosshairNode: GroundCrosshairNode?
         var currentCursorPosition: simd_float3?
         
@@ -1846,6 +1852,8 @@ struct ARViewContainer: UIViewRepresentable {
                     // ENTERED sphere - knock + start buzz
                     triggeredSurveyMarkers.insert(markerID)
                     
+                    bluetoothScanner?.startContinuous()
+                    
                     // Calculate initial intensity for buzz
                     let initialIntensity: Float
                     if distance < deadZoneRadius {
@@ -1875,6 +1883,8 @@ struct ARViewContainer: UIViewRepresentable {
                     triggeredSurveyMarkers.remove(markerID)
                     let exitTimestamp = String(format: "%.3f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 1000))
                     print("💥 [SURVEY_COLLISION] EXITED marker \(String(markerID.uuidString.prefix(8))) [t=\(exitTimestamp)]")
+                    
+                    bluetoothScanner?.stopContinuous()
                     
                     if currentlyInsideSurveyMarkerID == markerID {
                         currentlyInsideSurveyMarkerID = nil
