@@ -1984,4 +1984,167 @@ public final class MapPointStore: ObservableObject {
         print(String(repeating: "=", count: 60) + "\n")
     }
     
+    // MARK: - Duplicate MapPoint Detection & Merge
+    
+    /// Represents a group of MapPoints that are suspiciously close together
+    public struct DuplicateGroup {
+        let points: [MapPoint]
+        let maxDistance: CGFloat
+        
+        /// The point with the most data (sessions + arPositionHistory)
+        var keeper: MapPoint {
+            points.max(by: { dataScore($0) < dataScore($1) }) ?? points[0]
+        }
+        
+        /// Points that should be merged into keeper
+        var duplicates: [MapPoint] {
+            points.filter { $0.id != keeper.id }
+        }
+        
+        private func dataScore(_ point: MapPoint) -> Int {
+            point.sessions.count + point.arPositionHistory.count
+        }
+    }
+    
+    /// Find MapPoints that are within `thresholdPixels` of each other
+    /// Returns groups of duplicates (empty if no duplicates found)
+    public func findDuplicateMapPoints(thresholdPixels: CGFloat = 3.0) -> [DuplicateGroup] {
+        var groups: [DuplicateGroup] = []
+        var processed: Set<UUID> = []
+        
+        for point in points {
+            guard !processed.contains(point.id) else { continue }
+            
+            // Find all points within threshold of this point
+            var cluster: [MapPoint] = [point]
+            var maxDist: CGFloat = 0
+            
+            for other in points {
+                guard other.id != point.id else { continue }
+                guard !processed.contains(other.id) else { continue }
+                
+                let dist = hypot(point.position.x - other.position.x,
+                               point.position.y - other.position.y)
+                
+                if dist <= thresholdPixels {
+                    cluster.append(other)
+                    maxDist = max(maxDist, dist)
+                }
+            }
+            
+            // Only create a group if there are duplicates
+            if cluster.count > 1 {
+                groups.append(DuplicateGroup(points: cluster, maxDistance: maxDist))
+                cluster.forEach { processed.insert($0.id) }
+            } else {
+                processed.insert(point.id)
+            }
+        }
+        
+        return groups
+    }
+    
+    /// Log duplicate groups for diagnostic purposes
+    public func logDuplicateMapPoints() {
+        let groups = findDuplicateMapPoints()
+        
+        if groups.isEmpty {
+            print("✅ [DUPLICATE_SCAN] No duplicate MapPoints found")
+            return
+        }
+        
+        print("⚠️ [DUPLICATE_SCAN] Found \(groups.count) duplicate group(s):")
+        
+        for (index, group) in groups.enumerated() {
+            print("   Group \(index + 1): \(group.points.count) points within \(String(format: "%.1f", group.maxDistance)) pixels")
+            print("   └─ Keeper: \(String(group.keeper.id.uuidString.prefix(8))) (\(group.keeper.sessions.count) sessions, \(group.keeper.arPositionHistory.count) AR records)")
+            
+            for dup in group.duplicates {
+                let triangleRefs = dup.triangleMemberships.map { String($0.uuidString.prefix(8)) }.joined(separator: ", ")
+                print("   └─ Duplicate: \(String(dup.id.uuidString.prefix(8))) (\(dup.sessions.count) sessions, \(dup.arPositionHistory.count) AR records) triangles: [\(triangleRefs)]")
+            }
+        }
+    }
+    
+    /// Safely merge duplicate MapPoints, updating all triangle references
+    /// Returns number of MapPoints removed
+    func mergeDuplicateMapPoints(triangleStore: TrianglePatchStore) -> Int {
+        let groups = findDuplicateMapPoints()
+        
+        if groups.isEmpty {
+            print("✅ [DUPLICATE_MERGE] No duplicates to merge")
+            return 0
+        }
+        
+        var removedCount = 0
+        
+        for group in groups {
+            let keeper = group.keeper
+            let keeperID = keeper.id
+            
+            guard let keeperIndex = points.firstIndex(where: { $0.id == keeperID }) else {
+                print("⚠️ [DUPLICATE_MERGE] Keeper \(String(keeperID.uuidString.prefix(8))) not found, skipping group")
+                continue
+            }
+            
+            for duplicate in group.duplicates {
+                let dupID = duplicate.id
+                
+                print("🔀 [DUPLICATE_MERGE] Merging \(String(dupID.uuidString.prefix(8))) into \(String(keeperID.uuidString.prefix(8)))")
+                
+                // 1. Transfer sessions
+                points[keeperIndex].sessions.append(contentsOf: duplicate.sessions)
+                
+                // 2. Transfer AR position history
+                points[keeperIndex].arPositionHistory.append(contentsOf: duplicate.arPositionHistory)
+                
+                // 3. Update triangle references (CRITICAL)
+                for (triIndex, triangle) in triangleStore.triangles.enumerated() {
+                    if triangle.vertexIDs.contains(dupID) {
+                        // Replace duplicate ID with keeper ID in vertex list
+                        var updatedVertexIDs = triangle.vertexIDs
+                        for (vIndex, vID) in updatedVertexIDs.enumerated() {
+                            if vID == dupID {
+                                updatedVertexIDs[vIndex] = keeperID
+                                print("   📐 Updated triangle \(String(triangle.id.uuidString.prefix(8))) vertex \(vIndex): \(String(dupID.uuidString.prefix(8))) → \(String(keeperID.uuidString.prefix(8)))")
+                            }
+                        }
+                        
+                        // Create updated triangle (vertexIDs is let, so we rebuild)
+                        triangleStore.triangles[triIndex] = TrianglePatch(
+                            id: triangle.id,
+                            vertexIDs: updatedVertexIDs,
+                            isCalibrated: triangle.isCalibrated,
+                            calibrationQuality: triangle.calibrationQuality,
+                            transform: triangle.transform,
+                            createdAt: triangle.createdAt,
+                            lastCalibratedAt: triangle.lastCalibratedAt,
+                            arMarkerIDs: triangle.arMarkerIDs,
+                            userPositionWhenCalibrated: triangle.userPositionWhenCalibrated,
+                            legMeasurements: triangle.legMeasurements,
+                            worldMapFilename: triangle.worldMapFilename,
+                            worldMapFilesByStrategy: triangle.worldMapFilesByStrategy
+                        )
+                        
+                        // Update keeper's triangle memberships if not already present
+                        if !points[keeperIndex].triangleMemberships.contains(triangle.id) {
+                            points[keeperIndex].triangleMemberships.append(triangle.id)
+                        }
+                    }
+                }
+                
+                // 4. Remove the duplicate MapPoint
+                points.removeAll { $0.id == dupID }
+                removedCount += 1
+            }
+        }
+        
+        // Save both stores
+        save()
+        triangleStore.save()
+        
+        print("✅ [DUPLICATE_MERGE] Merged \(removedCount) duplicate MapPoint(s)")
+        return removedCount
+    }
+    
 }

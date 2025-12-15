@@ -1438,6 +1438,47 @@ private struct DebugSettingsPanel: View {
                             .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
                         }
                         .buttonStyle(.plain)
+                        
+                        // MARK: - MapPoint Maintenance
+                        
+                        // Scan for Duplicates Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            mapPointStore.logDuplicateMapPoints()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: 24))
+                                Text("Scan Duplicates")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Merge Duplicates Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            let removed = mapPointStore.mergeDuplicateMapPoints(triangleStore: triangleStore)
+                            if removed > 0 {
+                                // Trigger UI refresh if needed
+                            }
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "arrow.triangle.merge")
+                                    .font(.system(size: 24))
+                                Text("Merge Duplicates")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 20)

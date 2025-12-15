@@ -47,6 +47,35 @@ struct TrianglePatch: Codable, Identifiable {
         self.lastCalibratedAt = nil
     }
     
+    /// Full initializer for rebuilding triangles (used during merge operations)
+    init(
+        id: UUID,
+        vertexIDs: [UUID],
+        isCalibrated: Bool,
+        calibrationQuality: Float,
+        transform: Similarity2D?,
+        createdAt: Date,
+        lastCalibratedAt: Date?,
+        arMarkerIDs: [String],
+        userPositionWhenCalibrated: simd_float3?,
+        legMeasurements: [TriangleLegMeasurement],
+        worldMapFilename: String?,
+        worldMapFilesByStrategy: [String: String]
+    ) {
+        self.id = id
+        self.vertexIDs = vertexIDs
+        self.isCalibrated = isCalibrated
+        self.calibrationQuality = calibrationQuality
+        self.transform = transform
+        self.createdAt = createdAt
+        self.lastCalibratedAt = lastCalibratedAt
+        self.arMarkerIDs = arMarkerIDs
+        self.userPositionWhenCalibrated = userPositionWhenCalibrated
+        self.legMeasurements = legMeasurements
+        self.worldMapFilename = worldMapFilename
+        self.worldMapFilesByStrategy = worldMapFilesByStrategy
+    }
+    
     /// Returns vertices in consistent order (sorted by ID for deterministic rendering)
     var sortedVertexIDs: [UUID] {
         vertexIDs.sorted { $0.uuidString < $1.uuidString }
