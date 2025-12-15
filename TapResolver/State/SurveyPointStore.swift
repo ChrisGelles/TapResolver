@@ -12,6 +12,52 @@ import UIKit
 
 // MARK: - Data Structures
 
+/// Simple RSSI reading without pose data
+public struct RssiSample: Codable, Equatable {
+    public let ms: Int64      // Milliseconds since session start
+    public let rssi: Int      // Signal strength (dBm)
+    
+    public init(ms: Int64, rssi: Int) {
+        self.ms = ms
+        self.rssi = rssi
+    }
+}
+
+/// Device pose snapshot for pose track
+public struct PoseSample: Codable, Equatable {
+    public let ms: Int64      // Milliseconds since session start
+    public let x: Float       // Position X (meters, AR coordinates)
+    public let y: Float       // Position Y (meters)
+    public let z: Float       // Position Z (meters)
+    public let qx: Float      // Quaternion X
+    public let qy: Float      // Quaternion Y
+    public let qz: Float      // Quaternion Z
+    public let qw: Float      // Quaternion W
+    
+    public init(ms: Int64, x: Float, y: Float, z: Float, qx: Float, qy: Float, qz: Float, qw: Float) {
+        self.ms = ms
+        self.x = x
+        self.y = y
+        self.z = z
+        self.qx = qx
+        self.qy = qy
+        self.qz = qz
+        self.qw = qw
+    }
+    
+    /// Create from SurveyDevicePose with timestamp
+    public init(ms: Int64, pose: SurveyDevicePose) {
+        self.ms = ms
+        self.x = pose.x
+        self.y = pose.y
+        self.z = pose.z
+        self.qx = pose.qx
+        self.qy = pose.qy
+        self.qz = pose.qz
+        self.qw = pose.qw
+    }
+}
+
 /// A single RSSI sample with synchronized device pose
 public struct RssiPoseSample: Codable, Equatable {
     public let ms: Int64              // Milliseconds since session start
@@ -232,10 +278,10 @@ public struct SurveyBeaconMeasurement: Codable, Equatable {
     public let beaconID: String
     public let stats: SurveyStats
     public let histogram: SurveyHistogram
-    public let samples: [RssiPoseSample]  // Raw timeline with pose, bookended with rssi=0
+    public let samples: [RssiSample]  // Raw RSSI timeline
     public let meta: SurveyBeaconMeta
     
-    public init(beaconID: String, stats: SurveyStats, histogram: SurveyHistogram, samples: [RssiPoseSample], meta: SurveyBeaconMeta) {
+    public init(beaconID: String, stats: SurveyStats, histogram: SurveyHistogram, samples: [RssiSample], meta: SurveyBeaconMeta) {
         self.beaconID = beaconID
         self.stats = stats
         self.histogram = histogram
@@ -260,10 +306,13 @@ public struct SurveySession: Codable, Identifiable, Equatable {
     // Compass snapshot for magnetic distortion mapping
     public let compassHeading_deg: Float
     
+    // Device pose track (sampled at 4 Hz)
+    public let poseTrack: [PoseSample]
+    
     // Beacon measurements
     public let beacons: [SurveyBeaconMeasurement]
     
-    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, compassHeading_deg: Float, beacons: [SurveyBeaconMeasurement]) {
+    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, compassHeading_deg: Float, poseTrack: [PoseSample], beacons: [SurveyBeaconMeasurement]) {
         self.id = id
         self.locationID = locationID
         self.startISO = startISO
@@ -271,6 +320,7 @@ public struct SurveySession: Codable, Identifiable, Equatable {
         self.duration_s = duration_s
         self.devicePose = devicePose
         self.compassHeading_deg = compassHeading_deg
+        self.poseTrack = poseTrack
         self.beacons = beacons
     }
 }

@@ -1423,6 +1423,7 @@ private struct DebugSettingsPanel: View {
                         
                         // Purge Survey Data Button
                         Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                             surveyPointStore.purgeAll()
                         } label: {
                             VStack(spacing: 8) {
