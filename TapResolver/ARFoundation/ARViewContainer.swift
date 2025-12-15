@@ -128,7 +128,7 @@ struct ARViewContainer: UIViewRepresentable {
         /// Reference to calibration coordinator for ghost selection updates
         weak var arCalibrationCoordinator: ARCalibrationCoordinator?
         weak var bluetoothScanner: BluetoothScanner?
-        private var crosshairNode: GroundCrosshairNode?
+        var crosshairNode: GroundCrosshairNode?
         var currentCursorPosition: simd_float3?
         
         /// Last valid cursor position (lingers for 200ms after raycast gaps)
@@ -1150,6 +1150,9 @@ struct ARViewContainer: UIViewRepresentable {
         }
         
         func updateCrosshair() {
+            // Skip crosshair updates when inside survey marker sphere
+            guard currentlyInsideSurveyMarkerID == nil else { return }
+            
             guard let sceneView = sceneView,
                   let crosshair = crosshairNode else { return }
             

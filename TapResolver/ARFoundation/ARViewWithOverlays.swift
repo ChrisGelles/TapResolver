@@ -56,6 +56,7 @@ struct ARViewWithOverlays: View {
     // Survey marker dwell timer
     @State private var dwellTimerValue: Double = -3.0
     @State private var dwellTimer: Timer?
+    @State private var showDwellTimer: Bool = false
     
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
@@ -986,7 +987,7 @@ struct ARViewWithOverlays: View {
 
             // Dwell Timer Display - centered on screen when inside ANY survey marker sphere
             // This displays regardless of mode (idle, swath survey, etc.)
-            if isInsideSphere {
+            if showDwellTimer {
                 VStack(spacing: 4) {
                     Text(String(format: "%.1f", dwellTimerValue))
                         .font(.system(size: 72, weight: .heavy, design: .monospaced))
@@ -1209,6 +1210,7 @@ struct ARViewWithOverlays: View {
             continuousPlayer = try engine.makeAdvancedPlayer(with: pattern)
             try continuousPlayer?.start(atTime: CHHapticTimeImmediate)
             isInsideSphere = true
+            ARViewContainer.Coordinator.current?.crosshairNode?.isHidden = true
             print("📳 [HAPTICS] Started continuous buzz at intensity \(String(format: "%.2f", startIntensity))")
         } catch {
             print("⚠️ [HAPTICS] Failed to start continuous buzz: \(error.localizedDescription)")
@@ -1239,6 +1241,7 @@ struct ARViewWithOverlays: View {
             try player.stop(atTime: CHHapticTimeImmediate)
             continuousPlayer = nil
             isInsideSphere = false
+            ARViewContainer.Coordinator.current?.crosshairNode?.isHidden = false
             print("📳 [HAPTICS] Stopped continuous buzz")
         } catch {
             print("⚠️ [HAPTICS] Failed to stop continuous buzz: \(error.localizedDescription)")
@@ -1249,6 +1252,7 @@ struct ARViewWithOverlays: View {
     
     /// Start the dwell timer (called on sphere entry)
     private func startDwellTimer() {
+        showDwellTimer = true
         dwellTimerValue = -3.0
         dwellTimer?.invalidate()
         dwellTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
@@ -1259,6 +1263,7 @@ struct ARViewWithOverlays: View {
     
     /// Stop the dwell timer (called on sphere exit)
     private func stopDwellTimer() {
+        showDwellTimer = false
         dwellTimer?.invalidate()
         dwellTimer = nil
         print("⏱️ [DWELL] Timer stopped at \(String(format: "%.1f", dwellTimerValue))")
