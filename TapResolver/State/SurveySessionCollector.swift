@@ -9,6 +9,7 @@
 import Foundation
 import Combine
 import simd
+import QuartzCore
 
 /// Manages data collection during Survey Marker dwell sessions
 @MainActor
@@ -31,10 +32,16 @@ class SurveySessionCollector: ObservableObject {
     @Published private(set) var activeMarkerID: UUID?
     @Published private(set) var currentDwellTime: Double = 0.0
     
+    /// Throttle tracking: beaconID -> last sample timestamp
+    private var lastSampleTime: [String: TimeInterval] = [:]
+    
     // MARK: - Configuration
     
     /// Minimum session duration to persist (seconds)
     static let minimumSessionDuration: Double = 3.0
+    
+    /// BLE sample interval: 4 Hz sampling rate (250ms)
+    private let sampleIntervalSeconds: TimeInterval = 0.250
     
     // MARK: - Internal Types
     
@@ -158,6 +165,9 @@ class SurveySessionCollector: ObservableObject {
             compassHeading: compassHeading
         )
         
+        // Reset throttle state for new session
+        lastSampleTime.removeAll()
+        
         // Insert boundary markers for all known beacons
         // TODO: Milestone 3 - Get beacon list from BeaconListsStore
         insertBoundaryMarkers(atMs: 0, pose: currentPose)
@@ -244,6 +254,8 @@ class SurveySessionCollector: ObservableObject {
     
     /// Handle incoming BLE device updates
     private func handleBLEUpdate(devices: [BluetoothScanner.DiscoveredDevice]) {
+        let bleStart = CACurrentMediaTime()
+        
         guard activeSession != nil else { return }
         
         // Get whitelist for filtering
@@ -251,6 +263,8 @@ class SurveySessionCollector: ObservableObject {
         
         // TODO: Milestone 4 - Get actual pose from ARKit
         let currentPose = SurveyDevicePose.identity
+        
+        let now = CACurrentMediaTime()
         
         for device in devices {
             // Use device name as beacon ID (matches BeaconListsStore convention)
@@ -267,7 +281,18 @@ class SurveySessionCollector: ObservableObject {
             // Skip invalid RSSI values
             guard rssi < 0 else { continue }
             
+            // Throttle check: only sample at 4 Hz per beacon
+            if let lastTime = lastSampleTime[beaconName], now - lastTime < sampleIntervalSeconds {
+                continue  // Skip this sample, too soon
+            }
+            lastSampleTime[beaconName] = now
+            
             ingestSample(beaconID: beaconName, rssi: rssi, pose: currentPose)
+        }
+        
+        let bleDuration = (CACurrentMediaTime() - bleStart) * 1000
+        if bleDuration > 5.0 {
+            print("⚠️ [PERF] BLE update took \(String(format: "%.1f", bleDuration))ms for \(devices.count) devices")
         }
     }
     
