@@ -21,6 +21,7 @@ class SurveySessionCollector: ObservableObject {
     private weak var bluetoothScanner: BluetoothScanner?
     private weak var beaconLists: BeaconListsStore?
     private weak var arCalibrationCoordinator: ARCalibrationCoordinator?
+    private weak var orientationManager: CompassOrientationManager?
     private var bleSubscription: AnyCancellable?
     
     // MARK: - Session State
@@ -85,12 +86,13 @@ class SurveySessionCollector: ObservableObject {
     // MARK: - Configuration
     
     /// Configure with required dependencies
-    func configure(surveyPointStore: SurveyPointStore, bluetoothScanner: BluetoothScanner, beaconLists: BeaconListsStore, arCalibrationCoordinator: ARCalibrationCoordinator) {
+    func configure(surveyPointStore: SurveyPointStore, bluetoothScanner: BluetoothScanner, beaconLists: BeaconListsStore, arCalibrationCoordinator: ARCalibrationCoordinator, orientationManager: CompassOrientationManager) {
         self.surveyPointStore = surveyPointStore
         self.bluetoothScanner = bluetoothScanner
         self.beaconLists = beaconLists
         self.arCalibrationCoordinator = arCalibrationCoordinator
-        print("📊 [SurveySessionCollector] Configured with SurveyPointStore, BluetoothScanner, BeaconListsStore (\(beaconLists.beacons.count) beacons), and ARCalibrationCoordinator")
+        self.orientationManager = orientationManager
+        print("📊 [SurveySessionCollector] Configured with SurveyPointStore, BluetoothScanner, BeaconListsStore (\(beaconLists.beacons.count) beacons), ARCalibrationCoordinator, and CompassOrientationManager")
     }
     
     // MARK: - Notification Setup
@@ -164,8 +166,13 @@ class SurveySessionCollector: ObservableObject {
         // Milestone 4a: Get actual pose from ARKit
         let currentPose = ARViewContainer.Coordinator.current?.getCurrentPose() ?? SurveyDevicePose.identity
         
-        // TODO: Milestone 5 - Get actual compass heading
-        let compassHeading: Float = -1.0  // Sentinel for "unavailable"
+        // Milestone 5: Capture compass heading (fused true-north heading)
+        let compassHeading: Float
+        if let heading = orientationManager?.fusedHeadingDegrees, heading.isFinite {
+            compassHeading = Float(heading)
+        } else {
+            compassHeading = -1.0  // Sentinel for "unavailable"
+        }
         
         activeSession = ActiveDwellSession(
             markerID: markerID,
