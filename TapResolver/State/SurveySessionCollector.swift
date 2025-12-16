@@ -53,12 +53,12 @@ class SurveySessionCollector: ObservableObject {
         let startTime: Date
         let startPose: SurveyDevicePose
         let mapCoordinate: CGPoint?
-        var compassHeading: Float = 0.0
         let sessionTransform: SessionTransformSnapshot?
         
-        // Separate tracks for pose and RSSI
+        // Separate tracks for pose, RSSI, and compass
         var poseTrack: [PoseSample] = []
         var beaconSamples: [String: [RssiSample]] = [:]
+        var compassSamples: [Float] = []
         
         /// Elapsed milliseconds since session start
         func elapsedMs() -> Int64 {
@@ -166,20 +166,11 @@ class SurveySessionCollector: ObservableObject {
         // Milestone 4a: Get actual pose from ARKit
         let currentPose = ARViewContainer.Coordinator.current?.getCurrentPose() ?? SurveyDevicePose.identity
         
-        // Milestone 5: Capture compass heading (fused true-north heading)
-        let compassHeading: Float
-        if let heading = orientationManager?.fusedHeadingDegrees, heading.isFinite {
-            compassHeading = Float(heading)
-        } else {
-            compassHeading = -1.0  // Sentinel for "unavailable"
-        }
-        
         activeSession = ActiveDwellSession(
             markerID: markerID,
             startTime: now,
             startPose: currentPose,
             mapCoordinate: mapCoordinate,
-            compassHeading: compassHeading,
             sessionTransform: sessionTransform
         )
         
@@ -318,6 +309,14 @@ class SurveySessionCollector: ObservableObject {
             guard var updatedSession = activeSession else { return }
             let poseSample = PoseSample(ms: currentMs, pose: currentPose)
             updatedSession.poseTrack.append(poseSample)
+            
+            // Capture compass heading at 4Hz
+            if let heading = orientationManager?.fusedHeadingDegrees, heading.isFinite {
+                updatedSession.compassSamples.append(Float(heading))
+            } else {
+                updatedSession.compassSamples.append(-1.0)  // Sentinel for unavailable
+            }
+            
             activeSession = updatedSession
         }
         
@@ -411,7 +410,7 @@ class SurveySessionCollector: ObservableObject {
             endISO: iso8601Formatter.string(from: Date()),
             duration_s: duration,
             devicePose: session.startPose,
-            compassHeading_deg: session.compassHeading,
+            compassTrack: session.compassSamples,
             sessionTransform: session.sessionTransform,
             poseTrack: session.poseTrack,
             beacons: beaconMeasurements
@@ -422,7 +421,7 @@ class SurveySessionCollector: ObservableObject {
         
         let totalRssiSamples = beaconMeasurements.reduce(0) { $0 + $1.samples.count }
         let poseCount = session.poseTrack.count
-        print("📊 [SurveySessionCollector] Persisted session with \(beaconMeasurements.count) beacon(s), \(totalRssiSamples) RSSI samples, \(poseCount) pose samples")
+        print("📊 [SurveySessionCollector] Persisted session with \(beaconMeasurements.count) beacon(s), \(totalRssiSamples) RSSI samples, \(poseCount) pose samples, \(surveySession.compassTrack.count) compass samples")
     }
     
     // MARK: - Statistics Computation (Milestone 7 placeholder)

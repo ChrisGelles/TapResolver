@@ -346,8 +346,8 @@ public struct SurveySession: Codable, Identifiable, Equatable {
     // Device pose during collection (reference snapshot)
     public let devicePose: SurveyDevicePose
     
-    // Compass snapshot for magnetic distortion mapping
-    public let compassHeading_deg: Float
+    // Compass track (sampled at 4 Hz)
+    public let compassTrack: [Float]
     
     // AR Session transform for converting poseTrack to canonical space
     public let sessionTransform: SessionTransformSnapshot?
@@ -358,14 +358,14 @@ public struct SurveySession: Codable, Identifiable, Equatable {
     // Beacon measurements
     public let beacons: [SurveyBeaconMeasurement]
     
-    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, compassHeading_deg: Float, sessionTransform: SessionTransformSnapshot?, poseTrack: [PoseSample], beacons: [SurveyBeaconMeasurement]) {
+    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, compassTrack: [Float], sessionTransform: SessionTransformSnapshot?, poseTrack: [PoseSample], beacons: [SurveyBeaconMeasurement]) {
         self.id = id
         self.locationID = locationID
         self.startISO = startISO
         self.endISO = endISO
         self.duration_s = duration_s
         self.devicePose = devicePose
-        self.compassHeading_deg = compassHeading_deg
+        self.compassTrack = compassTrack
         self.sessionTransform = sessionTransform
         self.poseTrack = poseTrack
         self.beacons = beacons
