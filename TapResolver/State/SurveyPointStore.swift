@@ -9,55 +9,8 @@
 import Foundation
 import Combine
 import UIKit
-import simd
 
 // MARK: - Data Structures
-
-/// Simple RSSI reading without pose data
-public struct RssiSample: Codable, Equatable {
-    public let ms: Int64      // Milliseconds since session start
-    public let rssi: Int      // Signal strength (dBm)
-    
-    public init(ms: Int64, rssi: Int) {
-        self.ms = ms
-        self.rssi = rssi
-    }
-}
-
-/// Device pose snapshot for pose track
-public struct PoseSample: Codable, Equatable {
-    public let ms: Int64      // Milliseconds since session start
-    public let x: Float       // Position X (meters, AR coordinates)
-    public let y: Float       // Position Y (meters)
-    public let z: Float       // Position Z (meters)
-    public let qx: Float      // Quaternion X
-    public let qy: Float      // Quaternion Y
-    public let qz: Float      // Quaternion Z
-    public let qw: Float      // Quaternion W
-    
-    public init(ms: Int64, x: Float, y: Float, z: Float, qx: Float, qy: Float, qz: Float, qw: Float) {
-        self.ms = ms
-        self.x = x
-        self.y = y
-        self.z = z
-        self.qx = qx
-        self.qy = qy
-        self.qz = qz
-        self.qw = qw
-    }
-    
-    /// Create from SurveyDevicePose with timestamp
-    public init(ms: Int64, pose: SurveyDevicePose) {
-        self.ms = ms
-        self.x = pose.x
-        self.y = pose.y
-        self.z = pose.z
-        self.qx = pose.qx
-        self.qy = pose.qy
-        self.qz = pose.qz
-        self.qw = pose.qw
-    }
-}
 
 /// A single RSSI sample with synchronized device pose
 public struct RssiPoseSample: Codable, Equatable {
@@ -158,21 +111,6 @@ public struct SurveyDevicePose: Codable, Equatable {
         self.qy = qy
         self.qz = qz
         self.qw = qw
-    }
-    
-    /// Extract pose from ARKit camera transform matrix
-    public init(transform: simd_float4x4) {
-        // Position from translation column
-        self.x = transform.columns.3.x
-        self.y = transform.columns.3.y
-        self.z = transform.columns.3.z
-        
-        // Quaternion from rotation matrix
-        let quat = simd_quatf(transform)
-        self.qx = quat.imag.x
-        self.qy = quat.imag.y
-        self.qz = quat.imag.z
-        self.qw = quat.real
     }
     
     /// Identity pose (no translation, no rotation)
@@ -294,42 +232,15 @@ public struct SurveyBeaconMeasurement: Codable, Equatable {
     public let beaconID: String
     public let stats: SurveyStats
     public let histogram: SurveyHistogram
-    public let samples: [RssiSample]  // Raw RSSI timeline
+    public let samples: [RssiPoseSample]  // Raw timeline with pose, bookended with rssi=0
     public let meta: SurveyBeaconMeta
     
-    public init(beaconID: String, stats: SurveyStats, histogram: SurveyHistogram, samples: [RssiSample], meta: SurveyBeaconMeta) {
+    public init(beaconID: String, stats: SurveyStats, histogram: SurveyHistogram, samples: [RssiPoseSample], meta: SurveyBeaconMeta) {
         self.beaconID = beaconID
         self.stats = stats
         self.histogram = histogram
         self.samples = samples
         self.meta = meta
-    }
-}
-
-/// Snapshot of AR session-to-canonical transform for pose interpretation
-public struct SessionTransformSnapshot: Codable, Equatable {
-    public let rotationY: Float        // Y-axis rotation (radians)
-    public let translationX: Float
-    public let translationY: Float
-    public let translationZ: Float
-    public let scale: Float            // AR meters / canonical meters
-    
-    public init(rotationY: Float, translationX: Float, translationY: Float, translationZ: Float, scale: Float) {
-        self.rotationY = rotationY
-        self.translationX = translationX
-        self.translationY = translationY
-        self.translationZ = translationZ
-        self.scale = scale
-    }
-    
-    /// Invalid/unavailable transform sentinel
-    public static let invalid = SessionTransformSnapshot(
-        rotationY: 0, translationX: 0, translationY: 0, translationZ: 0, scale: 0
-    )
-    
-    /// Check if this is a valid (non-sentinel) transform
-    public var isValid: Bool {
-        return scale != 0
     }
 }
 
@@ -346,28 +257,20 @@ public struct SurveySession: Codable, Identifiable, Equatable {
     // Device pose during collection (reference snapshot)
     public let devicePose: SurveyDevicePose
     
-    // Compass track (sampled at 4 Hz)
-    public let compassTrack: [Float]
-    
-    // AR Session transform for converting poseTrack to canonical space
-    public let sessionTransform: SessionTransformSnapshot?
-    
-    // Device pose track (sampled at 4 Hz)
-    public let poseTrack: [PoseSample]
+    // Compass snapshot for magnetic distortion mapping
+    public let compassHeading_deg: Float
     
     // Beacon measurements
     public let beacons: [SurveyBeaconMeasurement]
     
-    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, compassTrack: [Float], sessionTransform: SessionTransformSnapshot?, poseTrack: [PoseSample], beacons: [SurveyBeaconMeasurement]) {
+    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, compassHeading_deg: Float, beacons: [SurveyBeaconMeasurement]) {
         self.id = id
         self.locationID = locationID
         self.startISO = startISO
         self.endISO = endISO
         self.duration_s = duration_s
         self.devicePose = devicePose
-        self.compassTrack = compassTrack
-        self.sessionTransform = sessionTransform
-        self.poseTrack = poseTrack
+        self.compassHeading_deg = compassHeading_deg
         self.beacons = beacons
     }
 }

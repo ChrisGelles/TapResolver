@@ -15,6 +15,7 @@ final class HUDPanelsState: ObservableObject {
     @Published var isMapPointOpen: Bool = false
     @Published var isMapPointLogOpen = false
     @Published var isDebugSettingsOpen = false
+    @Published var surveyThreadTraceEnabled = false
     @Published var isCalibratingNorth: Bool = false
     @Published var showFacingOverlay: Bool = true
     
@@ -35,5 +36,15 @@ final class HUDPanelsState: ObservableObject {
     func toggleDebugSettings() {
         isDebugSettingsOpen.toggle()
         print("⚙️ Debug Settings Panel: \(isDebugSettingsOpen ? "OPEN" : "CLOSED")")
+    }
+    
+    func toggleSurveyThreadTrace() {
+        surveyThreadTraceEnabled.toggle()
+        UserDefaults.standard.set(surveyThreadTraceEnabled, forKey: "debug.surveyThreadTrace")
+        print("🔍 Survey Thread Trace: \(surveyThreadTraceEnabled ? "ON" : "OFF")")
+    }
+    
+    init() {
+        self.surveyThreadTraceEnabled = UserDefaults.standard.bool(forKey: "debug.surveyThreadTrace")
     }
 }

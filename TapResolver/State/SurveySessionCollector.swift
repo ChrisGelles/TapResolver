@@ -11,6 +11,53 @@ import Combine
 import simd
 import QuartzCore
 
+// MARK: - Thread Tracing
+
+/// Logs survey thread trace information when enabled
+/// - Parameters:
+///   - event: Description of what's happening
+///   - context: Additional context (markerID, counts, etc.)
+///   - function: Auto-captured function name
+///   - isViolation: If true, marks this as a threading violation
+func surveyTrace(
+    _ event: String,
+    context: String = "",
+    function: String = #function,
+    isViolation: Bool = false
+) {
+    // Check if tracing is enabled via UserDefaults (avoids dependency on HUDPanelsState)
+    guard UserDefaults.standard.bool(forKey: "debug.surveyThreadTrace") else { return }
+    
+    let timestamp = Date()
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm:ss.SSS"
+    let timeStr = formatter.string(from: timestamp)
+    
+    let threadName: String
+    if Thread.isMainThread {
+        threadName = "Main"
+    } else {
+        let qos = DispatchQoS.QoSClass(rawValue: qos_class_self()) ?? .default
+        switch qos {
+        case .utility:
+            threadName = "BG-Utility"
+        case .background:
+            threadName = "BG-Background"
+        case .userInitiated:
+            threadName = "BG-UserInit"
+        case .userInteractive:
+            threadName = "BG-UserInt"
+        default:
+            threadName = "BG-Default"
+        }
+    }
+    
+    let violationMarker = isViolation ? " ⚠️ VIOLATION" : ""
+    let contextStr = context.isEmpty ? "" : " | \(context)"
+    
+    print("[SURVEY] \(timeStr) | \(threadName.padding(toLength: 11, withPad: " ", startingAt: 0)) | \(function.padding(toLength: 35, withPad: " ", startingAt: 0)) | \(event)\(contextStr)\(violationMarker)")
+}
+
 /// Manages data collection during Survey Marker dwell sessions
 @MainActor
 class SurveySessionCollector: ObservableObject {
@@ -20,8 +67,6 @@ class SurveySessionCollector: ObservableObject {
     private weak var surveyPointStore: SurveyPointStore?
     private weak var bluetoothScanner: BluetoothScanner?
     private weak var beaconLists: BeaconListsStore?
-    private weak var arCalibrationCoordinator: ARCalibrationCoordinator?
-    private weak var orientationManager: CompassOrientationManager?
     private var bleSubscription: AnyCancellable?
     
     // MARK: - Session State
@@ -50,15 +95,13 @@ class SurveySessionCollector: ObservableObject {
     /// Tracks state during an active dwell session
     private struct ActiveDwellSession {
         let markerID: UUID
+        let mapCoordinate: CGPoint?
         let startTime: Date
         let startPose: SurveyDevicePose
-        let mapCoordinate: CGPoint?
-        let sessionTransform: SessionTransformSnapshot?
+        let compassHeading: Float
         
-        // Separate tracks for pose, RSSI, and compass
-        var poseTrack: [PoseSample] = []
-        var beaconSamples: [String: [RssiSample]] = [:]
-        var compassSamples: [Float] = []
+        /// Per-beacon sample buffers (beaconID → samples)
+        var beaconSamples: [String: [RssiPoseSample]] = [:]
         
         /// Elapsed milliseconds since session start
         func elapsedMs() -> Int64 {
@@ -86,13 +129,11 @@ class SurveySessionCollector: ObservableObject {
     // MARK: - Configuration
     
     /// Configure with required dependencies
-    func configure(surveyPointStore: SurveyPointStore, bluetoothScanner: BluetoothScanner, beaconLists: BeaconListsStore, arCalibrationCoordinator: ARCalibrationCoordinator, orientationManager: CompassOrientationManager) {
+    func configure(surveyPointStore: SurveyPointStore, bluetoothScanner: BluetoothScanner, beaconLists: BeaconListsStore) {
         self.surveyPointStore = surveyPointStore
         self.bluetoothScanner = bluetoothScanner
         self.beaconLists = beaconLists
-        self.arCalibrationCoordinator = arCalibrationCoordinator
-        self.orientationManager = orientationManager
-        print("📊 [SurveySessionCollector] Configured with SurveyPointStore, BluetoothScanner, BeaconListsStore (\(beaconLists.beacons.count) beacons), ARCalibrationCoordinator, and CompassOrientationManager")
+        print("📊 [SurveySessionCollector] Configured with SurveyPointStore, BluetoothScanner, and BeaconListsStore (\(beaconLists.beacons.count) beacons)")
     }
     
     // MARK: - Notification Setup
@@ -133,6 +174,7 @@ class SurveySessionCollector: ObservableObject {
             return
         }
         
+        surveyTrace("markerEntered", context: "id=\(markerID.uuidString.prefix(8))")
         startSession(markerID: markerID, mapCoordinate: mapCoordinate)
     }
     
@@ -149,36 +191,40 @@ class SurveySessionCollector: ObservableObject {
             return
         }
         
+        surveyTrace("markerExited", context: "id=\(markerID.uuidString.prefix(8))")
         endSession()
     }
     
     // MARK: - Session Lifecycle
     
     private func startSession(markerID: UUID, mapCoordinate: CGPoint?) {
+        surveyTrace("sessionStarting", context: "marker=\(markerID.uuidString.prefix(8))")
         let now = Date()
         
-        // Milestone 4a: Capture session transform snapshot (decipher key)
-        let sessionTransform = arCalibrationCoordinator?.getSessionTransformSnapshot()
-        if sessionTransform == nil {
-            print("⚠️ [SurveySessionCollector] No valid session transform - poses will be in raw AR coordinates")
-        }
+        // TODO: Milestone 4 - Get actual pose from ARKit
+        let currentPose = SurveyDevicePose.identity
         
-        // Milestone 4a: Get actual pose from ARKit
-        let currentPose = ARViewContainer.Coordinator.current?.getCurrentPose() ?? SurveyDevicePose.identity
+        // TODO: Milestone 5 - Get actual compass heading
+        let compassHeading: Float = -1.0  // Sentinel for "unavailable"
         
         activeSession = ActiveDwellSession(
             markerID: markerID,
+            mapCoordinate: mapCoordinate,
             startTime: now,
             startPose: currentPose,
-            mapCoordinate: mapCoordinate,
-            sessionTransform: sessionTransform
+            compassHeading: compassHeading
         )
         
         // Reset throttle state for new session
         lastSampleTime.removeAll()
         
+        // Insert boundary markers for all known beacons
+        // TODO: Milestone 3 - Get beacon list from BeaconListsStore
+        insertBoundaryMarkers(atMs: 0, pose: currentPose)
+        
         // Start listening for BLE updates
         startBLESubscription()
+        surveyTrace("bleSubscribed")
         
         // Update published state
         DispatchQueue.main.async {
@@ -207,6 +253,11 @@ class SurveySessionCollector: ObservableObject {
             return
         }
         
+        // Insert ending boundary markers
+        // TODO: Milestone 4 - Get actual pose from ARKit
+        let endPose = SurveyDevicePose.identity
+        insertBoundaryMarkers(atMs: session.elapsedMs(), pose: endPose)
+        
         // Capture session data for async processing
         let sessionCopy = session
         let storeCopy = surveyPointStore
@@ -217,9 +268,11 @@ class SurveySessionCollector: ObservableObject {
         // Log completion on main thread before async work
         print("📊 [SurveySessionCollector] Session COMPLETED for marker \(markerIDShort) - duration \(String(format: "%.1f", duration))s")
         
+        surveyTrace("endSession", context: "duration=\(String(format: "%.1f", duration))s, dispatching to background")
+        
         // Dispatch finalization to background queue
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            self?.finalizeSession(sessionCopy, duration: duration, store: storeCopy)
+        Task.detached(priority: .utility) { [sessionCopy, storeCopy] in
+            await self.finalizeSessionAsync(sessionCopy, duration: duration, endPose: endPose, store: storeCopy)
         }
     }
     
@@ -264,18 +317,14 @@ class SurveySessionCollector: ObservableObject {
     private func handleBLEUpdate(devices: [BluetoothScanner.DiscoveredDevice]) {
         let bleStart = CACurrentMediaTime()
         
-        guard var session = activeSession else { return }
+        guard activeSession != nil else { return }
+        surveyTrace("bleUpdate", context: "devices=\(devices.count)")
         
         // Get whitelist for filtering
         let whitelist = beaconLists?.beacons ?? []
         
-        // Milestone 4a: Get current pose from ARKit via static coordinator reference
-        let currentPose = ARViewContainer.Coordinator.current?.getCurrentPose() ?? SurveyDevicePose.identity
-        let currentMs = session.elapsedMs()
-        
-        // Sample pose at same throttle rate as RSSI (4 Hz)
-        // Only add pose if we're going to add at least one RSSI sample this cycle
-        var willAddSamples = false
+        // TODO: Milestone 4 - Get actual pose from ARKit
+        let currentPose = SurveyDevicePose.identity
         
         let now = CACurrentMediaTime()
         
@@ -300,24 +349,7 @@ class SurveySessionCollector: ObservableObject {
             }
             lastSampleTime[beaconName] = now
             
-            ingestSample(beaconID: beaconName, rssi: rssi, ms: currentMs)
-            willAddSamples = true
-        }
-        
-        // Add pose sample if we recorded any RSSI this cycle
-        if willAddSamples {
-            guard var updatedSession = activeSession else { return }
-            let poseSample = PoseSample(ms: currentMs, pose: currentPose)
-            updatedSession.poseTrack.append(poseSample)
-            
-            // Capture compass heading at 4Hz
-            if let heading = orientationManager?.fusedHeadingDegrees, heading.isFinite {
-                updatedSession.compassSamples.append(Float(heading))
-            } else {
-                updatedSession.compassSamples.append(-1.0)  // Sentinel for unavailable
-            }
-            
-            activeSession = updatedSession
+            ingestSample(beaconID: beaconName, rssi: rssi, pose: currentPose)
         }
         
         let bleDuration = (CACurrentMediaTime() - bleStart) * 1000
@@ -326,38 +358,81 @@ class SurveySessionCollector: ObservableObject {
         }
     }
     
+    // MARK: - Boundary Markers
+    
+    /// Insert rssi=0 boundary markers for all tracked beacons
+    private func insertBoundaryMarkers(atMs ms: Int64, pose: SurveyDevicePose) {
+        guard var session = activeSession else { return }
+        
+        // For now, we have no beacons being tracked
+        // Milestone 3 will populate beaconSamples with real beacon IDs
+        // When that happens, this method will insert boundary markers for each
+        
+        // Placeholder: If beaconSamples is empty, nothing to do yet
+        // Once BLE wiring is in place, beacons will be added dynamically
+        
+        for beaconID in session.beaconSamples.keys {
+            let boundaryMarker = RssiPoseSample.boundaryMarker(ms: ms, pose: pose)
+            session.beaconSamples[beaconID]?.append(boundaryMarker)
+        }
+        
+        activeSession = session
+    }
+    
     // MARK: - BLE Sample Ingestion (Milestone 3)
     
     /// Called when a BLE advertisement is received during dwell
     /// - Parameters:
     ///   - beaconID: Identifier for the beacon
     ///   - rssi: Signal strength in dBm
-    ///   - ms: Milliseconds since session start
-    func ingestSample(beaconID: String, rssi: Int, ms: Int64) {
+    ///   - pose: Device pose at moment of reception
+    func ingestSample(beaconID: String, rssi: Int, pose: SurveyDevicePose) {
         guard var session = activeSession else {
             // Not currently dwelling - ignore
             return
         }
         
-        let sample = RssiSample(ms: ms, rssi: rssi)
+        // Only trace every 10th sample to avoid log flooding
+        if Int.random(in: 0..<10) == 0 {
+            surveyTrace("ingestSample", context: "beacon=\(beaconID) rssi=\(rssi)")
+        }
         
-        // Initialize array for this beacon if needed
+        let ms = session.elapsedMs()
+        
+        let sample = RssiPoseSample(
+            ms: ms,
+            rssi: rssi,
+            x: pose.x,
+            y: pose.y,
+            z: pose.z,
+            qx: pose.qx,
+            qy: pose.qy,
+            qz: pose.qz,
+            qw: pose.qw
+        )
+        
+        // Initialize buffer for this beacon if needed
         if session.beaconSamples[beaconID] == nil {
-            session.beaconSamples[beaconID] = []
+            // Insert opening boundary marker first
+            let boundaryMarker = RssiPoseSample.boundaryMarker(ms: 0, pose: session.startPose)
+            session.beaconSamples[beaconID] = [boundaryMarker]
         }
         
         session.beaconSamples[beaconID]?.append(sample)
         activeSession = session
         
-        // Update dwell time for UI
-        DispatchQueue.main.async {
-            self.currentDwellTime = session.elapsedSeconds()
+        // Log periodically (every 10th sample per beacon to reduce spam)
+        let sampleCount = activeSession?.beaconSamples[beaconID]?.count ?? 0
+        if sampleCount % 10 == 1 {
+            print("📊 [BLE_SAMPLE] Beacon \(String(beaconID.prefix(8))): \(sampleCount) samples, RSSI=\(rssi)")
         }
     }
     
     // MARK: - Session Finalization
     
-    private func finalizeSession(_ session: ActiveDwellSession, duration: Double, store: SurveyPointStore? = nil) {
+    private func finalizeSession(_ session: ActiveDwellSession, duration: Double, endPose: SurveyDevicePose, store: SurveyPointStore? = nil) {
+        surveyTrace("finalizeSession", context: "starting on background thread")
+        
         guard let mapCoordinate = session.mapCoordinate else {
             print("⚠️ [SurveySessionCollector] Cannot finalize - no map coordinate (test marker?)")
             return
@@ -410,23 +485,94 @@ class SurveySessionCollector: ObservableObject {
             endISO: iso8601Formatter.string(from: Date()),
             duration_s: duration,
             devicePose: session.startPose,
-            compassTrack: session.compassSamples,
-            sessionTransform: session.sessionTransform,
-            poseTrack: session.poseTrack,
+            compassHeading_deg: session.compassHeading,
             beacons: beaconMeasurements
         )
         
         // Persist to store
+        surveyTrace("storeWrite", context: "calling @MainActor store from background", isViolation: true)
         store.addSession(surveySession, atMapCoordinate: mapCoordinate)
         
-        let totalRssiSamples = beaconMeasurements.reduce(0) { $0 + $1.samples.count }
-        let poseCount = session.poseTrack.count
-        print("📊 [SurveySessionCollector] Persisted session with \(beaconMeasurements.count) beacon(s), \(totalRssiSamples) RSSI samples, \(poseCount) pose samples, \(surveySession.compassTrack.count) compass samples")
+        print("📊 [SurveySessionCollector] Persisted session with \(beaconMeasurements.count) beacon(s), \(beaconMeasurements.reduce(0) { $0 + $1.samples.count }) total samples")
+    }
+    
+    /// Async version of finalizeSession that properly handles @MainActor store access
+    private func finalizeSessionAsync(_ session: ActiveDwellSession, duration: Double, endPose: SurveyDevicePose, store: SurveyPointStore?) async {
+        surveyTrace("finalizeSessionAsync", context: "starting on background")
+        
+        guard let mapCoordinate = session.mapCoordinate else {
+            surveyTrace("finalizeSessionAsync", context: "no mapCoordinate, aborting")
+            print("⚠️ [SurveySessionCollector] No map coordinate for session, cannot save")
+            return
+        }
+        
+        guard let store = store else {
+            surveyTrace("finalizeSessionAsync", context: "no store, aborting")
+            print("⚠️ [SurveySessionCollector] No store available, cannot save")
+            return
+        }
+        
+        // Build beacon measurements
+        var beaconMeasurements: [SurveyBeaconMeasurement] = []
+        
+        for (beaconID, samples) in session.beaconSamples {
+            // Skip beacons with only boundary markers (no actual readings)
+            let validSamples = samples.filter { $0.rssi != 0 }
+            if validSamples.isEmpty {
+                continue
+            }
+            
+            // Compute statistics
+            let stats = computeStats(from: validSamples)
+            let histogram = computeHistogram(from: validSamples)
+            
+            // TODO: Get actual beacon metadata from BeaconListsStore
+            let meta = SurveyBeaconMeta(
+                name: beaconID,
+                model: "Unknown",
+                txPower: nil,
+                advertisingInterval_ms: nil
+            )
+            
+            let measurement = SurveyBeaconMeasurement(
+                beaconID: beaconID,
+                stats: stats,
+                histogram: histogram,
+                samples: samples,
+                meta: meta
+            )
+            
+            beaconMeasurements.append(measurement)
+        }
+        
+        // Create session record
+        let iso8601Formatter = ISO8601DateFormatter()
+        let surveySession = SurveySession(
+            id: UUID().uuidString,
+            locationID: store.locationID,
+            startISO: iso8601Formatter.string(from: session.startTime),
+            endISO: iso8601Formatter.string(from: Date()),
+            duration_s: duration,
+            devicePose: session.startPose,
+            compassHeading_deg: session.compassHeading,
+            beacons: beaconMeasurements
+        )
+        
+        surveyTrace("finalizeSessionAsync", context: "computation complete, hopping to MainActor for store write")
+        
+        // Hop to MainActor ONLY for the store write
+        await MainActor.run {
+            surveyTrace("storeWrite", context: "on MainActor, writing to store")
+            store.addSession(surveySession, atMapCoordinate: mapCoordinate)
+        }
+        
+        surveyTrace("finalizeSessionAsync", context: "complete, session saved")
+        print("📊 [SurveySessionCollector] ✅ Session saved: \(beaconMeasurements.count) beacons, \(String(format: "%.1f", duration))s duration")
     }
     
     // MARK: - Statistics Computation (Milestone 7 placeholder)
     
-    private func computeStats(from samples: [RssiSample]) -> SurveyStats {
+    private func computeStats(from samples: [RssiPoseSample]) -> SurveyStats {
         let rssiValues = samples.map { $0.rssi }.sorted()
         
         guard !rssiValues.isEmpty else {
@@ -465,7 +611,7 @@ class SurveySessionCollector: ObservableObject {
         )
     }
     
-    private func computeHistogram(from samples: [RssiSample]) -> SurveyHistogram {
+    private func computeHistogram(from samples: [RssiPoseSample]) -> SurveyHistogram {
         let binMin = -100
         let binMax = -30
         let binSize = 1

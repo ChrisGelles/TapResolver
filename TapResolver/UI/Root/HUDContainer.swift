@@ -1223,6 +1223,23 @@ private struct DebugSettingsPanel: View {
                         }
                         .buttonStyle(.plain)
                         
+                        // Survey Thread Trace Toggle
+                        Button {
+                            hudPanels.toggleSurveyThreadTrace()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: hudPanels.surveyThreadTraceEnabled ? "ant.circle.fill" : "ant.circle")
+                                    .font(.system(size: 24))
+                                Text("Survey Trace")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(hudPanels.surveyThreadTraceEnabled ? .green : .primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
                         // BLE Scanning Toggle
                         Button {
                             if btScanner.isScanning {
