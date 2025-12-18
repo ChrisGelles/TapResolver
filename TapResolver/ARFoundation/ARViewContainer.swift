@@ -1248,9 +1248,6 @@ struct ARViewContainer: UIViewRepresentable {
             
             // Check for survey marker collisions
             checkSurveyMarkerCollisions()
-            
-            // Update inner sphere orientation for the survey marker user is inside
-            updateActiveInnerSphereOrientation()
         }
         
         private func isPlaneConfident(_ result: ARRaycastResult) -> Bool {
@@ -1903,6 +1900,9 @@ struct ARViewContainer: UIViewRepresentable {
                     print("💥 [SURVEY_COLLISION] ENTERED marker \(String(markerID.uuidString.prefix(8))) at distance \(String(format: "%.3f", distance))m, intensity \(String(format: "%.2f", initialIntensity)) [t=\(timestamp)]")
                     
                     currentlyInsideSurveyMarkerID = markerID
+                    
+                    // Orient inner sphere toward camera once at entry (frozen during dwell)
+                    updateActiveInnerSphereOrientation()
                     
                     NotificationCenter.default.post(
                         name: NSNotification.Name("SurveyMarkerEntered"),

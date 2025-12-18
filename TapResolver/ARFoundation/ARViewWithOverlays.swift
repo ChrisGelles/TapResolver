@@ -57,6 +57,7 @@ struct ARViewWithOverlays: View {
     // Survey marker dwell timer
     @State private var dwellTimerValue: Double = -3.0
     @State private var dwellTimer: Timer?
+    @State private var dwellStartTime: Date?
     @State private var showDwellTimer: Bool = false
     @State private var didFireThresholdHaptic: Bool = false
     
@@ -1287,23 +1288,21 @@ struct ARViewWithOverlays: View {
     /// Start the dwell timer (called on sphere entry)
     private func startDwellTimer() {
         showDwellTimer = true
+        dwellStartTime = Date()
         dwellTimerValue = -3.0
         didFireThresholdHaptic = false
         dwellTimer?.invalidate()
         dwellTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-            let timerStart = CACurrentMediaTime()
-            let wasNegative = dwellTimerValue < 0
-            dwellTimerValue += 0.1
+            guard let startTime = self.dwellStartTime else { return }
+            
+            let wasNegative = self.dwellTimerValue < 0
+            // Calculate actual elapsed time, offset by 3 seconds (countdown phase)
+            self.dwellTimerValue = Date().timeIntervalSince(startTime) - 3.0
             
             // Fire double-knock when crossing zero threshold
-            if wasNegative && dwellTimerValue >= 0 && !didFireThresholdHaptic {
-                didFireThresholdHaptic = true
-                playDoubleKnock()
-            }
-            
-            let timerDuration = (CACurrentMediaTime() - timerStart) * 1000
-            if timerDuration > 1.0 {
-                print("⚠️ [PERF] Dwell timer update took \(String(format: "%.1f", timerDuration))ms")
+            if wasNegative && self.dwellTimerValue >= 0 && !self.didFireThresholdHaptic {
+                self.didFireThresholdHaptic = true
+                self.playDoubleKnock()
             }
         }
         print("⏱️ [DWELL] Timer started at -3.0")
@@ -1314,6 +1313,7 @@ struct ARViewWithOverlays: View {
         showDwellTimer = false
         dwellTimer?.invalidate()
         dwellTimer = nil
+        dwellStartTime = nil
         print("⏱️ [DWELL] Timer stopped at \(String(format: "%.1f", dwellTimerValue))")
     }
     
