@@ -133,6 +133,10 @@ class SurveySessionCollector: ObservableObject {
         self.surveyPointStore = surveyPointStore
         self.bluetoothScanner = bluetoothScanner
         self.beaconLists = beaconLists
+        
+        // Set up reverse reference for direct BLE injection during dwell
+        bluetoothScanner.surveyCollector = self
+        
         print("📊 [SurveySessionCollector] Configured with SurveyPointStore, BluetoothScanner, and BeaconListsStore (\(beaconLists.beacons.count) beacons)")
     }
     
@@ -286,26 +290,17 @@ class SurveySessionCollector: ObservableObject {
     // MARK: - BLE Subscription
     
     /// Start listening to BLE updates during dwell
+    /// Note: With direct injection, this is now a no-op. BLE data flows via ingestBLEData().
     private func startBLESubscription() {
-        guard let scanner = bluetoothScanner else {
-            print("⚠️ [SurveySessionCollector] Cannot start BLE subscription - no BluetoothScanner")
-            return
-        }
-        
-        // Subscribe to device updates
-        bleSubscription = scanner.$devices
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] devices in
-                self?.handleBLEUpdate(devices: devices)
-            }
-        
-        print("📊 [SurveySessionCollector] BLE subscription started")
+        // Direct injection path: BluetoothScanner calls ingestBLEData() directly
+        // No Combine subscription needed - eliminates publisher overhead during dwell
+        print("📊 [SurveySessionCollector] BLE subscription started (direct injection mode)")
     }
     
     /// Stop listening to BLE updates
+    /// Note: With direct injection, this is now a no-op.
     private func stopBLESubscription() {
-        bleSubscription?.cancel()
-        bleSubscription = nil
+        // Direct injection path: No subscription to cancel
         print("📊 [SurveySessionCollector] BLE subscription stopped")
     }
     
@@ -373,6 +368,41 @@ class SurveySessionCollector: ObservableObject {
         }
         
         activeSession = session
+    }
+    
+    // MARK: - Direct BLE Injection
+    
+    /// Direct injection point for BLE data during active dwell
+    /// Called by BluetoothScanner, bypassing Combine entirely
+    /// - Parameters:
+    ///   - beaconID: Device name (beacon identifier)
+    ///   - rssi: Signal strength in dBm
+    func ingestBLEData(beaconID: String, rssi: Int) {
+        // Only process during active session
+        guard activeSession != nil else { return }
+        
+        // Skip empty names
+        guard !beaconID.isEmpty else { return }
+        
+        // Whitelist filter: only record beacons we care about
+        let whitelist = beaconLists?.beacons ?? []
+        guard whitelist.contains(beaconID) else { return }
+        
+        // Skip invalid RSSI values
+        guard rssi < 0 else { return }
+        
+        // 4Hz throttle: only sample every 250ms per beacon
+        let now = CACurrentMediaTime()
+        if let lastTime = lastSampleTime[beaconID], now - lastTime < sampleIntervalSeconds {
+            return
+        }
+        lastSampleTime[beaconID] = now
+        
+        // TODO: Milestone 4 - Get actual pose from ARKit
+        let currentPose = SurveyDevicePose.identity
+        
+        // Record the sample
+        ingestSample(beaconID: beaconID, rssi: rssi, pose: currentPose)
     }
     
     // MARK: - BLE Sample Ingestion (Milestone 3)
