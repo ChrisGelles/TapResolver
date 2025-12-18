@@ -497,7 +497,7 @@ class SurveySessionCollector: ObservableObject {
     }
     
     /// Async version of finalizeSession that properly handles @MainActor store access
-    private func finalizeSessionAsync(_ session: ActiveDwellSession, duration: Double, endPose: SurveyDevicePose, store: SurveyPointStore?) async {
+    nonisolated private func finalizeSessionAsync(_ session: ActiveDwellSession, duration: Double, endPose: SurveyDevicePose, store: SurveyPointStore?) async {
         surveyTrace("finalizeSessionAsync", context: "starting on background")
         
         guard let mapCoordinate = session.mapCoordinate else {
@@ -547,7 +547,7 @@ class SurveySessionCollector: ObservableObject {
         
         // Create session record
         let iso8601Formatter = ISO8601DateFormatter()
-        let surveySession = SurveySession(
+        let surveySession = await SurveySession(
             id: UUID().uuidString,
             locationID: store.locationID,
             startISO: iso8601Formatter.string(from: session.startTime),
@@ -572,7 +572,7 @@ class SurveySessionCollector: ObservableObject {
     
     // MARK: - Statistics Computation (Milestone 7 placeholder)
     
-    private func computeStats(from samples: [RssiPoseSample]) -> SurveyStats {
+    nonisolated private func computeStats(from samples: [RssiPoseSample]) -> SurveyStats {
         let rssiValues = samples.map { $0.rssi }.sorted()
         
         guard !rssiValues.isEmpty else {
@@ -611,7 +611,7 @@ class SurveySessionCollector: ObservableObject {
         )
     }
     
-    private func computeHistogram(from samples: [RssiPoseSample]) -> SurveyHistogram {
+    nonisolated private func computeHistogram(from samples: [RssiPoseSample]) -> SurveyHistogram {
         let binMin = -100
         let binMax = -30
         let binSize = 1
