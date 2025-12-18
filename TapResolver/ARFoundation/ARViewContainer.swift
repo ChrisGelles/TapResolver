@@ -163,6 +163,21 @@ struct ARViewContainer: UIViewRepresentable {
         private var lastFrameTime: TimeInterval = 0
         
         private var frameDropThreshold: TimeInterval = 0.5 // Log if gap > 500ms
+        
+        /// Minimum distance from camera to any ghost marker (for proximity gating)
+        /// Returns nil if no ghosts exist
+        private func distanceToNearestGhost(from cameraPosition: simd_float3) -> Float? {
+            guard !ghostMarkerPositions.isEmpty else { return nil }
+            
+            var minDistance: Float = .greatestFiniteMagnitude
+            for (_, ghostPos) in ghostMarkerPositions {
+                let distance = simd_distance(cameraPosition, ghostPos)
+                if distance < minDistance {
+                    minDistance = distance
+                }
+            }
+            return minDistance
+        }
 
         func setMode(_ mode: ARMode) {
             guard mode != currentMode else { return }
@@ -1846,7 +1861,23 @@ struct ARViewContainer: UIViewRepresentable {
             let sphereRadius = SurveyMarkerConfig.sphereRadius
             let deadZoneRadius = SurveyMarkerConfig.deadZoneRadius
             
-            for (markerID, marker) in surveyMarkers {
+            // OPTIMIZATION: If inside a sphere, only check that one marker for exit detection
+            // Otherwise, filter to markers within 2m radius for entry detection
+            let proximityRadius: Float = 0.6
+            let markersToCheck: [(UUID, SurveyMarker)]
+            if let insideMarkerID = currentlyInsideSurveyMarkerID,
+               let insideMarker = surveyMarkers[insideMarkerID] {
+                // Inside a sphere - only check this one marker
+                markersToCheck = [(insideMarkerID, insideMarker)]
+            } else {
+                // Outside all spheres - check only nearby markers (within 2m)
+                markersToCheck = surveyMarkers.compactMap { (markerID, marker) in
+                    let distance = simd_distance(cameraPosition, marker.sphereCenter)
+                    return distance <= proximityRadius ? (markerID, marker) : nil
+                }
+            }
+            
+            for (markerID, marker) in markersToCheck {
                 // Use marker's computed sphere center
                 let sphereCenterPosition = marker.sphereCenter
                 
@@ -2068,31 +2099,19 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
         // }
         
         // MARK: - Ghost Proximity Selection
+        // OPTIMIZATION: Skip ghost proximity entirely when inside a survey sphere
+        if currentlyInsideSurveyMarkerID != nil {
+            // Inside survey sphere - no need to check ghosts
+            return
+        }
         
-        let ghostStart = CACurrentMediaTime()
-        
-        // Throttle logging to once per second to avoid spam
-        let now = Date().timeIntervalSince1970
-        let shouldLog = (Int(now) % 5 == 0) && (Int(now * 10) % 10 == 0)  // Log roughly every 5 seconds
-        
+        // Early exit if no ghosts to check
         if ghostMarkerPositions.isEmpty {
-            if shouldLog {
-                print("👻 [GHOST_PROXIMITY] No ghost positions tracked (ghostMarkerPositions is empty)")
-            }
             return
         }
         
-        guard let sceneView = sceneView else {
-            if shouldLog {
-                print("👻 [GHOST_PROXIMITY] sceneView is nil")
-            }
-            return
-        }
-        
-        guard let cameraTransform = sceneView.session.currentFrame?.camera.transform else {
-            if shouldLog {
-                print("👻 [GHOST_PROXIMITY] No camera transform available")
-            }
+        guard let sceneView = sceneView,
+              let cameraTransform = sceneView.session.currentFrame?.camera.transform else {
             return
         }
         
@@ -2102,17 +2121,15 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
             cameraTransform.columns.3.z
         )
         
-        // Log ghost check status periodically
-        if shouldLog {
-            print("👻 [GHOST_PROXIMITY] Checking \(ghostMarkerPositions.count) ghost(s), camera at (\(String(format: "%.2f", cameraPosition.x)), \(String(format: "%.2f", cameraPosition.y)), \(String(format: "%.2f", cameraPosition.z)))")
-            for (mapPointID, ghostPos) in ghostMarkerPositions {
-                let horizontalDistance = simd_distance(
-                    simd_float2(cameraPosition.x, cameraPosition.z),
-                    simd_float2(ghostPos.x, ghostPos.z)
-                )
-                print("   Ghost \(String(mapPointID.uuidString.prefix(8))): \(String(format: "%.2f", horizontalDistance))m away (horizontal)")
-            }
+        // OPTIMIZATION: Skip ghost proximity if camera is >3m from all ghosts
+        let ghostProximityThreshold: Float = 3.0
+        if let nearestDistance = distanceToNearestGhost(from: cameraPosition),
+           nearestDistance > ghostProximityThreshold {
+            // Too far from any ghost - skip proximity check
+            return
         }
+        
+        let ghostStart = CACurrentMediaTime()
         
         // Calculate which ghosts are visible in camera view
         var visibleGhostIDs = Set<UUID>()
@@ -2124,16 +2141,8 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
         
         // Update ghost selection on main thread (touches @Published properties)
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else {
-                print("👻 [GHOST_PROXIMITY] self is nil in async block")
-                return
-            }
-            guard let coordinator = self.arCalibrationCoordinator else {
-                if shouldLog {
-                    print("👻 [GHOST_PROXIMITY] arCalibrationCoordinator is nil!")
-                }
-                return
-            }
+            guard let self = self,
+                  let coordinator = self.arCalibrationCoordinator else { return }
             coordinator.updateGhostSelection(
                 cameraPosition: cameraPosition,
                 ghostPositions: self.ghostMarkerPositions,

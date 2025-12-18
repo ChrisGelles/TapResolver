@@ -227,11 +227,9 @@ class SurveySessionCollector: ObservableObject {
         surveyTrace("bleSubscribed")
         
         // Update published state
-        DispatchQueue.main.async {
-            self.isCollecting = true
-            self.activeMarkerID = markerID
-            self.currentDwellTime = 0.0
-        }
+        self.isCollecting = true
+        self.activeMarkerID = markerID
+        self.currentDwellTime = 0.0
         
         let coordString = mapCoordinate.map { "(\(String(format: "%.1f", $0.x)), \(String(format: "%.1f", $0.y)))" } ?? "nil"
         print("📊 [SurveySessionCollector] Session STARTED for marker \(String(markerID.uuidString.prefix(8))) at map coord \(coordString)")
@@ -280,11 +278,9 @@ class SurveySessionCollector: ObservableObject {
         activeSession = nil
         stopBLESubscription()
         
-        DispatchQueue.main.async {
-            self.isCollecting = false
-            self.activeMarkerID = nil
-            self.currentDwellTime = 0.0
-        }
+        self.isCollecting = false
+        self.activeMarkerID = nil
+        self.currentDwellTime = 0.0
     }
     
     // MARK: - BLE Subscription

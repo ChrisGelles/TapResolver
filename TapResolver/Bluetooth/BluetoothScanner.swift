@@ -237,36 +237,44 @@ extension BluetoothScanner: @preconcurrency CBCentralManagerDelegate {
             }
         }
 
-        if let idx = deviceIndex[id] {
-            devices[idx].name = name
-            devices[idx].rssi = rssi
-            devices[idx].txPower = txPower ?? devices[idx].txPower
-            devices[idx].lastSeen = Date()
-            devices[idx].advSummary = summary
-            devices[idx].ibeaconUUID = ibeaconUUID ?? devices[idx].ibeaconUUID
-            devices[idx].ibeaconMajor = ibeaconMajor ?? devices[idx].ibeaconMajor
-            devices[idx].ibeaconMinor = ibeaconMinor ?? devices[idx].ibeaconMinor
-            devices[idx].ibeaconMeasuredPower = ibeaconMeasuredPower ?? devices[idx].ibeaconMeasuredPower
-        } else {
-            let dev = DiscoveredDevice(
-                id: id,
-                name: name,
-                rssi: rssi,
-                txPower: txPower,
-                lastSeen: Date(),
-                advSummary: summary,
-                ibeaconUUID: ibeaconUUID,
-                ibeaconMajor: ibeaconMajor,
-                ibeaconMinor: ibeaconMinor,
-                ibeaconMeasuredPower: ibeaconMeasuredPower
-            )
-            deviceIndex[id] = devices.count
-            devices.append(dev)
-            if verboseLogging {
-                print("📱 Discovered: \(name) • id=\(id.uuidString) • RSSI=\(rssi) dBm")
-                if !summary.isEmpty { print("    ⤷ \(summary)") }
+        // FILTER: Only add whitelisted devices to @Published devices array
+        // Discovery (beaconLists.ingest) still happens below for ALL devices
+        // Empty whitelist = publish all (backwards compatible for fresh setups)
+        let whitelist = beaconLists?.beacons ?? []
+        let shouldPublish = whitelist.isEmpty || whitelist.contains(name)
+        
+        if shouldPublish {
+            if let idx = deviceIndex[id] {
+                devices[idx].name = name
+                devices[idx].rssi = rssi
+                devices[idx].txPower = txPower ?? devices[idx].txPower
+                devices[idx].lastSeen = Date()
+                devices[idx].advSummary = summary
+                devices[idx].ibeaconUUID = ibeaconUUID ?? devices[idx].ibeaconUUID
+                devices[idx].ibeaconMajor = ibeaconMajor ?? devices[idx].ibeaconMajor
+                devices[idx].ibeaconMinor = ibeaconMinor ?? devices[idx].ibeaconMinor
+                devices[idx].ibeaconMeasuredPower = ibeaconMeasuredPower ?? devices[idx].ibeaconMeasuredPower
+            } else {
+                let dev = DiscoveredDevice(
+                    id: id,
+                    name: name,
+                    rssi: rssi,
+                    txPower: txPower,
+                    lastSeen: Date(),
+                    advSummary: summary,
+                    ibeaconUUID: ibeaconUUID,
+                    ibeaconMajor: ibeaconMajor,
+                    ibeaconMinor: ibeaconMinor,
+                    ibeaconMeasuredPower: ibeaconMeasuredPower
+                )
+                deviceIndex[id] = devices.count
+                devices.append(dev)
+                if verboseLogging {
+                    print("📱 Discovered: \(name) • id=\(id.uuidString) • RSSI=\(rssi) dBm")
+                    if !summary.isEmpty { print("    ⤷ \(summary)") }
+                }
             }
-        }
+        } // end shouldPublish
         
         // Forward advertisement to scan utility for map point logging
         // Use device name as beaconID since that's how beacons are identified in our system
