@@ -84,6 +84,13 @@ struct UserDefaultsCleanup {
             }
         }
         
+        // === CATEGORY 3b: Root-level survey points (should be location-scoped) ===
+        for key in allKeys {
+            if key.hasPrefix("surveyPoints_") && !key.hasPrefix("locations.") {
+                keysToRemove.append(key)
+            }
+        }
+        
         // === CATEGORY 4: Retired features ===
         for key in allKeys {
             if key.contains("mapPointLog.sessionIndex") {

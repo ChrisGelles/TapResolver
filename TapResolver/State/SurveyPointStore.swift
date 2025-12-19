@@ -362,7 +362,7 @@ public class SurveyPointStore: ObservableObject {
     public private(set) var locationID: String = ""
     
     private var storageKey: String {
-        "surveyPoints_\(locationID)"
+        "locations.\(locationID).surveyPoints_v1"
     }
     
     // MARK: - Initialization
