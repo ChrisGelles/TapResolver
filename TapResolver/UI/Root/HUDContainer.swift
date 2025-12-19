@@ -1147,6 +1147,7 @@ private struct DebugSettingsPanel: View {
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var btScanner: BluetoothScanner
     @EnvironmentObject private var surveyPointStore: SurveyPointStore
+    @EnvironmentObject private var beaconLists: BeaconListsStore
     
     @Binding var showRelocalizationDebug: Bool
     @State private var showingSoftResetAlert = false
@@ -1541,6 +1542,26 @@ private struct DebugSettingsPanel: View {
                                 Image(systemName: "arrow.triangle.merge")
                                     .font(.system(size: 24))
                                 Text("Merge Duplicates")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Batch Clear Morgue History
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            let cleared = beaconLists.clearAllMorgueHistory()
+                            let purged = beaconLists.purgeEphemeralMorgueItems()
+                            print("🧹 Morgue cleanup: cleared history from \(cleared) items, purged \(purged) ephemeral items")
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "trash.slash")
+                                    .font(.system(size: 24))
+                                Text("Clear Morgue History")
                                     .font(.system(size: 12, weight: .medium))
                             }
                             .foregroundColor(.orange)
