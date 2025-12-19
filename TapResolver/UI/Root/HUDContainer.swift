@@ -1549,6 +1549,48 @@ private struct DebugSettingsPanel: View {
                             .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
                         }
                         .buttonStyle(.plain)
+                        
+                        // === ONE-TIME CLEANUP UTILITY ===
+                        // Uncomment to run, then comment out again after use
+                        
+                        // Preview Cleanup (Dry Run)
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            _ = UserDefaultsCleanup.preview()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "eye.trianglebadge.exclamationmark")
+                                    .font(.system(size: 24))
+                                Text("Preview Cleanup")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Execute Cleanup (DESTRUCTIVE)
+                        Button {
+                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                            let result = UserDefaultsCleanup.execute()
+                            print("🧹 Cleanup result: \(result.summary)")
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "trash.circle.fill")
+                                    .font(.system(size: 24))
+                                Text("Run Cleanup")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // === END ONE-TIME CLEANUP UTILITY ===
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 20)
