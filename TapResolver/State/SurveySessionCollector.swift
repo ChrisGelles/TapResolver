@@ -100,8 +100,11 @@ class SurveySessionCollector: ObservableObject {
         let startPose: SurveyDevicePose
         let compassHeading: Float
         
-        /// Per-beacon sample buffers (beaconID → samples)
-        var beaconSamples: [String: [RssiPoseSample]] = [:]
+        /// Pose track (sampled at 4 Hz, independent of beacon readings)
+        var poseTrack: [PoseSample] = []
+        
+        /// Per-beacon sample buffers (beaconID → lean RSSI samples)
+        var beaconSamples: [String: [RssiSample]] = [:]
         
         /// Elapsed milliseconds since session start
         func elapsedMs() -> Int64 {
@@ -224,7 +227,7 @@ class SurveySessionCollector: ObservableObject {
         
         // Insert boundary markers for all known beacons
         // TODO: Milestone 3 - Get beacon list from BeaconListsStore
-        insertBoundaryMarkers(atMs: 0, pose: currentPose)
+        insertBoundaryMarkers(atMs: 0)
         
         // Start listening for BLE updates
         startBLESubscription()
@@ -256,9 +259,10 @@ class SurveySessionCollector: ObservableObject {
         }
         
         // Insert ending boundary markers
-        // TODO: Milestone 4 - Get actual pose from ARKit
+        insertBoundaryMarkers(atMs: session.elapsedMs())
+        
+        // TODO: Milestone 4 - Get actual end pose from ARKit
         let endPose = SurveyDevicePose.identity
-        insertBoundaryMarkers(atMs: session.elapsedMs(), pose: endPose)
         
         // Capture session data for async processing
         let sessionCopy = session
@@ -314,9 +318,6 @@ class SurveySessionCollector: ObservableObject {
         // Get whitelist for filtering
         let whitelist = beaconLists?.beacons ?? []
         
-        // TODO: Milestone 4 - Get actual pose from ARKit
-        let currentPose = SurveyDevicePose.identity
-        
         let now = CACurrentMediaTime()
         
         for device in devices {
@@ -340,7 +341,8 @@ class SurveySessionCollector: ObservableObject {
             }
             lastSampleTime[beaconName] = now
             
-            ingestSample(beaconID: beaconName, rssi: rssi, pose: currentPose)
+            // Record the sample (pose is captured separately in poseTrack)
+            ingestSample(beaconID: beaconName, rssi: rssi)
         }
         
         let bleDuration = (CACurrentMediaTime() - bleStart) * 1000
@@ -352,18 +354,12 @@ class SurveySessionCollector: ObservableObject {
     // MARK: - Boundary Markers
     
     /// Insert rssi=0 boundary markers for all tracked beacons
-    private func insertBoundaryMarkers(atMs ms: Int64, pose: SurveyDevicePose) {
+    private func insertBoundaryMarkers(atMs ms: Int64) {
         guard var session = activeSession else { return }
         
-        // For now, we have no beacons being tracked
-        // Milestone 3 will populate beaconSamples with real beacon IDs
-        // When that happens, this method will insert boundary markers for each
-        
-        // Placeholder: If beaconSamples is empty, nothing to do yet
-        // Once BLE wiring is in place, beacons will be added dynamically
-        
+        // Insert boundary marker for each beacon currently being tracked
         for beaconID in session.beaconSamples.keys {
-            let boundaryMarker = RssiPoseSample.boundaryMarker(ms: ms, pose: pose)
+            let boundaryMarker = RssiSample.boundaryMarker(ms: ms)
             session.beaconSamples[beaconID]?.append(boundaryMarker)
         }
         
@@ -398,11 +394,8 @@ class SurveySessionCollector: ObservableObject {
         }
         lastSampleTime[beaconID] = now
         
-        // TODO: Milestone 4 - Get actual pose from ARKit
-        let currentPose = SurveyDevicePose.identity
-        
-        // Record the sample
-        ingestSample(beaconID: beaconID, rssi: rssi, pose: currentPose)
+        // Record the sample (pose is captured separately in poseTrack)
+        ingestSample(beaconID: beaconID, rssi: rssi)
     }
     
     // MARK: - BLE Sample Ingestion (Milestone 3)
@@ -411,8 +404,7 @@ class SurveySessionCollector: ObservableObject {
     /// - Parameters:
     ///   - beaconID: Identifier for the beacon
     ///   - rssi: Signal strength in dBm
-    ///   - pose: Device pose at moment of reception
-    func ingestSample(beaconID: String, rssi: Int, pose: SurveyDevicePose) {
+    func ingestSample(beaconID: String, rssi: Int) {
         guard var session = activeSession else {
             // Not currently dwelling - ignore
             return
@@ -424,23 +416,12 @@ class SurveySessionCollector: ObservableObject {
         }
         
         let ms = session.elapsedMs()
-        
-        let sample = RssiPoseSample(
-            ms: ms,
-            rssi: rssi,
-            x: pose.x,
-            y: pose.y,
-            z: pose.z,
-            qx: pose.qx,
-            qy: pose.qy,
-            qz: pose.qz,
-            qw: pose.qw
-        )
+        let sample = RssiSample(ms: ms, rssi: rssi)
         
         // Initialize buffer for this beacon if needed
         if session.beaconSamples[beaconID] == nil {
             // Insert opening boundary marker first
-            let boundaryMarker = RssiPoseSample.boundaryMarker(ms: 0, pose: session.startPose)
+            let boundaryMarker = RssiSample.boundaryMarker(ms: 0)
             session.beaconSamples[beaconID] = [boundaryMarker]
         }
         
@@ -512,6 +493,7 @@ class SurveySessionCollector: ObservableObject {
             duration_s: duration,
             devicePose: session.startPose,
             compassHeading_deg: session.compassHeading,
+            poseTrack: session.poseTrack,
             beacons: beaconMeasurements
         )
         
@@ -581,6 +563,7 @@ class SurveySessionCollector: ObservableObject {
             duration_s: duration,
             devicePose: session.startPose,
             compassHeading_deg: session.compassHeading,
+            poseTrack: session.poseTrack,
             beacons: beaconMeasurements
         )
         
@@ -598,7 +581,7 @@ class SurveySessionCollector: ObservableObject {
     
     // MARK: - Statistics Computation (Milestone 7 placeholder)
     
-    nonisolated private func computeStats(from samples: [RssiPoseSample]) -> SurveyStats {
+    nonisolated private func computeStats(from samples: [RssiSample]) -> SurveyStats {
         let rssiValues = samples.map { $0.rssi }.sorted()
         
         guard !rssiValues.isEmpty else {
@@ -637,7 +620,7 @@ class SurveySessionCollector: ObservableObject {
         )
     }
     
-    nonisolated private func computeHistogram(from samples: [RssiPoseSample]) -> SurveyHistogram {
+    nonisolated private func computeHistogram(from samples: [RssiSample]) -> SurveyHistogram {
         let binMin = -100
         let binMax = -30
         let binSize = 1

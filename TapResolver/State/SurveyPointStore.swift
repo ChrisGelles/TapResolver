@@ -12,23 +12,35 @@ import UIKit
 
 // MARK: - Data Structures
 
-/// A single RSSI sample with synchronized device pose
-public struct RssiPoseSample: Codable, Equatable {
-    public let ms: Int64              // Milliseconds since session start
-    public let rssi: Int              // Signal strength (dBm), 0 = boundary marker
+/// Lean RSSI sample — just timestamp and signal strength
+public struct RssiSample: Codable, Equatable {
+    public let ms: Int64      // Milliseconds since session start
+    public let rssi: Int      // Signal strength (dBm), 0 = boundary marker
     
-    // Device pose at moment of BLE callback (AR session coordinates)
-    public let x: Float               // Position X (meters)
-    public let y: Float               // Position Y (meters)
-    public let z: Float               // Position Z (meters)
-    public let qx: Float              // Quaternion X
-    public let qy: Float              // Quaternion Y
-    public let qz: Float              // Quaternion Z
-    public let qw: Float              // Quaternion W
-    
-    public init(ms: Int64, rssi: Int, x: Float, y: Float, z: Float, qx: Float, qy: Float, qz: Float, qw: Float) {
+    public init(ms: Int64, rssi: Int) {
         self.ms = ms
         self.rssi = rssi
+    }
+    
+    /// Create a boundary marker (rssi=0)
+    public static func boundaryMarker(ms: Int64) -> RssiSample {
+        RssiSample(ms: ms, rssi: 0)
+    }
+}
+
+/// Device pose snapshot for pose track (captured independently of RSSI)
+public struct PoseSample: Codable, Equatable {
+    public let ms: Int64      // Milliseconds since session start
+    public let x: Float       // Position X (meters, AR coordinates)
+    public let y: Float       // Position Y (meters)
+    public let z: Float       // Position Z (meters)
+    public let qx: Float      // Quaternion X
+    public let qy: Float      // Quaternion Y
+    public let qz: Float      // Quaternion Z
+    public let qw: Float      // Quaternion W
+    
+    public init(ms: Int64, x: Float, y: Float, z: Float, qx: Float, qy: Float, qz: Float, qw: Float) {
+        self.ms = ms
         self.x = x
         self.y = y
         self.z = z
@@ -38,9 +50,16 @@ public struct RssiPoseSample: Codable, Equatable {
         self.qw = qw
     }
     
-    /// Create a boundary marker (rssi=0) with the given pose
-    public static func boundaryMarker(ms: Int64, pose: SurveyDevicePose) -> RssiPoseSample {
-        RssiPoseSample(ms: ms, rssi: 0, x: pose.x, y: pose.y, z: pose.z, qx: pose.qx, qy: pose.qy, qz: pose.qz, qw: pose.qw)
+    /// Create from SurveyDevicePose with timestamp
+    public init(ms: Int64, pose: SurveyDevicePose) {
+        self.ms = ms
+        self.x = pose.x
+        self.y = pose.y
+        self.z = pose.z
+        self.qx = pose.qx
+        self.qy = pose.qy
+        self.qz = pose.qz
+        self.qw = pose.qw
     }
 }
 
@@ -232,10 +251,10 @@ public struct SurveyBeaconMeasurement: Codable, Equatable {
     public let beaconID: String
     public let stats: SurveyStats
     public let histogram: SurveyHistogram
-    public let samples: [RssiPoseSample]  // Raw timeline with pose, bookended with rssi=0
+    public let samples: [RssiSample]  // Raw timeline, bookended with rssi=0
     public let meta: SurveyBeaconMeta
     
-    public init(beaconID: String, stats: SurveyStats, histogram: SurveyHistogram, samples: [RssiPoseSample], meta: SurveyBeaconMeta) {
+    public init(beaconID: String, stats: SurveyStats, histogram: SurveyHistogram, samples: [RssiSample], meta: SurveyBeaconMeta) {
         self.beaconID = beaconID
         self.stats = stats
         self.histogram = histogram
@@ -254,16 +273,19 @@ public struct SurveySession: Codable, Identifiable, Equatable {
     public let endISO: String            // ISO8601 timestamp
     public let duration_s: Double        // Should be 3+ seconds
     
-    // Device pose during collection (reference snapshot)
+    // Device pose during collection (reference snapshot at session start)
     public let devicePose: SurveyDevicePose
     
     // Compass snapshot for magnetic distortion mapping
     public let compassHeading_deg: Float
     
+    // Device pose track (sampled at 4 Hz, independent of beacon readings)
+    public let poseTrack: [PoseSample]
+    
     // Beacon measurements
     public let beacons: [SurveyBeaconMeasurement]
     
-    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, compassHeading_deg: Float, beacons: [SurveyBeaconMeasurement]) {
+    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, compassHeading_deg: Float, poseTrack: [PoseSample], beacons: [SurveyBeaconMeasurement]) {
         self.id = id
         self.locationID = locationID
         self.startISO = startISO
@@ -271,6 +293,7 @@ public struct SurveySession: Codable, Identifiable, Equatable {
         self.duration_s = duration_s
         self.devicePose = devicePose
         self.compassHeading_deg = compassHeading_deg
+        self.poseTrack = poseTrack
         self.beacons = beacons
     }
 }
