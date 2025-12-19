@@ -67,9 +67,8 @@ struct HUDContainer: View {
                 hud.isCalibratingNorth = false
             }
             .onReceive(NotificationCenter.default.publisher(for: .beaconSelectedForTxPower)) { notification in
-                if let beaconID = notification.object as? String {
-                    selectedBeaconForTxPower = beaconID
-                }
+                // Handle both selection (String) and deselection (nil)
+                selectedBeaconForTxPower = notification.object as? String
             }
             .onReceive(NotificationCenter.default.publisher(for: .sliderInteractionBegan)) { _ in
                 mapTransform.isHUDInteracting = true
