@@ -28,13 +28,23 @@ struct BeaconDrawer: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(beaconLists.beacons.sorted(), id: \.self) { name in
                         let locked = beaconDotStore.isLocked(name)
+                        let hasDot = beaconDotStore.dot(for: name) != nil
                         BeaconListItem(
                             beaconName: name,
                             isLocked: locked,
+                            hasDot: hasDot,
                             elevationText: beaconDotStore.displayElevationText(for: name),
                             txPowerText: txPowerDisplayText(for: name),
                             isSelected: false,
                             onSelect: { _, color in
+                                // Center on dot if one exists
+                                if let dot = beaconDotStore.dot(for: name) {
+                                    mapTransform.centerOnPoint(dot.mapPoint, animated: true)
+                                }
+                                
+                                // Only toggle dot if unlocked (existing behavior)
+                                guard !locked else { return }
+                                
                                 guard mapTransform.mapSize != .zero else {
                                     print("⚠️ Beacon add ignored: mapTransform not ready (mapSize == .zero)")
                                     return
@@ -136,6 +146,7 @@ struct BeaconDrawer: View {
 struct BeaconListItem: View {
     let beaconName: String
     let isLocked: Bool
+    let hasDot: Bool
     let elevationText: String
     let txPowerText: String
     let isSelected: Bool
@@ -150,10 +161,19 @@ struct BeaconListItem: View {
 
             // Capsule button (dot + name) — disabled when locked
             HStack(spacing: 2) {
-                Circle()
-                    .fill(beaconColor(for: beaconName))
-                    .frame(width: 12, height: 12)                  // ← tweak dot size
-                    .padding(.leading, 6)
+                ZStack {
+                    Circle()
+                        .fill(beaconColor(for: beaconName))
+                        .frame(width: 12, height: 12)
+                    // Show checkmark if beacon has a dot placed on map
+                    if hasDot {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
+                .frame(width: 12, height: 12)                  // ← tweak dot size
+                .padding(.leading, 6)
                 Text(beaconName)
                     .font(.system(size: 10, weight: .medium, design: .monospaced)) // ← font
                     .foregroundColor(.primary)

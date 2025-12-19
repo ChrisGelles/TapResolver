@@ -12,6 +12,7 @@ import CoreGraphics
 // without tight coupling to instances (wired in App bootstrap).
 enum BeaconDotRegistry {
     static var sharedLockedIDs: (() -> [String])?
+    static var sharedBeaconNames: (() -> [String])?
 }
 
 // MARK: - Elevation editing state
@@ -212,12 +213,68 @@ public final class BeaconDotStore: ObservableObject {
         loadElevations()
         loadTxPower()
         loadAdvertisingIntervals()
+        
+        // Remove any dots that don't correspond to active beacons
+        // (e.g., demoted beacons that left orphaned dots)
+        removeOrphanedDots()
+        
         objectWillChange.send()
     }
     
     /// Get the beacon IDs that are currently locked
     public func lockedBeaconIDs() -> [String] {
         locked.keys.filter { locked[$0] == true }
+    }
+    
+    /// Remove dots that don't have a corresponding beacon in the active beacon list
+    /// Also cleans up orphaned metadata (locks, elevations, txPower, advertising intervals)
+    /// Returns the count of removed dots
+    @discardableResult
+    public func removeOrphanedDots(validBeaconNames: [String]? = nil) -> Int {
+        let validNames: [String]
+        if let names = validBeaconNames {
+            validNames = names
+        } else {
+            validNames = BeaconDotRegistry.sharedBeaconNames?() ?? []
+        }
+        
+        // If we can't get the beacon list, don't remove anything
+        guard !validNames.isEmpty else {
+            print("⚠️ [BeaconDotStore] Cannot reconcile - no beacon names available")
+            return 0
+        }
+        
+        let orphanedDots = dots.filter { !validNames.contains($0.beaconID) }
+        
+        guard !orphanedDots.isEmpty else { return 0 }
+        
+        print("🧹 [BeaconDotStore] Found \(orphanedDots.count) orphaned dot(s):")
+        for dot in orphanedDots {
+            print("   - \(dot.beaconID) @ (\(Int(dot.mapPoint.x)), \(Int(dot.mapPoint.y)))")
+        }
+        
+        // Remove the dots
+        let orphanedIDs = Set(orphanedDots.map { $0.beaconID })
+        dots.removeAll { orphanedIDs.contains($0.beaconID) }
+        
+        // Clean up orphaned metadata
+        for beaconID in orphanedIDs {
+            locked.removeValue(forKey: beaconID)
+            elevations.removeValue(forKey: beaconID)
+            txPowerByID.removeValue(forKey: beaconID)
+            advertisingIntervalByID.removeValue(forKey: beaconID)
+        }
+        
+        // Save changes
+        saveDotsToDisk()
+        saveLocks()
+        saveElevations()
+        saveTxPower()
+        saveAdvertisingIntervals()
+        
+        print("🧹 [BeaconDotStore] Removed \(orphanedDots.count) orphaned dot(s) and their metadata")
+        
+        return orphanedDots.count
     }
 
     // MARK: - Lock API

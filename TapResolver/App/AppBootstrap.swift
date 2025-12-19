@@ -41,6 +41,12 @@ struct AppBootstrap: ViewModifier {
                 scanner.onDeviceNameDiscovered = { name, id in
                     lists.ingest(deviceName: name, id: id)
                 }
+                
+                // Wire up BeaconDotRegistry hook for orphan cleanup
+                BeaconDotRegistry.sharedBeaconNames = { [weak lists] in
+                    lists?.beacons ?? []
+                }
+                
                 configureScanUtilityClosures()
                 
                 // ARCHITECTURAL INTEGRATION: Start beacon state monitoring
