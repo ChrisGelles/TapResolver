@@ -12,6 +12,9 @@ struct BeaconDrawer: View {
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var hud: HUDPanelsState
     @EnvironmentObject private var beaconLists: BeaconListsStore
+    
+    // Track which beacon is selected for Tx Power editing (for toggle behavior)
+    @State private var selectedBeaconForTxPower: String? = nil
 
     private let crosshairScreenOffset = CGPoint(x: 0, y: 0)
     private let collapsedWidth: CGFloat = 56
@@ -29,13 +32,14 @@ struct BeaconDrawer: View {
                     ForEach(beaconLists.beacons.sorted(), id: \.self) { name in
                         let locked = beaconDotStore.isLocked(name)
                         let hasDot = beaconDotStore.dot(for: name) != nil
+                        let isSelectedForTxPower = selectedBeaconForTxPower == name
                         BeaconListItem(
                             beaconName: name,
                             isLocked: locked,
                             hasDot: hasDot,
                             elevationText: beaconDotStore.displayElevationText(for: name),
                             txPowerText: txPowerDisplayText(for: name),
-                            isSelected: false,
+                            isSelected: isSelectedForTxPower,
                             onSelect: { _, color in
                                 // Center on dot if one exists
                                 if let dot = beaconDotStore.dot(for: name) {
@@ -69,7 +73,18 @@ struct BeaconDrawer: View {
                                 beaconDotStore.startElevationEdit(for: name)
                             },
                             onSelectForTxPower: {
-                                NotificationCenter.default.post(name: .beaconSelectedForTxPower, object: name)
+                                // Toggle behavior: if already selected, deselect
+                                if isSelectedForTxPower {
+                                    NotificationCenter.default.post(name: .beaconSelectedForTxPower, object: nil)
+                                } else {
+                                    NotificationCenter.default.post(name: .beaconSelectedForTxPower, object: name)
+                                }
+                            },
+                            onCenterOnDot: {
+                                // Center map on this beacon's dot
+                                if let dot = beaconDotStore.dot(for: name) {
+                                    mapTransform.centerOnPoint(dot.mapPoint, animated: true)
+                                }
                             }
                         )
                         .frame(height: 44)
@@ -125,6 +140,17 @@ struct BeaconDrawer: View {
         .clipped()
         .contentShape(Rectangle())
         .animation(.easeInOut(duration: 0.25), value: hud.isBeaconOpen)
+        .onReceive(NotificationCenter.default.publisher(for: .beaconSelectedForTxPower)) { notification in
+            // Track selection locally for toggle behavior
+            selectedBeaconForTxPower = notification.object as? String
+        }
+        .onChange(of: hud.isBeaconOpen) { isOpen in
+            // Close Tx Power panel when Beacon Drawer closes
+            if !isOpen && selectedBeaconForTxPower != nil {
+                NotificationCenter.default.post(name: .beaconSelectedForTxPower, object: nil)
+                selectedBeaconForTxPower = nil
+            }
+        }
     }
 
     private var idealOpenHeight: CGFloat {
@@ -155,6 +181,7 @@ struct BeaconListItem: View {
     var onDemote: (() -> Void)? = nil
     var onEditElevation: (() -> Void)? = nil
     var onSelectForTxPower: (() -> Void)? = nil
+    var onCenterOnDot: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 2) {
@@ -191,10 +218,11 @@ struct BeaconListItem: View {
             .contentShape(Rectangle())
             .onTapGesture(coordinateSpace: .global) { globalPoint in
                 if isLocked {
-                    // When locked, select for Tx Power editing
+                    // When locked: center on dot AND toggle Tx Power editing
+                    onCenterOnDot?()
                     onSelectForTxPower?()
                 } else {
-                    // When unlocked, add/remove dot
+                    // When unlocked, add/remove dot (also centers if dot exists)
                     onSelect?(globalPoint, beaconColor(for: beaconName))
                 }
             }
