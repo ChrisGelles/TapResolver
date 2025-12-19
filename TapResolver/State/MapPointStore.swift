@@ -1049,7 +1049,11 @@ public final class MapPointStore: ObservableObject {
                 decoder.dateDecodingStrategy = .iso8601
                 let legacyMarkers = try decoder.decode([ARMarker].self, from: markersData)
                 arMarkers = []
+                let markerKey = "locations.\(ctx.locationID).ARMarkers_v1"
+                let markerSize = UserDefaults.standard.data(forKey: markerKey)?.count ?? 0
+                let markerKB = Double(markerSize) / 1024
                 print("📍 Legacy AR Markers in storage: \(legacyMarkers.count) (will not be loaded)")
+                print("   💾 Size: \(String(format: "%.2f KB", markerKB)) - can be purged with 'Purge Legacy AR Markers'")
                 print("   AR Markers are now created on-demand during AR sessions")
             } catch {
                 arMarkers = []

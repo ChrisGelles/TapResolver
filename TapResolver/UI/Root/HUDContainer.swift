@@ -1157,6 +1157,8 @@ private struct DebugSettingsPanel: View {
     @State private var showingFullResetAlert = false
     @State private var orphanPurgeResultMessage = ""
     @State private var showingLogShare = false
+    @State private var showingStorageAuditShare = false
+    @State private var storageAuditURL: URL? = nil
     
     var body: some View {
         GeometryReader { geometry in
@@ -1432,6 +1434,57 @@ private struct DebugSettingsPanel: View {
                                     .font(.system(size: 12, weight: .medium))
                             }
                             .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Storage Audit Export Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            let currentLoc = PersistenceContext.shared.locationID
+                            if let url = UserDefaultsDiagnostics.exportStorageAudit(
+                                locationID: currentLoc,
+                                mapPointStore: mapPointStore
+                            ) {
+                                storageAuditURL = url
+                                showingStorageAuditShare = true
+                            }
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "doc.badge.gearshape")
+                                    .font(.system(size: 24))
+                                Text("Storage Audit")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .sheet(isPresented: $showingStorageAuditShare) {
+                            if let url = storageAuditURL {
+                                ShareSheet(items: [url])
+                            }
+                        }
+                        
+                        // Raw UserDefaults Export Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            if let url = UserDefaultsDiagnostics.exportRawUserDefaults() {
+                                storageAuditURL = url
+                                showingStorageAuditShare = true
+                            }
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "externaldrive")
+                                    .font(.system(size: 24))
+                                Text("Raw Export")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.purple)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
                             .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))

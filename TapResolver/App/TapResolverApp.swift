@@ -65,6 +65,9 @@ struct TapResolverApp: App {
             Self.hasLoggedLaunchTime = true
         }
         
+        // Print total UserDefaults size at launch
+        UserDefaultsDiagnostics.printTotalSize()
+        
         // Initialize coordinator without stores - configure() called in onAppear
         _arCalibrationCoordinator = StateObject(wrappedValue: ARCalibrationCoordinator())
     }

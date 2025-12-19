@@ -10,6 +10,41 @@ import SwiftUI
 
 struct UserDefaultsDiagnostics {
     
+    /// Print total UserDefaults size at app launch
+    static func printTotalSize() {
+        let defaults = UserDefaults.standard
+        var totalBytes = 0
+        var keyCount = 0
+        
+        for (key, value) in defaults.dictionaryRepresentation() {
+            keyCount += 1
+            if let data = value as? Data {
+                totalBytes += data.count
+            } else if let archived = try? NSKeyedArchiver.archivedData(withRootObject: value, requiringSecureCoding: false) {
+                totalBytes += archived.count
+            }
+        }
+        
+        let totalMB = Double(totalBytes) / 1_048_576
+        let emoji: String
+        let status: String
+        if totalMB >= 4.0 {
+            emoji = "🔴"
+            status = "OVER LIMIT"
+        } else if totalMB >= 3.0 {
+            emoji = "🟠"
+            status = "DANGER"
+        } else if totalMB >= 2.0 {
+            emoji = "🟡"
+            status = "WARNING"
+        } else {
+            emoji = "🟢"
+            status = "OK"
+        }
+        
+        print("\(emoji) [USERDEFAULTS] Total: \(String(format: "%.2f MB", totalMB)) (\(keyCount) keys) - \(status)")
+    }
+    
     /// Print inventory of all UserDefaults data with sizes
     static func printInventory() {
         print("\n" + String(repeating: "=", count: 80))
@@ -89,6 +124,550 @@ struct UserDefaultsDiagnostics {
         }
         
         print(String(repeating: "=", count: 80) + "\n")
+    }
+    
+    // MARK: - Comprehensive Storage Audit Export
+    
+    /// Generates a comprehensive JSON audit of all UserDefaults storage for a location
+    /// Returns the file URL if successful, nil on failure
+    static func exportStorageAudit(locationID: String, mapPointStore: MapPointStore) -> URL? {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd-HHmmss"
+        let filename = "storage-audit-\(locationID)-\(dateFormatter.string(from: Date())).json"
+        
+        let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let outputURL = documentsDir.appendingPathComponent(filename)
+        
+        var audit: [String: Any] = [:]
+        let defaults = UserDefaults.standard
+        let prefix = "locations.\(locationID)."
+        
+        // ===== METADATA =====
+        var totalBytes = 0
+        let allKeys = defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix(prefix) }.sorted()
+        
+        for key in allKeys {
+            if let data = defaults.data(forKey: key) {
+                totalBytes += data.count
+            } else if let obj = defaults.object(forKey: key) {
+                if let archived = try? NSKeyedArchiver.archivedData(withRootObject: obj, requiringSecureCoding: false) {
+                    totalBytes += archived.count
+                }
+            }
+        }
+        
+        let totalMB = Double(totalBytes) / 1_048_576
+        let status: String
+        if totalMB >= 4.0 {
+            status = "CRITICAL: Over 4MB limit"
+        } else if totalMB >= 2.0 {
+            status = "WARNING: Approaching limit"
+        } else {
+            status = "OK: Within safe limits"
+        }
+        
+        audit["metadata"] = [
+            "generatedAt": timestamp,
+            "locationID": locationID,
+            "totalBytes": totalBytes,
+            "totalMB": String(format: "%.2f", totalMB),
+            "appleLimit": "4 MB",
+            "status": status,
+            "keyCount": allKeys.count
+        ]
+        
+        // ===== MAP POINTS DEEP INSPECTION =====
+        let mapPointsKey = prefix + "MapPoints_v1"
+        var mapPointsAudit: [[String: Any]] = []
+        var orphanedTriangleVertices: [[String: Any]] = []
+        var allSessionIDsInHistory: Set<String> = []
+        
+        if let data = defaults.data(forKey: mapPointsKey) {
+            do {
+                let json = try JSONSerialization.jsonObject(with: data, options: [])
+                if let array = json as? [[String: Any]] {
+                    for pointDict in array {
+                        var pointAudit: [String: Any] = [:]
+                        
+                        // Basic properties
+                        let id = (pointDict["id"] as? String) ?? "unknown"
+                        let idShort = String(id.prefix(8))
+                        pointAudit["id"] = id
+                        pointAudit["idShort"] = idShort
+                        pointAudit["name"] = pointDict["name"] ?? NSNull()
+                        pointAudit["x"] = pointDict["x"]
+                        pointAudit["y"] = pointDict["y"]
+                        pointAudit["createdDate"] = pointDict["createdDate"]
+                        pointAudit["isLocked"] = pointDict["isLocked"] ?? true
+                        pointAudit["roles"] = pointDict["roles"] ?? []
+                        pointAudit["linkedARMarkerID"] = pointDict["linkedARMarkerID"] ?? NSNull()
+                        pointAudit["arMarkerID"] = pointDict["arMarkerID"] ?? NSNull()
+                        
+                        // Triangle memberships
+                        let triangleMemberships = (pointDict["triangleMemberships"] as? [String]) ?? []
+                        pointAudit["triangleMemberships"] = triangleMemberships
+                        pointAudit["triangleMembershipCount"] = triangleMemberships.count
+                        
+                        // Photo analysis
+                        var photoAudit: [String: Any] = [:]
+                        let legacyPhotoData = pointDict["locationPhotoData"] as? String
+                        let photoFilename = pointDict["photoFilename"] as? String
+                        photoAudit["hasLegacyData"] = legacyPhotoData != nil && !(legacyPhotoData?.isEmpty ?? true)
+                        photoAudit["legacyDataBytes"] = legacyPhotoData?.utf8.count ?? 0
+                        photoAudit["hasFilename"] = photoFilename != nil
+                        photoAudit["filename"] = photoFilename ?? NSNull()
+                        photoAudit["photoOutdated"] = pointDict["photoOutdated"] ?? NSNull()
+                        photoAudit["photoCapturedAtPositionX"] = pointDict["photoCapturedAtPositionX"] ?? NSNull()
+                        photoAudit["photoCapturedAtPositionY"] = pointDict["photoCapturedAtPositionY"] ?? NSNull()
+                        pointAudit["photo"] = photoAudit
+                        
+                        // Baked position analysis
+                        var bakedAudit: [String: Any] = [:]
+                        let bakedArray = pointDict["bakedCanonicalPositionArray"] as? [Double]
+                        bakedAudit["exists"] = bakedArray != nil
+                        bakedAudit["position"] = bakedArray ?? NSNull()
+                        bakedAudit["confidence"] = pointDict["bakedConfidence"] ?? NSNull()
+                        bakedAudit["sampleCount"] = pointDict["bakedSampleCount"] ?? 0
+                        pointAudit["bakedPosition"] = bakedAudit
+                        
+                        // Sessions (BLE survey sessions) analysis
+                        var sessionsAudit: [String: Any] = [:]
+                        let sessions = (pointDict["sessions"] as? [[String: Any]]) ?? []
+                        sessionsAudit["count"] = sessions.count
+                        
+                        var sessionDetails: [[String: Any]] = []
+                        var sessionsBytes = 0
+                        for session in sessions {
+                            if let sessionData = try? JSONSerialization.data(withJSONObject: session) {
+                                sessionsBytes += sessionData.count
+                            }
+                            
+                            var sessionDetail: [String: Any] = [:]
+                            sessionDetail["sessionID"] = session["sessionID"] ?? "unknown"
+                            sessionDetail["duration_s"] = session["duration_s"] ?? 0
+                            sessionDetail["facing_deg"] = session["facing_deg"] ?? NSNull()
+                            sessionDetail["timingStartISO"] = session["timingStartISO"] ?? NSNull()
+                            
+                            // Beacon data summary
+                            let beacons = (session["beacons"] as? [[String: Any]]) ?? []
+                            sessionDetail["beaconCount"] = beacons.count
+                            
+                            var beaconSummaries: [[String: Any]] = []
+                            for beacon in beacons {
+                                var beaconSummary: [String: Any] = [:]
+                                beaconSummary["uuid"] = beacon["uuid"] ?? "unknown"
+                                beaconSummary["major"] = beacon["major"]
+                                beaconSummary["minor"] = beacon["minor"]
+                                let readings = (beacon["readings"] as? [Any]) ?? []
+                                beaconSummary["readingCount"] = readings.count
+                                beaconSummaries.append(beaconSummary)
+                            }
+                            sessionDetail["beacons"] = beaconSummaries
+                            
+                            sessionDetails.append(sessionDetail)
+                        }
+                        sessionsAudit["totalBytes"] = sessionsBytes
+                        sessionsAudit["details"] = sessionDetails
+                        pointAudit["sessions"] = sessionsAudit
+                        
+                        // AR Position History analysis
+                        var historyAudit: [String: Any] = [:]
+                        let history = (pointDict["arPositionHistory"] as? [[String: Any]]) ?? []
+                        historyAudit["count"] = history.count
+                        
+                        var historySessionIDs: Set<String> = []
+                        var historyDetails: [[String: Any]] = []
+                        for record in history {
+                            var recordDetail: [String: Any] = [:]
+                            let sessionID = (record["sessionID"] as? String) ?? "unknown"
+                            recordDetail["sessionID"] = sessionID
+                            recordDetail["timestamp"] = record["timestamp"]
+                            recordDetail["source"] = record["source"] ?? "unknown"
+                            recordDetail["confidenceScore"] = record["confidenceScore"] ?? 0
+                            
+                            // Position as array
+                            if let posDict = record["position"] as? [String: Any] {
+                                recordDetail["position"] = [
+                                    posDict["x"] ?? 0,
+                                    posDict["y"] ?? 0,
+                                    posDict["z"] ?? 0
+                                ]
+                            } else {
+                                recordDetail["position"] = NSNull()
+                            }
+                            
+                            historySessionIDs.insert(sessionID)
+                            allSessionIDsInHistory.insert(sessionID)
+                            historyDetails.append(recordDetail)
+                        }
+                        historyAudit["uniqueSessionCount"] = historySessionIDs.count
+                        historyAudit["sessionIDs"] = Array(historySessionIDs).sorted()
+                        historyAudit["records"] = historyDetails
+                        pointAudit["positionHistory"] = historyAudit
+                        
+                        // Calculate total size for this point
+                        if let pointData = try? JSONSerialization.data(withJSONObject: pointDict) {
+                            pointAudit["totalBytes"] = pointData.count
+                        }
+                        
+                        mapPointsAudit.append(pointAudit)
+                    }
+                }
+            } catch {
+                audit["mapPointsError"] = error.localizedDescription
+            }
+        }
+        
+        // Get set of valid MapPoint IDs
+        let validMapPointIDs = Set(mapPointsAudit.compactMap { $0["id"] as? String })
+        
+        audit["mapPoints"] = [
+            "key": mapPointsKey,
+            "count": mapPointsAudit.count,
+            "points": mapPointsAudit
+        ]
+        
+        // ===== TRIANGLES DEEP INSPECTION =====
+        let trianglesKey = prefix + "triangles_v1"
+        var trianglesAudit: [[String: Any]] = []
+        
+        if let data = defaults.data(forKey: trianglesKey) {
+            do {
+                let json = try JSONSerialization.jsonObject(with: data, options: [])
+                if let array = json as? [[String: Any]] {
+                    for triDict in array {
+                        var triAudit: [String: Any] = [:]
+                        
+                        let id = (triDict["id"] as? String) ?? "unknown"
+                        triAudit["id"] = id
+                        triAudit["idShort"] = String(id.prefix(8))
+                        
+                        let vertexIDs = (triDict["vertexIDs"] as? [String]) ?? []
+                        triAudit["vertexIDs"] = vertexIDs
+                        triAudit["vertexIDsShort"] = vertexIDs.map { String($0.prefix(8)) }
+                        
+                        // Validate vertices against existing MapPoints
+                        var missingVertices: [String] = []
+                        for vertexID in vertexIDs {
+                            if !validMapPointIDs.contains(vertexID) {
+                                missingVertices.append(String(vertexID.prefix(8)))
+                            }
+                        }
+                        triAudit["vertexValidation"] = [
+                            "allValid": missingVertices.isEmpty,
+                            "missingVertices": missingVertices
+                        ]
+                        
+                        if !missingVertices.isEmpty {
+                            orphanedTriangleVertices.append([
+                                "triangleID": id,
+                                "triangleIDShort": String(id.prefix(8)),
+                                "missingVertexIDs": missingVertices
+                            ])
+                        }
+                        
+                        triAudit["isCalibrated"] = triDict["isCalibrated"] ?? false
+                        triAudit["calibrationQuality"] = triDict["calibrationQuality"] ?? 0
+                        triAudit["lastCalibratedAt"] = triDict["lastCalibratedAt"] ?? NSNull()
+                        triAudit["createdAt"] = triDict["createdAt"] ?? NSNull()
+                        
+                        // AR marker IDs for vertices
+                        triAudit["arMarkerIDs"] = triDict["arMarkerIDs"] ?? []
+                        
+                        // Vertex AR positions
+                        triAudit["vertexARPositions"] = triDict["vertexARPositions"] ?? NSNull()
+                        
+                        trianglesAudit.append(triAudit)
+                    }
+                }
+            } catch {
+                audit["trianglesError"] = error.localizedDescription
+            }
+        }
+        
+        audit["triangles"] = [
+            "key": trianglesKey,
+            "count": trianglesAudit.count,
+            "triangles": trianglesAudit
+        ]
+        
+        // ===== BEACON LISTS INSPECTION =====
+        let beaconListsKey = prefix + "BeaconLists_v1"
+        var beaconListsAudit: [[String: Any]] = []
+        
+        if let data = defaults.data(forKey: beaconListsKey) {
+            do {
+                let json = try JSONSerialization.jsonObject(with: data, options: [])
+                if let array = json as? [[String: Any]] {
+                    for listDict in array {
+                        var listAudit: [String: Any] = [:]
+                        listAudit["id"] = listDict["id"]
+                        listAudit["name"] = listDict["name"]
+                        listAudit["createdAt"] = listDict["createdAt"]
+                        
+                        let beacons = (listDict["beacons"] as? [[String: Any]]) ?? []
+                        listAudit["beaconCount"] = beacons.count
+                        
+                        var beaconDetails: [[String: Any]] = []
+                        for beacon in beacons {
+                            beaconDetails.append([
+                                "uuid": beacon["uuid"] ?? "unknown",
+                                "major": beacon["major"] ?? 0,
+                                "minor": beacon["minor"] ?? 0,
+                                "name": beacon["name"] ?? NSNull()
+                            ])
+                        }
+                        listAudit["beacons"] = beaconDetails
+                        
+                        beaconListsAudit.append(listAudit)
+                    }
+                }
+            } catch {
+                audit["beaconListsError"] = error.localizedDescription
+            }
+        }
+        
+        audit["beaconLists"] = [
+            "key": beaconListsKey,
+            "count": beaconListsAudit.count,
+            "lists": beaconListsAudit
+        ]
+        
+        // ===== OTHER KEYS IN THIS LOCATION =====
+        var otherKeys: [[String: Any]] = []
+        let knownKeys = [mapPointsKey, trianglesKey, beaconListsKey]
+        
+        for key in allKeys where !knownKeys.contains(key) {
+            var keyAudit: [String: Any] = [:]
+            keyAudit["key"] = key
+            keyAudit["keyShort"] = String(key.replacingOccurrences(of: prefix, with: ""))
+            
+            if let data = defaults.data(forKey: key) {
+                keyAudit["sizeBytes"] = data.count
+                keyAudit["type"] = "Data"
+                
+                // Try to peek at structure
+                if let json = try? JSONSerialization.jsonObject(with: data, options: []) {
+                    if let array = json as? [Any] {
+                        keyAudit["structure"] = "Array[\(array.count)]"
+                    } else if let dict = json as? [String: Any] {
+                        keyAudit["structure"] = "Object with keys: \(dict.keys.sorted().joined(separator: ", "))"
+                    }
+                }
+            } else if let obj = defaults.object(forKey: key) {
+                keyAudit["type"] = String(describing: type(of: obj))
+                keyAudit["value"] = String(describing: obj).prefix(200)
+            }
+            
+            otherKeys.append(keyAudit)
+        }
+        
+        audit["otherKeys"] = otherKeys
+        
+        // ===== ORPHAN ANALYSIS =====
+        var orphanAnalysis: [String: Any] = [:]
+        
+        orphanAnalysis["trianglesWithMissingVertices"] = [
+            "count": orphanedTriangleVertices.count,
+            "details": orphanedTriangleVertices
+        ]
+        
+        // Summary
+        let totalMapPoints = mapPointsAudit.count
+        let pointsWithHistory = mapPointsAudit.filter { 
+            (($0["positionHistory"] as? [String: Any])?["count"] as? Int ?? 0) > 0 
+        }.count
+        let totalPositionRecords = mapPointsAudit.reduce(0) { 
+            $0 + (($1["positionHistory"] as? [String: Any])?["count"] as? Int ?? 0) 
+        }
+        let totalSessions = mapPointsAudit.reduce(0) { 
+            $0 + (($1["sessions"] as? [String: Any])?["count"] as? Int ?? 0) 
+        }
+        let legacyPhotoCount = mapPointsAudit.filter {
+            (($0["photo"] as? [String: Any])?["hasLegacyData"] as? Bool) == true
+        }.count
+        let legacyPhotoBytes = mapPointsAudit.reduce(0) {
+            $0 + (($1["photo"] as? [String: Any])?["legacyDataBytes"] as? Int ?? 0)
+        }
+        
+        audit["summary"] = [
+            "mapPoints": [
+                "total": totalMapPoints,
+                "withPositionHistory": pointsWithHistory,
+                "totalPositionRecords": totalPositionRecords,
+                "uniqueSessionsInHistory": allSessionIDsInHistory.count,
+                "totalBLESessions": totalSessions,
+                "legacyPhotos": legacyPhotoCount,
+                "legacyPhotoBytes": legacyPhotoBytes,
+                "legacyPhotoMB": String(format: "%.2f", Double(legacyPhotoBytes) / 1_048_576)
+            ],
+            "triangles": [
+                "total": trianglesAudit.count,
+                "withMissingVertices": orphanedTriangleVertices.count
+            ],
+            "beaconLists": [
+                "total": beaconListsAudit.count
+            ]
+        ]
+        
+        orphanAnalysis["summary"] = [
+            "orphanedTriangleCount": orphanedTriangleVertices.count,
+            "recommendation": orphanedTriangleVertices.isEmpty ? 
+                "No orphaned triangles found" : 
+                "Found \(orphanedTriangleVertices.count) triangle(s) with missing vertices - consider deletion"
+        ]
+        
+        audit["orphanAnalysis"] = orphanAnalysis
+        
+        // ===== WRITE TO FILE =====
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: audit, options: [.prettyPrinted, .sortedKeys])
+            try jsonData.write(to: outputURL, options: .atomic)
+            
+            print("✅ Storage audit exported to: \(outputURL.path)")
+            print("   Size: \(String(format: "%.2f KB", Double(jsonData.count) / 1024))")
+            
+            return outputURL
+        } catch {
+            print("❌ Failed to export storage audit: \(error)")
+            return nil
+        }
+    }
+    
+    /// Export complete raw UserDefaults dump - no interpretation, just the data as-is
+    /// Returns the file URL if successful, nil on failure
+    static func exportRawUserDefaults() -> URL? {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd-HHmmss"
+        let filename = "userdefaults-raw-\(dateFormatter.string(from: Date())).json"
+        
+        let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let outputURL = documentsDir.appendingPathComponent(filename)
+        
+        let defaults = UserDefaults.standard
+        let allData = defaults.dictionaryRepresentation()
+        
+        var output: [String: Any] = [:]
+        var totalBytes = 0
+        var keyDetails: [[String: Any]] = []
+        
+        // Sort keys for consistent output
+        let sortedKeys = allData.keys.sorted()
+        
+        for key in sortedKeys {
+            guard let value = allData[key] else { continue }
+            
+            var keyInfo: [String: Any] = [
+                "key": key
+            ]
+            
+            // Determine size
+            let sizeBytes: Int
+            if let data = value as? Data {
+                sizeBytes = data.count
+            } else if let archived = try? NSKeyedArchiver.archivedData(withRootObject: value, requiringSecureCoding: false) {
+                sizeBytes = archived.count
+            } else {
+                sizeBytes = String(describing: value).utf8.count
+            }
+            totalBytes += sizeBytes
+            keyInfo["sizeBytes"] = sizeBytes
+            keyInfo["type"] = String(describing: type(of: value))
+            
+            // Extract the actual value
+            if let data = value as? Data {
+                // Try to decode as JSON
+                if let json = try? JSONSerialization.jsonObject(with: data, options: []) {
+                    keyInfo["value"] = json
+                    keyInfo["encoding"] = "json"
+                } else {
+                    // Store as base64 for binary data
+                    keyInfo["value"] = data.base64EncodedString()
+                    keyInfo["encoding"] = "base64"
+                }
+            } else if let string = value as? String {
+                keyInfo["value"] = string
+            } else if let number = value as? NSNumber {
+                keyInfo["value"] = number
+            } else if let bool = value as? Bool {
+                keyInfo["value"] = bool
+            } else if let date = value as? Date {
+                keyInfo["value"] = ISO8601DateFormatter().string(from: date)
+                keyInfo["encoding"] = "iso8601"
+            } else if let array = value as? [Any] {
+                // Try to make it JSON-serializable
+                if JSONSerialization.isValidJSONObject(array) {
+                    keyInfo["value"] = array
+                } else {
+                    keyInfo["value"] = String(describing: array)
+                    keyInfo["encoding"] = "description"
+                }
+            } else if let dict = value as? [String: Any] {
+                if JSONSerialization.isValidJSONObject(dict) {
+                    keyInfo["value"] = dict
+                } else {
+                    keyInfo["value"] = String(describing: dict)
+                    keyInfo["encoding"] = "description"
+                }
+            } else {
+                // Fallback: string description
+                keyInfo["value"] = String(describing: value)
+                keyInfo["encoding"] = "description"
+            }
+            
+            keyDetails.append(keyInfo)
+        }
+        
+        // Build output
+        let totalMB = Double(totalBytes) / 1_048_576
+        output["metadata"] = [
+            "generatedAt": ISO8601DateFormatter().string(from: Date()),
+            "totalBytes": totalBytes,
+            "totalMB": String(format: "%.2f", totalMB),
+            "keyCount": keyDetails.count,
+            "appleLimit": "4 MB",
+            "status": totalMB >= 4.0 ? "OVER LIMIT" : (totalMB >= 2.0 ? "WARNING" : "OK")
+        ]
+        
+        // Group by prefix for easier reading
+        var byPrefix: [String: [[String: Any]]] = [:]
+        for detail in keyDetails {
+            let key = detail["key"] as? String ?? ""
+            let prefix: String
+            if key.hasPrefix("locations.") {
+                // Extract location ID: locations.home.xxx -> locations.home
+                let parts = key.split(separator: ".")
+                if parts.count >= 2 {
+                    prefix = "locations.\(parts[1])"
+                } else {
+                    prefix = "locations"
+                }
+            } else if key.contains(".") {
+                prefix = String(key.split(separator: ".").first ?? Substring(key))
+            } else {
+                prefix = "_root"
+            }
+            byPrefix[prefix, default: []].append(detail)
+        }
+        
+        output["byPrefix"] = byPrefix
+        output["allKeys"] = keyDetails
+        
+        // Write to file
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
+            try jsonData.write(to: outputURL, options: .atomic)
+            
+            print("✅ Raw UserDefaults exported to: \(outputURL.path)")
+            print("   Size: \(String(format: "%.2f KB", Double(jsonData.count) / 1024))")
+            print("   Total UserDefaults: \(String(format: "%.2f MB", totalMB)) (\(keyDetails.count) keys)")
+            
+            return outputURL
+        } catch {
+            print("❌ Failed to export raw UserDefaults: \(error)")
+            return nil
+        }
     }
     
     /// Identify keys that contain heavy data (images, ARWorldMaps, etc.)
