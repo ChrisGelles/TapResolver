@@ -111,7 +111,7 @@ struct TapResolverApp: App {
                     )
                     
                     // Configure survey session collector
-                    surveySessionCollector.configure(surveyPointStore: surveyPointStore, bluetoothScanner: btScanner, beaconLists: beaconLists)
+                    surveySessionCollector.configure(surveyPointStore: surveyPointStore, bluetoothScanner: btScanner, beaconLists: beaconLists, orientationManager: orientationManager)
                     
                     LocationMigration.runIfNeeded()
                     squareMetrics.setMetricSquareStore(metricSquares)

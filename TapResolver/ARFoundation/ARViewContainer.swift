@@ -1320,6 +1320,34 @@ struct ARViewContainer: UIViewRepresentable {
             return position
         }
         
+        /// Get current AR camera pose (position + orientation) for survey capture
+        func getCurrentPose() -> SurveyDevicePose? {
+            guard let sceneView = sceneView,
+                  let frame = sceneView.session.currentFrame else {
+                return nil
+            }
+            
+            let transform = frame.camera.transform
+            
+            // Position from translation column
+            let x = transform.columns.3.x
+            let y = transform.columns.3.y
+            let z = transform.columns.3.z
+            
+            // Quaternion from rotation matrix
+            let quat = simd_quatf(transform)
+            
+            return SurveyDevicePose(
+                x: x,
+                y: y,
+                z: z,
+                qx: quat.imag.x,
+                qy: quat.imag.y,
+                qz: quat.imag.z,
+                qw: quat.real
+            )
+        }
+        
         // MARK: - DEPRECATED
         /// DO NOT USE - Legacy function with incorrect interpolation.
         /// Use plantGhostMarkers(calibratedTriangle:, triangleStore:, filter:) instead.

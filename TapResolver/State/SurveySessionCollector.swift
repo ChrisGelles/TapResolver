@@ -67,6 +67,7 @@ class SurveySessionCollector: ObservableObject {
     private weak var surveyPointStore: SurveyPointStore?
     private weak var bluetoothScanner: BluetoothScanner?
     private weak var beaconLists: BeaconListsStore?
+    private weak var orientationManager: CompassOrientationManager?
     private var bleSubscription: AnyCancellable?
     
     // MARK: - Session State
@@ -81,6 +82,9 @@ class SurveySessionCollector: ObservableObject {
     
     /// Throttle tracking: beaconID -> last sample timestamp
     private var lastSampleTime: [String: TimeInterval] = [:]
+    
+    /// Throttle tracking for pose sampling (4 Hz, independent of beacon samples)
+    private var lastPoseSampleTime: TimeInterval = 0
     
     // MARK: - Configuration
     
@@ -132,15 +136,16 @@ class SurveySessionCollector: ObservableObject {
     // MARK: - Configuration
     
     /// Configure with required dependencies
-    func configure(surveyPointStore: SurveyPointStore, bluetoothScanner: BluetoothScanner, beaconLists: BeaconListsStore) {
+    func configure(surveyPointStore: SurveyPointStore, bluetoothScanner: BluetoothScanner, beaconLists: BeaconListsStore, orientationManager: CompassOrientationManager) {
         self.surveyPointStore = surveyPointStore
         self.bluetoothScanner = bluetoothScanner
         self.beaconLists = beaconLists
+        self.orientationManager = orientationManager
         
         // Set up reverse reference for direct BLE injection during dwell
         bluetoothScanner.surveyCollector = self
         
-        print("📊 [SurveySessionCollector] Configured with SurveyPointStore, BluetoothScanner, and BeaconListsStore (\(beaconLists.beacons.count) beacons)")
+        print("📊 [SurveySessionCollector] Configured with SurveyPointStore, BluetoothScanner, BeaconListsStore (\(beaconLists.beacons.count) beacons), and CompassOrientationManager")
     }
     
     // MARK: - Notification Setup
@@ -208,11 +213,25 @@ class SurveySessionCollector: ObservableObject {
         surveyTrace("sessionStarting", context: "marker=\(markerID.uuidString.prefix(8))")
         let now = Date()
         
-        // TODO: Milestone 4 - Get actual pose from ARKit
-        let currentPose = SurveyDevicePose.identity
+        // Milestone 4: Get actual pose from ARKit
+        let currentPose: SurveyDevicePose
+        if let arPose = ARViewContainer.ARViewCoordinator.current?.getCurrentPose() {
+            currentPose = arPose
+            print("📊 [SurveySessionCollector] Captured start pose: (\(String(format: "%.2f", arPose.x)), \(String(format: "%.2f", arPose.y)), \(String(format: "%.2f", arPose.z)))")
+        } else {
+            currentPose = SurveyDevicePose.identity
+            print("⚠️ [SurveySessionCollector] ARKit pose unavailable - using identity")
+        }
         
-        // TODO: Milestone 5 - Get actual compass heading
-        let compassHeading: Float = -1.0  // Sentinel for "unavailable"
+        // Milestone 5: Get actual compass heading (magnetic, for distortion mapping)
+        let compassHeading: Float
+        if let magneticHeading = orientationManager?.magneticHeadingDegrees {
+            compassHeading = Float(magneticHeading)
+            print("📊 [SurveySessionCollector] Captured magnetic heading: \(String(format: "%.1f", compassHeading))°")
+        } else {
+            compassHeading = -1.0  // Sentinel for "unavailable"
+            print("⚠️ [SurveySessionCollector] Compass heading unavailable")
+        }
         
         activeSession = ActiveDwellSession(
             markerID: markerID,
@@ -224,6 +243,7 @@ class SurveySessionCollector: ObservableObject {
         
         // Reset throttle state for new session
         lastSampleTime.removeAll()
+        lastPoseSampleTime = 0
         
         // Insert boundary markers for all known beacons
         // TODO: Milestone 3 - Get beacon list from BeaconListsStore
@@ -261,8 +281,13 @@ class SurveySessionCollector: ObservableObject {
         // Insert ending boundary markers
         insertBoundaryMarkers(atMs: session.elapsedMs())
         
-        // TODO: Milestone 4 - Get actual end pose from ARKit
-        let endPose = SurveyDevicePose.identity
+        // Milestone 4: Get actual end pose from ARKit
+        let endPose: SurveyDevicePose
+        if let arPose = ARViewContainer.ARViewCoordinator.current?.getCurrentPose() {
+            endPose = arPose
+        } else {
+            endPose = SurveyDevicePose.identity
+        }
         
         // Capture session data for async processing
         let sessionCopy = session
@@ -393,6 +418,18 @@ class SurveySessionCollector: ObservableObject {
             return
         }
         lastSampleTime[beaconID] = now
+        
+        // Milestone 4: Capture pose for poseTrack (sampled at 4 Hz, independent of beacon readings)
+        guard var session = activeSession else { return }
+        if now - lastPoseSampleTime >= sampleIntervalSeconds {
+            let ms = session.elapsedMs()
+            if let arPose = ARViewContainer.ARViewCoordinator.current?.getCurrentPose() {
+                let poseSample = PoseSample(ms: ms, pose: arPose)
+                session.poseTrack.append(poseSample)
+                lastPoseSampleTime = now
+            }
+            activeSession = session
+        }
         
         // Record the sample (pose is captured separately in poseTrack)
         ingestSample(beaconID: beaconID, rssi: rssi)
