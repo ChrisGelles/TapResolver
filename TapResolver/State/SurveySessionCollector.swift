@@ -12,6 +12,25 @@ import simd
 import QuartzCore
 import CoreMotion
 
+// MARK: - Console Timestamp Helper
+
+/// Formats a Date for console output in local time (East Coast US style: HH:mm:ss)
+private func localTimeString(from date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm:ss"
+    formatter.timeZone = .current  // Uses device's local timezone
+    return formatter.string(from: date)
+}
+
+/// Converts an ISO8601 string (UTC) to local time for console display
+private func localTimeFromISO(_ isoString: String) -> String {
+    let isoFormatter = ISO8601DateFormatter()
+    guard let date = isoFormatter.date(from: isoString) else {
+        return isoString  // Return original if parsing fails
+    }
+    return localTimeString(from: date)
+}
+
 // MARK: - Thread Tracing
 
 /// Logs survey thread trace information when enabled
@@ -269,7 +288,8 @@ class SurveySessionCollector: ObservableObject {
         self.currentDwellTime = 0.0
         
         let coordString = mapCoordinate.map { "(\(String(format: "%.1f", $0.x)), \(String(format: "%.1f", $0.y)))" } ?? "nil"
-        print("📊 [SurveySessionCollector] Session STARTED for marker \(String(markerID.uuidString.prefix(8))) at map coord \(coordString)")
+        let localTime = localTimeString(from: now)
+        print("📊 [SurveySessionCollector] Session STARTED at \(localTime) for marker \(String(markerID.uuidString.prefix(8))) at map coord \(coordString)")
     }
     
     private func endSession() {
@@ -669,7 +689,9 @@ class SurveySessionCollector: ObservableObject {
         }
         
         surveyTrace("finalizeSessionAsync", context: "complete, session saved")
-        print("📊 [SurveySessionCollector] ✅ Session saved: \(beaconMeasurements.count) beacons, \(String(format: "%.1f", duration))s duration")
+        let localStart = localTimeString(from: session.startTime)
+        let localEnd = localTimeString(from: Date())
+        print("📊 [SurveySessionCollector] ✅ Session saved: \(beaconMeasurements.count) beacons, \(String(format: "%.1f", duration))s duration (\(localStart) → \(localEnd) local)")
     }
     
     // MARK: - Statistics Computation (Milestone 7 placeholder)
