@@ -1373,7 +1373,60 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         print("📐 [GHOST_CALC] Barycentric weights: w1=\(String(format: "%.3f", w1)), w2=\(String(format: "%.3f", w2)), w3=\(String(format: "%.3f", w3))")
         
-        // PRIORITY 1: Session-level rigid transform
+        // ═══════════════════════════════════════════════════════════════════════════
+        // PRIORITY 0: Baked Canonical Position (fastest, most stable)
+        // Uses accumulated canonical position projected to current session
+        // ═══════════════════════════════════════════════════════════════════════════
+        print("╔════════════════════════════════════════════════════════════════════════╗")
+        print("║ 🔍 [GHOST_CALC] PRIORITY CHECK: Baked Canonical Position              ║")
+        print("╠════════════════════════════════════════════════════════════════════════╣")
+        
+        // Check prerequisites for baked path
+        let hasBakedPosition = mapPoint.bakedCanonicalPosition != nil
+        let hasSessionTransform = cachedCanonicalToSessionTransform != nil
+        
+        print("║   MapPoint: \(String(mapPoint.id.uuidString.prefix(8)))")
+        print("║   bakedCanonicalPosition: \(hasBakedPosition ? "✅ EXISTS" : "❌ NIL")")
+        if let baked = mapPoint.bakedCanonicalPosition {
+            print("║     → (\(String(format: "%.2f", baked.x)), \(String(format: "%.2f", baked.y)), \(String(format: "%.2f", baked.z)))")
+            print("║     confidence: \(mapPoint.bakedConfidence != nil ? String(format: "%.2f", mapPoint.bakedConfidence!) : "NIL")")
+            print("║     sampleCount: \(mapPoint.bakedSampleCount)")
+        }
+        print("║   cachedCanonicalToSessionTransform: \(hasSessionTransform ? "✅ EXISTS" : "❌ NIL")")
+        
+        if hasBakedPosition && hasSessionTransform {
+            print("║   → Attempting baked projection via calculateGhostPositionFromBakedData()")
+            print("╚════════════════════════════════════════════════════════════════════════╝")
+            
+            if let bakedPosition = calculateGhostPositionFromBakedData(for: mapPoint.id) {
+                let calcEndTime = Date()
+                let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
+                print("╔════════════════════════════════════════════════════════════════════════╗")
+                print("║ ✅ [GHOST_CALC] BAKED PATH SUCCEEDED                                   ║")
+                print("╠════════════════════════════════════════════════════════════════════════╣")
+                print("║ Result: (\(String(format: "%.2f", bakedPosition.x)), \(String(format: "%.2f", bakedPosition.y)), \(String(format: "%.2f", bakedPosition.z)))")
+                print("║ Duration: \(String(format: "%.2f", calcDuration))ms")
+                print("║ Source: Baked canonical → session projection")
+                print("╚════════════════════════════════════════════════════════════════════════╝")
+                return bakedPosition
+            } else {
+                print("╔════════════════════════════════════════════════════════════════════════╗")
+                print("║ ⚠️ [GHOST_CALC] Baked projection FAILED - falling through to PRIORITY 1║")
+                print("╚════════════════════════════════════════════════════════════════════════╝")
+            }
+        } else {
+            print("║   → Prerequisites not met, skipping baked path")
+            if !hasBakedPosition {
+                print("║     Reason: No bakedCanonicalPosition for this MapPoint")
+            }
+            if !hasSessionTransform {
+                print("║     Reason: No cachedCanonicalToSessionTransform (need 2+ markers placed)")
+            }
+            print("╚════════════════════════════════════════════════════════════════════════╝")
+        }
+        
+        // ═══════════════════════════════════════════════════════════════════════════
+        // PRIORITY 1: Session-level rigid transform (legacy path)
         // Instead of using naive consensus (which mixes coordinate frames),
         // we transform each historical session's position individually
         
@@ -1478,7 +1531,12 @@ final class ARCalibrationCoordinator: ObservableObject {
                 }
                 
                 let alignedConsensus = weightedSum / totalWeight
-                print("👻 [GHOST_CALC] Session-aligned consensus from \(alignedCandidates.count) session(s): (\(String(format: "%.2f", alignedConsensus.x)), \(String(format: "%.2f", alignedConsensus.y)), \(String(format: "%.2f", alignedConsensus.z)))")
+                print("╔════════════════════════════════════════════════════════════════════════╗")
+                print("║ ✅ [GHOST_CALC] PER-SESSION ALIGNMENT SUCCEEDED                        ║")
+                print("╠════════════════════════════════════════════════════════════════════════╣")
+                print("║ Consensus from \(alignedCandidates.count) session(s): (\(String(format: "%.2f", alignedConsensus.x)), \(String(format: "%.2f", alignedConsensus.y)), \(String(format: "%.2f", alignedConsensus.z)))")
+                print("║ Source: Session-level rigid transforms (PRIORITY 1 path)")
+                print("╚════════════════════════════════════════════════════════════════════════╝")
                 
                 let calcEndTime = Date()
                 let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
@@ -1586,7 +1644,13 @@ final class ARCalibrationCoordinator: ObservableObject {
             Float(w1) * m1_3D.z + Float(w2) * m2_3D.z + Float(w3) * m3_3D.z
         )
         
-        print("👻 [GHOST_CALC] Calculated ghost position: (\(String(format: "%.2f", ghostPosition.x)), \(String(format: "%.2f", ghostPosition.y)), \(String(format: "%.2f", ghostPosition.z)))")
+        print("╔════════════════════════════════════════════════════════════════════════╗")
+        print("║ ⚠️ [GHOST_CALC] BARYCENTRIC FALLBACK USED                              ║")
+        print("╠════════════════════════════════════════════════════════════════════════╣")
+        print("║ Position: (\(String(format: "%.2f", ghostPosition.x)), \(String(format: "%.2f", ghostPosition.y)), \(String(format: "%.2f", ghostPosition.z)))")
+        print("║ Source: Current session barycentric interpolation (PRIORITY 2 path)")
+        print("║ Note: No baked data or session history available for this vertex")
+        print("╚════════════════════════════════════════════════════════════════════════╝")
         
         let calcEndTime = Date()
         let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
