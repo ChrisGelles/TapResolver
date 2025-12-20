@@ -10,6 +10,7 @@ import Foundation
 import Combine
 import simd
 import QuartzCore
+import CoreMotion
 
 // MARK: - Thread Tracing
 
@@ -70,6 +71,9 @@ class SurveySessionCollector: ObservableObject {
     private weak var orientationManager: CompassOrientationManager?
     private var bleSubscription: AnyCancellable?
     
+    /// Motion manager for magnetometer sampling
+    private let motionManager = CMMotionManager()
+    
     // MARK: - Session State
     
     /// Currently active dwell session (nil when not dwelling)
@@ -106,6 +110,9 @@ class SurveySessionCollector: ObservableObject {
         
         /// Pose track (sampled at 4 Hz, independent of beacon readings)
         var poseTrack: [PoseSample] = []
+        
+        /// Magnetometer track (sampled at same timestamps as pose)
+        var magnetometerTrack: [MagnetometerSample] = []
         
         /// Per-beacon sample buffers (beaconID → lean RSSI samples)
         var beaconSamples: [String: [RssiSample]] = [:]
@@ -253,6 +260,9 @@ class SurveySessionCollector: ObservableObject {
         startBLESubscription()
         surveyTrace("bleSubscribed")
         
+        // Start magnetometer for magnetic field sampling
+        startMagnetometer()
+        
         // Update published state
         self.isCollecting = true
         self.activeMarkerID = markerID
@@ -310,6 +320,7 @@ class SurveySessionCollector: ObservableObject {
     private func clearSession() {
         activeSession = nil
         stopBLESubscription()
+        stopMagnetometer()
         
         self.isCollecting = false
         self.activeMarkerID = nil
@@ -331,6 +342,46 @@ class SurveySessionCollector: ObservableObject {
     private func stopBLESubscription() {
         // Direct injection path: No subscription to cancel
         print("📊 [SurveySessionCollector] BLE subscription stopped")
+    }
+    
+    // MARK: - Magnetometer
+    
+    /// Start magnetometer updates for magnetic field sampling
+    private func startMagnetometer() {
+        guard motionManager.isMagnetometerAvailable else {
+            print("⚠️ [SurveySessionCollector] Magnetometer not available")
+            return
+        }
+        
+        // We don't use the update interval here - we sample on demand
+        // when pose is sampled to keep timestamps synchronized
+        motionManager.startMagnetometerUpdates()
+        print("📊 [SurveySessionCollector] Magnetometer started")
+    }
+    
+    /// Stop magnetometer updates
+    private func stopMagnetometer() {
+        motionManager.stopMagnetometerUpdates()
+        print("📊 [SurveySessionCollector] Magnetometer stopped")
+    }
+    
+    /// Sample current magnetometer reading and add to active session
+    /// Call this at same time as pose sampling for timestamp correlation
+    private func sampleMagnetometer(atMs ms: Int64) {
+        guard var session = activeSession,
+              let data = motionManager.magnetometerData else {
+            return
+        }
+        
+        let sample = MagnetometerSample(
+            ms: ms,
+            x: Float(data.magneticField.x),
+            y: Float(data.magneticField.y),
+            z: Float(data.magneticField.z)
+        )
+        
+        session.magnetometerTrack.append(sample)
+        activeSession = session
     }
     
     /// Handle incoming BLE device updates
@@ -429,6 +480,9 @@ class SurveySessionCollector: ObservableObject {
                 lastPoseSampleTime = now
             }
             activeSession = session
+            
+            // Sample magnetometer at same timestamp for correlation
+            sampleMagnetometer(atMs: ms)
         }
         
         // Record the sample (pose is captured separately in poseTrack)
@@ -531,6 +585,7 @@ class SurveySessionCollector: ObservableObject {
             devicePose: session.startPose,
             compassHeading_deg: session.compassHeading,
             poseTrack: session.poseTrack,
+            magnetometerTrack: session.magnetometerTrack,
             beacons: beaconMeasurements
         )
         
@@ -601,6 +656,7 @@ class SurveySessionCollector: ObservableObject {
             devicePose: session.startPose,
             compassHeading_deg: session.compassHeading,
             poseTrack: session.poseTrack,
+            magnetometerTrack: session.magnetometerTrack,
             beacons: beaconMeasurements
         )
         

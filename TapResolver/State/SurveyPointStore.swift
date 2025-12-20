@@ -63,6 +63,21 @@ public struct PoseSample: Codable, Equatable {
     }
 }
 
+/// Raw magnetometer sample for magnetic distortion mapping
+public struct MagnetometerSample: Codable, Equatable {
+    public let ms: Int64      // Milliseconds since session start
+    public let x: Float       // Microteslas, device X axis
+    public let y: Float       // Microteslas, device Y axis
+    public let z: Float       // Microteslas, device Z axis
+    
+    public init(ms: Int64, x: Float, y: Float, z: Float) {
+        self.ms = ms
+        self.x = x
+        self.y = y
+        self.z = z
+    }
+}
+
 /// Statistical summary of RSSI measurements for one beacon
 public struct SurveyStats: Codable, Equatable {
     public let median_dbm: Int
@@ -282,10 +297,13 @@ public struct SurveySession: Codable, Identifiable, Equatable {
     // Device pose track (sampled at 4 Hz, independent of beacon readings)
     public let poseTrack: [PoseSample]
     
+    // Magnetometer track (sampled at same timestamps as pose for correlation)
+    public let magnetometerTrack: [MagnetometerSample]
+    
     // Beacon measurements
     public let beacons: [SurveyBeaconMeasurement]
     
-    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, compassHeading_deg: Float, poseTrack: [PoseSample], beacons: [SurveyBeaconMeasurement]) {
+    public init(id: String, locationID: String, startISO: String, endISO: String, duration_s: Double, devicePose: SurveyDevicePose, compassHeading_deg: Float, poseTrack: [PoseSample], magnetometerTrack: [MagnetometerSample], beacons: [SurveyBeaconMeasurement]) {
         self.id = id
         self.locationID = locationID
         self.startISO = startISO
@@ -294,6 +312,7 @@ public struct SurveySession: Codable, Identifiable, Equatable {
         self.devicePose = devicePose
         self.compassHeading_deg = compassHeading_deg
         self.poseTrack = poseTrack
+        self.magnetometerTrack = magnetometerTrack
         self.beacons = beacons
     }
 }
