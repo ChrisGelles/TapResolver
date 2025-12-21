@@ -921,8 +921,10 @@ struct ARViewWithOverlays: View {
                         .padding(.bottom, 40)
                     }
                     
-                    // Survey Button Bar - always visible, buttons enable/disable based on state
-                    SurveyButtonBar(
+                    // Survey Button Bar - hide when ghost interaction is active (ghost selected)
+                    // Ghost Confirm/Adjust takes UI priority
+                    if arCalibrationCoordinator.selectedGhostMapPointID == nil {
+                        SurveyButtonBar(
                         userContainingTriangleID: userContainingTriangleID,
                         hasAnyCalibratedTriangle: !arCalibrationCoordinator.sessionCalibratedTriangles.isEmpty,
                         fillableKnownCount: arCalibrationCoordinator.countFillableTrianglesSessionAndGhost(),
@@ -1056,6 +1058,7 @@ struct ARViewWithOverlays: View {
                             trianglesWithSurveyMarkers.removeAll()
                         }
                     )
+                    }
                 }
                 .zIndex(997)
             }
