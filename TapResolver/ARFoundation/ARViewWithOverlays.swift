@@ -692,23 +692,20 @@ struct ARViewWithOverlays: View {
                                     return
                                 }
                                 
-                                // Check if this is a DEMOTED ghost (requires re-confirmation, not crawl expansion)
+                                // DEMOTE RE-CONFIRM: If this ghost was demoted from an AR marker,
+                                // simply re-place the marker at the ghost position (no crawl/adjacent activation)
                                 if arCalibrationCoordinator.demotedGhostMapPointIDs.contains(ghostMapPointID) {
-                                    print("🔗 [DEMOTE_CONFIRM] Re-confirming demoted ghost at position")
+                                    print("🔄 [DEMOTE_READJUST] Re-confirming demoted marker at ghost position")
                                     print("   MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
-                                    print("   Position: \(ghostPosition)")
                                     
-                                    // Remove from demoted set
-                                    arCalibrationCoordinator.demotedGhostMapPointIDs.remove(ghostMapPointID)
-                                    
-                                    // Remove the ghost marker from scene
+                                    // Remove ghost from scene
                                     NotificationCenter.default.post(
                                         name: NSNotification.Name("RemoveGhostMarker"),
                                         object: nil,
                                         userInfo: ["mapPointID": ghostMapPointID]
                                     )
                                     
-                                    // Place a real marker at the ghost position
+                                    // Place marker at ghost position
                                     NotificationCenter.default.post(
                                         name: NSNotification.Name("ConfirmGhostMarker"),
                                         object: nil,
@@ -720,11 +717,12 @@ struct ARViewWithOverlays: View {
                                         ]
                                     )
                                     
-                                    // Clear ghost selection
+                                    // Clear demote state
+                                    arCalibrationCoordinator.demotedGhostMapPointIDs.remove(ghostMapPointID)
                                     arCalibrationCoordinator.selectedGhostMapPointID = nil
                                     arCalibrationCoordinator.selectedGhostEstimatedPosition = nil
                                     
-                                    print("✅ [DEMOTE_CONFIRM] Re-confirmation complete")
+                                    print("✅ [DEMOTE_READJUST] Marker re-placed, demote state cleared")
                                     return
                                 }
                                 
@@ -782,6 +780,37 @@ struct ARViewWithOverlays: View {
                             onPlaceMarker: {
                                 print("🔍 [PLACE_MARKER_BTN] Button tapped")
                                 print("   Current state: \(arCalibrationCoordinator.stateDescription)")
+                                
+                                // DEMOTE RE-ADJUST: If this ghost was demoted from an AR marker,
+                                // simply place marker at crosshair (no crawl/adjacent activation)
+                                if let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID,
+                                   arCalibrationCoordinator.demotedGhostMapPointIDs.contains(ghostMapPointID) {
+                                    print("🔄 [DEMOTE_READJUST] Adjusting demoted marker to crosshair position")
+                                    print("   MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
+                                    
+                                    // Remove ghost from scene
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("RemoveGhostMarker"),
+                                        object: nil,
+                                        userInfo: ["mapPointID": ghostMapPointID]
+                                    )
+                                    
+                                    // Place marker at crosshair (normal placement, NOT crawl mode)
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("PlaceMarkerAtCursor"),
+                                        object: nil,
+                                        userInfo: ["ghostMapPointID": ghostMapPointID]
+                                    )
+                                    
+                                    // Clear demote state
+                                    arCalibrationCoordinator.demotedGhostMapPointIDs.remove(ghostMapPointID)
+                                    arCalibrationCoordinator.selectedGhostMapPointID = nil
+                                    arCalibrationCoordinator.selectedGhostEstimatedPosition = nil
+                                    arCalibrationCoordinator.repositionModeActive = false
+                                    
+                                    print("✅ [DEMOTE_READJUST] Marker adjusted, demote state cleared")
+                                    return
+                                }
                                 
                                 // Check if we're in crawl mode (.readyToFill or .surveyMode + ghost selected)
                                 if arCalibrationCoordinator.isCrawlEligibleState,
