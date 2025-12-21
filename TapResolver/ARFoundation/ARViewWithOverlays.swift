@@ -877,6 +877,24 @@ struct ARViewWithOverlays: View {
                                 // Simply enable reposition mode - keep ghost in scene, keep selection
                                 // This bypasses the proximity/in-frame requirement in updateGhostSelection()
                                 arCalibrationCoordinator.repositionModeActive = true
+                            },
+                            onResetCanonical: {
+                                print("🔄 [GHOST_UI] Reset Position Data tapped")
+                                guard let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID else {
+                                    print("⚠️ [GHOST_UI] No ghost selected for canonical reset")
+                                    return
+                                }
+                                
+                                // Purge canonical data for this specific MapPoint
+                                let cleared = mapPointStore.purgeCanonicalPosition(for: ghostMapPointID)
+                                
+                                if cleared {
+                                    print("✅ [GHOST_UI] Canonical data cleared for \(String(ghostMapPointID.uuidString.prefix(8)))")
+                                    print("   Ghost will now use barycentric interpolation")
+                                    
+                                    // Optionally: Could trigger ghost position recalculation here
+                                    // For now, user can dismiss and re-approach to see new position
+                                }
                             }
                         )
                         .padding(.bottom, 40)

@@ -22,6 +22,7 @@ struct GhostInteractionButtons: View {
     let onConfirmGhost: () -> Void
     let onPlaceMarker: () -> Void
     let onReposition: () -> Void
+    let onResetCanonical: () -> Void
     
     // Debounce state to prevent accidental double-taps
     @State private var isPlaceMarkerCoolingDown = false
@@ -107,6 +108,23 @@ struct GhostInteractionButtons: View {
                         .background(Color.purple.opacity(0.9))
                         .cornerRadius(25)
                     }
+                    
+                    // Reset Canonical Position Button
+                    Button {
+                        onResetCanonical()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("Reset Position Data")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.orange.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal)
             }

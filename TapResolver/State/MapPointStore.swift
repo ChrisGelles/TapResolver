@@ -885,6 +885,61 @@ public final class MapPointStore: ObservableObject {
         print("================================================================================")
     }
     
+    // MARK: - Canonical Position Purge
+    
+    /// Purges canonical/baked position data for a single MapPoint
+    /// - Parameter mapPointID: The MapPoint to reset
+    /// - Returns: true if the MapPoint was found and updated
+    @discardableResult
+    func purgeCanonicalPosition(for mapPointID: UUID) -> Bool {
+        guard let index = points.firstIndex(where: { $0.id == mapPointID }) else {
+            print("⚠️ [PURGE_CANONICAL] MapPoint \(String(mapPointID.uuidString.prefix(8))) not found")
+            return false
+        }
+        
+        let hadData = points[index].canonicalPosition != nil
+        
+        points[index].canonicalPosition = nil
+        points[index].canonicalConfidence = nil
+        points[index].canonicalSampleCount = 0
+        
+        if hadData {
+            print("🧹 [PURGE_CANONICAL] Cleared canonical position for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+        } else {
+            print("ℹ️ [PURGE_CANONICAL] MapPoint \(String(mapPointID.uuidString.prefix(8))) had no canonical data")
+        }
+        
+        save()
+        return hadData
+    }
+    
+    /// Purges ALL canonical/baked position data for the current location
+    /// - Returns: Number of MapPoints that had data cleared
+    @discardableResult
+    func purgeAllCanonicalPositions() -> Int {
+        var clearedCount = 0
+        
+        print("🧹 [PURGE_CANONICAL] Starting purge of all canonical positions...")
+        print("   Location: \(PersistenceContext.shared.locationID)")
+        print("   Total MapPoints: \(points.count)")
+        
+        for index in points.indices {
+            if points[index].canonicalPosition != nil {
+                points[index].canonicalPosition = nil
+                points[index].canonicalConfidence = nil
+                points[index].canonicalSampleCount = 0
+                clearedCount += 1
+            }
+        }
+        
+        save()
+        
+        print("✅ [PURGE_CANONICAL] Cleared canonical data from \(clearedCount) MapPoint(s)")
+        print("   Remaining MapPoints: \(points.count) (structure preserved)")
+        
+        return clearedCount
+    }
+    
     // MARK: - Photo Management
     
     /// Purge all photo assets for current location

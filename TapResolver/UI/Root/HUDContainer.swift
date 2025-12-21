@@ -1156,6 +1156,9 @@ private struct DebugSettingsPanel: View {
     @State private var showingPurgeARHistoryAlert = false
     @State private var showingFullResetAlert = false
     @State private var orphanPurgeResultMessage = ""
+    @State private var showingPurgeCanonicalAlert = false
+    @State private var canonicalPurgeResultMessage = ""
+    @State private var showCanonicalPurgeResult = false
     @State private var showingLogShare = false
     @State private var showingStorageAuditShare = false
     @State private var storageAuditURL: URL? = nil
@@ -1308,6 +1311,23 @@ private struct DebugSettingsPanel: View {
                                     .font(.system(size: 12, weight: .medium))
                             }
                             .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Purge Canonical Positions Button
+                        Button {
+                            showingPurgeCanonicalAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "mappin.slash")
+                                    .font(.system(size: 24))
+                                Text("Purge Canonical")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
                             .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
@@ -1688,6 +1708,24 @@ private struct DebugSettingsPanel: View {
             Button("OK") { }
         } message: {
             Text(orphanPurgeResultMessage)
+        }
+        .alert("Purge All Canonical Positions?", isPresented: $showingPurgeCanonicalAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Purge All", role: .destructive) {
+                let cleared = mapPointStore.purgeAllCanonicalPositions()
+                canonicalPurgeResultMessage = cleared > 0
+                    ? "Cleared canonical data from \(cleared) MapPoint(s).\n\nGhost markers will now use barycentric interpolation until new calibration sessions rebuild the canonical positions."
+                    : "No canonical position data found to purge."
+                showCanonicalPurgeResult = true
+            }
+        } message: {
+            let withCanonical = mapPointStore.points.filter { $0.canonicalPosition != nil }.count
+            Text("This will clear baked canonical positions from \(withCanonical) MapPoint(s) for location '\(PersistenceContext.shared.locationID)'.\n\nGhost marker predictions will fall back to barycentric interpolation until new data is collected.\n\nThis cannot be undone.")
+        }
+        .alert("Canonical Purge Complete", isPresented: $showCanonicalPurgeResult) {
+            Button("OK") { }
+        } message: {
+            Text(canonicalPurgeResultMessage)
         }
     }
     

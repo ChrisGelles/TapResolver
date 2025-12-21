@@ -942,9 +942,25 @@ struct ARViewContainer: UIViewRepresentable {
                                 print("🎯 [HIT_TEST_DIAG] ⚠️ UUID parse failed for: '\(uuidString)'")
                             }
                         }
-                        // Check for ghost marker nodes too
+                        // Check for ghost marker tap
                         if name.hasPrefix("ghostMarker_") {
-                            print("🎯 [HIT_TEST_DIAG]   ℹ️ Hit ghost marker (not AR marker): '\(name)'")
+                            let uuidString = String(name.dropFirst("ghostMarker_".count))
+                            print("🎯 [HIT_TEST_DIAG]   Found ghostMarker_ prefix, UUID string: '\(uuidString)'")
+                            if let uuid = UUID(uuidString: uuidString) {
+                                print("🎯 [HIT_TEST_DIAG] ✅ SUCCESS: Hit ghost marker \(String(uuid.uuidString.prefix(8)))")
+                                // Select this ghost instead of returning marker UUID
+                                if let coordinator = self.arCalibrationCoordinator {
+                                    // Find the MapPoint ID from the ghost node name (ghost nodes use MapPoint ID)
+                                    coordinator.selectedGhostMapPointID = uuid
+                                    // Get position from the ghost node
+                                    let ghostPosition = current.simdWorldPosition
+                                    coordinator.selectedGhostEstimatedPosition = ghostPosition
+                                    print("👻 [GHOST_TAP] Selected ghost \(String(uuid.uuidString.prefix(8))) via tap at position \(ghostPosition)")
+                                }
+                                return nil  // Return nil since this isn't an AR marker demote
+                            } else {
+                                print("🎯 [HIT_TEST_DIAG] ⚠️ UUID parse failed for ghost marker: '\(uuidString)'")
+                            }
                         }
                     }
                     node = current.parent
