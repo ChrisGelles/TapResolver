@@ -72,6 +72,10 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// When set, UI should show "Unconfirmed Marker Nearby" instead of action buttons
     @Published var nearbyButNotVisibleGhostID: UUID? = nil
     
+    /// Tracks MapPoint IDs that were demoted from confirmed markers
+    /// These require re-confirmation flow, not adjacent triangle activation
+    @Published var demotedGhostMapPointIDs: Set<UUID> = []
+    
     /// When true, ghost selection is preserved even when user walks away from the ghost
     /// This allows the user to reposition a marker at any distance from the original ghost location
     @Published var repositionModeActive: Bool = false
@@ -125,7 +129,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     var originalMarkerPositions: [UUID: simd_float3] = [:]  // MapPoint ID → original AR position
     
     /// Maps marker ID (UUID string) to MapPoint ID for drift detection
-    private var sessionMarkerToMapPoint: [String: UUID] = [:]
+    var sessionMarkerToMapPoint: [String: UUID] = [:]
     
     // MARK: - Session Transform
     
@@ -1224,6 +1228,27 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // Remove from session tracking (will be re-added when confirmed)
         sessionMarkerToMapPoint.removeValue(forKey: markerIDString)
+        
+        // Mark this as a demoted ghost (requires re-confirmation, not crawl expansion)
+        demotedGhostMapPointIDs.insert(mapPointID)
+        print("🔄 [DEMOTE] Added \(String(mapPointID.uuidString.prefix(8))) to demotedGhostMapPointIDs")
+        
+        // Set activeTriangleID to a calibrated triangle containing this MapPoint
+        if let triangleStore = triangleStore {
+            let containingTriangles = triangleStore.triangles.filter { triangle in
+                triangle.vertexIDs.contains(mapPointID)
+            }
+            
+            // Prefer a calibrated triangle, fall back to any containing triangle
+            let calibratedContaining = containingTriangles.first { triangle in
+                sessionCalibratedTriangles.contains(triangle.id)
+            }
+            
+            if let targetTriangle = calibratedContaining ?? containingTriangles.first {
+                activeTriangleID = targetTriangle.id
+                print("🔄 [DEMOTE] Set activeTriangleID to \(String(targetTriangle.id.uuidString.prefix(8))) (contains demoted MapPoint)")
+            }
+        }
         
         // Post response to trigger visual conversion
         NotificationCenter.default.post(
@@ -2990,6 +3015,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         selectedGhostMapPointID = nil
         selectedGhostEstimatedPosition = nil
         nearbyButNotVisibleGhostID = nil
+        demotedGhostMapPointIDs.removeAll()
         repositionModeActive = false
         
         // Clear baked data transform cache
@@ -2999,6 +3025,24 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         print("🎯 CalibrationState → \(stateDescription) (reset)")
         print("🔄 ARCalibrationCoordinator: Reset complete - all markers cleared")
+    }
+    
+    /// Records session as completed if any calibration work occurred
+    /// Call this BEFORE reset() when AR view is dismissed normally
+    public func recordSessionCompletion() {
+        let triangleCount = sessionCalibratedTriangles.count
+        let mapPointCount = mapPointARPositions.count
+        
+        guard triangleCount > 0 || mapPointCount > 0 else {
+            print("📍 [SESSION_END] No calibration work to record")
+            return
+        }
+        
+        safeARStore.endSession(
+            trianglesCalibratedCount: triangleCount,
+            mapPointsPlacedCount: mapPointCount,
+            exitReason: .completed
+        )
     }
     
     /// Activates calibration for an adjacent triangle when user confirms a ghost marker

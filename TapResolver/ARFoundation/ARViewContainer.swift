@@ -405,6 +405,10 @@ struct ARViewContainer: UIViewRepresentable {
                 let markerID = placeMarker(at: position)
                 print("📍 [CRAWL_CROSSHAIR] Placed adjustment marker \(String(markerID.uuidString.prefix(8)))")
                 
+                // Register marker→MapPoint association for demote support
+                arCalibrationCoordinator?.sessionMarkerToMapPoint[markerID.uuidString] = ghostMapPointID
+                print("📍 [CRAWL_CROSSHAIR] Registered marker \(String(markerID.uuidString.prefix(8))) → MapPoint \(String(ghostMapPointID.uuidString.prefix(8)))")
+                
                 // Activate the adjacent triangle (wasAdjusted: true = placed at crosshair, not ghost position)
                 if let coordinator = arCalibrationCoordinator {
                     if let newTriangleID = coordinator.activateAdjacentTriangle(
@@ -783,6 +787,13 @@ struct ARViewContainer: UIViewRepresentable {
             placedMarkers[markerID] = markerNode
             
             print("🎯 [GHOST_CONFIRM] Created marker \(String(markerID.uuidString.prefix(8))) at ghost position")
+            
+            // Register marker→MapPoint association for demote support (especially for demote reconfirm)
+            let isDemoteReconfirm = notification.userInfo?["isDemoteReconfirm"] as? Bool ?? false
+            if isDemoteReconfirm {
+                arCalibrationCoordinator?.sessionMarkerToMapPoint[markerID.uuidString] = ghostMapPointID
+                print("📍 [CONFIRM_GHOST] Registered demote reconfirm marker \(String(markerID.uuidString.prefix(8))) → MapPoint \(String(ghostMapPointID.uuidString.prefix(8)))")
+            }
             
             // Remove the ghost marker node from scene
             if let ghostNode = ghostMarkers[ghostMapPointID] {

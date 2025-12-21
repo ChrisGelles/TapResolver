@@ -200,11 +200,13 @@ struct ARViewWithOverlays: View {
 
                 // Clean up on dismiss - defer to avoid view update conflicts
                 DispatchQueue.main.async {
-                currentMode = .idle
-                arCalibrationCoordinator.reset()
+                    currentMode = .idle
+                    // Record session completion BEFORE reset clears state
+                    arCalibrationCoordinator.recordSessionCompletion()
+                    arCalibrationCoordinator.reset()
                     lastPrintedPhotoRefVertexID = nil
                     lastLoggedPipMapState = nil
-                print("🧹 ARViewWithOverlays: Cleaned up on disappear")
+                    print("🧹 ARViewWithOverlays: Cleaned up on disappear")
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ARMarkerPlaced"))) { notification in
@@ -288,13 +290,27 @@ struct ARViewWithOverlays: View {
                 print("   targetMapPointID: \(String(targetMapPointID.uuidString.prefix(8)))")
                 print("   isGhostConfirm: \(isGhostConfirm)")
                 
-                // CRITICAL SAFETY CHECK: Block if not in placing vertices state (unless ghost confirm)
+                // CRITICAL SAFETY CHECK: Block if not in valid marker placement state
+                // Valid states: placingVertices, ghost confirm, or crawl mode (readyToFill + ghost selected)
                 if !isGhostConfirm {
-                guard case .placingVertices = arCalibrationCoordinator.calibrationState else {
-                    print("⚠️ [REGISTER_MARKER_TRACE] CRITICAL: registerMarker called outside placingVertices state!")
-                    print("   Current state: \(arCalibrationCoordinator.stateDescription)")
-                    print("   This should never happen - investigating caller")
-                    return
+                    let isValidPlacingState = {
+                        if case .placingVertices = arCalibrationCoordinator.calibrationState { return true }
+                        if case .readyToFill = arCalibrationCoordinator.calibrationState,
+                           arCalibrationCoordinator.selectedGhostMapPointID != nil { return true }
+                        return false
+                    }()
+                    
+                    guard isValidPlacingState else {
+                        print("⚠️ [REGISTER_MARKER_TRACE] CRITICAL: registerMarker called outside valid placement state!")
+                        print("   Current state: \(arCalibrationCoordinator.stateDescription)")
+                        print("   selectedGhostMapPointID: \(arCalibrationCoordinator.selectedGhostMapPointID?.uuidString.prefix(8) ?? "nil")")
+                        print("   This should never happen - investigating caller")
+                        return
+                    }
+                    
+                    // Log crawl mode adjustments (not a warning)
+                    if case .readyToFill = arCalibrationCoordinator.calibrationState {
+                        print("🔗 [REGISTER_MARKER_TRACE] Crawl mode adjustment for ghost \(String(arCalibrationCoordinator.selectedGhostMapPointID!.uuidString.prefix(8)))")
                     }
                 }
                 
@@ -671,6 +687,42 @@ struct ARViewWithOverlays: View {
                                 guard let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID,
                                       let ghostPosition = arCalibrationCoordinator.selectedGhostEstimatedPosition else {
                                     print("⚠️ [GHOST_UI] No ghost position/ID available for confirmation")
+                                    return
+                                }
+                                
+                                // Check if this is a DEMOTED ghost (requires re-confirmation, not crawl expansion)
+                                if arCalibrationCoordinator.demotedGhostMapPointIDs.contains(ghostMapPointID) {
+                                    print("🔗 [DEMOTE_CONFIRM] Re-confirming demoted ghost at position")
+                                    print("   MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
+                                    print("   Position: \(ghostPosition)")
+                                    
+                                    // Remove from demoted set
+                                    arCalibrationCoordinator.demotedGhostMapPointIDs.remove(ghostMapPointID)
+                                    
+                                    // Remove the ghost marker from scene
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("RemoveGhostMarker"),
+                                        object: nil,
+                                        userInfo: ["mapPointID": ghostMapPointID]
+                                    )
+                                    
+                                    // Place a real marker at the ghost position
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("ConfirmGhostMarker"),
+                                        object: nil,
+                                        userInfo: [
+                                            "position": [ghostPosition.x, ghostPosition.y, ghostPosition.z],
+                                            "mapPointID": ghostMapPointID,
+                                            "isGhostConfirm": true,
+                                            "isDemoteReconfirm": true
+                                        ]
+                                    )
+                                    
+                                    // Clear ghost selection
+                                    arCalibrationCoordinator.selectedGhostMapPointID = nil
+                                    arCalibrationCoordinator.selectedGhostEstimatedPosition = nil
+                                    
+                                    print("✅ [DEMOTE_CONFIRM] Re-confirmation complete")
                                     return
                                 }
                                 
