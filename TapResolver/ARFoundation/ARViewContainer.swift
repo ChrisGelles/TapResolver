@@ -21,6 +21,9 @@ struct ARViewContainer: UIViewRepresentable {
     
     // Map point store for survey markers
     var mapPointStore: MapPointStore?
+    
+    // Survey point store for marker coloring
+    var surveyPointStore: SurveyPointStore?
 
     // AR calibration coordinator for ghost selection
     var arCalibrationCoordinator: ARCalibrationCoordinator?
@@ -106,6 +109,7 @@ struct ARViewContainer: UIViewRepresentable {
         context.coordinator.showPlaneVisualization = showPlaneVisualization
         context.coordinator.metricSquareStore = metricSquareStore
         context.coordinator.mapPointStore = mapPointStore
+        context.coordinator.surveyPointStore = surveyPointStore
         context.coordinator.arCalibrationCoordinator = arCalibrationCoordinator
         context.coordinator.bluetoothScanner = bluetoothScanner
         
@@ -126,6 +130,7 @@ struct ARViewContainer: UIViewRepresentable {
         var surveyMarkers: [UUID: SurveyMarker] = [:]  // markerID -> SurveyMarker instance
         weak var metricSquareStore: MetricSquareStore?
         weak var mapPointStore: MapPointStore?
+        weak var surveyPointStore: SurveyPointStore?
         /// Reference to calibration coordinator for ghost selection updates
         weak var arCalibrationCoordinator: ARCalibrationCoordinator?
         weak var bluetoothScanner: BluetoothScanner?
@@ -348,6 +353,14 @@ struct ARViewContainer: UIViewRepresentable {
                 self,
                 selector: #selector(handleClearAllSurveyMarkers),
                 name: NSNotification.Name("ClearAllSurveyMarkers"),
+                object: nil
+            )
+            
+            // Survey session persisted - update nearby marker colors
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleSurveySessionPersisted),
+                name: .surveySessionPersisted,
                 object: nil
             )
             
@@ -591,6 +604,50 @@ struct ARViewContainer: UIViewRepresentable {
         @objc func handleClearAllSurveyMarkers(_ notification: Notification) {
             print("🧹 [CLEAR_ALL] Clearing all survey markers")
             clearSurveyMarkers()
+        }
+        
+        @objc func handleSurveySessionPersisted(_ notification: Notification) {
+            guard let userInfo = notification.userInfo,
+                  let mapCoordinate = userInfo["mapCoordinate"] as? CGPoint else {
+                print("⚠️ [ARViewContainer] SurveySessionPersisted missing mapCoordinate")
+                return
+            }
+            
+            // We're on main thread (notification posted from MainActor.run)
+            // Use assumeIsolated to access @MainActor isolated SurveyPointStore
+            MainActor.assumeIsolated {
+                guard let surveyPointStore = self.surveyPointStore,
+                      let ppm = self.getPixelsPerMeter(), ppm > 0 else {
+                    print("⚠️ [ARViewContainer] Cannot update marker colors - missing store or scale")
+                    return
+                }
+                
+                let influenceRadiusPixels = Double(SurveyMarkerConfig.influenceRadiusMeters) * Double(ppm)
+                var updatedCount = 0
+                
+                // Update markers within influence radius of saved session
+                for (_, marker) in self.surveyMarkers {
+                    guard let markerCoord = marker.mapCoordinate else { continue }
+                    
+                    let dx = Double(markerCoord.x - mapCoordinate.x)
+                    let dy = Double(markerCoord.y - mapCoordinate.y)
+                    let distance = sqrt(dx * dx + dy * dy)
+                    
+                    if distance < influenceRadiusPixels {
+                        let weightedTime = surveyPointStore.weightedDwellTimeNear(
+                            coordinate: markerCoord,
+                            radiusPixels: influenceRadiusPixels
+                        )
+                        let color = SurveyMarker.colorForDwellTime(weightedTime)
+                        marker.updateSphereColor(color)
+                        updatedCount += 1
+                    }
+                }
+                
+                if updatedCount > 0 {
+                    print("🎨 [ARViewContainer] Updated colors for \(updatedCount) marker(s) near (\(String(format: "%.1f", mapCoordinate.x)), \(String(format: "%.1f", mapCoordinate.y)))")
+                }
+            }
         }
         
         @objc func handleClearTriangleMarkers(_ notification: Notification) {
@@ -1796,6 +1853,22 @@ struct ARViewContainer: UIViewRepresentable {
             
             sceneView.scene.rootNode.addChildNode(marker.node)
             surveyMarkers[marker.id] = marker
+            
+            // Set initial color based on nearby survey data
+            MainActor.assumeIsolated {
+                if let surveyPointStore = self.surveyPointStore,
+                   let ppm = self.getPixelsPerMeter(), ppm > 0 {
+                    let influenceRadiusPixels = Double(SurveyMarkerConfig.influenceRadiusMeters) * Double(ppm)
+                    let weightedTime = surveyPointStore.weightedDwellTimeNear(
+                        coordinate: mapCoordinate,
+                        radiusPixels: influenceRadiusPixels
+                    )
+                    if weightedTime > 0 {
+                        let color = SurveyMarker.colorForDwellTime(weightedTime)
+                        marker.updateSphereColor(color)
+                    }
+                }
+            }
             
             print("📍 Placed survey marker at map(\(String(format: "%.1f, %.1f", mapCoordinate.x, mapCoordinate.y))) → AR\(String(format: "(%.2f, %.2f, %.2f)", position.x, position.y, position.z))")
             

@@ -21,6 +21,9 @@ struct SurveyMarkerConfig {
     // Collision zones
     static let deadZoneRadius: Float = 0.010     // 1cm silent zone at center
     
+    // Proximity influence
+    static let influenceRadiusMeters: Float = 1.25  // Markers within this radius share quality data
+    
     // Colors
     static let exteriorColor = UIColor.red
 }
@@ -78,6 +81,37 @@ class SurveyMarker {
     /// Remove this marker from the scene
     func removeFromScene() {
         node.removeFromParentNode()
+    }
+    
+    // MARK: - Color Management
+
+    /// Calculate sphere color based on weighted dwell time
+    /// - Parameter seconds: Weighted dwell time in seconds
+    /// - Returns: Interpolated color: Red (0s) → Yellow (6s) → Green (12s+)
+    static func colorForDwellTime(_ seconds: Double) -> UIColor {
+        let t = min(max(seconds, 0.0), 12.0)
+        
+        if t <= 6.0 {
+            // Red to Yellow: increase green channel
+            let progress = t / 6.0
+            return UIColor(red: 1.0, green: CGFloat(progress), blue: 0.0, alpha: 1.0)
+        } else {
+            // Yellow to Green: decrease red channel
+            let progress = (t - 6.0) / 6.0
+            return UIColor(red: CGFloat(1.0 - progress), green: 1.0, blue: 0.0, alpha: 1.0)
+        }
+    }
+
+    /// Update the outer sphere color (does not affect inner gradient sphere)
+    func updateSphereColor(_ color: UIColor) {
+        let sphereNodeName = "arMarkerSphere_\(id.uuidString)"
+        guard let sphereNode = node.childNode(withName: sphereNodeName, recursively: true),
+              let sphere = sphereNode.geometry as? SCNSphere,
+              let material = sphere.firstMaterial else {
+            print("⚠️ [SurveyMarker] Could not find sphere node: \(sphereNodeName)")
+            return
+        }
+        material.diffuse.contents = color
     }
 }
 

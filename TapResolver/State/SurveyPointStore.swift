@@ -550,6 +550,36 @@ public class SurveyPointStore: ObservableObject {
         return (nearest, minDistance)
     }
     
+    // MARK: - Spatial Queries for Marker Coloring
+
+    /// Query accumulated dwell time near a coordinate with linear distance falloff
+    /// - Parameters:
+    ///   - coordinate: Map coordinate in pixels
+    ///   - radiusPixels: Influence radius in pixels (points beyond this contribute nothing)
+    /// - Returns: Weighted sum of dwell time from nearby SurveyPoints
+    public func weightedDwellTimeNear(coordinate: CGPoint, radiusPixels: Double) -> Double {
+        guard radiusPixels > 0 else { return 0.0 }
+        
+        let x = Double(coordinate.x)
+        let y = Double(coordinate.y)
+        var weightedSum: Double = 0.0
+        
+        for point in surveyPoints.values {
+            let dx = point.mapX - x
+            let dy = point.mapY - y
+            let distance = sqrt(dx * dx + dy * dy)
+            
+            // Skip points outside influence radius
+            guard distance < radiusPixels else { continue }
+            
+            // Linear falloff: 1.0 at center, 0.0 at edge
+            let weight = 1.0 - (distance / radiusPixels)
+            weightedSum += weight * point.quality.totalDwellTime_s
+        }
+        
+        return weightedSum
+    }
+    
     /// Remove a specific session from a survey point
     public func removeSession(sessionID: String, from coordinateKey: String) {
         guard var point = surveyPoints[coordinateKey] else {

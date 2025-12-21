@@ -31,6 +31,14 @@ private func localTimeFromISO(_ isoString: String) -> String {
     return localTimeString(from: date)
 }
 
+// MARK: - Notifications
+
+extension Notification.Name {
+    /// Posted after a survey session is persisted to store
+    /// userInfo: ["mapCoordinate": CGPoint]
+    static let surveySessionPersisted = Notification.Name("SurveySessionPersisted")
+}
+
 // MARK: - Thread Tracing
 
 /// Logs survey thread trace information when enabled
@@ -682,10 +690,17 @@ class SurveySessionCollector: ObservableObject {
         
         surveyTrace("finalizeSessionAsync", context: "computation complete, hopping to MainActor for store write")
         
-        // Hop to MainActor ONLY for the store write
+        // Hop to MainActor ONLY for the store write, then notify
         await MainActor.run {
             surveyTrace("storeWrite", context: "on MainActor, writing to store")
             store.addSession(surveySession, atMapCoordinate: mapCoordinate)
+            
+            // Notify AR view to update marker colors (still on MainActor)
+            NotificationCenter.default.post(
+                name: .surveySessionPersisted,
+                object: nil,
+                userInfo: ["mapCoordinate": mapCoordinate]
+            )
         }
         
         surveyTrace("finalizeSessionAsync", context: "complete, session saved")

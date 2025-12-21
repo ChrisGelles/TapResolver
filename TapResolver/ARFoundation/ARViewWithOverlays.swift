@@ -66,6 +66,7 @@ struct ARViewWithOverlays: View {
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
     @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
     @EnvironmentObject private var metricSquares: MetricSquareStore
+    @EnvironmentObject private var surveyPointStore: SurveyPointStore
     @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
     @EnvironmentObject private var btScanner: BluetoothScanner
     
@@ -95,6 +96,7 @@ struct ARViewWithOverlays: View {
                 showPlaneVisualization: $showPlaneVisualization,
                 metricSquareStore: metricSquares,
                 mapPointStore: mapPointStore,
+                surveyPointStore: surveyPointStore,
                 arCalibrationCoordinator: arCalibrationCoordinator,
                 bluetoothScanner: btScanner
             )
