@@ -368,6 +368,14 @@ struct ARViewContainer: UIViewRepresentable {
                 object: nil
             )
             
+            // Manual survey marker placement
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handlePlaceManualSurveyMarker),
+                name: .placeManualSurveyMarker,
+                object: nil
+            )
+            
             // Listen for triangle calibration complete
             NotificationCenter.default.addObserver(
                 forName: NSNotification.Name("TriangleCalibrationComplete"),
@@ -483,6 +491,171 @@ struct ARViewContainer: UIViewRepresentable {
             
             print("🧪 [TEST_SURVEY_MARKER] Placed at (\(String(format: "%.2f, %.2f, %.2f", position.x, position.y, position.z)))")
             print("   Total survey markers in scene: \(surveyMarkers.count)")
+        }
+        
+        @objc func handlePlaceManualSurveyMarker(_ notification: Notification) {
+            print("📍 [MANUAL_SURVEY] Button tapped")
+            
+            guard let sceneView = sceneView else {
+                print("⚠️ [MANUAL_SURVEY] No sceneView available")
+                return
+            }
+            
+            // Get crosshair position (with linger fallback)
+            let lingerDuration: TimeInterval = 0.2
+            let position: simd_float3
+            if let livePosition = currentCursorPosition {
+                position = livePosition
+            } else if let lingeredPosition = lastValidCursorPosition,
+                      let timestamp = lastValidCursorTimestamp,
+                      Date().timeIntervalSince(timestamp) < lingerDuration {
+                position = lingeredPosition
+                print("📍 [MANUAL_SURVEY] Using lingered position")
+            } else {
+                print("⚠️ [MANUAL_SURVEY] No cursor position available")
+                return
+            }
+            
+            // Check proximity to existing Survey Markers (0.25m minimum)
+            let minSeparation: Float = 0.25
+            for (existingID, existingMarker) in surveyMarkers {
+                let existingPosition = existingMarker.node.simdPosition
+                let distance = simd_distance(position, existingPosition)
+                if distance < minSeparation {
+                    print("⚠️ [MANUAL_SURVEY] Too close to existing marker \(String(existingID.uuidString.prefix(8))) (\(String(format: "%.2f", distance))m < \(minSeparation)m)")
+                    // TODO: Could add haptic feedback or visual indicator here
+                    return
+                }
+            }
+            
+            // Calculate map coordinate from AR position (optional - try but allow nil)
+            var mapCoordinate: CGPoint? = nil
+            var containingTriangleID: UUID? = nil  // Track which triangle contains this point
+            if let coordinator = arCalibrationCoordinator,
+               let mapPointStore = mapPointStore,
+               !coordinator.sessionCalibratedTriangles.isEmpty,
+               !coordinator.mapPointARPositions.isEmpty {
+                // Try to find a calibrated triangle with all 3 vertices
+                for triangleID in coordinator.sessionCalibratedTriangles {
+                    guard let triangle = coordinator.triangleStoreAccess.triangle(withID: triangleID),
+                          triangle.vertexIDs.count == 3 else { continue }
+                    
+                    var arPositions: [simd_float3] = []
+                    var mapPositions: [CGPoint] = []
+                    
+                    for vertexID in triangle.vertexIDs {
+                        guard let arPos = coordinator.mapPointARPositions[vertexID],
+                              let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }) else {
+                            break
+                        }
+                        arPositions.append(arPos)
+                        mapPositions.append(mapPoint.mapPoint)
+                    }
+                    
+                    // If we have all 3 vertices, use barycentric interpolation
+                    if arPositions.count == 3 && mapPositions.count == 3 {
+                        mapCoordinate = projectUsingBarycentricInterpolation(
+                            userARPos: position,
+                            arPositions: arPositions,
+                            mapPositions: mapPositions
+                        )
+                        if mapCoordinate != nil {
+                            containingTriangleID = triangleID  // Remember which triangle contains this point
+                            print("📍 [MANUAL_SURVEY] Map coordinate: (\(String(format: "%.1f", mapCoordinate!.x)), \(String(format: "%.1f", mapCoordinate!.y))) in triangle \(String(triangleID.uuidString.prefix(8)))")
+                            break
+                        }
+                    }
+                }
+            }
+            
+            // Create survey marker
+            let marker = SurveyMarker(
+                at: position,
+                userDeviceHeight: userDeviceHeight,
+                mapCoordinate: mapCoordinate,
+                triangleID: containingTriangleID,  // Assign to containing triangle for clearing
+                animated: true
+            )
+            
+            sceneView.scene.rootNode.addChildNode(marker.node)
+            surveyMarkers[marker.id] = marker
+            
+            print("📍 [MANUAL_SURVEY] Placed at AR(\(String(format: "%.2f, %.2f, %.2f", position.x, position.y, position.z)))")
+            
+            // Apply initial color based on nearby SurveyPoints (same as auto-filled markers)
+            if let mapCoord = mapCoordinate {
+                MainActor.assumeIsolated {
+                    if let surveyPointStore = self.surveyPointStore,
+                       let ppm = self.getPixelsPerMeter(), ppm > 0 {
+                        let influenceRadiusPixels = Double(SurveyMarkerConfig.influenceRadiusMeters) * Double(ppm)
+                        let weightedTime = surveyPointStore.weightedDwellTimeNear(
+                            coordinate: mapCoord,
+                            radiusPixels: influenceRadiusPixels
+                        )
+                        if weightedTime > 0 {
+                            let color = SurveyMarker.colorForDwellTime(weightedTime)
+                            marker.updateSphereColor(color)
+                            print("🎨 [MANUAL_SURVEY] Applied inherited color (weighted time: \(String(format: "%.1f", weightedTime))s)")
+                        }
+                    }
+                }
+            }
+            
+            print("📍 [MANUAL_SURVEY] Total survey markers: \(surveyMarkers.count)")
+        }
+        
+        /// Project AR position to map coordinate using barycentric interpolation
+        /// - Parameters:
+        ///   - userARPos: AR position to project
+        ///   - arPositions: AR positions of triangle vertices (3 points)
+        ///   - mapPositions: Map positions of triangle vertices (3 points)
+        /// - Returns: Map coordinate or nil if projection fails
+        private func projectUsingBarycentricInterpolation(
+            userARPos: simd_float3,
+            arPositions: [simd_float3],
+            mapPositions: [CGPoint]
+        ) -> CGPoint? {
+            guard arPositions.count == 3, mapPositions.count == 3 else { return nil }
+            
+            let p0 = arPositions[0]
+            let p1 = arPositions[1]
+            let p2 = arPositions[2]
+            
+            // Project to 2D plane (use XZ plane)
+            let v0 = simd_float2(p1.x - p0.x, p1.z - p0.z)
+            let v1 = simd_float2(p2.x - p0.x, p2.z - p0.z)
+            let v2 = simd_float2(userARPos.x - p0.x, userARPos.z - p0.z)
+            
+            let dot00 = simd_dot(v0, v0)
+            let dot01 = simd_dot(v0, v1)
+            let dot02 = simd_dot(v0, v2)
+            let dot11 = simd_dot(v1, v1)
+            let dot12 = simd_dot(v1, v2)
+            
+            let invDenom = 1 / (dot00 * dot11 - dot01 * dot01)
+            guard invDenom.isFinite else { return nil }
+            
+            let u = (dot11 * dot02 - dot01 * dot12) * invDenom
+            let v = (dot00 * dot12 - dot01 * dot02) * invDenom
+            
+            // Check if point is inside triangle
+            if u >= 0 && v >= 0 && (u + v) <= 1 {
+                // Interpolate map positions
+                let map0 = mapPositions[0]
+                let map1 = mapPositions[1]
+                let map2 = mapPositions[2]
+                
+                let w = CGFloat(1.0 - u - v)
+                let uCGFloat = CGFloat(u)
+                let vCGFloat = CGFloat(v)
+                
+                let mapX = w * map0.x + uCGFloat * map1.x + vCGFloat * map2.x
+                let mapY = w * map0.y + uCGFloat * map1.y + vCGFloat * map2.y
+                
+                return CGPoint(x: mapX, y: mapY)
+            }
+            
+            return nil
         }
         
         @objc func handleFillTriangleWithSurveyMarkers(notification: Notification) {

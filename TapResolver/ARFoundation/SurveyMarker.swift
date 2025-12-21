@@ -133,4 +133,7 @@ extension Notification.Name {
     /// Posted when dwell timer reaches ready threshold (3.0 seconds)
     /// userInfo: ["markerID": UUID, "mapCoordinate": CGPoint?]
     static let surveyMarkerDwellReady = Notification.Name("SurveyMarkerDwellReady")
+    
+    /// Posted when user wants to manually place a survey marker at crosshair
+    static let placeManualSurveyMarker = Notification.Name("PlaceManualSurveyMarker")
 }
