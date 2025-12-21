@@ -31,6 +31,10 @@ public final class ARWorldMapStore: ObservableObject {
     @Published public var currentSessionID: UUID = UUID()
     @Published public var currentSessionStartTime: Date = Date()
     
+    /// Completed calibration sessions (persisted)
+    @Published public var completedSessions: [ARCalibrationSession] = []
+    private let sessionsStorageKey = "ARCalibrationSessions_v1"
+    
     // RELOCALIZATION PREP: Historical session metadata
     // TODO: Store all previous session origins and transformations
     // var sessionTransforms: [UUID: SessionTransform] = [:]
@@ -144,6 +148,42 @@ public final class ARWorldMapStore: ObservableObject {
             try container.encodeIfPresent(observations, forKey: .observations)
             try container.encode(sessionID, forKey: .sessionID)
             try container.encode(sessionTimestamp, forKey: .sessionTimestamp)
+        }
+    }
+    
+    // MARK: - Calibration Session Record
+    
+    /// Records metadata about a completed calibration session for analytics and drift detection
+    public struct ARCalibrationSession: Codable, Identifiable {
+        public let id: UUID                           // Same as currentSessionID
+        public let startTimestamp: Date
+        public let endTimestamp: Date
+        public var duration: TimeInterval { endTimestamp.timeIntervalSince(startTimestamp) }
+        
+        public let trianglesCalibratedCount: Int      // Number of triangles completed
+        public let mapPointsPlacedCount: Int          // Number of MapPoints that received position data
+        
+        public let exitReason: ExitReason
+        
+        public enum ExitReason: String, Codable {
+            case completed      // User finished calibration normally (dismissed AR view)
+            case aborted        // User tapped reset/cancel
+        }
+        
+        public init(
+            id: UUID,
+            startTimestamp: Date,
+            endTimestamp: Date,
+            trianglesCalibratedCount: Int,
+            mapPointsPlacedCount: Int,
+            exitReason: ExitReason
+        ) {
+            self.id = id
+            self.startTimestamp = startTimestamp
+            self.endTimestamp = endTimestamp
+            self.trianglesCalibratedCount = trianglesCalibratedCount
+            self.mapPointsPlacedCount = mapPointsPlacedCount
+            self.exitReason = exitReason
         }
     }
     
@@ -277,6 +317,8 @@ public final class ARWorldMapStore: ObservableObject {
     
     // Static flag to ensure init message only prints once
     private static var hasLoggedInit = false
+    // Static flag to ensure session loading message only prints once
+    private static var hasLoggedSessionLoad = false
     
     public init() {
         // Only log initialization once (for debugging)
@@ -285,6 +327,7 @@ public final class ARWorldMapStore: ObservableObject {
             Self.hasLoggedInit = true
         }
         loadGlobalMapMetadata()
+        loadCompletedSessions()
         // LEGACY: Marker loading removed - markers are now created on-demand during sessions
         // No longer loading persisted marker metadata at startup
         
@@ -748,6 +791,55 @@ public final class ARWorldMapStore: ObservableObject {
         // 3. Calculate transformation matrix: old -> new
         // 4. Apply transformation to all markers from previous sessions
         // 5. Store the transformation for future use
+    }
+    
+    /// Records a completed calibration session
+    /// - Parameters:
+    ///   - trianglesCalibratedCount: Number of triangles calibrated this session
+    ///   - mapPointsPlacedCount: Number of MapPoints that received position data
+    ///   - exitReason: Why the session ended
+    public func endSession(
+        trianglesCalibratedCount: Int,
+        mapPointsPlacedCount: Int,
+        exitReason: ARCalibrationSession.ExitReason
+    ) {
+        let session = ARCalibrationSession(
+            id: currentSessionID,
+            startTimestamp: currentSessionStartTime,
+            endTimestamp: Date(),
+            trianglesCalibratedCount: trianglesCalibratedCount,
+            mapPointsPlacedCount: mapPointsPlacedCount,
+            exitReason: exitReason
+        )
+        
+        completedSessions.append(session)
+        saveCompletedSessions()
+        
+        print("📍 [SESSION_END] Session \(String(currentSessionID.uuidString.prefix(8))) ended")
+        print("   Duration: \(String(format: "%.1f", session.duration))s")
+        print("   Triangles: \(trianglesCalibratedCount)")
+        print("   MapPoints: \(mapPointsPlacedCount)")
+        print("   Exit reason: \(exitReason.rawValue)")
+    }
+    
+    private func saveCompletedSessions() {
+        let key = ctx.key(sessionsStorageKey)
+        if let data = try? JSONEncoder().encode(completedSessions) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+    
+    private func loadCompletedSessions() {
+        let key = ctx.key(sessionsStorageKey)
+        if let data = UserDefaults.standard.data(forKey: key),
+           let sessions = try? JSONDecoder().decode([ARCalibrationSession].self, from: data) {
+            completedSessions = sessions
+            // Only log once to prevent spam from multiple ARWorldMapStore instances
+            if !Self.hasLoggedSessionLoad {
+                print("📖 [SESSION_HISTORY] Loaded \(sessions.count) completed session(s)")
+                Self.hasLoggedSessionLoad = true
+            }
+        }
     }
     
     // MARK: - Diagnostics

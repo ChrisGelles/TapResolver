@@ -809,6 +809,13 @@ struct ARViewContainer: UIViewRepresentable {
         }
 
         @objc func handleTapGesture(_ sender: UITapGestureRecognizer) {
+            // DIAGNOSTIC: Log every tap
+            let tapLocation = sender.location(in: sceneView ?? sender.view)
+            print("👆 [TAP_DIAG] ═══════════════════════════════════════")
+            print("👆 [TAP_DIAG] Tap received at screen position: \(tapLocation)")
+            print("👆 [TAP_DIAG] Current mode: \(currentMode)")
+            print("👆 [TAP_DIAG] Calibration state: \(arCalibrationCoordinator?.stateDescription ?? "nil coordinator")")
+            
             print("🔍 [TAP_TRACE] Tap detected")
             print("   Current mode: \(currentMode)")
             
@@ -821,11 +828,17 @@ struct ARViewContainer: UIViewRepresentable {
             // Disable tap-to-place in triangle calibration mode - use Place Marker button instead
             // But allow tapping on existing AR markers to demote them to ghosts
             if case .triangleCalibration = currentMode {
-                guard let sceneView = sceneView else { return }
+                print("👆 [TAP_DIAG] Mode is .triangleCalibration - checking for AR marker tap")
+                guard let sceneView = sceneView else {
+                    print("👆 [TAP_DIAG] ⚠️ sceneView is nil!")
+                    return
+                }
                 
                 // Check if user tapped on an existing AR marker for re-adjustment
-                let tapLocation = sender.location(in: sceneView)
-                if let tappedMarkerID = hitTestARMarker(at: tapLocation, in: sceneView) {
+                // Note: tapLocation already captured at function entry for diagnostics
+                let markerTapLocation = sender.location(in: sceneView)
+                print("👆 [TAP_DIAG] Calling hitTestARMarker at \(markerTapLocation)")
+                if let tappedMarkerID = hitTestARMarker(at: markerTapLocation, in: sceneView) {
                     print("👆 [TAP_MARKER] Tapped AR marker \(String(tappedMarkerID.uuidString.prefix(8))) - demoting to ghost")
                     demoteMarkerToGhost(markerID: tappedMarkerID)
                     return
@@ -834,6 +847,9 @@ struct ARViewContainer: UIViewRepresentable {
                 print("👆 [TAP_TRACE] Tap ignored in triangle calibration mode — use Place Marker button or tap an AR marker to adjust")
                 return
             }
+            
+            // DIAGNOSTIC: Log if we're in a different mode
+            print("👆 [TAP_DIAG] Not in .triangleCalibration mode - current mode: \(currentMode)")
             
             guard let sceneView = sceneView else { return }
             
@@ -865,39 +881,67 @@ struct ARViewContainer: UIViewRepresentable {
         ///   - sceneView: The AR scene view
         /// - Returns: The marker UUID if hit, nil otherwise
         private func hitTestARMarker(at point: CGPoint, in sceneView: ARSCNView) -> UUID? {
+            print("🎯 [HIT_TEST_DIAG] ───────────────────────────────")
+            print("🎯 [HIT_TEST_DIAG] Testing point: \(point)")
+            
             let hitResults = sceneView.hitTest(point, options: [
                 .searchMode: SCNHitTestSearchMode.all.rawValue,
                 .ignoreHiddenNodes: false
             ])
             
-            for result in hitResults {
+            print("🎯 [HIT_TEST_DIAG] Total hit results: \(hitResults.count)")
+            
+            if hitResults.isEmpty {
+                print("🎯 [HIT_TEST_DIAG] ⚠️ No nodes hit at all - tap missed all geometry")
+                return nil
+            }
+            
+            for (index, result) in hitResults.enumerated() {
+                print("🎯 [HIT_TEST_DIAG] Hit[\(index)]: node='\(result.node.name ?? "unnamed")' geometry=\(type(of: result.node.geometry as Any))")
+                
                 // Check if we hit a marker node (sphere topper or pole)
                 var node: SCNNode? = result.node
+                var depth = 0
                 
                 // Walk up the hierarchy to find the marker root
                 while let current = node {
+                    let nodeName = current.name ?? "unnamed"
+                    print("🎯 [HIT_TEST_DIAG]   ↳ depth[\(depth)]: '\(nodeName)'")
+                    
                     if let name = current.name {
                         // Check for marker root node: "arMarker_<UUID>"
                         if name.hasPrefix("arMarker_") && !name.hasPrefix("arMarkerSphere_") {
                             let uuidString = String(name.dropFirst("arMarker_".count))
+                            print("🎯 [HIT_TEST_DIAG]   Found arMarker_ prefix, UUID string: '\(uuidString)'")
                             if let uuid = UUID(uuidString: uuidString) {
-                                print("🎯 [HIT_TEST] Hit AR marker node: \(String(uuid.uuidString.prefix(8)))")
+                                print("🎯 [HIT_TEST_DIAG] ✅ SUCCESS: Hit AR marker \(String(uuid.uuidString.prefix(8)))")
                                 return uuid
+                            } else {
+                                print("🎯 [HIT_TEST_DIAG] ⚠️ UUID parse failed for: '\(uuidString)'")
                             }
                         }
                         // Check for sphere node: "arMarkerSphere_<UUID>"
                         if name.hasPrefix("arMarkerSphere_") {
                             let uuidString = String(name.dropFirst("arMarkerSphere_".count))
+                            print("🎯 [HIT_TEST_DIAG]   Found arMarkerSphere_ prefix, UUID string: '\(uuidString)'")
                             if let uuid = UUID(uuidString: uuidString) {
-                                print("🎯 [HIT_TEST] Hit AR marker sphere: \(String(uuid.uuidString.prefix(8)))")
+                                print("🎯 [HIT_TEST_DIAG] ✅ SUCCESS: Hit AR marker sphere \(String(uuid.uuidString.prefix(8)))")
                                 return uuid
+                            } else {
+                                print("🎯 [HIT_TEST_DIAG] ⚠️ UUID parse failed for: '\(uuidString)'")
                             }
+                        }
+                        // Check for ghost marker nodes too
+                        if name.hasPrefix("ghostMarker_") {
+                            print("🎯 [HIT_TEST_DIAG]   ℹ️ Hit ghost marker (not AR marker): '\(name)'")
                         }
                     }
                     node = current.parent
+                    depth += 1
                 }
             }
             
+            print("🎯 [HIT_TEST_DIAG] ❌ No AR marker found in any hit result")
             return nil
         }
         
