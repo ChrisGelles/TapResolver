@@ -186,13 +186,26 @@ public final class MapPointStore: ObservableObject {
         // MARK: - Position History (Milestone 2)
         public var arPositionHistory: [ARPositionRecord] = []
         
-        // MARK: - Baked Canonical Position (Milestone 5)
+        // MARK: - Canonical Position (Physical Reality)
         
-        // These values are computed at calibration end and represent the MapPoint's
-        // position in a map-centered canonical coordinate frame.
-        public var bakedCanonicalPosition: SIMD3<Float>?  // Position in canonical frame
-        public var bakedConfidence: Float?                 // Aggregate confidence (0.0-1.0)
-        public var bakedSampleCount: Int = 0               // Number of calibration sessions that contributed
+        // ═══════════════════════════════════════════════════════════════════════
+        // CANONICAL COORDINATE SPACE
+        // ═══════════════════════════════════════════════════════════════════════
+        // Origin: Center of map image at floor level
+        // Units: Meters
+        // Orientation: +X right, +Z down (map coords), +Y up (toward ceiling)
+        //
+        // This represents where the point ACTUALLY IS in physical space,
+        // accumulated from multiple AR calibration sessions. Ghost markers
+        // are projected FROM this position into current session coordinates.
+        //
+        // FUTURE: Discrepancy between canonicalPosition and mapPixelPosition
+        // (after scale/rotation) indicates map distortion to be corrected.
+        // ═══════════════════════════════════════════════════════════════════════
+        
+        public var canonicalPosition: SIMD3<Float>?       // Position in canonical frame (meters)
+        public var canonicalConfidence: Float?             // Aggregate confidence (0.0-1.0)
+        public var canonicalSampleCount: Int = 0           // Number of calibration sessions that contributed
         
         public var mapPoint: CGPoint {
             get { position }
@@ -212,9 +225,9 @@ public final class MapPointStore: ObservableObject {
             triangleMemberships: [UUID] = [],
             isLocked: Bool = true,  // ✅ ADD THIS PARAMETER
             arPositionHistory: [ARPositionRecord] = [],
-            bakedCanonicalPosition: SIMD3<Float>? = nil,
-            bakedConfidence: Float? = nil,
-            bakedSampleCount: Int = 0
+            canonicalPosition: SIMD3<Float>? = nil,
+            canonicalConfidence: Float? = nil,
+            canonicalSampleCount: Int = 0
         ) {
             self.id = id ?? UUID()
             self.position = mapPoint
@@ -229,9 +242,9 @@ public final class MapPointStore: ObservableObject {
             self.triangleMemberships = triangleMemberships
             self.isLocked = isLocked  // ✅ ADD THIS ASSIGNMENT
             self.arPositionHistory = arPositionHistory  // NEW
-            self.bakedCanonicalPosition = bakedCanonicalPosition
-            self.bakedConfidence = bakedConfidence
-            self.bakedSampleCount = bakedSampleCount
+            self.canonicalPosition = canonicalPosition
+            self.canonicalConfidence = canonicalConfidence
+            self.canonicalSampleCount = canonicalSampleCount
         }
         
         // MARK: - Consensus Position (Milestone 2)
@@ -298,7 +311,11 @@ public final class MapPointStore: ObservableObject {
             case linkedARMarkerID, arMarkerID, roles
             case locationPhotoData, photoFilename, photoOutdated, photoCapturedAtPosition
             case triangleMemberships, isLocked, arPositionHistory
-            case bakedCanonicalPositionArray, bakedConfidence, bakedSampleCount
+            // NOTE: These keys use "baked" prefix for backward compatibility with stored data.
+            // Swift properties use "canonical" prefix (renamed for clarity).
+            case bakedCanonicalPositionArray   // Maps to: canonicalPosition
+            case bakedConfidence               // Maps to: canonicalConfidence
+            case bakedSampleCount              // Maps to: canonicalSampleCount
         }
         
         public init(from decoder: Decoder) throws {
@@ -327,15 +344,15 @@ public final class MapPointStore: ObservableObject {
             isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? true
             arPositionHistory = try container.decodeIfPresent([ARPositionRecord].self, forKey: .arPositionHistory) ?? []
             
-            // Decode baked canonical position (Milestone 5)
+            // Decode canonical position (stored with "baked" keys for backward compatibility)
             if let bakedArray = try container.decodeIfPresent([Float].self, forKey: .bakedCanonicalPositionArray),
                bakedArray.count == 3 {
-                bakedCanonicalPosition = SIMD3<Float>(bakedArray[0], bakedArray[1], bakedArray[2])
+                canonicalPosition = SIMD3<Float>(bakedArray[0], bakedArray[1], bakedArray[2])
             } else {
-                bakedCanonicalPosition = nil
+                canonicalPosition = nil
             }
-            bakedConfidence = try container.decodeIfPresent(Float.self, forKey: .bakedConfidence)
-            bakedSampleCount = try container.decodeIfPresent(Int.self, forKey: .bakedSampleCount) ?? 0
+            canonicalConfidence = try container.decodeIfPresent(Float.self, forKey: .bakedConfidence)
+            canonicalSampleCount = try container.decodeIfPresent(Int.self, forKey: .bakedSampleCount) ?? 0
         }
         
         public func encode(to encoder: Encoder) throws {
@@ -361,13 +378,13 @@ public final class MapPointStore: ObservableObject {
                 try container.encode(arPositionHistory, forKey: .arPositionHistory)
             }
             
-            // Encode baked canonical position (Milestone 5)
-            if let baked = bakedCanonicalPosition {
-                try container.encode([baked.x, baked.y, baked.z], forKey: .bakedCanonicalPositionArray)
+            // Encode canonical position (using "baked" keys for backward compatibility)
+            if let canonical = canonicalPosition {
+                try container.encode([canonical.x, canonical.y, canonical.z], forKey: .bakedCanonicalPositionArray)
             }
-            try container.encodeIfPresent(bakedConfidence, forKey: .bakedConfidence)
-            if bakedSampleCount > 0 {
-                try container.encode(bakedSampleCount, forKey: .bakedSampleCount)
+            try container.encodeIfPresent(canonicalConfidence, forKey: .bakedConfidence)
+            if canonicalSampleCount > 0 {
+                try container.encode(canonicalSampleCount, forKey: .bakedSampleCount)
             }
         }
     }
@@ -760,10 +777,10 @@ public final class MapPointStore: ObservableObject {
         let isLocked: Bool?  // ✅ Optional for backward compatibility
         let arPositionHistory: [ARPositionRecord]?  // Optional for migration from old data
         
-        // Baked canonical position (Milestone 5)
-        let bakedCanonicalPositionArray: [Float]?  // [x, y, z] in canonical frame
-        let bakedConfidence: Float?
-        let bakedSampleCount: Int?
+        // Canonical position (stored with "baked" keys for backward compatibility)
+        let bakedCanonicalPositionArray: [Float]?  // [x, y, z] in canonical frame → canonicalPosition
+        let bakedConfidence: Float?                 // → canonicalConfidence
+        let bakedSampleCount: Int?                  // → canonicalSampleCount
     }
 
     internal func save() {
@@ -812,10 +829,10 @@ public final class MapPointStore: ObservableObject {
                 triangleMemberships: point.triangleMemberships.isEmpty ? nil : point.triangleMemberships,
                 isLocked: point.isLocked,
                 arPositionHistory: point.arPositionHistory.isEmpty ? nil : point.arPositionHistory,
-                // Baked canonical position (Milestone 5)
-                bakedCanonicalPositionArray: point.bakedCanonicalPosition.map { [$0.x, $0.y, $0.z] },
-                bakedConfidence: point.bakedConfidence,
-                bakedSampleCount: point.bakedSampleCount > 0 ? point.bakedSampleCount : nil
+                // Canonical position (stored with "baked" keys for backward compatibility)
+                bakedCanonicalPositionArray: point.canonicalPosition.map { [$0.x, $0.y, $0.z] },
+                bakedConfidence: point.canonicalConfidence,
+                bakedSampleCount: point.canonicalSampleCount > 0 ? point.canonicalSampleCount : nil
             )
         }
         
@@ -968,9 +985,9 @@ public final class MapPointStore: ObservableObject {
                     isLocked: dtoItem.isLocked ?? true,  // Default to locked for backward compatibility
                     arPositionHistory: dtoItem.arPositionHistory ?? [],
                     // Baked canonical position (Milestone 5)
-                    bakedCanonicalPosition: bakedPosition,
-                    bakedConfidence: dtoItem.bakedConfidence,
-                    bakedSampleCount: dtoItem.bakedSampleCount ?? 0
+                    canonicalPosition: bakedPosition,
+                    canonicalConfidence: dtoItem.bakedConfidence,
+                    canonicalSampleCount: dtoItem.bakedSampleCount ?? 0
                 )
                 
                 // Set photo tracking fields
@@ -1918,9 +1935,9 @@ public final class MapPointStore: ObservableObject {
             let avgConfidence = totalWeight / Float(samples.count)
             
             // Update MapPoint
-            points[index].bakedCanonicalPosition = bakedPosition
-            points[index].bakedConfidence = avgConfidence
-            points[index].bakedSampleCount = samples.count
+                points[index].canonicalPosition = bakedPosition
+                points[index].canonicalConfidence = avgConfidence
+                points[index].canonicalSampleCount = samples.count
             
             print("   ✅ \(String(mapPointID.uuidString.prefix(8))): (\(String(format: "%.2f", bakedPosition.x)), \(String(format: "%.2f", bakedPosition.y)), \(String(format: "%.2f", bakedPosition.z))) [samples: \(samples.count), conf: \(String(format: "%.2f", avgConfidence))]")
             
@@ -1966,7 +1983,7 @@ public final class MapPointStore: ObservableObject {
     
     /// Prints summary of baked canonical positions
     func debugBakedPositionSummary() {
-        let pointsWithBaked = points.filter { $0.bakedCanonicalPosition != nil }
+        let pointsWithBaked = points.filter { $0.canonicalPosition != nil }
         let pointsWithHistory = points.filter { !$0.arPositionHistory.isEmpty }
         
         print("\n" + String(repeating: "=", count: 60))
@@ -1979,9 +1996,9 @@ public final class MapPointStore: ObservableObject {
         if !pointsWithBaked.isEmpty {
             print("\n   Baked positions:")
             for point in pointsWithBaked {
-                if let baked = point.bakedCanonicalPosition,
-                   let confidence = point.bakedConfidence {
-                    print("   • \(String(point.id.uuidString.prefix(8))): (\(String(format: "%.2f", baked.x)), \(String(format: "%.2f", baked.y)), \(String(format: "%.2f", baked.z))) conf=\(String(format: "%.2f", confidence)) samples=\(point.bakedSampleCount)")
+                if let canonical = point.canonicalPosition,
+                   let confidence = point.canonicalConfidence {
+                    print("   • \(String(point.id.uuidString.prefix(8))): (\(String(format: "%.2f", canonical.x)), \(String(format: "%.2f", canonical.y)), \(String(format: "%.2f", canonical.z))) conf=\(String(format: "%.2f", confidence)) samples=\(point.canonicalSampleCount)")
                 }
             }
         }

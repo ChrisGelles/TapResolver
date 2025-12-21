@@ -284,7 +284,7 @@ struct ARViewContainer: UIViewRepresentable {
                         
                         // Check baked position
                         if let mapPoint = self.mapPointStore?.points.first(where: { $0.id == vertexID }),
-                           let bakedPos = mapPoint.bakedCanonicalPosition,
+                           let bakedPos = mapPoint.canonicalPosition,
                            self.arCalibrationCoordinator?.projectBakedToSession(bakedPos) != nil {
                             continue
                         }
@@ -1065,7 +1065,7 @@ struct ARViewContainer: UIViewRepresentable {
                     if let coordinator = self.arCalibrationCoordinator,
                        coordinator.hasValidSessionTransform,
                        let mapPoint = self.mapPointStore?.points.first(where: { $0.id == vertexID }),
-                       let bakedPos = mapPoint.bakedCanonicalPosition,
+                       let bakedPos = mapPoint.canonicalPosition,
                        let sessionPos = coordinator.projectBakedToSession(bakedPos) {
                         
                         self.createGhostMarker(at: sessionPos, for: vertexID)
@@ -1494,7 +1494,7 @@ struct ARViewContainer: UIViewRepresentable {
                 
                 // Priority 3: Baked position (historical consensus projected to session)
                 if let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }),
-                   let bakedPos = mapPoint.bakedCanonicalPosition,
+                   let bakedPos = mapPoint.canonicalPosition,
                    let sessionPos = arCalibrationCoordinator?.projectBakedToSession(bakedPos) {
                     vertexPositions3D[vertexID] = sessionPos
                     print("🧱 [REGION_SURVEY] Vertex \(String(vertexID.uuidString.prefix(8))): baked position")

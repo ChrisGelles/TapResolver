@@ -1382,15 +1382,15 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("╠════════════════════════════════════════════════════════════════════════╣")
         
         // Check prerequisites for baked path
-        let hasBakedPosition = mapPoint.bakedCanonicalPosition != nil
+        let hasBakedPosition = mapPoint.canonicalPosition != nil
         let hasSessionTransform = cachedCanonicalToSessionTransform != nil
         
         print("║   MapPoint: \(String(mapPoint.id.uuidString.prefix(8)))")
-        print("║   bakedCanonicalPosition: \(hasBakedPosition ? "✅ EXISTS" : "❌ NIL")")
-        if let baked = mapPoint.bakedCanonicalPosition {
+        print("║   canonicalPosition: \(hasBakedPosition ? "✅ EXISTS" : "❌ NIL")")
+        if let baked = mapPoint.canonicalPosition {
             print("║     → (\(String(format: "%.2f", baked.x)), \(String(format: "%.2f", baked.y)), \(String(format: "%.2f", baked.z)))")
-            print("║     confidence: \(mapPoint.bakedConfidence != nil ? String(format: "%.2f", mapPoint.bakedConfidence!) : "NIL")")
-            print("║     sampleCount: \(mapPoint.bakedSampleCount)")
+            print("║     confidence: \(mapPoint.canonicalConfidence != nil ? String(format: "%.2f", mapPoint.canonicalConfidence!) : "NIL")")
+            print("║     sampleCount: \(mapPoint.canonicalSampleCount)")
         }
         print("║   cachedCanonicalToSessionTransform: \(hasSessionTransform ? "✅ EXISTS" : "❌ NIL")")
         
@@ -1417,7 +1417,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         } else {
             print("║   → Prerequisites not met, skipping baked path")
             if !hasBakedPosition {
-                print("║     Reason: No bakedCanonicalPosition for this MapPoint")
+                print("║     Reason: No canonicalPosition for this MapPoint")
             }
             if !hasSessionTransform {
                 print("║     Reason: No cachedCanonicalToSessionTransform (need 2+ markers placed)")
@@ -1714,13 +1714,13 @@ final class ARCalibrationCoordinator: ObservableObject {
             return nil
         }
         
-        guard let bakedPosition = targetMapPoint.bakedCanonicalPosition else {
+        guard let bakedPosition = targetMapPoint.canonicalPosition else {
             print("┌─────────────────────────────────────────────────────────────────────┐")
-            print("│ ❌ [BAKED_GHOST] No bakedCanonicalPosition for \(String(targetMapPointID.uuidString.prefix(8)))")
+            print("│ ❌ [BAKED_GHOST] No canonicalPosition for \(String(targetMapPointID.uuidString.prefix(8)))")
             print("├─────────────────────────────────────────────────────────────────────┤")
             print("│ MapPoint exists but has no baked data:")
-            print("│   bakedConfidence: \(targetMapPoint.bakedConfidence != nil ? String(format: "%.2f", targetMapPoint.bakedConfidence!) : "NIL")")
-            print("│   bakedSampleCount: \(targetMapPoint.bakedSampleCount)")
+            print("│   canonicalConfidence: \(targetMapPoint.canonicalConfidence != nil ? String(format: "%.2f", targetMapPoint.canonicalConfidence!) : "NIL")")
+            print("│   canonicalSampleCount: \(targetMapPoint.canonicalSampleCount)")
             print("│   arPositionHistory: \(targetMapPoint.arPositionHistory.count) record(s)")
             if !targetMapPoint.arPositionHistory.isEmpty {
                 print("│   Sessions in history:")
@@ -1772,13 +1772,13 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Check target MapPoint's baked status
         if let targetMP = safeMapStore.points.first(where: { $0.id == thirdVertexID }) {
             print("║   Target MapPoint baked status:")
-            if let baked = targetMP.bakedCanonicalPosition {
-                print("║     bakedCanonicalPosition: ✅ (\(String(format: "%.2f", baked.x)), \(String(format: "%.2f", baked.y)), \(String(format: "%.2f", baked.z)))")
+            if let baked = targetMP.canonicalPosition {
+                print("║     canonicalPosition: ✅ (\(String(format: "%.2f", baked.x)), \(String(format: "%.2f", baked.y)), \(String(format: "%.2f", baked.z)))")
             } else {
-                print("║     bakedCanonicalPosition: ❌ NIL")
+                print("║     canonicalPosition: ❌ NIL")
             }
-            print("║     bakedConfidence: \(targetMP.bakedConfidence != nil ? String(format: "%.2f", targetMP.bakedConfidence!) : "NIL")")
-            print("║     bakedSampleCount: \(targetMP.bakedSampleCount)")
+            print("║     canonicalConfidence: \(targetMP.canonicalConfidence != nil ? String(format: "%.2f", targetMP.canonicalConfidence!) : "NIL")")
+            print("║     canonicalSampleCount: \(targetMP.canonicalSampleCount)")
             print("║     arPositionHistory count: \(targetMP.arPositionHistory.count)")
         } else {
             print("║   Target MapPoint: ❌ NOT FOUND IN STORE")
@@ -2235,7 +2235,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         for vertexID in triangle.vertexIDs {
             guard let mapPoint = safeMapStore.points.first(where: { $0.id == vertexID }),
-                  mapPoint.bakedCanonicalPosition != nil else {
+                  mapPoint.canonicalPosition != nil else {
                 return false
             }
         }
@@ -2262,7 +2262,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             
             // Check if vertex has baked position
             guard let mapPoint = safeMapStore.points.first(where: { $0.id == vertexID }),
-                  mapPoint.bakedCanonicalPosition != nil else {
+                  mapPoint.canonicalPosition != nil else {
                 return false // No position source for this vertex
             }
         }
@@ -2341,7 +2341,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             
             for vertexID in triangle.vertexIDs {
                 if let mapPoint = mapPointStore.points.first(where: { $0.id == vertexID }),
-                   mapPoint.bakedCanonicalPosition != nil {
+                   mapPoint.canonicalPosition != nil {
                     // Has baked data
                 } else {
                     allVerticesHaveBaked = false
@@ -2414,7 +2414,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             
             // Fall back to baked position projected to session
             guard let mapPoint = safeMapStore.points.first(where: { $0.id == vertexID }),
-                  let bakedPos = mapPoint.bakedCanonicalPosition,
+                  let bakedPos = mapPoint.canonicalPosition,
                   let sessionPos = projectBakedToSession(bakedPos) else {
                 return nil // Missing data for this vertex
             }
@@ -3597,9 +3597,9 @@ final class ARCalibrationCoordinator: ObservableObject {
             let canonicalPosition = transform.apply(to: sessionARPosition)
             
             // Get current baked state
-            let currentBaked = safeMapStore.points[index].bakedCanonicalPosition
-            let currentConfidence = safeMapStore.points[index].bakedConfidence ?? 0
-            let currentSampleCount = safeMapStore.points[index].bakedSampleCount
+            let currentBaked = safeMapStore.points[index].canonicalPosition
+            let currentConfidence = safeMapStore.points[index].canonicalConfidence ?? 0
+            let currentSampleCount = safeMapStore.points[index].canonicalSampleCount
             
             // Determine confidence for this session's data
             // Use the confidence from position history if available, otherwise default to 0.9
@@ -3638,9 +3638,9 @@ final class ARCalibrationCoordinator: ObservableObject {
             }
             
             // Update the MapPoint
-            safeMapStore.points[index].bakedCanonicalPosition = newBakedPosition
-            safeMapStore.points[index].bakedConfidence = newConfidence
-            safeMapStore.points[index].bakedSampleCount = newSampleCount
+            safeMapStore.points[index].canonicalPosition = newBakedPosition
+            safeMapStore.points[index].canonicalConfidence = newConfidence
+            safeMapStore.points[index].canonicalSampleCount = newSampleCount
             
             updatedCount += 1
         }
@@ -3696,9 +3696,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         let canonicalPosition = rotated * inverseScale
         
         // Get current baked state
-        let currentBaked = safeMapStore.points[index].bakedCanonicalPosition
-        let currentConfidence = safeMapStore.points[index].bakedConfidence ?? 0
-        let currentSampleCount = safeMapStore.points[index].bakedSampleCount
+        let currentBaked = safeMapStore.points[index].canonicalPosition
+        let currentConfidence = safeMapStore.points[index].canonicalConfidence ?? 0
+        let currentSampleCount = safeMapStore.points[index].canonicalSampleCount
         
         // Compute new weighted average
         let newBakedPosition: SIMD3<Float>
@@ -3726,9 +3726,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
         
         // Update and save
-        safeMapStore.points[index].bakedCanonicalPosition = newBakedPosition
-        safeMapStore.points[index].bakedConfidence = newConfidence
-        safeMapStore.points[index].bakedSampleCount = newSampleCount
+        safeMapStore.points[index].canonicalPosition = newBakedPosition
+        safeMapStore.points[index].canonicalConfidence = newConfidence
+        safeMapStore.points[index].canonicalSampleCount = newSampleCount
         
         // Update bake timestamp in MapPointStore
         safeMapStore.lastBakeTimestamp = Date()
