@@ -728,8 +728,8 @@ struct ARViewWithOverlays: View {
                                     return
                                 }
                                 
-                                // Check if we're in crawl mode (readyToFill + ghost selected)
-                                if case .readyToFill = arCalibrationCoordinator.calibrationState,
+                                // Check if we're in crawl mode (readyToFill or surveyMode + ghost selected)
+                                if arCalibrationCoordinator.isCrawlEligibleState,
                                    let currentTriangleID = arCalibrationCoordinator.activeTriangleID {
                                     
                                     print("🔗 [CRAWL_CONFIRM] Confirming ghost at estimated position for crawl")
@@ -783,8 +783,8 @@ struct ARViewWithOverlays: View {
                                 print("🔍 [PLACE_MARKER_BTN] Button tapped")
                                 print("   Current state: \(arCalibrationCoordinator.stateDescription)")
                                 
-                                // Check if we're in crawl mode (.readyToFill + ghost selected)
-                                if case .readyToFill = arCalibrationCoordinator.calibrationState,
+                                // Check if we're in crawl mode (.readyToFill or .surveyMode + ghost selected)
+                                if arCalibrationCoordinator.isCrawlEligibleState,
                                    let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID,
                                    let currentTriangleID = arCalibrationCoordinator.activeTriangleID {
                                     

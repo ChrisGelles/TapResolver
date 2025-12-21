@@ -2630,6 +2630,21 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
     }
     
+    /// Returns true if calibration state allows crawl mode continuation
+    /// Crawl mode works in both .readyToFill and .surveyMode states
+    /// - .readyToFill: Triangle calibrated, awaiting fill or crawl
+    /// - .surveyMode: Triangle calibrated with survey markers, crawl can continue
+    /// - .placingVertices: Still placing vertices, not eligible
+    /// - .idle: No active calibration, not eligible
+    var isCrawlEligibleState: Bool {
+        switch calibrationState {
+        case .readyToFill, .surveyMode:
+            return true
+        case .placingVertices, .idle:
+            return false
+        }
+    }
+    
     /// Save ARWorldMap after successful triangle calibration
     private func saveWorldMapForTriangle(_ triangle: TrianglePatch) {
         // Get the current ARViewCoordinator to access the session
