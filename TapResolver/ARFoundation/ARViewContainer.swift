@@ -158,6 +158,10 @@ struct ARViewContainer: UIViewRepresentable {
         /// The survey marker the user's device is currently inside (for inner sphere orientation updates)
         private var currentlyInsideSurveyMarkerID: UUID?
         
+        /// AR markers hidden because Survey Markers are within proximity threshold
+        /// These stay hidden until survey markers are cleared (not restored on sphere exit)
+        private var hiddenARMarkersForSurveyProximity: Set<UUID> = []
+        
         // Timer for updating crosshair
         private var crosshairUpdateTimer: Timer?
         
@@ -512,6 +516,9 @@ struct ARViewContainer: UIViewRepresentable {
             print("   vertexIDs: \(triangle.vertexIDs.map { String($0.uuidString.prefix(8)) })")
             
             generateSurveyMarkers(for: triangle, spacing: spacing, arWorldMapStore: arWorldMapStore)
+            
+            // Hide AR markers that would interfere with survey markers
+            hideARMarkersNearSurveyMarkers()
         }
         
         @objc func handleFillSwathWithSurveyMarkers(notification: Notification) {
@@ -1754,6 +1761,10 @@ struct ARViewContainer: UIViewRepresentable {
             }
             surveyMarkers.removeAll()
             triggeredSurveyMarkers.removeAll()
+            
+            // Restore AR markers that were hidden for proximity
+            unhideProximityHiddenARMarkers()
+            
             print("🧹 Cleared survey markers")
         }
         
@@ -1833,6 +1844,64 @@ struct ARViewContainer: UIViewRepresentable {
             }
             
             print("🧹 [CLEAR_TRIANGLE] Triangle \(String(triangleID.uuidString.prefix(8))): removed \(removedCount), reassigned \(reassignedCount) edge marker(s)")
+            
+            // If no survey markers remain, restore proximity-hidden AR markers
+            if surveyMarkers.isEmpty {
+                unhideProximityHiddenARMarkers()
+            }
+        }
+        
+        /// Hide AR markers that are within proximity of any survey marker
+        /// Called after survey markers are placed to prevent visual interference
+        /// - Parameter proximityThreshold: Distance in meters (default 0.25m)
+        private func hideARMarkersNearSurveyMarkers(proximityThreshold: Float = 0.25) {
+            guard !surveyMarkers.isEmpty else { return }
+            
+            var hiddenCount = 0
+            
+            for (markerID, markerNode) in placedMarkers {
+                let markerPosition = markerNode.simdPosition
+                
+                // Check if any survey marker is within threshold
+                for (_, surveyMarker) in surveyMarkers {
+                    let surveyPosition = surveyMarker.node.simdPosition
+                    let distance = simd_distance(markerPosition, surveyPosition)
+                    
+                    if distance < proximityThreshold {
+                        markerNode.isHidden = true
+                        hiddenARMarkersForSurveyProximity.insert(markerID)
+                        hiddenCount += 1
+                        print("👁️ [AR_HIDE] Hid AR marker \(String(markerID.uuidString.prefix(8))) - survey marker within \(String(format: "%.2f", distance))m")
+                        break  // Only need one nearby survey marker to hide
+                    }
+                }
+            }
+            
+            if hiddenCount > 0 {
+                print("👁️ [AR_HIDE] Hidden \(hiddenCount) AR marker(s) for survey proximity")
+            }
+        }
+
+        /// Unhide AR markers that were hidden due to survey marker proximity
+        /// Called when survey markers are cleared
+        private func unhideProximityHiddenARMarkers() {
+            guard !hiddenARMarkersForSurveyProximity.isEmpty else { return }
+            
+            var unhiddenCount = 0
+            
+            for markerID in hiddenARMarkersForSurveyProximity {
+                if let markerNode = placedMarkers[markerID] {
+                    markerNode.isHidden = false
+                    unhiddenCount += 1
+                    print("👁️ [AR_SHOW] Restored AR marker \(String(markerID.uuidString.prefix(8)))")
+                }
+            }
+            
+            hiddenARMarkersForSurveyProximity.removeAll()
+            
+            if unhiddenCount > 0 {
+                print("👁️ [AR_SHOW] Restored \(unhiddenCount) AR marker(s) after survey clear")
+            }
         }
         
         /// Places a survey marker WITHOUT calling registerMarker (no photo, no MapPoint updates)
@@ -2073,6 +2142,15 @@ struct ARViewContainer: UIViewRepresentable {
                     
                     currentlyInsideSurveyMarkerID = markerID
                     
+                    // Hide all AR and ghost markers while inside sphere
+                    for (_, node) in placedMarkers {
+                        node.isHidden = true
+                    }
+                    for (_, node) in ghostMarkers {
+                        node.isHidden = true
+                    }
+                    print("👁️ [SPHERE_ENTER] Hid all AR and ghost markers")
+                    
                     // Orient inner sphere toward camera once at entry (frozen during dwell)
                     updateActiveInnerSphereOrientation()
                     
@@ -2097,6 +2175,17 @@ struct ARViewContainer: UIViewRepresentable {
                     
                     if currentlyInsideSurveyMarkerID == markerID {
                         currentlyInsideSurveyMarkerID = nil
+                        
+                        // Restore AR markers (except those hidden for proximity) and all ghost markers
+                        for (arMarkerID, node) in placedMarkers {
+                            if !hiddenARMarkersForSurveyProximity.contains(arMarkerID) {
+                                node.isHidden = false
+                            }
+                        }
+                        for (_, node) in ghostMarkers {
+                            node.isHidden = false
+                        }
+                        print("👁️ [SPHERE_EXIT] Restored marker visibility")
                     }
                     
                     NotificationCenter.default.post(
