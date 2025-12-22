@@ -73,6 +73,16 @@ class KBeaconConnectionManager: NSObject, ObservableObject {
         connectionState = .disconnected
     }
     
+    /// Connect to a beacon using the stored password for the current location
+    func connectUsingStoredPassword(to beacon: KBeacon, locationID: String, completion: @escaping (Bool, String) -> Void) {
+        guard let password = BeaconPasswordStore.shared.getPassword(for: locationID) else {
+            completion(false, "No password stored for location '\(locationID)'")
+            return
+        }
+        
+        connect(to: beacon, password: password, completion: completion)
+    }
+    
     // MARK: - Configuration Reading
     
     func readConfiguration(from beacon: KBeacon) -> KBeaconConfiguration? {

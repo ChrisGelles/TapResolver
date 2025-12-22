@@ -2055,9 +2055,60 @@ private struct ARLocationToolsSheet: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @Environment(\.dismiss) private var dismiss
     
+    @State private var beaconPassword: String = ""
+    @State private var showPassword: Bool = false
+    @State private var passwordSaved: Bool = false
+    
     var body: some View {
         NavigationStack {
             List {
+                // MARK: - Beacon Configuration
+                Section {
+                    HStack {
+                        if showPassword {
+                            TextField("16 hex characters", text: $beaconPassword)
+                                .font(.system(.body, design: .monospaced))
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+                        } else {
+                            SecureField("16 hex characters", text: $beaconPassword)
+                                .font(.system(.body, design: .monospaced))
+                        }
+                        
+                        Button {
+                            showPassword.toggle()
+                        } label: {
+                            Image(systemName: showPassword ? "eye.slash" : "eye")
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
+                    Button {
+                        BeaconPasswordStore.shared.setPassword(beaconPassword, for: locationID)
+                        passwordSaved = true
+                        
+                        // Brief feedback
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            passwordSaved = false
+                        }
+                    } label: {
+                        HStack {
+                            Text(passwordSaved ? "Saved!" : "Save Password")
+                            if passwordSaved {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                            }
+                        }
+                    }
+                    .disabled(beaconPassword.isEmpty)
+                } header: {
+                    Text("Beacon Password")
+                } footer: {
+                    Text("Password used to connect to KBeacon devices at this location. All beacons at this location should share the same password.")
+                }
+                
+                // MARK: - Info Section
                 Section {
                     Text("Survey tools are available within AR view after selecting a MapPoint.")
                         .font(.footnote)
@@ -2065,12 +2116,18 @@ private struct ARLocationToolsSheet: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("AR Tools")
+            .navigationTitle("Location Settings")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") {
                         dismiss()
                     }
+                }
+            }
+            .onAppear {
+                // Load existing password
+                if let existing = BeaconPasswordStore.shared.getPassword(for: locationID) {
+                    beaconPassword = existing
                 }
             }
         }

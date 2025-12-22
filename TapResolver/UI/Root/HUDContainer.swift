@@ -8,6 +8,7 @@
 import SwiftUI
 import Combine
 import Foundation
+import kbeaconlib2
 
 // MARK: - Notification Extensions
 extension Notification.Name {
@@ -1162,6 +1163,8 @@ private struct DebugSettingsPanel: View {
     @State private var showingLogShare = false
     @State private var showingStorageAuditShare = false
     @State private var storageAuditURL: URL? = nil
+    @StateObject private var kbeaconManager = KBeaconConnectionManager()
+    @State private var isBeaconScanning = false
     
     var body: some View {
         GeometryReader { geometry in
@@ -1630,6 +1633,26 @@ private struct DebugSettingsPanel: View {
                         }
                         .buttonStyle(.plain)
                         
+                        // MARK: - KBeacon Inspector
+                        
+                        // Beacon Report Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            runBeaconReport()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: isBeaconScanning ? "antenna.radiowaves.left.and.right.circle.fill" : "antenna.radiowaves.left.and.right")
+                                    .font(.system(size: 24))
+                                Text("Beacon Report")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(isBeaconScanning ? .green : .blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
                         // === END ONE-TIME CLEANUP UTILITY ===
                     }
                     .padding(.horizontal, 20)
@@ -1767,6 +1790,55 @@ private struct DebugSettingsPanel: View {
         print("   AR marker associations will be cleared (arMarkerIDs = [])")
         print("   Triangle vertices and mesh connectivity preserved")
         print("================================================================================")
+    }
+    
+    private func runBeaconReport() {
+        print("")
+        print("================================================================================")
+        print("📡 KBEACON REPORT")
+        print("================================================================================")
+        
+        if isBeaconScanning {
+            // Stop scanning
+            kbeaconManager.stopScanning()
+            isBeaconScanning = false
+            
+            print("🛑 Scanning stopped")
+            print("")
+            print("📋 DISCOVERED BEACONS: \(kbeaconManager.discoveredBeacons.count)")
+            print("--------------------------------------------------------------------------------")
+            
+            if kbeaconManager.discoveredBeacons.isEmpty {
+                print("   (No KBeacons found)")
+            } else {
+                for beacon in kbeaconManager.discoveredBeacons {
+                    let name = beacon.name ?? "Unknown"
+                    let mac = beacon.mac ?? "No MAC"
+                    let rssi = beacon.rssi
+                    let rssiStr = (rssi != 0 && rssi > -128 && rssi < 0) ? "\(rssi) dBm" : "N/A"
+                    
+                    print("   📡 \(name)")
+                    print("      MAC: \(mac)")
+                    print("      RSSI: \(rssiStr)")
+                    print("")
+                }
+            }
+            
+            print("--------------------------------------------------------------------------------")
+            print("⚠️  To read TX Power and Interval, a password is required.")
+            print("    Password entry UI coming soon.")
+            print("================================================================================")
+            print("")
+            
+        } else {
+            // Start scanning
+            print("🔍 Starting KBeacon scan...")
+            print("   Tap 'Beacon Report' again to stop and view results.")
+            print("")
+            
+            kbeaconManager.startScanning()
+            isBeaconScanning = true
+        }
     }
     
     private func performSoftReset() {
