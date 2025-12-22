@@ -2419,6 +2419,44 @@ final class ARCalibrationCoordinator: ObservableObject {
         return rotated + transform.translation
     }
     
+    /// Projects an AR session position to map pixel coordinates using the global session transform
+    /// This is less accurate than barycentric interpolation but works outside calibrated triangles
+    /// - Parameter sessionPosition: Position in AR session coordinates
+    /// - Returns: Map pixel coordinate, or nil if transform not available
+    public func projectSessionToMap(_ sessionPosition: SIMD3<Float>) -> CGPoint? {
+        guard let transform = cachedCanonicalToSessionTransform,
+              let mapSize = cachedMapSize,
+              let metersPerPixel = cachedMetersPerPixel else {
+            print("⚠️ [PROJECT_SESSION_TO_MAP] Missing transform or map parameters")
+            return nil
+        }
+        
+        let pixelsPerMeter = 1.0 / metersPerPixel
+        let canonicalOrigin = CGPoint(x: mapSize.width / 2, y: mapSize.height / 2)
+        
+        // Inverse transform: session → canonical
+        // The cached transform is canonical→session, so we invert it
+        let inverseRotation = -transform.rotationY
+        let inverseScale = 1.0 / transform.scale
+        
+        // Remove translation, then rotate, then scale
+        let translated = sessionPosition - transform.translation
+        let cosR = cos(inverseRotation)
+        let sinR = sin(inverseRotation)
+        let rotated = SIMD3<Float>(
+            translated.x * cosR - translated.z * sinR,
+            translated.y,
+            translated.x * sinR + translated.z * cosR
+        )
+        let canonicalPosition = rotated * inverseScale
+        
+        // Canonical → Map pixels
+        let mapX = CGFloat(canonicalPosition.x * pixelsPerMeter) + canonicalOrigin.x
+        let mapY = CGFloat(canonicalPosition.z * pixelsPerMeter) + canonicalOrigin.y
+        
+        return CGPoint(x: mapX, y: mapY)
+    }
+    
     /// Get session-space AR positions for a triangle's vertices using baked data
     /// Returns nil if transform not available or vertices don't have baked positions
     public func getTriangleVertexPositionsFromBaked(_ triangleID: UUID) -> [UUID: SIMD3<Float>]? {

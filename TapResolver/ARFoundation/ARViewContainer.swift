@@ -568,6 +568,21 @@ struct ARViewContainer: UIViewRepresentable {
                 }
             }
             
+            // Fallback: If barycentric projection failed, try global session transform
+            if mapCoordinate == nil, let coordinator = arCalibrationCoordinator {
+                if let fallbackCoord = coordinator.projectSessionToMap(position) {
+                    mapCoordinate = fallbackCoord
+                    // Don't assign containingTriangleID - marker is outside calibrated triangles
+                    print("📍 [MANUAL_SURVEY] Map coordinate via global transform: (\(String(format: "%.1f", fallbackCoord.x)), \(String(format: "%.1f", fallbackCoord.y))) [FALLBACK]")
+                }
+            }
+            
+            // Warn if we still couldn't get a map coordinate
+            if mapCoordinate == nil {
+                print("⚠️ [MANUAL_SURVEY] No map coordinate available - data will not persist!")
+                print("   Ensure at least 2 AR markers are placed to enable global transform")
+            }
+            
             // Create survey marker
             let marker = SurveyMarker(
                 at: position,
