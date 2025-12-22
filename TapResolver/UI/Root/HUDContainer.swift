@@ -1793,51 +1793,115 @@ private struct DebugSettingsPanel: View {
     }
     
     private func runBeaconReport() {
+        let locationID = locationManager.currentLocationID
+        
         print("")
         print("================================================================================")
-        print("📡 KBEACON REPORT")
+        print("📡 KBEACON REPORT — Location: '\(locationID)'")
         print("================================================================================")
         
         if isBeaconScanning {
-            // Stop scanning
+            // Stop scanning and run full report
             kbeaconManager.stopScanning()
             isBeaconScanning = false
             
             print("🛑 Scanning stopped")
             print("")
-            print("📋 DISCOVERED BEACONS: \(kbeaconManager.discoveredBeacons.count)")
-            print("--------------------------------------------------------------------------------")
             
-            if kbeaconManager.discoveredBeacons.isEmpty {
-                print("   (No KBeacons found)")
-            } else {
-                for beacon in kbeaconManager.discoveredBeacons {
-                    let name = beacon.name ?? "Unknown"
-                    let mac = beacon.mac ?? "No MAC"
-                    let rssi = beacon.rssi
-                    let rssiStr = (rssi != 0 && rssi > -128 && rssi < 0) ? "\(rssi) dBm" : "N/A"
-                    
-                    print("   📡 \(name)")
-                    print("      MAC: \(mac)")
-                    print("      RSSI: \(rssiStr)")
-                    print("")
-                }
+            let beacons = kbeaconManager.discoveredBeacons
+            
+            if beacons.isEmpty {
+                print("📋 No KBeacons found")
+                print("================================================================================")
+                return
             }
             
+            print("📋 DISCOVERED: \(beacons.count) beacon(s)")
             print("--------------------------------------------------------------------------------")
-            print("⚠️  To read TX Power and Interval, a password is required.")
-            print("    Password entry UI coming soon.")
-            print("================================================================================")
+            
+            // Check for password
+            guard let password = BeaconPasswordStore.shared.getPassword(for: locationID) else {
+                print("")
+                print("⚠️  No password stored for location '\(locationID)'")
+                print("   Go to Location Settings (gear icon) to set the beacon password.")
+                print("")
+                print("📋 SCAN-ONLY RESULTS (no connection):")
+                for beacon in beacons {
+                    let name = beacon.name ?? "Unknown"
+                    let rssi = beacon.rssi
+                    let rssiStr = (rssi != 0 && rssi > -128 && rssi < 0) ? "\(rssi) dBm" : "N/A"
+                    print("   📡 \(name) — RSSI: \(rssiStr)")
+                }
+                print("================================================================================")
+                return
+            }
+            
+            print("🔐 Password found, connecting to each beacon...")
             print("")
+            
+            // Connect to each beacon sequentially
+            connectAndReportSequentially(beacons: Array(beacons), password: password, index: 0)
             
         } else {
             // Start scanning
             print("🔍 Starting KBeacon scan...")
-            print("   Tap 'Beacon Report' again to stop and view results.")
+            print("   Tap 'Beacon Report' again to stop and read configurations.")
             print("")
             
             kbeaconManager.startScanning()
             isBeaconScanning = true
+        }
+    }
+    
+    private func connectAndReportSequentially(beacons: [KBeacon], password: String, index: Int) {
+        // Base case: all beacons processed
+        guard index < beacons.count else {
+            print("--------------------------------------------------------------------------------")
+            print("✅ REPORT COMPLETE — \(beacons.count) beacon(s) processed")
+            print("================================================================================")
+            print("")
+            return
+        }
+        
+        let beacon = beacons[index]
+        let name = beacon.name ?? "Unknown"
+        let rssi = beacon.rssi
+        let rssiStr = (rssi != 0 && rssi > -128 && rssi < 0) ? "\(rssi) dBm" : "N/A"
+        
+        print("📡 [\(index + 1)/\(beacons.count)] \(name)")
+        print("   RSSI: \(rssiStr)")
+        
+        kbeaconManager.connect(to: beacon, password: password) { [self] success, message in
+            if success {
+                // Read configuration
+                if let config = kbeaconManager.readConfiguration(from: beacon) {
+                    print("   ✅ Connected")
+                    print("   TX Power: \(config.txPower) dBm")
+                    print("   Interval: \(Int(config.intervalMs)) ms")
+                    print("   Battery: \(config.batteryPercent)%")
+                    if let model = config.model {
+                        print("   Model: \(model)")
+                    }
+                    if let firmware = config.firmwareVersion {
+                        print("   Firmware: \(firmware)")
+                    }
+                } else {
+                    print("   ⚠️  Connected but failed to read configuration")
+                }
+                
+                // Disconnect
+                kbeaconManager.disconnect(from: beacon)
+                
+            } else {
+                print("   ❌ Connection failed: \(message)")
+            }
+            
+            print("")
+            
+            // Process next beacon after a brief delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.connectAndReportSequentially(beacons: beacons, password: password, index: index + 1)
+            }
         }
     }
     
