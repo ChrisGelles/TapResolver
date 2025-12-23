@@ -1148,6 +1148,7 @@ private struct DebugSettingsPanel: View {
     @EnvironmentObject private var btScanner: BluetoothScanner
     @EnvironmentObject private var surveyPointStore: SurveyPointStore
     @EnvironmentObject private var beaconLists: BeaconListsStore
+    @EnvironmentObject private var beaconDotStore: BeaconDotStore
     
     @Binding var showRelocalizationDebug: Bool
     @State private var showingSoftResetAlert = false
@@ -1875,17 +1876,31 @@ private struct DebugSettingsPanel: View {
             if success {
                 // Read configuration
                 if let config = kbeaconManager.readConfiguration(from: beacon) {
-                    let mac = beacon.mac ?? "Unknown"
+                    let mac = beacon.mac
+                    let macDisplay = mac ?? "Unknown"
                     let batteryStr = config.batteryPercent > 0 ? "\(config.batteryPercent)%" : "Unknown"
-                    let model = config.model ?? "Unknown"
-                    let firmware = config.firmwareVersion ?? "Unknown"
+                    let model = config.model
+                    let firmware = config.firmwareVersion
+                    let modelDisplay = model ?? "Unknown"
+                    let firmwareDisplay = firmware ?? "Unknown"
+                    
+                    // Update BeaconDotStore with fresh config
+                    beaconDotStore.updateFromDeviceConfig(
+                        beaconName: name,
+                        txPower: config.txPower,
+                        intervalMs: config.intervalMs,
+                        mac: mac,
+                        model: model,
+                        firmware: firmware
+                    )
                     
                     // Single clean output line per beacon
                     print("")
                     print("┃ 📡 [\(index + 1)/\(beacons.count)] \(name)")
-                    print("┃    MAC: \(mac)")
+                    print("┃    MAC: \(macDisplay)")
                     print("┃    TX: \(config.txPower) dBm | Interval: \(Int(config.intervalMs)) ms | Battery: \(batteryStr)")
-                    print("┃    Model: \(model) | Firmware: \(firmware)")
+                    print("┃    Model: \(modelDisplay) | Firmware: \(firmwareDisplay)")
+                    print("┃    ✅ Stored to BeaconList")
                 } else {
                     print("")
                     print("┃ ⚠️ [\(index + 1)/\(beacons.count)] \(name) — Connected but failed to read config")

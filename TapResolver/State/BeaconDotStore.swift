@@ -43,6 +43,18 @@ public final class BeaconDotStore: ObservableObject {
     // beaconID -> advertising interval in milliseconds
     @Published private(set) var advertisingIntervalByID: [String: Double] = [:]
     private let defaultAdvertisingInterval: Double = 100.0  // BC04P default
+    // beaconID -> MAC address
+    @Published private(set) var macAddressByID: [String: String] = [:]
+    // beaconID -> session number when config was last read from device
+    @Published private(set) var lastConfigReadSession: [String: Int] = [:]
+    // beaconID -> model string
+    @Published private(set) var modelByID: [String: String] = [:]
+    // beaconID -> firmware version
+    @Published private(set) var firmwareByID: [String: String] = [:]
+    
+    // Current session number (incremented on each app launch)
+    private static let sessionNumberKey = "BeaconConfigSessionNumber"
+    @Published private(set) var currentSessionNumber: Int = 0
     // Active elevation editing state
     @Published public var activeElevationEdit: ActiveElevationEdit? = nil
 
@@ -60,6 +72,11 @@ public final class BeaconDotStore: ObservableObject {
         loadTxPower()
         loadAdvertisingIntervals()
         loadDotsFromDisk()
+        loadMacAddresses()
+        loadLastConfigReadSessions()
+        loadModels()
+        loadFirmware()
+        incrementSessionNumber()
     }
 
     public func dot(for beaconID: String) -> Dot? {
@@ -205,6 +222,10 @@ public final class BeaconDotStore: ObservableObject {
         elevations.removeAll()
         txPowerByID.removeAll()
         advertisingIntervalByID.removeAll()
+        macAddressByID.removeAll()
+        lastConfigReadSession.removeAll()
+        modelByID.removeAll()
+        firmwareByID.removeAll()
 
         // Pure load for the active namespace and file
         // Load dots first (positions only), then metadata from dedicated sources
@@ -213,6 +234,10 @@ public final class BeaconDotStore: ObservableObject {
         loadElevations()
         loadTxPower()
         loadAdvertisingIntervals()
+        loadMacAddresses()
+        loadLastConfigReadSessions()
+        loadModels()
+        loadFirmware()
         
         // Remove any dots that don't correspond to active beacons
         // (e.g., demoted beacons that left orphaned dots)
@@ -263,6 +288,10 @@ public final class BeaconDotStore: ObservableObject {
             elevations.removeValue(forKey: beaconID)
             txPowerByID.removeValue(forKey: beaconID)
             advertisingIntervalByID.removeValue(forKey: beaconID)
+            macAddressByID.removeValue(forKey: beaconID)
+            lastConfigReadSession.removeValue(forKey: beaconID)
+            modelByID.removeValue(forKey: beaconID)
+            firmwareByID.removeValue(forKey: beaconID)
         }
         
         // Save changes
@@ -271,6 +300,10 @@ public final class BeaconDotStore: ObservableObject {
         saveElevations()
         saveTxPower()
         saveAdvertisingIntervals()
+        saveMacAddresses()
+        saveLastConfigReadSessions()
+        saveModels()
+        saveFirmware()
         
         print("🧹 [BeaconDotStore] Removed \(orphanedDots.count) orphaned dot(s) and their metadata")
         
@@ -350,6 +383,131 @@ public final class BeaconDotStore: ObservableObject {
     
     private func loadAdvertisingIntervals() {
         advertisingIntervalByID = ctx.read("advertisingIntervals", as: [String: Double].self) ?? [:]
+    }
+    
+    // MARK: - MAC Address persistence
+    
+    private func saveMacAddresses() {
+        ctx.write("BeaconMacAddresses_v1", value: macAddressByID)
+    }
+    
+    private func loadMacAddresses() {
+        macAddressByID = ctx.read("BeaconMacAddresses_v1", as: [String: String].self) ?? [:]
+    }
+    
+    // MARK: - Last Config Read Session persistence
+    
+    private func saveLastConfigReadSessions() {
+        ctx.write("BeaconLastConfigReadSession_v1", value: lastConfigReadSession)
+    }
+    
+    private func loadLastConfigReadSessions() {
+        lastConfigReadSession = ctx.read("BeaconLastConfigReadSession_v1", as: [String: Int].self) ?? [:]
+    }
+    
+    // MARK: - Model persistence
+    
+    private func saveModels() {
+        ctx.write("BeaconModels_v1", value: modelByID)
+    }
+    
+    private func loadModels() {
+        modelByID = ctx.read("BeaconModels_v1", as: [String: String].self) ?? [:]
+    }
+    
+    // MARK: - Firmware persistence
+    
+    private func saveFirmware() {
+        ctx.write("BeaconFirmware_v1", value: firmwareByID)
+    }
+    
+    private func loadFirmware() {
+        firmwareByID = ctx.read("BeaconFirmware_v1", as: [String: String].self) ?? [:]
+    }
+    
+    // MARK: - Session Number Management
+    
+    private func incrementSessionNumber() {
+        // Global session counter (not location-scoped)
+        let key = Self.sessionNumberKey
+        currentSessionNumber = UserDefaults.standard.integer(forKey: key) + 1
+        UserDefaults.standard.set(currentSessionNumber, forKey: key)
+        print("📊 [BeaconDotStore] Session #\(currentSessionNumber)")
+    }
+    
+    // MARK: - Bulk Update from Beacon Config
+    
+    /// Update beacon metadata from a device config read
+    /// Called by Beacon Report after successfully reading from device
+    public func updateFromDeviceConfig(
+        beaconName: String,
+        txPower: Int,
+        intervalMs: Float,
+        mac: String?,
+        model: String?,
+        firmware: String?
+    ) {
+        // Update TX Power
+        txPowerByID[beaconName] = txPower
+        saveTxPower()
+        
+        // Update Interval
+        advertisingIntervalByID[beaconName] = Double(intervalMs)
+        saveAdvertisingIntervals()
+        
+        // Update MAC
+        if let mac = mac, !mac.isEmpty {
+            macAddressByID[beaconName] = mac
+            saveMacAddresses()
+        }
+        
+        // Update Model
+        if let model = model {
+            modelByID[beaconName] = model
+            saveModels()
+        }
+        
+        // Update Firmware
+        if let firmware = firmware {
+            firmwareByID[beaconName] = firmware
+            saveFirmware()
+        }
+        
+        // Mark as read this session
+        lastConfigReadSession[beaconName] = currentSessionNumber
+        saveLastConfigReadSessions()
+        
+        print("📊 [BeaconDotStore] Updated \(beaconName): TX=\(txPower)dBm, Interval=\(Int(intervalMs))ms, Session=\(currentSessionNumber)")
+    }
+    
+    // MARK: - Freshness API
+    
+    /// Returns how many sessions ago this beacon's config was read
+    /// Returns nil if never read from device
+    public func sessionsSinceLastRead(for beaconID: String) -> Int? {
+        guard let lastSession = lastConfigReadSession[beaconID] else { return nil }
+        return currentSessionNumber - lastSession
+    }
+    
+    /// Returns a color indicating freshness of beacon config data
+    /// Green = just read, Yellow = 1 session ago, Orange = 2, Red = 3+, Dark Red = 10+
+    public func freshnessColor(for beaconID: String) -> Color {
+        guard let sessionsDelta = sessionsSinceLastRead(for: beaconID) else {
+            return Color.gray.opacity(0.5) // Never read from device
+        }
+        
+        switch sessionsDelta {
+        case 0:
+            return Color.green
+        case 1:
+            return Color.yellow
+        case 2:
+            return Color.orange
+        case 3...9:
+            return Color.red
+        default: // 10+
+            return Color(red: 0.5, green: 0, blue: 0) // Dark red
+        }
     }
     
     // MARK: - File persistence for dot coordinates

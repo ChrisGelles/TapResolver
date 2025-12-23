@@ -39,6 +39,7 @@ struct BeaconDrawer: View {
                             hasDot: hasDot,
                             elevationText: beaconDotStore.displayElevationText(for: name),
                             txPowerText: txPowerDisplayText(for: name),
+                            txPowerFreshnessColor: txPowerFreshnessColor(for: name),
                             isSelected: isSelectedForTxPower,
                             onSelect: { _, color in
                                 // Center on dot if one exists
@@ -167,6 +168,10 @@ struct BeaconDrawer: View {
             return "Tx"
         }
     }
+    
+    private func txPowerFreshnessColor(for beaconID: String) -> Color {
+        return beaconDotStore.freshnessColor(for: beaconID)
+    }
 }
 
 struct BeaconListItem: View {
@@ -175,6 +180,7 @@ struct BeaconListItem: View {
     let hasDot: Bool
     let elevationText: String
     let txPowerText: String
+    let txPowerFreshnessColor: Color
     let isSelected: Bool
     var onSelect: ((CGPoint, Color) -> Void)? = nil
     var onToggleLock: (() -> Void)? = nil
@@ -243,17 +249,24 @@ struct BeaconListItem: View {
             .buttonStyle(.plain)
 
             // Tx Power "pill" (opens Tx Power selection)
+            // Background color indicates freshness: green=just read, yellow=1 session, orange=2, red=3+
             Button {
                 onSelectForTxPower?()
             } label: {
-                Text(txPowerText)
-                    .font(.system(size: 8, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 0)                        // ← pill H padding
-                    .padding(.vertical, 4)                          // ← pill V padding
-                    .background(isSelected ? Color.blue.opacity(0.7) : Color.black.opacity(0.5))
-                    .cornerRadius(4)
-                    .fixedSize(horizontal: true, vertical: true)
+                HStack(spacing: 2) {
+                    // Freshness indicator dot
+                    Circle()
+                        .fill(txPowerFreshnessColor)
+                        .frame(width: 6, height: 6)
+                    Text(txPowerText)
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white)
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 4)
+                .background(isSelected ? Color.blue.opacity(0.7) : Color.black.opacity(0.5))
+                .cornerRadius(4)
+                .fixedSize(horizontal: true, vertical: true)
             }
             .buttonStyle(.plain)
 
