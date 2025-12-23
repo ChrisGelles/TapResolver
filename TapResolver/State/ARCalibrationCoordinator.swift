@@ -386,7 +386,23 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Triangle-specific state (not needed for Swath anchoring)
         activeTriangleID = triangleID
         currentTriangleID = triangleID
-        triangleVertices = triangle.vertexIDs
+        
+        // Rotate starting vertex to distribute ghost/anchor roles across sessions
+        let lastIndex = triangle.lastStartingVertexIndex ?? -1
+        let newStartIndex = (lastIndex + 1) % 3
+
+        // Rotate vertexIDs so newStartIndex becomes position 0
+        var rotatedVertices = triangle.vertexIDs
+        for i in 0..<3 {
+            rotatedVertices[i] = triangle.vertexIDs[(newStartIndex + i) % 3]
+        }
+        triangleVertices = rotatedVertices
+
+        print("🔄 [VERTEX_ROTATION] Starting vertex rotated:")
+        print("   Last starting index: \(triangle.lastStartingVertexIndex.map { String($0) } ?? "nil")")
+        print("   New starting index: \(newStartIndex)")
+        print("   Original order: \(triangle.vertexIDs.map { String($0.uuidString.prefix(8)) })")
+        print("   Rotated order: \(rotatedVertices.map { String($0.uuidString.prefix(8)) })")
         
         // REFACTOR CANDIDATE: resetCalibrationState()
         // Clear any existing markers - we're re-calibrating from scratch
@@ -2519,6 +2535,12 @@ final class ARCalibrationCoordinator: ObservableObject {
     private func finalizeCalibration(for triangle: TrianglePatch) {
         let quality = computeCalibrationQuality(triangle)
         safeTriangleStore.markCalibrated(triangle.id, quality: quality)
+        
+        // Record which vertex was the starting anchor for next session's rotation
+        if let originalIndex = triangle.vertexIDs.firstIndex(of: triangleVertices[0]) {
+            safeTriangleStore.setLastStartingVertexIndex(triangle.id, index: originalIndex)
+            print("🔄 [VERTEX_ROTATION] Saved starting index \(originalIndex) for next session")
+        }
         
         // Add to session calibrated triangles for crawl mode
         sessionCalibratedTriangles.insert(triangle.id)

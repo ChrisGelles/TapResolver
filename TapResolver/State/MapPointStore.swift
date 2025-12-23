@@ -2211,7 +2211,8 @@ public final class MapPointStore: ObservableObject {
                             userPositionWhenCalibrated: triangle.userPositionWhenCalibrated,
                             legMeasurements: triangle.legMeasurements,
                             worldMapFilename: triangle.worldMapFilename,
-                            worldMapFilesByStrategy: triangle.worldMapFilesByStrategy
+                            worldMapFilesByStrategy: triangle.worldMapFilesByStrategy,
+                            lastStartingVertexIndex: triangle.lastStartingVertexIndex
                         )
                         
                         // Update keeper's triangle memberships if not already present

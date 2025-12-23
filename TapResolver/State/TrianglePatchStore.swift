@@ -548,6 +548,19 @@ class TrianglePatchStore: ObservableObject {
         print("✅ Marked triangle \(String(id.uuidString.prefix(8))) as calibrated (quality: \(Int(quality * 100))%)")
     }
     
+    /// Set the last starting vertex index for vertex rotation
+    func setLastStartingVertexIndex(_ id: UUID, index: Int) {
+        guard let triangleIndex = triangles.firstIndex(where: { $0.id == id }) else {
+            print("⚠️ Cannot set last starting vertex index: Triangle \(String(id.uuidString.prefix(8))) not found")
+            return
+        }
+        
+        triangles[triangleIndex].lastStartingVertexIndex = index
+        save()
+        
+        print("✅ Set last starting vertex index \(index) for triangle \(String(id.uuidString.prefix(8)))")
+    }
+    
     /// Set leg measurements for a triangle
     func setLegMeasurements(for triangleID: UUID, measurements: [TriangleLegMeasurement]) {
         guard let index = triangles.firstIndex(where: { $0.id == triangleID }) else {

@@ -36,6 +36,10 @@ struct TrianglePatch: Codable, Identifiable {
     var legMeasurements: [TriangleLegMeasurement] = []  // Leg distance measurements for quality computation
     var worldMapFilename: String?  // Legacy: Filename of saved ARWorldMap patch (deprecated - use worldMapFilesByStrategy)
     var worldMapFilesByStrategy: [String: String] = [:]  // [strategyName: filename] - Multiple world maps per strategy
+    /// Tracks which vertex was used as the starting anchor in the last calibration session.
+    /// Used to rotate starting vertex each session so all vertices cycle through being ghosts.
+    /// nil means never calibrated with rotation tracking.
+    var lastStartingVertexIndex: Int?
     
     init(vertexIDs: [UUID]) {
         self.id = UUID()
@@ -60,7 +64,8 @@ struct TrianglePatch: Codable, Identifiable {
         userPositionWhenCalibrated: simd_float3?,
         legMeasurements: [TriangleLegMeasurement],
         worldMapFilename: String?,
-        worldMapFilesByStrategy: [String: String]
+        worldMapFilesByStrategy: [String: String],
+        lastStartingVertexIndex: Int?
     ) {
         self.id = id
         self.vertexIDs = vertexIDs
@@ -74,6 +79,7 @@ struct TrianglePatch: Codable, Identifiable {
         self.legMeasurements = legMeasurements
         self.worldMapFilename = worldMapFilename
         self.worldMapFilesByStrategy = worldMapFilesByStrategy
+        self.lastStartingVertexIndex = lastStartingVertexIndex
     }
     
     /// Returns vertices in consistent order (sorted by ID for deterministic rendering)
@@ -100,6 +106,7 @@ extension TrianglePatch {
     enum CodingKeys: String, CodingKey {
         case id, vertexIDs, arMarkerIDs, calibrationQuality, isCalibrated, createdAt, lastCalibratedAt
         case transform, userPositionWhenCalibrated, legMeasurements, worldMapFilename, worldMapFilesByStrategy
+        case lastStartingVertexIndex
     }
     
     init(from decoder: Decoder) throws {
@@ -144,6 +151,9 @@ extension TrianglePatch {
         
         // Decode worldMapFilesByStrategy (optional for backward compatibility)
         worldMapFilesByStrategy = try container.decodeIfPresent([String: String].self, forKey: .worldMapFilesByStrategy) ?? [:]
+        
+        // Decode lastStartingVertexIndex (optional for backward compatibility)
+        lastStartingVertexIndex = try container.decodeIfPresent(Int.self, forKey: .lastStartingVertexIndex)
         
         // Backward compatibility: accept both ISO8601 String or Unix timestamp (Double) for createdAt
         if let dateString = try? container.decode(String.self, forKey: .createdAt),
@@ -195,6 +205,9 @@ extension TrianglePatch {
         if !worldMapFilesByStrategy.isEmpty {
             try container.encode(worldMapFilesByStrategy, forKey: .worldMapFilesByStrategy)
         }
+        
+        // Encode lastStartingVertexIndex
+        try container.encodeIfPresent(lastStartingVertexIndex, forKey: .lastStartingVertexIndex)
     }
 }
 
