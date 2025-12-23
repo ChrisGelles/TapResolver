@@ -890,7 +890,8 @@ public final class MapPointStore: ObservableObject {
     
     // MARK: - Canonical Position Purge
     
-    /// Purges canonical/baked position data for a single MapPoint
+    /// Purges canonical/baked position data AND position history for a single MapPoint
+    /// This ensures the next bake starts fresh with only new placements
     /// - Parameter mapPointID: The MapPoint to reset
     /// - Returns: true if the MapPoint was found and updated
     @discardableResult
@@ -900,20 +901,28 @@ public final class MapPointStore: ObservableObject {
             return false
         }
         
-        let hadData = points[index].canonicalPosition != nil
+        let hadCanonical = points[index].canonicalPosition != nil
+        let historyCount = points[index].arPositionHistory.count
         
+        // Clear computed canonical position
         points[index].canonicalPosition = nil
         points[index].canonicalConfidence = nil
         points[index].canonicalSampleCount = 0
         
-        if hadData {
-            print("🧹 [PURGE_CANONICAL] Cleared canonical position for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+        // Clear source position history so next bake starts fresh
+        points[index].arPositionHistory = []
+        
+        if hadCanonical || historyCount > 0 {
+            print("🧹 [PURGE_CANONICAL] Cleared MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            print("   Canonical position: \(hadCanonical ? "cleared" : "was nil")")
+            print("   Position history: \(historyCount) record(s) purged")
+            print("   Ghost placement will use barycentric interpolation until new data is collected")
         } else {
-            print("ℹ️ [PURGE_CANONICAL] MapPoint \(String(mapPointID.uuidString.prefix(8))) had no canonical data")
+            print("ℹ️ [PURGE_CANONICAL] MapPoint \(String(mapPointID.uuidString.prefix(8))) had no data to purge")
         }
         
         save()
-        return hadData
+        return hadCanonical || historyCount > 0
     }
     
     /// Purges ALL canonical/baked position data for the current location
