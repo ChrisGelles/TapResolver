@@ -1838,6 +1838,10 @@ private struct DebugSettingsPanel: View {
             
             print("🔐 Password found, connecting to each beacon...")
             print("")
+            print("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+            print("┃ BEACON CONFIGURATIONS                                                       ┃")
+            print("┃ (SDK verbose logging below is internal noise — ignore it)                   ┃")
+            print("┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
             
             // Connect to each beacon sequentially
             connectAndReportSequentially(beacons: Array(beacons), password: password, index: 0)
@@ -1856,47 +1860,43 @@ private struct DebugSettingsPanel: View {
     private func connectAndReportSequentially(beacons: [KBeacon], password: String, index: Int) {
         // Base case: all beacons processed
         guard index < beacons.count else {
-            print("--------------------------------------------------------------------------------")
-            print("✅ REPORT COMPLETE — \(beacons.count) beacon(s) processed")
-            print("================================================================================")
+            print("")
+            print("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+            print("┃ ✅ BEACON REPORT COMPLETE — \(beacons.count) beacon(s)                              ┃")
+            print("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
             print("")
             return
         }
         
         let beacon = beacons[index]
         let name = beacon.name ?? "Unknown"
-        let rssi = beacon.rssi
-        let rssiStr = (rssi != 0 && rssi > -128 && rssi < 0) ? "\(rssi) dBm" : "N/A"
-        
-        print("📡 [\(index + 1)/\(beacons.count)] \(name)")
-        print("   RSSI: \(rssiStr)")
         
         kbeaconManager.connect(to: beacon, password: password) { [self] success, message in
             if success {
                 // Read configuration
                 if let config = kbeaconManager.readConfiguration(from: beacon) {
-                    print("   ✅ Connected")
-                    print("   TX Power: \(config.txPower) dBm")
-                    print("   Interval: \(Int(config.intervalMs)) ms")
-                    print("   Battery: \(config.batteryPercent)%")
-                    if let model = config.model {
-                        print("   Model: \(model)")
-                    }
-                    if let firmware = config.firmwareVersion {
-                        print("   Firmware: \(firmware)")
-                    }
+                    let mac = beacon.mac ?? "Unknown"
+                    let batteryStr = config.batteryPercent > 0 ? "\(config.batteryPercent)%" : "Unknown"
+                    let model = config.model ?? "Unknown"
+                    let firmware = config.firmwareVersion ?? "Unknown"
+                    
+                    // Single clean output line per beacon
+                    print("")
+                    print("┃ 📡 [\(index + 1)/\(beacons.count)] \(name)")
+                    print("┃    MAC: \(mac)")
+                    print("┃    TX: \(config.txPower) dBm | Interval: \(Int(config.intervalMs)) ms | Battery: \(batteryStr)")
+                    print("┃    Model: \(model) | Firmware: \(firmware)")
                 } else {
-                    print("   ⚠️  Connected but failed to read configuration")
+                    print("")
+                    print("┃ ⚠️ [\(index + 1)/\(beacons.count)] \(name) — Connected but failed to read config")
                 }
                 
-                // Disconnect
                 kbeaconManager.disconnect(from: beacon)
                 
             } else {
-                print("   ❌ Connection failed: \(message)")
+                print("")
+                print("┃ ❌ [\(index + 1)/\(beacons.count)] \(name) — \(message)")
             }
-            
-            print("")
             
             // Process next beacon after a brief delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
