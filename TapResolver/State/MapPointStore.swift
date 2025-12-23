@@ -564,11 +564,14 @@ public final class MapPointStore: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            print("📍 MapPointStore: Location changed, reloading...")
-            self?.reloadForActiveLocation()
-            
-            // AR markers are now session-only; skip reloading persisted markers
-            // self?.loadARMarkers()
+            // Defer reload to avoid "Publishing changes from within view updates"
+            DispatchQueue.main.async {
+                print("📍 MapPointStore: Location changed, reloading...")
+                self?.reloadForActiveLocation()
+                
+                // AR markers are now session-only; skip reloading persisted markers
+                // self?.loadARMarkers()
+            }
         }
     }
 

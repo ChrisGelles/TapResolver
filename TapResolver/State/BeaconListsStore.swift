@@ -62,14 +62,19 @@ final class BeaconListsStore: ObservableObject {
     }
 
     init() {
-        load()
-        reloadMorgue()
+        // Defer initial load to avoid "Publishing changes from within view updates"
+        DispatchQueue.main.async { [weak self] in
+            self?.load()
+            self?.reloadMorgue()
+        }
         
         // Reload when location changes
         NotificationCenter.default.publisher(for: .locationDidChange)
             .sink { [weak self] _ in
-                self?.load()
-                self?.reloadMorgue()
+                DispatchQueue.main.async {
+                    self?.load()
+                    self?.reloadMorgue()
+                }
             }
             .store(in: &bag)
     }

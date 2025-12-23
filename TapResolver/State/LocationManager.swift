@@ -17,7 +17,10 @@ final class LocationManager: ObservableObject {
             .sink { id in
                 PersistenceContext.shared.locationID = id
                 UserDefaults.standard.set(id, forKey: "locations.lastOpened.v1")
-                NotificationCenter.default.post(name: .locationDidChange, object: nil)
+                // Defer notification to next runloop to avoid "Publishing changes from within view updates"
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .locationDidChange, object: nil)
+                }
             }
             .store(in: &bag)
     }
