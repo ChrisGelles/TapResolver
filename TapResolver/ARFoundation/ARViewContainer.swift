@@ -128,6 +128,11 @@ struct ARViewContainer: UIViewRepresentable {
         /// Used for distortion calculation when user adjusts a ghost
         var ghostMarkerPositions: [UUID: simd_float3] = [:]
         var surveyMarkers: [UUID: SurveyMarker] = [:]  // markerID -> SurveyMarker instance
+        
+        // MARK: - Origin Marker
+        
+        private var originMarkerNode: SCNNode?
+        
         weak var metricSquareStore: MetricSquareStore?
         weak var mapPointStore: MapPointStore?
         weak var surveyPointStore: SurveyPointStore?
@@ -375,6 +380,23 @@ struct ARViewContainer: UIViewRepresentable {
                 name: .placeManualSurveyMarker,
                 object: nil
             )
+            
+            // Origin marker placement
+            NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("PlaceOriginMarker"),
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self,
+                      let positionArray = notification.userInfo?["position"] as? [Float],
+                      positionArray.count == 3 else {
+                    print("⚠️ [ORIGIN_MARKER] Invalid notification data")
+                    return
+                }
+                
+                let position = simd_float3(positionArray[0], positionArray[1], positionArray[2])
+                self.placeOriginMarker(at: position)
+            }
             
             // Listen for triangle calibration complete
             NotificationCenter.default.addObserver(
@@ -939,6 +961,39 @@ struct ARViewContainer: UIViewRepresentable {
             sceneView?.scene.rootNode.addChildNode(ghostNode)
             
             print("✅ [GHOST_CREATE] Created ghost marker for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+        }
+        
+        /// Places the origin marker at the projected canonical origin
+        func placeOriginMarker(at position: simd_float3) {
+            // Only place once per session
+            if originMarkerNode != nil {
+                print("ℹ️ [ORIGIN_MARKER] Already placed for this session")
+                return
+            }
+            
+            print("🎯 [ORIGIN_MARKER] Placing at session position: (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
+            
+            let originNode = ARMarkerRenderer.createNode(
+                at: position,
+                options: MarkerOptions(
+                    color: .red,  // Initial color (will be animated)
+                    markerID: UUID(),
+                    userDeviceHeight: 2.0,  // Will be overridden by isOriginMarker
+                    badgeColor: nil,
+                    radius: 0.06,  // Will be overridden by isOriginMarker
+                    animateOnAppearance: true,
+                    animationOvershoot: 0.06,
+                    isGhost: false,
+                    isSurveyMarker: false,
+                    isOriginMarker: true
+                )
+            )
+            
+            originNode.name = "originMarker"
+            sceneView?.scene.rootNode.addChildNode(originNode)
+            originMarkerNode = originNode
+            
+            print("✅ [ORIGIN_MARKER] Origin marker placed (2m tall, RGB cycling)")
         }
         
         /// Remove a ghost marker from the scene
@@ -2159,6 +2214,13 @@ struct ARViewContainer: UIViewRepresentable {
             
             if !markersToRemove.isEmpty {
                 print("🧹 Cleared \(markersToRemove.count) calibration marker(s) from scene")
+            }
+            
+            // Clear origin marker
+            if let originNode = originMarkerNode {
+                originNode.removeFromParentNode()
+                originMarkerNode = nil
+                print("🧹 [ORIGIN_MARKER] Cleared")
             }
         }
         

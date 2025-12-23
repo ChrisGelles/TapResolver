@@ -19,6 +19,7 @@ struct MarkerOptions {
     var animationOvershoot: Float = 0.04  // Overshoot in meters (default 4cm)
     var isGhost: Bool = false  // Ghost markers are semi-transparent and pulsing
     var isSurveyMarker: Bool = false  // Survey markers get gradient inner sphere; others get solid
+    var isOriginMarker: Bool = false  // Origin marker: 2m tall, large sphere, RGB cycling
 }
 
 class ARMarkerRenderer {
@@ -30,6 +31,11 @@ class ARMarkerRenderer {
         // Disable occlusion so markers render even if below ground plane
         markerNode.renderingOrder = 100
         markerNode.castsShadow = false
+        
+        // Origin marker overrides: taller rod, larger sphere
+        let effectiveHeight: Float = options.isOriginMarker ? 2.0 : options.userDeviceHeight
+        let effectiveRadius: CGFloat = options.isOriginMarker ? 0.06 : options.radius
+        let rodRadius: CGFloat = options.isOriginMarker ? 0.003 : 0.00125  // Thicker rod for origin
         
         // Floor ring
         let ring = SCNTorus(ringRadius: 0.1, pipeRadius: 0.002)
@@ -46,8 +52,8 @@ class ARMarkerRenderer {
         
         // Vertical line (rod)
         // Rod ends at bottom of sphere + 2mm overlap for visual connection
-        let rodHeight = CGFloat(options.userDeviceHeight) - options.radius + 0.002
-        let line = SCNCylinder(radius: 0.00125, height: rodHeight)
+        let rodHeight = CGFloat(effectiveHeight) - effectiveRadius + 0.002
+        let line = SCNCylinder(radius: rodRadius, height: rodHeight)
         line.firstMaterial?.diffuse.contents = UIColor.ARPalette.markerLine
         let lineNode = SCNNode(geometry: line)
         // Set pivot at bottom so rod grows upward from ground
@@ -57,7 +63,7 @@ class ARMarkerRenderer {
         markerNode.addChildNode(lineNode)
         
         // Sphere top - positioned at top of rod
-        let sphere = SCNSphere(radius: options.radius)
+        let sphere = SCNSphere(radius: effectiveRadius)
         sphere.firstMaterial?.diffuse.contents = options.color
         sphere.firstMaterial?.specular.contents = UIColor.white
         sphere.firstMaterial?.shininess = 0.8
@@ -71,12 +77,12 @@ class ARMarkerRenderer {
         
         let sphereNode = SCNNode(geometry: sphere)
         // Position sphere at top of rod (resting on top)
-        sphereNode.position = SCNVector3(0, options.userDeviceHeight, 0)
+        sphereNode.position = SCNVector3(0, effectiveHeight, 0)
         sphereNode.name = "arMarkerSphere_\(options.markerID.uuidString)"
         markerNode.addChildNode(sphereNode)
         
         // Inner sphere - visible from inside (flipped normals)
-        let innerSphere = SCNSphere(radius: options.radius - 0.002)
+        let innerSphere = SCNSphere(radius: effectiveRadius - 0.002)
         
         if options.isSurveyMarker {
             // Survey markers: gradient texture for visibility when inside
@@ -97,7 +103,7 @@ class ARMarkerRenderer {
         innerSphere.firstMaterial?.isDoubleSided = false
         innerSphere.firstMaterial?.lightingModel = .constant  // Ignore scene lighting for consistent color
         let innerSphereNode = SCNNode(geometry: innerSphere)
-        innerSphereNode.position = SCNVector3(0, options.userDeviceHeight, 0)
+        innerSphereNode.position = SCNVector3(0, effectiveHeight, 0)
         innerSphereNode.name = "arMarkerInnerSphere_\(options.markerID.uuidString)"
         markerNode.addChildNode(innerSphereNode)
         
@@ -118,7 +124,7 @@ class ARMarkerRenderer {
                 ringNode: ringNode,
                 lineNode: lineNode,
                 sphereNode: sphereNode,
-                finalHeight: options.userDeviceHeight,
+                finalHeight: effectiveHeight,
                 overshoot: options.animationOvershoot
             )
         }
@@ -131,6 +137,22 @@ class ARMarkerRenderer {
             ])
             let pulseForever = SCNAction.repeatForever(pulseAction)
             markerNode.runAction(pulseForever)
+        }
+        
+        // Origin marker RGB cycling animation
+        if options.isOriginMarker {
+            // Animate sphere color through RGB cycle
+            let sphereMaterial = sphere.firstMaterial
+            
+            let colorCycle = SCNAction.customAction(duration: 3.0) { node, elapsedTime in
+                let phase = elapsedTime / 3.0  // 0.0 to 1.0 over 3 seconds
+                let hue = CGFloat(phase)
+                let color = UIColor(hue: hue, saturation: 1.0, brightness: 1.0, alpha: 1.0)
+                sphereMaterial?.diffuse.contents = color
+                sphereMaterial?.emission.contents = color.withAlphaComponent(0.3)  // Slight glow
+            }
+            let cycleForever = SCNAction.repeatForever(colorCycle)
+            sphereNode.runAction(cycleForever)
         }
         
         return markerNode

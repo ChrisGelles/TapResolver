@@ -908,6 +908,27 @@ final class ARCalibrationCoordinator: ObservableObject {
                     print("   mapPointARPositions keys: \(mapPointARPositions.keys.map { String($0.uuidString.prefix(8)) })")
                 }
             }
+            
+            // Plant origin marker at canonical (0,0,0) projected to session, grounded to floor
+            let canonicalOrigin = simd_float3(0, 0, 0)
+            if var sessionOrigin = projectBakedToSession(canonicalOrigin) {
+                // Ground the marker: use Y from first placed marker (which is on the floor)
+                if let firstPlacedID = placedMarkers.first,
+                   let groundY = mapPointARPositions[firstPlacedID]?.y {
+                    sessionOrigin.y = groundY
+                    print("🎯 [ORIGIN_MARKER] Grounded to Y=\(String(format: "%.2f", groundY)) from first placed marker")
+                }
+                
+                print("🎯 [ORIGIN_MARKER] Canonical (0,0,0) → Session (\(String(format: "%.2f", sessionOrigin.x)), \(String(format: "%.2f", sessionOrigin.y)), \(String(format: "%.2f", sessionOrigin.z)))")
+                
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("PlaceOriginMarker"),
+                    object: nil,
+                    userInfo: ["position": [sessionOrigin.x, sessionOrigin.y, sessionOrigin.z]]
+                )
+            } else {
+                print("⚠️ [ORIGIN_MARKER] Could not project canonical origin - transform not available")
+            }
         }
         
         // Advance to next vertex if not all placed
