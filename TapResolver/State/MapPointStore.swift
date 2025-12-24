@@ -101,6 +101,7 @@ public enum MapPointRole: String, Codable, CaseIterable, Identifiable {
     case featureMarker = "feature_marker"
     case directionalNorth = "directional_north"
     case directionalSouth = "directional_south"
+    case zoneCorner = "zone_corner"
     
     public var id: String { rawValue }
     
@@ -110,6 +111,7 @@ public enum MapPointRole: String, Codable, CaseIterable, Identifiable {
         case .featureMarker: return "Feature Marker"
         case .directionalNorth: return "North Calibration"
         case .directionalSouth: return "South Calibration"
+        case .zoneCorner: return "Zone Corner"
         }
     }
     
@@ -119,6 +121,7 @@ public enum MapPointRole: String, Codable, CaseIterable, Identifiable {
         case .featureMarker: return "mappin.circle"
         case .directionalNorth: return "location.north.fill"
         case .directionalSouth: return "s.circle.fill"
+        case .zoneCorner: return "rectangle.dashed"
         }
     }
     
@@ -128,6 +131,7 @@ public enum MapPointRole: String, Codable, CaseIterable, Identifiable {
         case .featureMarker: return .green
         case .directionalNorth: return .red
         case .directionalSouth: return .orange
+        case .zoneCorner: return .purple
         }
     }
 }
