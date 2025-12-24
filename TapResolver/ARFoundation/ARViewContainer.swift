@@ -471,6 +471,31 @@ struct ARViewContainer: UIViewRepresentable {
                 } else {
                     print("⚠️ [CRAWL_CROSSHAIR] No arCalibrationCoordinator reference available")
                 }
+            } else if let ghostMapPointID = notification.userInfo?["ghostMapPointID"] as? UUID {
+                // Generic ghost adjustment - check for originalGhostPosition
+                let originalGhostPositionArray = notification.userInfo?["originalGhostPosition"] as? [Float]
+                let originalGhostPosition: simd_float3? = originalGhostPositionArray != nil && originalGhostPositionArray!.count == 3
+                    ? simd_float3(originalGhostPositionArray![0], originalGhostPositionArray![1], originalGhostPositionArray![2])
+                    : nil
+                
+                // Place the real marker at crosshair position (this posts ARMarkerPlaced)
+                let markerID = placeMarker(at: position)
+                
+                // Re-post ARMarkerPlaced with originalGhostPosition for distortion vector calculation
+                // (placeMarker already posted it, but we need to add the ghost info)
+                var userInfo: [String: Any] = [
+                    "markerID": markerID,
+                    "position": [position.x, position.y, position.z],
+                    "ghostMapPointID": ghostMapPointID
+                ]
+                if let origPos = originalGhostPosition {
+                    userInfo["originalGhostPosition"] = [origPos.x, origPos.y, origPos.z]
+                }
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("ARMarkerPlaced"),
+                    object: nil,
+                    userInfo: userInfo
+                )
             } else {
                 // Normal marker placement
                 let _ = placeMarker(at: position)

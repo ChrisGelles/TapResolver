@@ -373,12 +373,23 @@ struct ARViewWithOverlays: View {
                 // because they use getCurrentVertexID() which returns the correct MapPoint
                 let sourceType: SourceType = isGhostConfirm ? .ghostConfirm : .calibration
                 
+                // Calculate distortion vector if originalGhostPosition is available
+                let distortionVector: simd_float3?
+                if let originalGhostPosArray = notification.userInfo?["originalGhostPosition"] as? [Float],
+                   originalGhostPosArray.count == 3 {
+                    let originalGhostPos = simd_float3(originalGhostPosArray[0], originalGhostPosArray[1], originalGhostPosArray[2])
+                    distortionVector = arPosition - originalGhostPos
+                    print("📍 [DISTORTION_VECTOR] Calculated: \(distortionVector!) (new: \(arPosition) - original: \(originalGhostPos))")
+                } else {
+                    distortionVector = nil
+                }
+                
                 // Register with coordinator
                 arCalibrationCoordinator.registerMarker(
                     mapPointID: targetMapPointID,
                     marker: marker,
                     sourceType: sourceType,
-                    distortionVector: nil
+                    distortionVector: distortionVector
                 )
                 
                 print("✅ Registered marker \(String(markerID.uuidString.prefix(8))) for MapPoint \(String(targetMapPointID.uuidString.prefix(8)))")
@@ -870,14 +881,25 @@ struct ARViewWithOverlays: View {
                                         userInfo: ["mapPointID": ghostMapPointID]
                                     )
                                     
+                                    // Track that this ghost was converted to AR marker (prevents re-planting)
+                                    arCalibrationCoordinator.adjustedGhostMapPoints.insert(ghostMapPointID)
+                                    print("📍 [SWATH_TRACK] Marked \(String(ghostMapPointID.uuidString.prefix(8))) as adjusted")
+                                    
+                                    // Capture original ghost position before clearing (for distortion vector)
+                                    let originalGhostPosition = arCalibrationCoordinator.selectedGhostEstimatedPosition
+                                    
                                     // Clear ghost selection
                                     arCalibrationCoordinator.selectedGhostMapPointID = nil
                                     
                                     // Then place marker at crosshair
+                                    var userInfo: [String: Any] = ["ghostMapPointID": ghostMapPointID]
+                                    if let origPos = originalGhostPosition {
+                                        userInfo["originalGhostPosition"] = [origPos.x, origPos.y, origPos.z]
+                                    }
                                     NotificationCenter.default.post(
                                         name: NSNotification.Name("PlaceMarkerAtCursor"),
                                         object: nil,
-                                        userInfo: ["ghostMapPointID": ghostMapPointID]
+                                        userInfo: userInfo
                                     )
                                     
                                     // Clear reposition mode if it was active

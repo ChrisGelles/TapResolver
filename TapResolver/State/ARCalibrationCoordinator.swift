@@ -43,6 +43,9 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Maps MapPoint ID to AR position for current session (for ghost calculation)
     var mapPointARPositions: [UUID: simd_float3] = [:]
     
+    /// MapPoints whose ghosts were adjusted to AR markers this session (prevents re-planting)
+    var adjustedGhostMapPoints: Set<UUID> = []
+    
     /// Ghost marker positions tracked by the coordinator (set by ARViewContainer)
     var ghostMarkerPositions: [UUID: simd_float3] = [:]
     
@@ -712,18 +715,33 @@ final class ARCalibrationCoordinator: ObservableObject {
         let triangleID: UUID?
         let triangle: TrianglePatch?
         
-        // Normal mode - require active triangle
-        guard let activeID = activeTriangleID,
-              let activeTriangle = safeTriangleStore.triangle(withID: activeID) else {
-            print("❌ Cannot register marker: No active triangle")
+        // Determine triangle context
+        let triangleContext: (id: UUID, triangle: TrianglePatch)?
+        
+        if let activeID = activeTriangleID,
+           let activeTriangle = safeTriangleStore.triangle(withID: activeID) {
+            // Normal mode - use active triangle
+            triangleContext = (activeID, activeTriangle)
+        } else if adjustedGhostMapPoints.contains(mapPointID) {
+            // Swath mode - find any triangle containing this MapPoint
+            if let foundTriangle = safeTriangleStore.triangles.first(where: { $0.vertexIDs.contains(mapPointID) }) {
+                triangleContext = (foundTriangle.id, foundTriangle)
+                print("📍 [SWATH_REGISTER] Found triangle \(String(foundTriangle.id.uuidString.prefix(8))) for swath MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            } else {
+                print("❌ Cannot register marker: No triangle contains MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+                return
+            }
+        } else {
+            print("❌ Cannot register marker: No active triangle and MapPoint not in adjustedGhostMapPoints")
             return
         }
-        triangleID = activeID
-        triangle = activeTriangle
         
-        // Validate this mapPointID is a vertex of the active triangle
-        guard triangle!.vertexIDs.contains(mapPointID) else {
-            print("❌ MapPoint \(String(mapPointID.uuidString.prefix(8))) is not a vertex of triangle \(String(triangleID!.uuidString.prefix(8)))")
+        triangleID = triangleContext?.id
+        triangle = triangleContext?.triangle
+        
+        // Validate this mapPointID is a vertex of the triangle
+        guard let tri = triangle, tri.vertexIDs.contains(mapPointID) else {
+            print("❌ MapPoint \(String(mapPointID.uuidString.prefix(8))) is not a vertex of triangle \(String(triangleID?.uuidString.prefix(8) ?? "unknown"))")
             return
         }
         
@@ -810,11 +828,21 @@ final class ARCalibrationCoordinator: ObservableObject {
             }
             
             // MARK: - Record position in history (Milestone 2)
-            let confidence: Float = sourceType == .ghostConfirm ? 1.0 : (sourceType == .ghostAdjust ? 0.8 : 0.95)
+            // Determine source type for swath adjustments
+            let effectiveSourceType: SourceType
+            if adjustedGhostMapPoints.contains(mapPointID) && sourceType == .calibration {
+                // This is a swath ghost adjustment, treat as ghostAdjust
+                effectiveSourceType = .ghostAdjust
+                print("📍 [SWATH_REGISTER] Treating as ghostAdjust for position history")
+            } else {
+                effectiveSourceType = sourceType
+            }
+            
+            let confidence: Float = effectiveSourceType == .ghostConfirm ? 1.0 : (effectiveSourceType == .ghostAdjust ? 0.8 : 0.95)
             let record = ARPositionRecord(
                 position: marker.arPosition,
                 sessionID: safeARStore.currentSessionID,
-                sourceType: sourceType,
+                sourceType: effectiveSourceType,
                 distortionVector: distortionVector,
                 confidenceScore: confidence
             )
@@ -2232,6 +2260,13 @@ final class ARCalibrationCoordinator: ObservableObject {
                 continue
             }
             
+            // Skip if this ghost was already adjusted to an AR marker
+            if adjustedGhostMapPoints.contains(farVertexID) {
+                skippedReasons.append((farVertexID, "Already adjusted to AR marker"))
+                print("👻 [GHOST_SKIP] Skipping \(String(farVertexID.uuidString.prefix(8))) — already adjusted to AR marker")
+                continue
+            }
+            
             // Skip if this MapPoint already has an AR position established in the current session
             // Uses mapPointARPositions which is updated by BOTH calibration and crawl mode
             let hasPositionInCurrentSession = mapPointARPositions[farVertexID] != nil
@@ -2389,6 +2424,13 @@ final class ARCalibrationCoordinator: ObservableObject {
         var skippedCalcFailed = 0
         
         for vertexID in candidates {
+            // Skip if this ghost was already adjusted to an AR marker
+            if adjustedGhostMapPoints.contains(vertexID) {
+                print("👻 [GHOST_SKIP] Skipping \(String(vertexID.uuidString.prefix(8))) — already adjusted to AR marker")
+                skippedHasPosition += 1
+                continue
+            }
+            
             // Skip if already has AR position in current session
             if mapPointARPositions[vertexID] != nil {
                 skippedHasPosition += 1
@@ -3266,6 +3308,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         selectedGhostEstimatedPosition = nil
         nearbyButNotVisibleGhostID = nil
         demotedGhostMapPointIDs.removeAll()
+        adjustedGhostMapPoints.removeAll()
         repositionModeActive = false
         
         // Clear baked data transform cache
