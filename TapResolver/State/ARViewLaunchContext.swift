@@ -12,6 +12,7 @@ enum LaunchMode {
     case generic
     case triangleCalibration
     case swathSurvey
+    case zoneCornerCalibration
 }
 
 final class ARViewLaunchContext: ObservableObject {
@@ -23,6 +24,9 @@ final class ARViewLaunchContext: ObservableObject {
     @Published var swathTriangleIDs: [UUID] = []
     /// Suggested anchor vertex IDs for Swath Survey
     @Published var suggestedAnchorIDs: [UUID] = []
+    
+    /// Zone Corner MapPoint IDs for Zone Corner Calibration
+    @Published var zoneCornerIDs: [UUID] = []
     
     /// Launch AR view in generic mode
     func launchGeneric() {
@@ -63,6 +67,20 @@ final class ARViewLaunchContext: ObservableObject {
         }
     }
     
+    /// Launch AR for Zone Corner Calibration
+    func launchZoneCornerCalibration(zoneCornerIDs: [UUID]) {
+        DispatchQueue.main.async {
+            self.zoneCornerIDs = zoneCornerIDs
+            self.launchMode = .zoneCornerCalibration
+            self.isCalibrationMode = true
+            self.selectedTriangle = nil
+            self.swathTriangleIDs.removeAll()
+            self.suggestedAnchorIDs.removeAll()
+            self.isPresented = true
+            print("📱 [ARViewLaunchContext] Zone Corner Calibration mode: \(zoneCornerIDs.count) corners")
+        }
+    }
+    
     /// Dismiss AR view and clean up state
     func dismiss() {
         DispatchQueue.main.async {
@@ -71,6 +89,7 @@ final class ARViewLaunchContext: ObservableObject {
             self.selectedTriangle = nil
             self.swathTriangleIDs.removeAll()
             self.suggestedAnchorIDs.removeAll()
+            self.zoneCornerIDs.removeAll()
             print("🚀 ARViewLaunchContext: Dismissed AR view")
         }
     }

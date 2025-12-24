@@ -350,19 +350,23 @@ struct HUDContainer: View {
                 .padding(.top, 80)
             }
             
-            // Survey selection button
+            // Zone Corner Calibration button
             if surveySelectionCoordinator.state == .idle && !triangleStore.isCreatingTriangle {
                 Button {
-                    surveySelectionCoordinator.beginTriangleSelection()
+                    let zoneCorners = mapPointStore.points.filter { $0.roles.contains(.zoneCorner) }
+                    if zoneCorners.count >= 2 {
+                        let sortedIDs = zoneCorners.map { $0.id }
+                        print("🏁 [HUD] Launching Zone Corner Calibration with \(sortedIDs.count) corners")
+                        arViewLaunchContext.launchZoneCornerCalibration(zoneCornerIDs: sortedIDs)
+                    } else {
+                        print("⚠️ [HUD] Zone Corner Calibration requires at least 2 Zone Corner points (found \(zoneCorners.count))")
+                    }
                 } label: {
-                    Image("tin-polygon")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 24, height: 24)
+                    Image(systemName: "rectangle.dashed")
+                        .font(.system(size: 20, weight: .semibold))
                         .foregroundColor(.white)
                         .frame(width: 48, height: 48)
-                        .background(Color.orange.opacity(0.9))
+                        .background(Color.purple.opacity(0.9))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             }

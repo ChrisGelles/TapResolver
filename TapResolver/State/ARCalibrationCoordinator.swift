@@ -486,6 +486,68 @@ final class ARCalibrationCoordinator: ObservableObject {
         preloadHistoricalPositions()
     }
     
+    /// Starts Zone Corner calibration mode with dynamic vertex count
+    /// Unlike triangle calibration (3 vertices) or swath anchoring (3 anchors),
+    /// this accepts any number >= 2 of Zone Corner MapPoints.
+    func startZoneCornerCalibration(zoneCornerIDs: [UUID]) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        print("🚀 [ZONE_CORNER] startZoneCornerCalibration() BEGIN: \(formatter.string(from: Date()))")
+        
+        guard zoneCornerIDs.count >= 2 else {
+            print("❌ Zone Corner calibration requires at least 2 points, got \(zoneCornerIDs.count)")
+            return
+        }
+        
+        // Clear any existing calibration state
+        if let coordinator = ARViewContainer.Coordinator.current {
+            coordinator.clearCalibrationMarkers()
+        }
+        
+        // Zone Corner: No triangle state, just set vertices directly
+        activeTriangleID = nil
+        currentTriangleID = nil
+        triangleVertices = zoneCornerIDs
+        
+        // Reset calibration state
+        placedMarkers = []
+        completedMarkerCount = 0
+        currentVertexIndex = 0
+        lastPrintedVertexIndex = nil
+        calibrationState = .placingVertices(currentIndex: 0)
+        print("🎯 CalibrationState → \(stateDescription)")
+        
+        print("📍 Starting Zone Corner calibration with \(zoneCornerIDs.count) vertices: \(zoneCornerIDs.map { String($0.uuidString.prefix(8)) })")
+        
+        // Load reference photo for first vertex
+        if let currentVertexID = getCurrentVertexID(),
+           let mapPoint = safeMapStore.points.first(where: { $0.id == currentVertexID }) {
+            let photoData: Data? = {
+                if let diskData = safeMapStore.loadPhotoFromDisk(for: currentVertexID) {
+                    return diskData
+                } else {
+                    return mapPoint.locationPhotoData
+                }
+            }()
+            setReferencePhoto(photoData)
+            
+            print("🎯 Guiding user to Zone Corner (\(String(format: "%.1f", mapPoint.mapPoint.x)), \(String(format: "%.1f", mapPoint.mapPoint.y)))")
+        } else {
+            print("⚠️ Could not load reference photo for first Zone Corner")
+        }
+        
+        // Initialize UI state
+        progressDots = (false, false, false)  // Not used for Zone Corner (variable count)
+        statusText = "Place Zone Corner markers (0/\(zoneCornerIDs.count))"
+        isActive = true
+        
+        print("🎯 ARCalibrationCoordinator: Starting Zone Corner calibration with \(zoneCornerIDs.count) corners")
+        print("🚀 [ZONE_CORNER] startZoneCornerCalibration() ready for markers: \(formatter.string(from: Date()))")
+        
+        // Preload historical position data for fast ghost calculations
+        preloadHistoricalPositions()
+    }
+    
     /// Start Swath Survey anchoring workflow
     /// Similar to startCalibration but uses provided anchor IDs instead of triangle vertices
     /// - Parameter anchorIDs: The 3 MapPoint IDs to use as anchors (from SurveySelectionCoordinator.suggestedAnchorIDs)

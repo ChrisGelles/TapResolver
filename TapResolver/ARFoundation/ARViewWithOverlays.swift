@@ -135,6 +135,14 @@ struct ARViewWithOverlays: View {
                         currentMode = .idle  // Will show calibration UI via calibrationState
                         print("🎯 ARViewWithOverlays: Auto-initialized swath anchoring with \(anchorIDs.count) anchors")
                     }
+                } else if arViewLaunchContext.launchMode == .zoneCornerCalibration {
+                    // Zone Corner Calibration mode: Initialize with zone corner points
+                    DispatchQueue.main.async {
+                        let cornerIDs = arViewLaunchContext.zoneCornerIDs
+                        arCalibrationCoordinator.startZoneCornerCalibration(zoneCornerIDs: cornerIDs)
+                        currentMode = .idle  // Will show calibration UI via calibrationState
+                        print("🎯 ARViewWithOverlays: Auto-initialized Zone Corner calibration with \(cornerIDs.count) corners")
+                    }
                 } else {
                     // Set mode to idle - user will choose Calibrate or Relocalize
                     currentMode = .idle
@@ -266,6 +274,37 @@ struct ARViewWithOverlays: View {
                     
                     arCalibrationCoordinator.registerSwathAnchor(mapPointID: currentVertexID, marker: marker)
                     print("✅ [SWATH_ANCHOR_TRACE] Registered swath anchor for MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
+                    return
+                }
+                
+                // ZONE CORNER CALIBRATION MODE: Handle zone corner placement separately
+                if arViewLaunchContext.launchMode == .zoneCornerCalibration,
+                   case .placingVertices = arCalibrationCoordinator.calibrationState,
+                   let markerID = notification.userInfo?["markerID"] as? UUID,
+                   let positionArray = notification.userInfo?["position"] as? [Float],
+                   positionArray.count == 3 {
+                    
+                    print("🎯 [ZONE_CORNER_TRACE] Processing zone corner placement")
+                    
+                    guard let currentVertexID = arCalibrationCoordinator.getCurrentVertexID() else {
+                        print("⚠️ [ZONE_CORNER_TRACE] No current vertex ID")
+                        return
+                    }
+                    
+                    let arPosition = simd_float3(positionArray[0], positionArray[1], positionArray[2])
+                    let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID })
+                    let mapCoordinates = mapPoint?.mapPoint ?? CGPoint.zero
+                    
+                    let marker = ARMarker(
+                        id: markerID,
+                        linkedMapPointID: currentVertexID,
+                        arPosition: arPosition,
+                        mapCoordinates: mapCoordinates,
+                        isAnchor: false
+                    )
+                    
+                    arCalibrationCoordinator.registerSwathAnchor(mapPointID: currentVertexID, marker: marker)
+                    print("✅ [ZONE_CORNER_TRACE] Registered zone corner for MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
                     return
                 }
                 
@@ -606,14 +645,23 @@ struct ARViewWithOverlays: View {
                 }
             }
             
-            // Tap-to-Place Button (bottom) - during triangle calibration OR swath survey anchoring
-            // Swath Survey uses calibrationState.placingVertices with currentMode == .idle
+            // Tap-to-Place Button (bottom) - during triangle calibration OR swath survey anchoring OR zone corner calibration
+            // Swath Survey and Zone Corner use calibrationState.placingVertices with currentMode == .idle
             let showCalibrationUI: Bool = {
                 if case .triangleCalibration = currentMode {
                     return true
                 }
                 // Swath Survey: show UI during vertex placement AND when ready to fill
                 if arViewLaunchContext.launchMode == .swathSurvey {
+                    if case .placingVertices = arCalibrationCoordinator.calibrationState {
+                        return true
+                    }
+                    if case .readyToFill = arCalibrationCoordinator.calibrationState {
+                        return true
+                    }
+                }
+                // Zone Corner Calibration: show UI during vertex placement AND when ready to fill
+                if arViewLaunchContext.launchMode == .zoneCornerCalibration {
                     if case .placingVertices = arCalibrationCoordinator.calibrationState {
                         return true
                     }
@@ -1696,6 +1744,15 @@ struct ARPiPMapView: View {
         // SWATH SURVEY MODE: Focus on current anchor vertex during placement
         if arViewLaunchContext.launchMode == .swathSurvey {
             // During vertex placement, focus on current anchor (same as Calibration Crawl)
+            if case .placingVertices = arCalibrationCoordinator.calibrationState {
+                return arCalibrationCoordinator.getCurrentVertexID()
+            }
+            return nil
+        }
+        
+        // ZONE CORNER CALIBRATION MODE: Focus on current zone corner vertex during placement
+        if arViewLaunchContext.launchMode == .zoneCornerCalibration {
+            // During vertex placement, focus on current zone corner (same as Calibration Crawl)
             if case .placingVertices = arCalibrationCoordinator.calibrationState {
                 return arCalibrationCoordinator.getCurrentVertexID()
             }
