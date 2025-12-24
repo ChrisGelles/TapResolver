@@ -83,6 +83,9 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// This allows the user to reposition a marker at any distance from the original ghost location
     @Published var repositionModeActive: Bool = false
     
+    /// True when in Zone Corner calibration mode (variable anchor count)
+    @Published var isZoneCornerMode: Bool = false
+    
     // Legacy compatibility properties
     @Published var isActive: Bool = false
     @Published var currentTriangleID: UUID?
@@ -512,6 +515,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Reset calibration state
         placedMarkers = []
         completedMarkerCount = 0
+        isZoneCornerMode = true
         currentVertexIndex = 0
         lastPrintedVertexIndex = nil
         calibrationState = .placingVertices(currentIndex: 0)
@@ -1225,6 +1229,175 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
         
         print("📍 [SWATH_ANCHOR] registerSwathAnchor END: \(formatter.string(from: Date()))")
+    }
+    
+    /// Registers a Zone Corner anchor marker during Zone Corner calibration
+    /// Unlike registerSwathAnchor (fixed 3 anchors), this supports variable corner count
+    /// After ALL corners placed: computes transform and plants ghosts for all triangle vertices
+    func registerZoneCornerAnchor(mapPointID: UUID, marker: ARMarker) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        print("📍 [ZONE_CORNER] registerZoneCornerAnchor BEGIN: \(formatter.string(from: Date()))")
+        print("   MapPoint: \(String(mapPointID.uuidString.prefix(8)))")
+        print("   Position: (\(String(format: "%.2f", marker.arPosition.x)), \(String(format: "%.2f", marker.arPosition.y)), \(String(format: "%.2f", marker.arPosition.z)))")
+        
+        let totalCorners = triangleVertices.count
+        
+        // Validate this is one of our target corners
+        guard triangleVertices.contains(mapPointID) else {
+            print("❌ [ZONE_CORNER] MapPoint \(String(mapPointID.uuidString.prefix(8))) is not a zone corner vertex")
+            return
+        }
+        
+        // Check if already placed
+        guard !placedMarkers.contains(mapPointID) else {
+            print("⚠️ [ZONE_CORNER] MapPoint \(String(mapPointID.uuidString.prefix(8))) already has a marker")
+            return
+        }
+        
+        // Save to ARWorldMapStore
+        do {
+            let worldMapMarker = convertToWorldMapMarker(marker)
+            try safeARStore.saveMarker(worldMapMarker)
+            print("💾 [ZONE_CORNER] Saved marker to ARWorldMapStore")
+            
+            // Track position for transform computation
+            sessionMarkerPositions[marker.id.uuidString] = marker.arPosition
+            mapPointARPositions[mapPointID] = marker.arPosition
+            sessionMarkerToMapPoint[marker.id.uuidString] = mapPointID
+            print("📍 [ZONE_CORNER] Stored position for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            
+            // Record in position history
+            let record = ARPositionRecord(
+                position: marker.arPosition,
+                sessionID: safeARStore.currentSessionID,
+                sourceType: .calibration,
+                distortionVector: nil,
+                confidenceScore: 0.95
+            )
+            safeMapStore.addPositionRecord(mapPointID: mapPointID, record: record)
+            
+        } catch {
+            print("❌ [ZONE_CORNER] Failed to save marker: \(error)")
+            return
+        }
+        
+        // Track placed marker and update UI
+        placedMarkers.append(mapPointID)
+        completedMarkerCount = placedMarkers.count
+        
+        print("📊 [ZONE_CORNER] Progress: \(placedMarkers.count)/\(totalCorners) corners placed")
+        
+        // Advance to next corner or complete
+        if placedMarkers.count < totalCorners {
+            // Move to next vertex
+            currentVertexIndex += 1
+            calibrationState = .placingVertices(currentIndex: currentVertexIndex)
+            statusText = "Place Zone Corner markers (\(placedMarkers.count)/\(totalCorners))"
+            
+            // Load reference photo for next corner
+            if let nextVertexID = getCurrentVertexID(),
+               let mapPoint = safeMapStore.points.first(where: { $0.id == nextVertexID }) {
+                let photoData: Data? = safeMapStore.loadPhotoFromDisk(for: nextVertexID) ?? mapPoint.locationPhotoData
+                setReferencePhoto(photoData)
+                print("🎯 [ZONE_CORNER] Advancing to corner \(currentVertexIndex + 1): MapPoint \(String(nextVertexID.uuidString.prefix(8)))")
+                print("   Position: (\(String(format: "%.1f", mapPoint.mapPoint.x)), \(String(format: "%.1f", mapPoint.mapPoint.y)))")
+            }
+        } else {
+            // All corners placed - compute transform and plant ghosts
+            print("✅ [ZONE_CORNER] All \(totalCorners) corners placed")
+            
+            // Compute session transform using all placed corners
+            if let pixelsPerMeter = getPixelsPerMeter(),
+               let mapSize = cachedMapSize {
+                let metersPerPixel = 1.0 / pixelsPerMeter
+                let success = computeSessionTransformForBakedData(mapSize: mapSize, metersPerPixel: metersPerPixel)
+                print("📐 [ZONE_CORNER] Transform computation: \(success ? "SUCCESS" : "FAILED")")
+            }
+            
+            // Plant ghosts for ALL triangle vertices
+            if hasValidSessionTransform {
+                plantGhostsForAllTriangleVertices()
+            } else {
+                print("⚠️ [ZONE_CORNER] Cannot plant ghosts - no valid session transform")
+            }
+            
+            // Transition to crawl mode
+            calibrationState = .readyToFill
+            statusText = "Zone corners complete - adjust ghosts as needed"
+            print("🎯 [ZONE_CORNER] Entering crawl mode with \(ghostMarkerPositions.count) ghost(s)")
+        }
+        
+        print("📍 [ZONE_CORNER] registerZoneCornerAnchor END: \(formatter.string(from: Date()))")
+    }
+    
+    /// Plants ghost markers for all triangle vertices that have baked canonical positions
+    /// Called after Zone Corner calibration completes
+    private func plantGhostsForAllTriangleVertices() {
+        print("👻 [ZONE_CORNER_GHOSTS] Planting ghosts for all triangle vertices...")
+        
+        // Collect all unique vertex IDs from all triangles
+        var allVertexIDs = Set<UUID>()
+        for triangle in safeTriangleStore.triangles {
+            for vertexID in triangle.vertexIDs {
+                allVertexIDs.insert(vertexID)
+            }
+        }
+        
+        print("👻 [ZONE_CORNER_GHOSTS] Found \(allVertexIDs.count) unique vertices across \(safeTriangleStore.triangles.count) triangles")
+        
+        var ghostsPlanted = 0
+        var skippedHasPosition = 0
+        var skippedNoBaked = 0
+        var skippedCalcFailed = 0
+        
+        for vertexID in allVertexIDs {
+            // Skip if already has AR position (placed as corner or already confirmed)
+            if mapPointARPositions[vertexID] != nil {
+                skippedHasPosition += 1
+                continue
+            }
+            
+            // Skip if already a ghost was adjusted
+            if adjustedGhostMapPoints.contains(vertexID) {
+                skippedHasPosition += 1
+                continue
+            }
+            
+            // Get MapPoint and check for baked position
+            guard let mapPoint = safeMapStore.points.first(where: { $0.id == vertexID }),
+                  mapPoint.canonicalPosition != nil else {
+                skippedNoBaked += 1
+                continue
+            }
+            
+            // Calculate ghost position from baked data
+            guard let ghostPosition = calculateGhostPositionFromBakedData(for: vertexID) else {
+                skippedCalcFailed += 1
+                continue
+            }
+            
+            // Track ghost position
+            ghostMarkerPositions[vertexID] = ghostPosition
+            
+            // Post notification to render ghost in AR view
+            NotificationCenter.default.post(
+                name: NSNotification.Name("PlaceGhostMarker"),
+                object: nil,
+                userInfo: [
+                    "mapPointID": vertexID,
+                    "position": ghostPosition
+                ]
+            )
+            
+            ghostsPlanted += 1
+        }
+        
+        print("👻 [ZONE_CORNER_GHOSTS] Complete:")
+        print("   Planted: \(ghostsPlanted)")
+        print("   Skipped (has position): \(skippedHasPosition)")
+        print("   Skipped (no baked data): \(skippedNoBaked)")
+        print("   Skipped (calc failed): \(skippedCalcFailed)")
     }
     
     // MARK: - Drift Detection
@@ -3387,6 +3560,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         demotedGhostMapPointIDs.removeAll()
         adjustedGhostMapPoints.removeAll()
         repositionModeActive = false
+        isZoneCornerMode = false
         
         // Clear baked data transform cache
         cachedCanonicalToSessionTransform = nil

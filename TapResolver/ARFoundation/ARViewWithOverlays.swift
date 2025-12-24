@@ -303,7 +303,7 @@ struct ARViewWithOverlays: View {
                         isAnchor: false
                     )
                     
-                    arCalibrationCoordinator.registerSwathAnchor(mapPointID: currentVertexID, marker: marker)
+                    arCalibrationCoordinator.registerZoneCornerAnchor(mapPointID: currentVertexID, marker: marker)
                     print("✅ [ZONE_CORNER_TRACE] Registered zone corner for MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
                     return
                 }
@@ -1045,9 +1045,10 @@ struct ARViewWithOverlays: View {
                         .padding(.bottom, 40)
                     }
                     
-                    // Survey Button Bar - hide when ghost interaction is active (ghost selected)
+                    // Survey Button Bar - hide when ghost interaction is active (ghost selected) or in Zone Corner mode
                     // Ghost Confirm/Adjust takes UI priority
-                    if arCalibrationCoordinator.selectedGhostMapPointID == nil {
+                    // Zone Corner mode uses crawl-only (no Fill Triangle buttons)
+                    if arCalibrationCoordinator.selectedGhostMapPointID == nil && !arCalibrationCoordinator.isZoneCornerMode {
                         SurveyButtonBar(
                         userContainingTriangleID: userContainingTriangleID,
                         hasAnyCalibratedTriangle: !arCalibrationCoordinator.sessionCalibratedTriangles.isEmpty,
@@ -1203,8 +1204,8 @@ struct ARViewWithOverlays: View {
             }
             
             // Place AR Marker Button + Strategy Picker (bottom) - only in idle mode with no triangle selected
-            // Exclude Swath Survey mode - it has its own workflow
-            if currentMode == .idle && selectedTriangle == nil && arViewLaunchContext.launchMode != .swathSurvey {
+            // Exclude Swath Survey and Zone Corner Calibration modes - they have their own workflows
+            if currentMode == .idle && selectedTriangle == nil && arViewLaunchContext.launchMode != .swathSurvey && arViewLaunchContext.launchMode != .zoneCornerCalibration {
                 VStack {
                     Spacer()
                     
