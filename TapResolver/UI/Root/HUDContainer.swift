@@ -1166,6 +1166,8 @@ private struct DebugSettingsPanel: View {
     @State private var storageAuditURL: URL? = nil
     @StateObject private var kbeaconManager = KBeaconConnectionManager()
     @State private var isBeaconScanning = false
+    @State private var showMapSVGSheet = false
+    @State private var mapSVGURL: URL? = nil
     
     var body: some View {
         GeometryReader { geometry in
@@ -1654,6 +1656,23 @@ private struct DebugSettingsPanel: View {
                         }
                         .buttonStyle(.plain)
                         
+                        // Export MapPoints SVG
+                        Button {
+                            exportMapPointsSVG()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "map")
+                                    .font(.system(size: 24))
+                                Text("Export Map SVG")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
                         // === END ONE-TIME CLEANUP UTILITY ===
                     }
                     .padding(.horizontal, 20)
@@ -1750,6 +1769,11 @@ private struct DebugSettingsPanel: View {
             Button("OK") { }
         } message: {
             Text(canonicalPurgeResultMessage)
+        }
+        .sheet(isPresented: $showMapSVGSheet) {
+            if let url = mapSVGURL {
+                ShareSheet(items: [url])
+            }
         }
     }
     
@@ -2003,6 +2027,68 @@ private struct DebugSettingsPanel: View {
         print("================================================================================")
         print("✅ Soft reset complete for location '\(currentLocation)'")
         print("================================================================================")
+    }
+    
+    private func exportMapPointsSVG() {
+        let locationID = locationManager.currentLocationID
+        
+        // Load map image
+        let mapImage: UIImage?
+        if let image = LocationImportUtils.loadDisplayImage(locationID: locationID) {
+            mapImage = image
+        } else {
+            // Fallback to bundled assets
+            let assetName: String
+            switch locationID {
+            case "home":
+                assetName = "myFirstFloor_v03-metric"
+            case "museum":
+                assetName = "MuseumMap-8k"
+            default:
+                assetName = ""
+            }
+            mapImage = assetName.isEmpty ? nil : UIImage(named: assetName)
+        }
+        
+        guard let image = mapImage else {
+            print("⚠️ [SVG_EXPORT] No map image")
+            return
+        }
+        
+        let mapWidth = Int(image.size.width)
+        let mapHeight = Int(image.size.height)
+        let locationName = locationID ?? "unknown"
+        
+        let pointData: [(id: UUID, position: CGPoint, isLocked: Bool, hasCanonical: Bool)] = mapPointStore.points.map { point in
+            (id: point.id, position: point.mapPoint, isLocked: point.isLocked, hasCanonical: point.canonicalPosition != nil)
+        }
+        
+        guard !pointData.isEmpty else {
+            print("⚠️ [SVG_EXPORT] No MapPoints")
+            return
+        }
+        
+        let svgContent = SVGExporter.generateMapPointsSVG(
+            mapPoints: pointData,
+            mapWidth: mapWidth,
+            mapHeight: mapHeight,
+            locationName: locationName
+        )
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd-HHmm"
+        let timestamp = dateFormatter.string(from: Date())
+        let filename = "\(locationName)-mappoints-\(timestamp).svg"
+        
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try svgContent.write(to: tempURL, atomically: true, encoding: .utf8)
+            print("✅ [SVG_EXPORT] Exported \(pointData.count) MapPoints to \(filename)")
+            mapSVGURL = tempURL
+            showMapSVGSheet = true
+        } catch {
+            print("❌ [SVG_EXPORT] Failed: \(error)")
+        }
     }
 }
 

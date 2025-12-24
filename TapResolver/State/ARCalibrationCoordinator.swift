@@ -215,6 +215,21 @@ final class ARCalibrationCoordinator: ObservableObject {
         return safeARStore
     }
     
+    /// Public read-only access to cached map size (for SVG export)
+    public var cachedMapSizeAccess: CGSize? {
+        return cachedMapSize
+    }
+    
+    /// Public read-only access to cached meters per pixel (for SVG export)
+    public var cachedMetersPerPixelAccess: Float? {
+        return cachedMetersPerPixel
+    }
+    
+    /// Public read-only access to cached canonical to session transform (for SVG export)
+    public var cachedCanonicalToSessionTransformAccess: SessionToCanonicalTransform? {
+        return cachedCanonicalToSessionTransform
+    }
+    
     // MARK: - Safe Store Accessors
     // These provide clear crash messages if stores are accessed before configure() is called.
     // In Step 4, all internal usages of mapStore/arStore/triangleStore will use these instead.

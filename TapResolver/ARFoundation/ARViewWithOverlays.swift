@@ -61,6 +61,10 @@ struct ARViewWithOverlays: View {
     @State private var showDwellTimer: Bool = false
     @State private var didFireThresholdHaptic: Bool = false
     
+    // SVG Export state
+    @State private var showShareSheet = false
+    @State private var svgFileURL: URL? = nil
+    
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
@@ -440,6 +444,27 @@ struct ARViewWithOverlays: View {
                         .padding(.top, 60)
                     }
                     Spacer()
+                }
+                .zIndex(4000)
+                
+                // SVG Export Button (bottom-right corner)
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button(action: {
+                            exportARSessionSVG()
+                        }) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 20))
+                                .foregroundColor(.white)
+                                .padding(12)
+                                .background(Color.black.opacity(0.6))
+                                .clipShape(Circle())
+                        }
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 20)
+                    }
                 }
                 .zIndex(4000)
                 
@@ -1277,6 +1302,11 @@ struct ARViewWithOverlays: View {
                 .zIndex(990)
             }
         }
+        .sheet(isPresented: $showShareSheet) {
+            if let url = svgFileURL {
+                ShareSheet(items: [url])
+            }
+        }
     }
     
     // MARK: - Haptic Feedback Helpers
@@ -1518,6 +1548,72 @@ struct ARViewWithOverlays: View {
             print("📉 [HAPTICS] Fading buzz")
         } catch {
             print("⚠️ [HAPTICS] Fading buzz failed: \(error.localizedDescription)")
+        }
+    }
+    
+    // MARK: - SVG Export
+    
+    private func exportARSessionSVG() {
+        guard let mapSize = arCalibrationCoordinator.cachedMapSizeAccess,
+              let metersPerPixel = arCalibrationCoordinator.cachedMetersPerPixelAccess else {
+            print("⚠️ [SVG_EXPORT] Missing required data for export")
+            return
+        }
+        
+        let sessionID = arWorldMapStore.currentSessionID
+        let pixelsPerMeter = 1.0 / Double(metersPerPixel)
+        let canonicalOrigin = CGPoint(x: mapSize.width / 2, y: mapSize.height / 2)
+        
+        var transformedPositions: [(mapPointID: UUID, pixelPosition: CGPoint)] = []
+        
+        if let transform = arCalibrationCoordinator.cachedCanonicalToSessionTransformAccess {
+            for (mapPointID, arPosition) in arCalibrationCoordinator.mapPointARPositions {
+                let inverseRotation = -transform.rotationY
+                let inverseScale = 1.0 / transform.scale
+                
+                let translated = arPosition - transform.translation
+                let cosR = cos(inverseRotation)
+                let sinR = sin(inverseRotation)
+                let rotated = SIMD3<Float>(
+                    translated.x * cosR - translated.z * sinR,
+                    translated.y,
+                    translated.x * sinR + translated.z * cosR
+                )
+                let canonicalPosition = rotated * inverseScale
+                
+                let pixelX = CGFloat(canonicalPosition.x * Float(pixelsPerMeter)) + canonicalOrigin.x
+                let pixelY = CGFloat(canonicalPosition.z * Float(pixelsPerMeter)) + canonicalOrigin.y
+                
+                transformedPositions.append((mapPointID: mapPointID, pixelPosition: CGPoint(x: pixelX, y: pixelY)))
+            }
+        }
+        
+        guard !transformedPositions.isEmpty else {
+            print("⚠️ [SVG_EXPORT] No markers to export")
+            return
+        }
+        
+        let svgContent = SVGExporter.generateARSessionSVG(
+            sessionMarkers: transformedPositions,
+            mapWidth: Int(mapSize.width),
+            mapHeight: Int(mapSize.height),
+            sessionID: sessionID
+        )
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd-HHmm"
+        let timestamp = dateFormatter.string(from: Date())
+        let sessionShort = String(sessionID.uuidString.prefix(8))
+        let filename = "ARpoints-\(sessionShort)-\(timestamp).svg"
+        
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try svgContent.write(to: tempURL, atomically: true, encoding: .utf8)
+            print("✅ [SVG_EXPORT] Exported \(transformedPositions.count) markers to \(filename)")
+            svgFileURL = tempURL
+            showShareSheet = true
+        } catch {
+            print("❌ [SVG_EXPORT] Failed to write file: \(error)")
         }
     }
 }
