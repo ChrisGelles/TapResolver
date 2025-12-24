@@ -1367,6 +1367,12 @@ final class ARCalibrationCoordinator: ObservableObject {
         mapPointStore: MapPointStore,
         arWorldMapStore: ARWorldMapStore
     ) -> simd_float3? {
+        print("═══════════════════════════════════════════════════════════")
+        print("👻 [GHOST_CALC] Calculating ghost for MapPoint \(String(mapPoint.id.uuidString.prefix(8)))")
+        if let triangleID = activeTriangleID {
+            print("   Triangle: \(String(triangleID.uuidString.prefix(8)))")
+        }
+        
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss.SSS"
         let calcStartTime = Date()
@@ -1455,6 +1461,15 @@ final class ARCalibrationCoordinator: ObservableObject {
             print("║     sampleCount: \(mapPoint.canonicalSampleCount)")
         }
         print("║   cachedCanonicalToSessionTransform: \(hasSessionTransform ? "✅ EXISTS" : "❌ NIL")")
+        
+        // Task 2: Canonical position diagnostics
+        if let canonical = mapPoint.canonicalPosition {
+            print("📍 [GHOST_CALC] Canonical position: (\(String(format: "%.3f", canonical.x)), \(String(format: "%.3f", canonical.y)), \(String(format: "%.3f", canonical.z)))")
+            print("   Confidence: \(mapPoint.canonicalConfidence ?? 0)")
+            print("   Sample count: \(mapPoint.canonicalSampleCount ?? 0)")
+        } else {
+            print("📍 [GHOST_CALC] No canonical position — using fallback path")
+        }
         
         if hasBakedPosition && hasSessionTransform {
             print("║   → Attempting baked projection via calculateGhostPositionFromBakedData()")
@@ -1600,9 +1615,53 @@ final class ARCalibrationCoordinator: ObservableObject {
                 print("║ Source: Session-level rigid transforms (PRIORITY 1 path)")
                 print("╚════════════════════════════════════════════════════════════════════════╝")
                 
+                // Task 4: Historical distortion vector diagnostics
+                let distortionHistory = mapPoint.arPositionHistory.compactMap { $0.distortionVector }
+                if !distortionHistory.isEmpty {
+                    print("📐 [GHOST_CALC] Historical distortion vectors (\(distortionHistory.count) records):")
+                    var avgDistortion = simd_float3(0, 0, 0)
+                    for (i, d) in distortionHistory.prefix(5).enumerated() {
+                        print("   [\(i)] (\(String(format: "%.3f", d.x)), \(String(format: "%.3f", d.y)), \(String(format: "%.3f", d.z)))")
+                        avgDistortion += d
+                    }
+                    if distortionHistory.count > 5 {
+                        print("   ... and \(distortionHistory.count - 5) more")
+                        for d in distortionHistory.dropFirst(5) {
+                            avgDistortion += d
+                        }
+                    }
+                    avgDistortion /= Float(distortionHistory.count)
+                    print("   AVG: (\(String(format: "%.3f", avgDistortion.x)), \(String(format: "%.3f", avgDistortion.y)), \(String(format: "%.3f", avgDistortion.z)))")
+                    print("   Magnitude: \(String(format: "%.3f", simd_length(avgDistortion)))m")
+                    print("   ⚠️ [NOT APPLIED] This correction is stored but not used in prediction!")
+                } else {
+                    print("📐 [GHOST_CALC] No historical distortion vectors for this point")
+                }
+                
+                // Task 5: Leg measurements diagnostics
+                if let triangleID = activeTriangleID,
+                   let triangle = safeTriangleStore.triangle(withID: triangleID),
+                   !triangle.legMeasurements.isEmpty {
+                    print("📏 [GHOST_CALC] Triangle leg measurements:")
+                    for (i, leg) in triangle.legMeasurements.enumerated() {
+                        print("   Leg \(i): \(String(leg.vertexA.uuidString.prefix(8)))→\(String(leg.vertexB.uuidString.prefix(8))) map=\(String(format: "%.3f", leg.mapDistance))m AR=\(String(format: "%.3f", leg.arDistance))m ratio=\(String(format: "%.3f", leg.distortionRatio))")
+                    }
+                    let ratios = triangle.legMeasurements.map { $0.distortionRatio }
+                    let avgRatio = ratios.reduce(0, +) / Float(ratios.count)
+                    let maxDeviation = ratios.map { abs($0 - 1.0) }.max() ?? 0
+                    print("   Avg ratio: \(String(format: "%.3f", avgRatio)) (1.0 = perfect match)")
+                    print("   Max deviation: \(String(format: "%.3f", maxDeviation)) (\(String(format: "%.1f", maxDeviation * 100))%)")
+                } else {
+                    print("📏 [GHOST_CALC] No leg measurements available for this triangle")
+                }
+                
                 let calcEndTime = Date()
                 let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
                 print("👻 [GHOST_CALC] END: \(formatter.string(from: calcEndTime)) (duration: \(String(format: "%.1f", calcDuration))ms)")
+                
+                // Task 6: Final position diagnostic
+                print("👻 [GHOST_CALC] Final ghost position: (\(String(format: "%.3f", alignedConsensus.x)), \(String(format: "%.3f", alignedConsensus.y)), \(String(format: "%.3f", alignedConsensus.z)))")
+                print("═══════════════════════════════════════════════════════════")
                 
                 return alignedConsensus
             } else {
@@ -1714,9 +1773,53 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("║ Note: No baked data or session history available for this vertex")
         print("╚════════════════════════════════════════════════════════════════════════╝")
         
+        // Task 4: Historical distortion vector diagnostics
+        let distortionHistory = mapPoint.arPositionHistory.compactMap { $0.distortionVector }
+        if !distortionHistory.isEmpty {
+            print("📐 [GHOST_CALC] Historical distortion vectors (\(distortionHistory.count) records):")
+            var avgDistortion = simd_float3(0, 0, 0)
+            for (i, d) in distortionHistory.prefix(5).enumerated() {
+                print("   [\(i)] (\(String(format: "%.3f", d.x)), \(String(format: "%.3f", d.y)), \(String(format: "%.3f", d.z)))")
+                avgDistortion += d
+            }
+            if distortionHistory.count > 5 {
+                print("   ... and \(distortionHistory.count - 5) more")
+                for d in distortionHistory.dropFirst(5) {
+                    avgDistortion += d
+                }
+            }
+            avgDistortion /= Float(distortionHistory.count)
+            print("   AVG: (\(String(format: "%.3f", avgDistortion.x)), \(String(format: "%.3f", avgDistortion.y)), \(String(format: "%.3f", avgDistortion.z)))")
+            print("   Magnitude: \(String(format: "%.3f", simd_length(avgDistortion)))m")
+            print("   ⚠️ [NOT APPLIED] This correction is stored but not used in prediction!")
+        } else {
+            print("📐 [GHOST_CALC] No historical distortion vectors for this point")
+        }
+        
+        // Task 5: Leg measurements diagnostics
+        if let triangleID = activeTriangleID,
+           let triangle = safeTriangleStore.triangle(withID: triangleID),
+           !triangle.legMeasurements.isEmpty {
+            print("📏 [GHOST_CALC] Triangle leg measurements:")
+            for (i, leg) in triangle.legMeasurements.enumerated() {
+                print("   Leg \(i): \(String(leg.vertexA.uuidString.prefix(8)))→\(String(leg.vertexB.uuidString.prefix(8))) map=\(String(format: "%.3f", leg.mapDistance))m AR=\(String(format: "%.3f", leg.arDistance))m ratio=\(String(format: "%.3f", leg.distortionRatio))")
+            }
+            let ratios = triangle.legMeasurements.map { $0.distortionRatio }
+            let avgRatio = ratios.reduce(0, +) / Float(ratios.count)
+            let maxDeviation = ratios.map { abs($0 - 1.0) }.max() ?? 0
+            print("   Avg ratio: \(String(format: "%.3f", avgRatio)) (1.0 = perfect match)")
+            print("   Max deviation: \(String(format: "%.3f", maxDeviation)) (\(String(format: "%.1f", maxDeviation * 100))%)")
+        } else {
+            print("📏 [GHOST_CALC] No leg measurements available for this triangle")
+        }
+        
         let calcEndTime = Date()
         let calcDuration = calcEndTime.timeIntervalSince(calcStartTime) * 1000
         print("👻 [GHOST_CALC] END: \(formatter.string(from: calcEndTime)) (duration: \(String(format: "%.1f", calcDuration))ms)")
+        
+        // Task 6: Final position diagnostic
+        print("👻 [GHOST_CALC] Final ghost position: (\(String(format: "%.3f", ghostPosition.x)), \(String(format: "%.3f", ghostPosition.y)), \(String(format: "%.3f", ghostPosition.z)))")
+        print("═══════════════════════════════════════════════════════════")
         
         return ghostPosition
     }
@@ -1799,8 +1902,59 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Apply transform: canonical → session
         let sessionPosition = transform.apply(to: bakedPosition)
         
+        // Task 3: Transform application diagnostics
+        print("🔄 [GHOST_CALC] Global transform applied:")
+        print("   Canonical (X,Z): (\(String(format: "%.3f", bakedPosition.x)), \(String(format: "%.3f", bakedPosition.z)))")
+        print("   Session (X,Z):   (\(String(format: "%.3f", sessionPosition.x)), \(String(format: "%.3f", sessionPosition.z)))")
+        print("   Transform: rot=\(String(format: "%.1f", transform.rotationY * 180 / .pi))° scale=\(String(format: "%.4f", transform.scale))")
+        print("   Translation: (\(String(format: "%.3f", transform.translation.x)), \(String(format: "%.3f", transform.translation.z)))")
+        
         let duration = Date().timeIntervalSince(startTime) * 1000
         print("👻 [BAKED_GHOST] ✅ \(String(targetMapPointID.uuidString.prefix(8))): baked(\(String(format: "%.2f", bakedPosition.x)), \(String(format: "%.2f", bakedPosition.z))) → session(\(String(format: "%.2f", sessionPosition.x)), \(String(format: "%.2f", sessionPosition.z))) in \(String(format: "%.2f", duration))ms")
+        
+        // Task 4: Historical distortion vector diagnostics
+        let distortionHistory = targetMapPoint.arPositionHistory.compactMap { $0.distortionVector }
+        if !distortionHistory.isEmpty {
+            print("📐 [GHOST_CALC] Historical distortion vectors (\(distortionHistory.count) records):")
+            var avgDistortion = simd_float3(0, 0, 0)
+            for (i, d) in distortionHistory.prefix(5).enumerated() {
+                print("   [\(i)] (\(String(format: "%.3f", d.x)), \(String(format: "%.3f", d.y)), \(String(format: "%.3f", d.z)))")
+                avgDistortion += d
+            }
+            if distortionHistory.count > 5 {
+                print("   ... and \(distortionHistory.count - 5) more")
+                for d in distortionHistory.dropFirst(5) {
+                    avgDistortion += d
+                }
+            }
+            avgDistortion /= Float(distortionHistory.count)
+            print("   AVG: (\(String(format: "%.3f", avgDistortion.x)), \(String(format: "%.3f", avgDistortion.y)), \(String(format: "%.3f", avgDistortion.z)))")
+            print("   Magnitude: \(String(format: "%.3f", simd_length(avgDistortion)))m")
+            print("   ⚠️ [NOT APPLIED] This correction is stored but not used in prediction!")
+        } else {
+            print("📐 [GHOST_CALC] No historical distortion vectors for this point")
+        }
+        
+        // Task 5: Leg measurements diagnostics
+        if let triangleID = activeTriangleID,
+           let triangle = safeTriangleStore.triangle(withID: triangleID),
+           !triangle.legMeasurements.isEmpty {
+            print("📏 [GHOST_CALC] Triangle leg measurements:")
+            for (i, leg) in triangle.legMeasurements.enumerated() {
+                print("   Leg \(i): \(String(leg.vertexA.uuidString.prefix(8)))→\(String(leg.vertexB.uuidString.prefix(8))) map=\(String(format: "%.3f", leg.mapDistance))m AR=\(String(format: "%.3f", leg.arDistance))m ratio=\(String(format: "%.3f", leg.distortionRatio))")
+            }
+            let ratios = triangle.legMeasurements.map { $0.distortionRatio }
+            let avgRatio = ratios.reduce(0, +) / Float(ratios.count)
+            let maxDeviation = ratios.map { abs($0 - 1.0) }.max() ?? 0
+            print("   Avg ratio: \(String(format: "%.3f", avgRatio)) (1.0 = perfect match)")
+            print("   Max deviation: \(String(format: "%.3f", maxDeviation)) (\(String(format: "%.1f", maxDeviation * 100))%)")
+        } else {
+            print("📏 [GHOST_CALC] No leg measurements available for this triangle")
+        }
+        
+        // Task 6: Final position diagnostic
+        print("👻 [GHOST_CALC] Final ghost position: (\(String(format: "%.3f", sessionPosition.x)), \(String(format: "%.3f", sessionPosition.y)), \(String(format: "%.3f", sessionPosition.z)))")
+        print("═══════════════════════════════════════════════════════════")
         
         return sessionPosition
     }
@@ -3254,6 +3408,21 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("🔗 [ADJACENT_ACTIVATE] Ordered vertices for adjacent triangle:")
         for (i, (id, pos)) in zip(orderedVertexIDs, orderedPositions).enumerated() {
             print("   [\(i)] \(String(id.uuidString.prefix(8))) at AR(\(String(format: "%.2f", pos.x)), \(String(format: "%.2f", pos.y)), \(String(format: "%.2f", pos.z)))")
+        }
+        
+        // Task 7: Adjustment diagnostics
+        if wasAdjusted {
+            // Get the ghost's estimated position before adjustment
+            if let originalGhostPos = selectedGhostEstimatedPosition {
+                let delta = ghostPosition - originalGhostPos
+                print("✏️ [ADJUSTMENT] User adjusted ghost position:")
+                print("   Ghost was at:  (\(String(format: "%.3f", originalGhostPos.x)), \(String(format: "%.3f", originalGhostPos.y)), \(String(format: "%.3f", originalGhostPos.z)))")
+                print("   User placed:   (\(String(format: "%.3f", ghostPosition.x)), \(String(format: "%.3f", ghostPosition.y)), \(String(format: "%.3f", ghostPosition.z)))")
+                print("   Delta (X,Z):   (\(String(format: "%.3f", delta.x)), \(String(format: "%.3f", delta.z)))")
+                print("   Distance:      \(String(format: "%.3f", simd_length(delta)))m")
+                let angle = atan2(delta.z, delta.x) * 180 / .pi
+                print("   Direction:     \(String(format: "%.1f", angle))° (0°=East, 90°=South)")
+            }
         }
         
         // Record position to MapPoint's arPositionHistory for future ghost prediction improvement
