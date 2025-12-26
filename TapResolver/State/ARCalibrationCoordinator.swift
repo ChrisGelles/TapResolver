@@ -1318,6 +1318,27 @@ final class ARCalibrationCoordinator: ObservableObject {
             // Plant ghosts for ALL triangle vertices
             if hasValidSessionTransform {
                 plantGhostsForAllTriangleVertices()
+                
+                // Plant origin marker at canonical (0,0,0) projected to session, grounded to floor
+                let canonicalOrigin = simd_float3(0, 0, 0)
+                if var sessionOrigin = projectBakedToSession(canonicalOrigin) {
+                    // Ground the marker: use Y from first placed marker (which is on the floor)
+                    if let firstPlacedID = placedMarkers.first,
+                       let groundY = mapPointARPositions[firstPlacedID]?.y {
+                        sessionOrigin.y = groundY
+                        print("🎯 [ZONE_CORNER_ORIGIN] Grounded to Y=\(String(format: "%.2f", groundY)) from first placed corner")
+                    }
+                    
+                    print("🎯 [ZONE_CORNER_ORIGIN] Canonical (0,0,0) → Session (\(String(format: "%.2f", sessionOrigin.x)), \(String(format: "%.2f", sessionOrigin.y)), \(String(format: "%.2f", sessionOrigin.z)))")
+                    
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("PlaceOriginMarker"),
+                        object: nil,
+                        userInfo: ["position": [sessionOrigin.x, sessionOrigin.y, sessionOrigin.z]]
+                    )
+                } else {
+                    print("⚠️ [ZONE_CORNER_ORIGIN] Could not project canonical origin - transform not available")
+                }
             } else {
                 print("⚠️ [ZONE_CORNER] Cannot plant ghosts - no valid session transform")
             }

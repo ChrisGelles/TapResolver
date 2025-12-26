@@ -810,6 +810,41 @@ struct ARViewWithOverlays: View {
                                     return
                                 }
                                 
+                                // ZONE CORNER MODE: Confirm ghost without requiring active triangle
+                                if arCalibrationCoordinator.isZoneCornerMode {
+                                    print("🎯 [ZONE_CORNER_CONFIRM] Confirming ghost at estimated position")
+                                    print("   MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
+                                    
+                                    // Track that this ghost was adjusted (prevents re-planting)
+                                    arCalibrationCoordinator.adjustedGhostMapPoints.insert(ghostMapPointID)
+                                    
+                                    // Remove ghost from scene
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("RemoveGhostMarker"),
+                                        object: nil,
+                                        userInfo: ["mapPointID": ghostMapPointID]
+                                    )
+                                    
+                                    // Place real marker at ghost position
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("ConfirmGhostMarker"),
+                                        object: nil,
+                                        userInfo: [
+                                            "position": [ghostPosition.x, ghostPosition.y, ghostPosition.z],
+                                            "mapPointID": ghostMapPointID,
+                                            "isGhostConfirm": true,
+                                            "isZoneCornerMode": true
+                                        ]
+                                    )
+                                    
+                                    // Clear selection
+                                    arCalibrationCoordinator.selectedGhostMapPointID = nil
+                                    arCalibrationCoordinator.selectedGhostEstimatedPosition = nil
+                                    
+                                    print("✅ [ZONE_CORNER_CONFIRM] Ghost confirmed as AR marker")
+                                    return
+                                }
+                                
                                 // Check if we're in crawl mode (readyToFill or surveyMode + ghost selected)
                                 if arCalibrationCoordinator.isCrawlEligibleState,
                                    let currentTriangleID = arCalibrationCoordinator.activeTriangleID {
@@ -980,8 +1015,14 @@ struct ARViewWithOverlays: View {
                                     
                                     // Transition to readyToFill and trigger adjacent triangle discovery
                                     // This ensures the crawl can continue after promoting a ghost in any state
-                                    print("🔗 [GENERIC_ADJUST] Triggering adjacent triangle discovery")
-                                    arCalibrationCoordinator.transitionToReadyToFillAndRefreshGhosts(placedMapPointID: ghostMapPointID)
+                                    // EXCEPT in Zone Corner mode where all ghosts are already planted
+                                    if arCalibrationCoordinator.isZoneCornerMode {
+                                        print("🔗 [ZONE_CORNER_ADJUST] Skipping adjacent refresh - ghosts already planted")
+                                        // Just stay in readyToFill, don't trigger duplicate ghost creation
+                                    } else {
+                                        print("🔗 [GENERIC_ADJUST] Triggering adjacent triangle discovery")
+                                        arCalibrationCoordinator.transitionToReadyToFillAndRefreshGhosts(placedMapPointID: ghostMapPointID)
+                                    }
                                 } else {
                                     // Normal crosshair placement (no ghost selected)
                                     NotificationCenter.default.post(
