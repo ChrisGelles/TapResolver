@@ -1385,17 +1385,48 @@ final class ARCalibrationCoordinator: ObservableObject {
                 continue
             }
             
-            // Get MapPoint and check for baked position
-            guard let mapPoint = safeMapStore.points.first(where: { $0.id == vertexID }),
-                  mapPoint.canonicalPosition != nil else {
+            // Get MapPoint
+            guard let mapPoint = safeMapStore.points.first(where: { $0.id == vertexID }) else {
+                print("⚠️ [ZONE_CORNER_GHOSTS] MapPoint \(String(vertexID.uuidString.prefix(8))) not found in store")
                 skippedNoBaked += 1
                 continue
             }
             
-            // Calculate ghost position from baked data
-            guard let ghostPosition = calculateGhostPositionFromBakedData(for: vertexID) else {
-                skippedCalcFailed += 1
-                continue
+            // Calculate ghost position - prefer baked data, fall back to 2D map projection
+            let ghostPosition: simd_float3
+            
+            if mapPoint.canonicalPosition != nil {
+                // PRIORITY 1: Use baked canonical position
+                guard let bakedGhostPosition = calculateGhostPositionFromBakedData(for: vertexID) else {
+                    print("⚠️ [ZONE_CORNER_GHOSTS] \(String(vertexID.uuidString.prefix(8))): has baked data but projection failed")
+                    skippedCalcFailed += 1
+                    continue
+                }
+                ghostPosition = bakedGhostPosition
+            } else {
+                // PRIORITY 2: Fall back to 2D map position → canonical → session
+                print("📍 [ZONE_CORNER_GHOSTS] \(String(vertexID.uuidString.prefix(8))): No baked data, using 2D map fallback")
+                
+                guard let mapSize = cachedMapSize,
+                      let metersPerPixel = cachedMetersPerPixel else {
+                    print("⚠️ [ZONE_CORNER_GHOSTS] \(String(vertexID.uuidString.prefix(8))): Missing map parameters for fallback")
+                    skippedNoBaked += 1
+                    continue
+                }
+                
+                // Convert 2D map position to canonical 3D
+                let canonicalFrame = CanonicalFrame.fromMapContext(mapSize: mapSize, metersPerPixel: metersPerPixel)
+                let canonicalPosition = canonicalFrame.mapToCanonical(mapPoint.position)
+                
+                // Project canonical to session
+                guard let sessionPosition = projectBakedToSession(canonicalPosition) else {
+                    print("⚠️ [ZONE_CORNER_GHOSTS] \(String(vertexID.uuidString.prefix(8))): Session projection failed for 2D fallback")
+                    skippedCalcFailed += 1
+                    continue
+                }
+                
+                print("   2D map (\(String(format: "%.0f", mapPoint.position.x)), \(String(format: "%.0f", mapPoint.position.y))) → canonical (\(String(format: "%.2f", canonicalPosition.x)), \(String(format: "%.2f", canonicalPosition.z))) → session (\(String(format: "%.2f", sessionPosition.x)), \(String(format: "%.2f", sessionPosition.z)))")
+                ghostPosition = sessionPosition
             }
             
             // Track ghost position

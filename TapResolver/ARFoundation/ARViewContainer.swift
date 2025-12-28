@@ -1170,6 +1170,8 @@ struct ARViewContainer: UIViewRepresentable {
             
             // Disable tap-to-place in triangle calibration mode - use Place Marker button instead
             // But allow tapping on existing AR markers to demote them to ghosts
+            // Also enable in Zone Corner mode (which uses currentMode = .idle but isZoneCornerMode = true)
+            let isZoneCorner = arCalibrationCoordinator?.isZoneCornerMode == true
             if case .triangleCalibration = currentMode {
                 print("👆 [TAP_DIAG] Mode is .triangleCalibration - checking for AR marker tap")
                 guard let sceneView = sceneView else {
@@ -1188,6 +1190,24 @@ struct ARViewContainer: UIViewRepresentable {
                 }
                 
                 print("👆 [TAP_TRACE] Tap ignored in triangle calibration mode — use Place Marker button or tap an AR marker to adjust")
+                return
+            } else if isZoneCorner {
+                // Zone Corner mode: allow marker tap-to-demote
+                print("👆 [TAP_DIAG] Mode is Zone Corner - checking for AR marker tap")
+                guard let sceneView = sceneView else {
+                    print("👆 [TAP_DIAG] ⚠️ sceneView is nil!")
+                    return
+                }
+                
+                let markerTapLocation = sender.location(in: sceneView)
+                print("👆 [TAP_DIAG] Calling hitTestARMarker at \(markerTapLocation)")
+                if let tappedMarkerID = hitTestARMarker(at: markerTapLocation, in: sceneView) {
+                    print("👆 [TAP_MARKER] Tapped AR marker \(String(tappedMarkerID.uuidString.prefix(8))) - demoting to ghost (Zone Corner mode)")
+                    demoteMarkerToGhost(markerID: tappedMarkerID)
+                    return
+                }
+                
+                print("👆 [TAP_TRACE] Tap ignored in Zone Corner mode — use Place Marker button or tap an AR marker to adjust")
                 return
             }
             
