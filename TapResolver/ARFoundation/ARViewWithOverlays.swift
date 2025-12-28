@@ -278,34 +278,78 @@ struct ARViewWithOverlays: View {
                 }
                 
                 // ZONE CORNER CALIBRATION MODE: Handle zone corner placement separately
+                // Accept both .placingVertices (initial corners) and .readyToFill (ghost confirmations)
                 if arViewLaunchContext.launchMode == .zoneCornerCalibration,
-                   case .placingVertices = arCalibrationCoordinator.calibrationState,
                    let markerID = notification.userInfo?["markerID"] as? UUID,
                    let positionArray = notification.userInfo?["position"] as? [Float],
                    positionArray.count == 3 {
                     
-                    print("🎯 [ZONE_CORNER_TRACE] Processing zone corner placement")
-                    
-                    guard let currentVertexID = arCalibrationCoordinator.getCurrentVertexID() else {
-                        print("⚠️ [ZONE_CORNER_TRACE] No current vertex ID")
+                    // Determine if we're in a valid state for zone corner processing
+                    let isPlacingVertices: Bool
+                    if case .placingVertices = arCalibrationCoordinator.calibrationState {
+                        isPlacingVertices = true
+                    } else if case .readyToFill = arCalibrationCoordinator.calibrationState {
+                        isPlacingVertices = false
+                    } else {
+                        // Not in a valid zone corner state, skip this handler
+                        print("⚠️ [ZONE_CORNER_TRACE] Skipping - not in placingVertices or readyToFill state")
+                        // Don't return here - let it fall through to other handlers
                         return
                     }
                     
-                    let arPosition = simd_float3(positionArray[0], positionArray[1], positionArray[2])
-                    let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID })
-                    let mapCoordinates = mapPoint?.mapPoint ?? CGPoint.zero
+                    // Check if this is a ghost confirmation
+                    let isZoneCornerGhostConfirm = notification.userInfo?["isGhostConfirm"] as? Bool ?? false
+                    // Accept either "mapPointID" (Zone Corner uses this) or "ghostMapPointID" (crawl mode uses this)
+                    let zoneCornerGhostMapPointID = notification.userInfo?["mapPointID"] as? UUID ?? notification.userInfo?["ghostMapPointID"] as? UUID
                     
-                    let marker = ARMarker(
-                        id: markerID,
-                        linkedMapPointID: currentVertexID,
-                        arPosition: arPosition,
-                        mapCoordinates: mapCoordinates,
-                        isAnchor: false
-                    )
-                    
-                    arCalibrationCoordinator.registerZoneCornerAnchor(mapPointID: currentVertexID, marker: marker)
-                    print("✅ [ZONE_CORNER_TRACE] Registered zone corner for MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
-                    return
+                    if isPlacingVertices {
+                        // Original flow: placing initial zone corners
+                        print("🎯 [ZONE_CORNER_TRACE] Processing zone corner placement")
+                        
+                        guard let currentVertexID = arCalibrationCoordinator.getCurrentVertexID() else {
+                            print("⚠️ [ZONE_CORNER_TRACE] No current vertex ID")
+                            return
+                        }
+                        
+                        let arPosition = simd_float3(positionArray[0], positionArray[1], positionArray[2])
+                        let mapPoint = mapPointStore.points.first(where: { $0.id == currentVertexID })
+                        let mapCoordinates = mapPoint?.mapPoint ?? CGPoint.zero
+                        
+                        let marker = ARMarker(
+                            id: markerID,
+                            linkedMapPointID: currentVertexID,
+                            arPosition: arPosition,
+                            mapCoordinates: mapCoordinates,
+                            isAnchor: false
+                        )
+                        
+                        arCalibrationCoordinator.registerZoneCornerAnchor(mapPointID: currentVertexID, marker: marker)
+                        print("✅ [ZONE_CORNER_TRACE] Registered zone corner for MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
+                        return
+                        
+                    } else if isZoneCornerGhostConfirm, let ghostID = zoneCornerGhostMapPointID {
+                        // Ghost confirmation in readyToFill state
+                        print("🎯 [ZONE_CORNER_GHOST] Processing ghost confirmation in Zone Corner mode")
+                        print("   MapPoint: \(String(ghostID.uuidString.prefix(8)))")
+                        print("   State: \(arCalibrationCoordinator.stateDescription)")
+                        
+                        let arPosition = simd_float3(positionArray[0], positionArray[1], positionArray[2])
+                        let mapPoint = mapPointStore.points.first(where: { $0.id == ghostID })
+                        let mapCoordinates = mapPoint?.mapPoint ?? CGPoint.zero
+                        
+                        let marker = ARMarker(
+                            id: markerID,
+                            linkedMapPointID: ghostID,
+                            arPosition: arPosition,
+                            mapCoordinates: mapCoordinates,
+                            isAnchor: false
+                        )
+                        
+                        // Register the ghost-confirmed marker as a zone corner anchor
+                        arCalibrationCoordinator.registerZoneCornerAnchor(mapPointID: ghostID, marker: marker)
+                        print("✅ [ZONE_CORNER_GHOST] Registered ghost-confirmed marker for MapPoint \(String(ghostID.uuidString.prefix(8)))")
+                        return
+                    }
                 }
                 
                 // Handle marker placement in calibration mode (triangle calibration)
@@ -977,30 +1021,22 @@ struct ARViewWithOverlays: View {
                                     arCalibrationCoordinator.repositionModeActive = false
                                 } else if let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID {
                                     // Generic ghost adjustment - ghost selected in any other state
-                                    // Remove ghost first, then place marker at crosshair
+                                    // DON'T remove ghost here - let handlePlaceMarkerAtCursor do it after cursor validation
                                     print("🔗 [GENERIC_ADJUST] Adjusting ghost position via crosshair")
                                     print("   Ghost MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
                                     print("   Current state: \(arCalibrationCoordinator.stateDescription)")
                                     
-                                    // Remove the ghost marker first
-                                    NotificationCenter.default.post(
-                                        name: NSNotification.Name("RemoveGhostMarker"),
-                                        object: nil,
-                                        userInfo: ["mapPointID": ghostMapPointID]
-                                    )
-                                    
-                                    // Track that this ghost was converted to AR marker (prevents re-planting)
-                                    arCalibrationCoordinator.adjustedGhostMapPoints.insert(ghostMapPointID)
-                                    print("📍 [SWATH_TRACK] Marked \(String(ghostMapPointID.uuidString.prefix(8))) as adjusted")
-                                    
                                     // Capture original ghost position before clearing (for distortion vector)
                                     let originalGhostPosition = arCalibrationCoordinator.selectedGhostEstimatedPosition
                                     
-                                    // Clear ghost selection
+                                    // Clear ghost selection (user can tap again if placement fails)
                                     arCalibrationCoordinator.selectedGhostMapPointID = nil
                                     
-                                    // Then place marker at crosshair
-                                    var userInfo: [String: Any] = ["ghostMapPointID": ghostMapPointID]
+                                    // Post PlaceMarkerAtCursor - ghost removal happens there after cursor validation
+                                    var userInfo: [String: Any] = [
+                                        "ghostMapPointID": ghostMapPointID,
+                                        "removeGhostOnSuccess": true  // Flag to trigger ghost removal after cursor check
+                                    ]
                                     if let origPos = originalGhostPosition {
                                         userInfo["originalGhostPosition"] = [origPos.x, origPos.y, origPos.z]
                                     }

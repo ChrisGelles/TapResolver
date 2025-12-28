@@ -478,6 +478,22 @@ struct ARViewContainer: UIViewRepresentable {
                     ? simd_float3(originalGhostPositionArray![0], originalGhostPositionArray![1], originalGhostPositionArray![2])
                     : nil
                 
+                // Check if we should remove ghost on successful placement
+                let removeGhostOnSuccess = notification.userInfo?["removeGhostOnSuccess"] as? Bool ?? false
+                
+                if removeGhostOnSuccess {
+                    // Remove ghost marker NOW (after cursor validation succeeded)
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("RemoveGhostMarker"),
+                        object: nil,
+                        userInfo: ["mapPointID": ghostMapPointID]
+                    )
+                    
+                    // Track that this ghost was converted to AR marker (prevents re-planting)
+                    arCalibrationCoordinator?.adjustedGhostMapPoints.insert(ghostMapPointID)
+                    print("📍 [SWATH_TRACK] Marked \(String(ghostMapPointID.uuidString.prefix(8))) as adjusted")
+                }
+                
                 // Place the real marker at crosshair position (this posts ARMarkerPlaced)
                 let markerID = placeMarker(at: position)
                 
