@@ -198,7 +198,7 @@ private func onSegment(_ a: CGPoint, _ b: CGPoint, _ c: CGPoint) -> Bool {
 ///   - point: The 2D point to find UV for
 ///   - corners: Array of exactly 4 CGPoints in CCW order [A, B, C, D]
 ///              where A=(0,0), B=(1,0), C=(1,1), D=(0,1) in UV space
-/// - Returns: (u, v) coordinates where both are in [0,1] if inside quad, or nil if outside/invalid
+/// - Returns: (u, v) coordinates (may be outside [0,1] for extrapolation), or nil if geometrically invalid
 func inverseBilinear(point: CGPoint, corners: [CGPoint]) -> (u: Float, v: Float)? {
     guard corners.count == 4 else {
         print("⚠️ [BILINEAR] inverseBilinear requires exactly 4 corners")
@@ -280,26 +280,19 @@ func inverseBilinear(point: CGPoint, corners: [CGPoint]) -> (u: Float, v: Float)
                 uCandidate = (h.y - f.y * vCandidate) / denomY
             }
             
-            // Check if both u and v are in valid range (with small epsilon for boundary)
-            let epsilon: Float = 0.001
-            if uCandidate >= -epsilon && uCandidate <= 1 + epsilon &&
-               vCandidate >= -epsilon && vCandidate <= 1 + epsilon {
-                u = max(0, min(1, uCandidate))
-                v = max(0, min(1, vCandidate))
-                validSolution = true
-                break
-            }
+            // Accept the first geometrically valid solution
+            // Allow UV outside [0,1] for extrapolation of exterior points
+            u = uCandidate
+            v = vCandidate
+            validSolution = true
+            break
         }
         
         if !validSolution {
-            // Point is outside quad
+            // No valid geometric solution found
             return nil
         }
     }
-    
-    // Clamp to [0,1]
-    u = max(0, min(1, u))
-    v = max(0, min(1, v))
     
     return (u, v)
 }
@@ -354,7 +347,7 @@ func projectPointBilinear(
     }
     
     guard let uv = inverseBilinear(point: point, corners: corners2D) else {
-        print("⚠️ [BILINEAR] Point \(point) is outside quad")
+        print("⚠️ [BILINEAR] Point \(point) failed inverse bilinear (degenerate quad?)")
         return nil
     }
     
@@ -362,7 +355,9 @@ func projectPointBilinear(
         return nil
     }
     
-    print("📐 [BILINEAR] Projected point \(point) → UV(\(String(format: "%.3f", uv.u)), \(String(format: "%.3f", uv.v))) → AR(\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
+    let isExtrapolated = uv.u < 0 || uv.u > 1 || uv.v < 0 || uv.v > 1
+    let marker = isExtrapolated ? "📐 [BILINEAR_EXTRAP]" : "📐 [BILINEAR]"
+    print("\(marker) Projected point \(point) → UV(\(String(format: "%.3f", uv.u)), \(String(format: "%.3f", uv.v))) → AR(\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
     
     return position
 }
