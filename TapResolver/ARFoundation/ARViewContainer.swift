@@ -1178,16 +1178,19 @@ struct ARViewContainer: UIViewRepresentable {
             print("🔍 [TAP_TRACE] Tap detected")
             print("   Current mode: \(currentMode)")
             
+            // Check Zone Corner mode FIRST (before idle rejection)
+            // Zone Corner uses currentMode = .idle but should allow marker tap-to-demote
+            let isZoneCorner = arCalibrationCoordinator?.isZoneCornerMode == true
+            
             // Disable tap-to-place in idle mode - use Place AR Marker button instead
-            guard currentMode != .idle else {
+            // UNLESS we're in Zone Corner mode (checked above)
+            if currentMode == .idle && !isZoneCorner {
                 print("👆 [TAP_TRACE] Tap ignored in idle mode — use Place AR Marker button")
                 return
             }
             
             // Disable tap-to-place in triangle calibration mode - use Place Marker button instead
             // But allow tapping on existing AR markers to demote them to ghosts
-            // Also enable in Zone Corner mode (which uses currentMode = .idle but isZoneCornerMode = true)
-            let isZoneCorner = arCalibrationCoordinator?.isZoneCornerMode == true
             if case .triangleCalibration = currentMode {
                 print("👆 [TAP_DIAG] Mode is .triangleCalibration - checking for AR marker tap")
                 guard let sceneView = sceneView else {
