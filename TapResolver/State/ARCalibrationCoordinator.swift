@@ -43,6 +43,14 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Maps MapPoint ID to AR position for current session (for ghost calculation)
     var mapPointARPositions: [UUID: simd_float3] = [:]
     
+    // MARK: - Bilinear Zone Corner Data
+    /// Sorted zone corner 2D map positions in CCW order [A, B, C, D]
+    private var sortedZoneCorners2D: [CGPoint] = []
+    /// Sorted zone corner 3D AR positions in CCW order, matching sortedZoneCorners2D
+    private var sortedZoneCorners3D: [simd_float3] = []
+    /// Whether bilinear corner data is ready for projection
+    var hasBilinearCorners: Bool { sortedZoneCorners2D.count == 4 && sortedZoneCorners3D.count == 4 }
+    
     /// MapPoints whose ghosts were adjusted to AR markers this session (prevents re-planting)
     var adjustedGhostMapPoints: Set<UUID> = []
     
@@ -1304,43 +1312,92 @@ final class ARCalibrationCoordinator: ObservableObject {
                 print("   Position: (\(String(format: "%.1f", mapPoint.mapPoint.x)), \(String(format: "%.1f", mapPoint.mapPoint.y)))")
             }
         } else {
-            // All corners placed - compute transform and plant ghosts
+            // All corners placed - set up bilinear projection and plant ghosts
             print("✅ [ZONE_CORNER] All \(totalCorners) corners placed")
             
-            // Compute session transform using all placed corners
-            if let pixelsPerMeter = getPixelsPerMeter(),
-               let mapSize = cachedMapSize {
-                let metersPerPixel = 1.0 / pixelsPerMeter
-                let success = computeSessionTransformForBakedData(mapSize: mapSize, metersPerPixel: metersPerPixel)
-                print("📐 [ZONE_CORNER] Transform computation: \(success ? "SUCCESS" : "FAILED")")
+            // BILINEAR SETUP: Gather and sort corner data
+            print("📐 [BILINEAR_SETUP] Gathering zone corner data...")
+            
+            // Gather corner data: (ID, 2D map position, 3D AR position)
+            var cornerData: [(id: UUID, pos2D: CGPoint, pos3D: simd_float3)] = []
+            for cornerID in triangleVertices {
+                guard let mapPoint = safeMapStore.points.first(where: { $0.id == cornerID }),
+                      let arPosition = mapPointARPositions[cornerID] else {
+                    print("⚠️ [BILINEAR_SETUP] Missing data for corner \(String(cornerID.uuidString.prefix(8)))")
+                    continue
+                }
+                cornerData.append((id: cornerID, pos2D: mapPoint.mapPoint, pos3D: arPosition))
             }
             
-            // Plant ghosts for ALL triangle vertices
-            if hasValidSessionTransform {
-                plantGhostsForAllTriangleVertices()
-                
-                // Plant origin marker at canonical (0,0,0) projected to session, grounded to floor
-                let canonicalOrigin = simd_float3(0, 0, 0)
-                if var sessionOrigin = projectBakedToSession(canonicalOrigin) {
-                    // Ground the marker: use Y from first placed marker (which is on the floor)
+            guard cornerData.count == 4 else {
+                print("❌ [BILINEAR_SETUP] Expected 4 corners, got \(cornerData.count)")
+                calibrationState = .idle
+                statusText = "Zone corner setup failed - missing corner data"
+                return
+            }
+            
+            // Sort corners into CCW order using 2D positions
+            let cornersForSorting: [(id: UUID, position: CGPoint)] = cornerData.map { ($0.id, $0.pos2D) }
+            guard let sortedCorners = sortCornersCounterClockwise(cornersForSorting) else {
+                print("❌ [BILINEAR_SETUP] Failed to sort corners")
+                calibrationState = .idle
+                statusText = "Zone corner setup failed - sorting error"
+                return
+            }
+            
+            // Extract sorted 2D and 3D arrays in matching order
+            sortedZoneCorners2D = sortedCorners.map { $0.position }
+            sortedZoneCorners3D = sortedCorners.compactMap { sortedCorner in
+                cornerData.first(where: { $0.id == sortedCorner.id })?.pos3D
+            }
+            
+            guard sortedZoneCorners3D.count == 4 else {
+                print("❌ [BILINEAR_SETUP] Failed to match 3D positions to sorted order")
+                calibrationState = .idle
+                statusText = "Zone corner setup failed - position matching error"
+                return
+            }
+            
+            // Validate quad (check for self-intersection)
+            guard isValidQuad(corners: sortedZoneCorners2D) else {
+                print("❌ [BILINEAR_SETUP] Invalid quad - corners form self-intersecting shape")
+                calibrationState = .idle
+                statusText = "Invalid zone shape - corners cross each other"
+                sortedZoneCorners2D = []
+                sortedZoneCorners3D = []
+                return
+            }
+            
+            print("✅ [BILINEAR_SETUP] Corners sorted and validated:")
+            for (i, corner) in sortedCorners.enumerated() {
+                let label = ["A (0,0)", "B (1,0)", "C (1,1)", "D (0,1)"][i]
+                print("   \(label): \(String(corner.id.uuidString.prefix(8))) at 2D\(corner.position) → AR(\(String(format: "%.2f", sortedZoneCorners3D[i].x)), \(String(format: "%.2f", sortedZoneCorners3D[i].y)), \(String(format: "%.2f", sortedZoneCorners3D[i].z)))")
+            }
+            
+            // Plant ghosts using bilinear projection
+            plantGhostsForAllTriangleVerticesBilinear()
+            
+            // Plant origin marker at map center projected via bilinear
+            if let mapSize = cachedMapSize {
+                let mapCenter = CGPoint(x: mapSize.width / 2, y: mapSize.height / 2)
+                if var originPosition = projectPointBilinear(point: mapCenter, corners2D: sortedZoneCorners2D, corners3D: sortedZoneCorners3D) {
+                    // Ground the marker: use Y from first placed corner
                     if let firstPlacedID = placedMarkers.first,
                        let groundY = mapPointARPositions[firstPlacedID]?.y {
-                        sessionOrigin.y = groundY
+                        originPosition.y = groundY
                         print("🎯 [ZONE_CORNER_ORIGIN] Grounded to Y=\(String(format: "%.2f", groundY)) from first placed corner")
                     }
                     
-                    print("🎯 [ZONE_CORNER_ORIGIN] Canonical (0,0,0) → Session (\(String(format: "%.2f", sessionOrigin.x)), \(String(format: "%.2f", sessionOrigin.y)), \(String(format: "%.2f", sessionOrigin.z)))")
+                    print("🎯 [ZONE_CORNER_ORIGIN] Map center \(mapCenter) → AR(\(String(format: "%.2f", originPosition.x)), \(String(format: "%.2f", originPosition.y)), \(String(format: "%.2f", originPosition.z)))")
                     
                     NotificationCenter.default.post(
                         name: NSNotification.Name("PlaceOriginMarker"),
                         object: nil,
-                        userInfo: ["position": [sessionOrigin.x, sessionOrigin.y, sessionOrigin.z]]
+                        userInfo: ["position": [originPosition.x, originPosition.y, originPosition.z]]
                     )
                 } else {
-                    print("⚠️ [ZONE_CORNER_ORIGIN] Could not project canonical origin - transform not available")
+                    print("⚠️ [ZONE_CORNER_ORIGIN] Map center is outside zone quad - no origin marker")
                 }
-            } else {
-                print("⚠️ [ZONE_CORNER] Cannot plant ghosts - no valid session transform")
             }
             
             // Transition to crawl mode
@@ -1450,6 +1507,91 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("   Skipped (has position): \(skippedHasPosition)")
         print("   Skipped (no baked data): \(skippedNoBaked)")
         print("   Skipped (calc failed): \(skippedCalcFailed)")
+    }
+    
+    /// Plants ghost markers for all triangle vertices using bilinear interpolation from zone corners.
+    /// Called after Zone Corner calibration completes with bilinear setup.
+    private func plantGhostsForAllTriangleVerticesBilinear() {
+        print("👻 [ZONE_CORNER_GHOSTS_BILINEAR] Planting ghosts using bilinear projection...")
+        
+        guard hasBilinearCorners else {
+            print("❌ [ZONE_CORNER_GHOSTS_BILINEAR] Bilinear corners not set up")
+            return
+        }
+        
+        // Collect all unique vertex IDs from all triangles
+        var allVertexIDs = Set<UUID>()
+        for triangle in safeTriangleStore.triangles {
+            for vertexID in triangle.vertexIDs {
+                allVertexIDs.insert(vertexID)
+            }
+        }
+        
+        print("👻 [ZONE_CORNER_GHOSTS_BILINEAR] Found \(allVertexIDs.count) unique vertices across \(safeTriangleStore.triangles.count) triangles")
+        
+        var ghostsPlanted = 0
+        var skippedHasPosition = 0
+        var skippedOutsideQuad = 0
+        var skippedNoMapPoint = 0
+        
+        // Get ground Y from first placed corner for consistent height
+        let groundY: Float = placedMarkers.first.flatMap { mapPointARPositions[$0]?.y } ?? -1.0
+        
+        for vertexID in allVertexIDs {
+            // Skip if already has AR position (placed as corner or already confirmed)
+            if mapPointARPositions[vertexID] != nil {
+                skippedHasPosition += 1
+                continue
+            }
+            
+            // Skip if ghost was already adjusted
+            if adjustedGhostMapPoints.contains(vertexID) {
+                skippedHasPosition += 1
+                continue
+            }
+            
+            // Get MapPoint 2D position
+            guard let mapPoint = safeMapStore.points.first(where: { $0.id == vertexID }) else {
+                print("⚠️ [ZONE_CORNER_GHOSTS_BILINEAR] MapPoint \(String(vertexID.uuidString.prefix(8))) not found")
+                skippedNoMapPoint += 1
+                continue
+            }
+            
+            // Project using bilinear interpolation
+            guard var ghostPosition = projectPointBilinear(
+                point: mapPoint.mapPoint,
+                corners2D: sortedZoneCorners2D,
+                corners3D: sortedZoneCorners3D
+            ) else {
+                print("⚠️ [ZONE_CORNER_GHOSTS_BILINEAR] \(String(vertexID.uuidString.prefix(8))): Outside zone quad at \(mapPoint.mapPoint)")
+                skippedOutsideQuad += 1
+                continue
+            }
+            
+            // Ground the ghost to floor level
+            ghostPosition.y = groundY
+            
+            // Track ghost position
+            ghostMarkerPositions[vertexID] = ghostPosition
+            
+            // Post notification to render ghost in AR view
+            NotificationCenter.default.post(
+                name: NSNotification.Name("PlaceGhostMarker"),
+                object: nil,
+                userInfo: [
+                    "mapPointID": vertexID,
+                    "position": ghostPosition
+                ]
+            )
+            
+            ghostsPlanted += 1
+        }
+        
+        print("👻 [ZONE_CORNER_GHOSTS_BILINEAR] Complete:")
+        print("   Planted: \(ghostsPlanted)")
+        print("   Skipped (has position): \(skippedHasPosition)")
+        print("   Skipped (outside quad): \(skippedOutsideQuad)")
+        print("   Skipped (no MapPoint): \(skippedNoMapPoint)")
     }
     
     // MARK: - Drift Detection
@@ -3602,6 +3744,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         isActive = false
         currentVertexIndex = 0
         triangleVertices = []
+        sortedZoneCorners2D = []
+        sortedZoneCorners3D = []
         referencePhotoData = nil
         completedMarkerCount = 0
         lastPrintedVertexIndex = nil  // Reset print tracking
