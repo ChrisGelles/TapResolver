@@ -28,7 +28,22 @@ struct SurveyButtonBar: View {
     let onFillMap: () -> Void
     let onClearAll: () -> Void
     
+    // Zone Mode properties
+    var isZoneCornerMode: Bool = false
+    var hasZoneSurveyMarkers: Bool = false  // True when zone has been flooded
+    var onFloodZone: () -> Void = {}
+    var onClearZone: () -> Void = {}
+    var isRovingMode: Bool = false
+    var onToggleRovingMode: () -> Void = {}
+    var onExportSVG: () -> Void = {}
+    var onManualMarker: () -> Void = {}
+    
     var body: some View {
+        if isZoneCornerMode {
+            // ZONE MODE LAYOUT
+            zoneModeSurveyBar
+        } else {
+            // EXISTING CALIBRATION CRAWL LAYOUT
         HStack(spacing: 12) {
             VStack(spacing: 8) {
                 // Row 1: Triangle-level operations
@@ -107,6 +122,100 @@ struct SurveyButtonBar: View {
                     .cornerRadius(8)
             }
             .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 60)
+        }
+    }
+    
+    // MARK: - Zone Mode Layout
+    
+    @ViewBuilder
+    private var zoneModeSurveyBar: some View {
+        HStack(spacing: 12) {
+            // LEFT: Flood Zone / Clear Zone toggle (spans 2 rows)
+            Button(action: {
+                if hasZoneSurveyMarkers {
+                    print("🧹 [ZONE_SURVEY] Clear Zone tapped")
+                    onClearZone()
+                } else {
+                    print("🌊 [ZONE_SURVEY] Flood Zone tapped")
+                    onFloodZone()
+                }
+            }) {
+                VStack(spacing: 4) {
+                    Image(systemName: hasZoneSurveyMarkers ? "xmark.circle.fill" : "square.grid.3x3.fill")
+                        .font(.system(size: 24))
+                    Text(hasZoneSurveyMarkers ? "Clear Zone" : "Flood Zone")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .foregroundColor(.white)
+                .frame(width: 90, height: 76)
+                .background(Color.blue.opacity(0.6))
+                .cornerRadius(12)
+            }
+            
+            // CENTER: Two stacked buttons
+            VStack(spacing: 8) {
+                // CENTER TOP: Roving Mode toggle (placeholder)
+                Button(action: {
+                    print("🎯 [ZONE_SURVEY] Roving Mode tapped (placeholder)")
+                    onToggleRovingMode()
+                }) {
+                    VStack(spacing: 2) {
+                        Image(systemName: "target")
+                            .font(.system(size: 18))
+                        Text("Roving")
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.white)
+                    .frame(width: 70, height: 34)
+                    .background(Color.orange.opacity(0.6))
+                    .cornerRadius(8)
+                }
+                .disabled(true)  // Placeholder - disabled for now
+                .opacity(0.5)
+                
+                // CENTER BOTTOM: Export SVG (placeholder)
+                Button(action: {
+                    print("📄 [ZONE_SURVEY] Export SVG tapped (placeholder)")
+                    onExportSVG()
+                }) {
+                    VStack(spacing: 2) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 18))
+                        Text("Export")
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.white)
+                    .frame(width: 70, height: 34)
+                    .background(Color.gray.opacity(0.6))
+                    .cornerRadius(8)
+                }
+                .disabled(true)  // Placeholder - disabled for now
+                .opacity(0.5)
+            }
+            
+            // RIGHT: Manual Survey Marker (spans 2 rows)
+            Button(action: {
+                print("📍 [ZONE_SURVEY] Manual Survey Marker tapped")
+                onManualMarker()
+            }) {
+                VStack(spacing: 4) {
+                    Image(systemName: "plus.viewfinder")
+                        .font(.system(size: 24))
+                    Text("Manual")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .foregroundColor(.white)
+                .frame(width: 60, height: 76)
+                .background(Color.red.opacity(0.85))
+                .cornerRadius(12)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 60)

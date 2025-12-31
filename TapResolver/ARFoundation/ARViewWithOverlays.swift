@@ -44,6 +44,9 @@ struct ARViewWithOverlays: View {
     // Track which triangles have survey markers for Clear Triangle button
     @State private var trianglesWithSurveyMarkers: Set<UUID> = []
     
+    // Track if zone has been flooded (Zone Mode)
+    @State private var zoneHasBeenFlooded: Bool = false
+    
     // Debounce state to prevent accidental double-taps on Place Marker
     @State private var isPlaceMarkerCoolingDown = false
     
@@ -1132,10 +1135,60 @@ struct ARViewWithOverlays: View {
                         .padding(.bottom, 40)
                     }
                     
-                    // Survey Button Bar - hide when ghost interaction is active (ghost selected) or in Zone Corner mode
+                    // Survey Button Bar - show different layout for Zone Mode vs Calibration Crawl
                     // Ghost Confirm/Adjust takes UI priority
-                    // Zone Corner mode uses crawl-only (no Fill Triangle buttons)
-                    if arCalibrationCoordinator.selectedGhostMapPointID == nil && !arCalibrationCoordinator.isZoneCornerMode {
+                    if arCalibrationCoordinator.selectedGhostMapPointID == nil {
+                        if arCalibrationCoordinator.isZoneCornerMode {
+                            // ZONE MODE LAYOUT
+                            SurveyButtonBar(
+                                userContainingTriangleID: nil,
+                                hasAnyCalibratedTriangle: false,
+                                fillableKnownCount: 0,
+                                fillableBakedCount: 0,
+                                canFillCurrentTriangle: false,
+                                currentTriangleHasMarkers: false,
+                                hasAnySurveyMarkers: false,
+                                onFillTriangle: {},
+                                onClearTriangle: {},
+                                onFillKnown: {},
+                                onDefineSwath: {},
+                                onFillMap: {},
+                                onClearAll: {},
+                                isZoneCornerMode: true,
+                                hasZoneSurveyMarkers: zoneHasBeenFlooded,
+                                onFloodZone: {
+                                    print("🌊 [ZONE_FLOOD] Flood Zone triggered")
+                                    zoneHasBeenFlooded = true
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("FloodZoneWithSurveyMarkers"),
+                                        object: nil
+                                    )
+                                },
+                                onClearZone: {
+                                    print("🧹 [ZONE_CLEAR] Clear Zone triggered")
+                                    zoneHasBeenFlooded = false
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("ClearAllSurveyMarkers"),
+                                        object: nil
+                                    )
+                                    trianglesWithSurveyMarkers.removeAll()
+                                },
+                                isRovingMode: false,
+                                onToggleRovingMode: {
+                                    // Placeholder - will be implemented later
+                                },
+                                onExportSVG: {
+                                    // Placeholder - will be implemented later
+                                },
+                                onManualMarker: {
+                                    NotificationCenter.default.post(
+                                        name: .placeManualSurveyMarker,
+                                        object: nil
+                                    )
+                                }
+                            )
+                        } else {
+                            // EXISTING CALIBRATION CRAWL LAYOUT
                         SurveyButtonBar(
                         userContainingTriangleID: userContainingTriangleID,
                         hasAnyCalibratedTriangle: !arCalibrationCoordinator.sessionCalibratedTriangles.isEmpty,
@@ -1269,7 +1322,8 @@ struct ARViewWithOverlays: View {
                             
                             trianglesWithSurveyMarkers.removeAll()
                         }
-                    )
+                        )
+                        }
                     }
                 }
                 .zIndex(997)

@@ -262,6 +262,17 @@ struct ARViewContainer: UIViewRepresentable {
                 object: nil
             )
             
+            // Listen for FloodZoneWithSurveyMarkers (Zone Mode)
+            NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("FloodZoneWithSurveyMarkers"),
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self = self else { return }
+                print("🌊 [ZONE_FLOOD] FloodZoneWithSurveyMarkers notification received")
+                self.floodZoneWithSurveyMarkers()
+            }
+            
             // Fill Swath notification observer
             NotificationCenter.default.addObserver(
                 forName: NSNotification.Name("FillSwathWithSurveyMarkers"),
@@ -2083,6 +2094,199 @@ struct ARViewContainer: UIViewRepresentable {
             print("🔍 [SURVEY] Single triangle mode - routing to region generator")
             let region = SurveyableRegion.single(triangle)
             generateSurveyMarkersForRegion(region, spacing: spacing, arWorldMapStore: arWorldMapStore)
+        }
+        
+        /// Floods the entire zone with Survey Markers using distortion mesh projection
+        /// - Uses bilinear interpolation from zone corners for points outside calibrated triangles
+        /// - Uses barycentric interpolation from triangle vertices for points inside calibrated triangles
+        func floodZoneWithSurveyMarkers() {
+            print("🌊 [ZONE_FLOOD] Starting zone flood...")
+            
+            guard let coordinator = arCalibrationCoordinator,
+                  coordinator.isZoneCornerMode,
+                  coordinator.hasBilinearCorners else {
+                print("⚠️ [ZONE_FLOOD] Not in Zone Mode or bilinear corners not set up")
+                return
+            }
+            
+            let triangleStore = coordinator.triangleStoreAccess
+            guard let mapPointStore = mapPointStore else {
+                print("⚠️ [ZONE_FLOOD] Missing mapPointStore reference")
+                return
+            }
+            
+            // Get pixels per meter for grid spacing
+            guard let pxPerMeter = getPixelsPerMeter() else {
+                print("⚠️ [ZONE_FLOOD] Cannot get pixels per meter")
+                return
+            }
+            
+            let spacingMeters: Float = 1.0
+            let spacingPixels = spacingMeters * pxPerMeter
+            
+            print("📐 [ZONE_FLOOD] Grid spacing: \(spacingMeters)m = \(spacingPixels)px")
+            
+            // Collect all triangles and generate fill points
+            var allFillPoints: [CGPoint] = []
+            var processedTriangles = 0
+            
+            for triangle in triangleStore.triangles {
+                // Get 2D vertex positions
+                let vertexPositions: [CGPoint] = triangle.vertexIDs.compactMap { vertexID in
+                    mapPointStore.points.first { $0.id == vertexID }?.mapPoint
+                }
+                
+                guard vertexPositions.count == 3 else {
+                    print("⚠️ [ZONE_FLOOD] Triangle \(String(triangle.id.uuidString.prefix(8))) missing vertices")
+                    continue
+                }
+                
+                // Generate fill points for this triangle
+                let triangleFillPoints = generateTriangleFillPoints(
+                    triangle: vertexPositions,
+                    spacingMeters: spacingMeters,
+                    pxPerMeter: pxPerMeter
+                )
+                
+                allFillPoints.append(contentsOf: triangleFillPoints)
+                processedTriangles += 1
+            }
+            
+            print("📊 [ZONE_FLOOD] Generated \(allFillPoints.count) fill points from \(processedTriangles) triangles")
+            
+            // Deduplicate points that are very close (shared edges)
+            let deduplicatedPoints = deduplicateFillPoints(allFillPoints, minDistance: spacingPixels * 0.5)
+            print("📊 [ZONE_FLOOD] After deduplication: \(deduplicatedPoints.count) points")
+            
+            // Get ground Y from first zone corner
+            let groundY: Float = coordinator.mapPointARPositions.values.first?.y ?? -1.0
+            
+            // Place survey markers
+            var markersPlaced = 0
+            var markersFailed = 0
+            
+            for mapPoint in deduplicatedPoints {
+                // Try to project this point to AR space
+                guard let arPosition = projectMapPointToAR(
+                    mapPoint: mapPoint,
+                    groundY: groundY,
+                    coordinator: coordinator,
+                    triangleStore: triangleStore,
+                    mapPointStore: mapPointStore
+                ) else {
+                    markersFailed += 1
+                    continue
+                }
+                
+                // Place survey marker
+                if placeSurveyMarkerOnly(
+                    at: arPosition,
+                    mapCoordinate: mapPoint,
+                    triangleID: nil  // Zone mode doesn't track by triangle
+                ) != nil {
+                    markersPlaced += 1
+                } else {
+                    markersFailed += 1
+                }
+            }
+            
+            print("✅ [ZONE_FLOOD] Complete: \(markersPlaced) markers placed, \(markersFailed) failed")
+        }
+        
+        /// Projects a 2D map point to AR space using distortion mesh
+        /// Priority: barycentric from calibrated triangle vertices, fallback to bilinear from zone corners
+        private func projectMapPointToAR(
+            mapPoint: CGPoint,
+            groundY: Float,
+            coordinator: ARCalibrationCoordinator,
+            triangleStore: TrianglePatchStore,
+            mapPointStore: MapPointStore
+        ) -> simd_float3? {
+            
+            // Try to find containing triangle with all vertices calibrated
+            for triangle in triangleStore.triangles {
+                // Get 2D vertex positions
+                let vertexPositions: [CGPoint] = triangle.vertexIDs.compactMap { vertexID in
+                    mapPointStore.points.first { $0.id == vertexID }?.mapPoint
+                }
+                
+                guard vertexPositions.count == 3 else { continue }
+                
+                // Check if point is inside this triangle
+                guard pointInTriangleForZone(mapPoint, vertices: vertexPositions) else { continue }
+                
+                // Check if all 3 vertices have calibrated AR positions
+                let arPositions: [simd_float3] = triangle.vertexIDs.compactMap { vertexID in
+                    coordinator.mapPointARPositions[vertexID]
+                }
+                
+                if arPositions.count == 3 {
+                    // Use barycentric interpolation from calibrated vertices
+                    if let position = interpolateARPosition(
+                        fromMapPoint: mapPoint,
+                        triangle2D: vertexPositions,
+                        triangle3D: arPositions
+                    ) {
+                        var groundedPosition = position
+                        groundedPosition.y = groundY
+                        return groundedPosition
+                    }
+                }
+                
+                // Triangle found but not fully calibrated - fall through to bilinear
+                break
+            }
+            
+            // Fallback: bilinear from zone corners
+            guard coordinator.hasBilinearCorners else { return nil }
+            
+            // Access sorted zone corners via bilinear projection
+            guard let bilinearPosition = coordinator.projectPointViaBilinear(mapPoint: mapPoint) else {
+                return nil
+            }
+            
+            var groundedPosition = bilinearPosition
+            groundedPosition.y = groundY
+            return groundedPosition
+        }
+        
+        /// Simple point-in-triangle test using barycentric coordinates
+        private func pointInTriangleForZone(_ p: CGPoint, vertices: [CGPoint]) -> Bool {
+            guard vertices.count == 3 else { return false }
+            
+            let v0 = vertices[0]
+            let v1 = vertices[1]
+            let v2 = vertices[2]
+            
+            let denom = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y)
+            guard abs(denom) > 0.0001 else { return false }
+            
+            let a = ((v1.y - v2.y) * (p.x - v2.x) + (v2.x - v1.x) * (p.y - v2.y)) / denom
+            let b = ((v2.y - v0.y) * (p.x - v2.x) + (v0.x - v2.x) * (p.y - v2.y)) / denom
+            let c = 1 - a - b
+            
+            let epsilon: CGFloat = -0.0001
+            return a >= epsilon && b >= epsilon && c >= epsilon
+        }
+        
+        /// Deduplicate fill points that are too close together
+        private func deduplicateFillPoints(_ points: [CGPoint], minDistance: Float) -> [CGPoint] {
+            var result: [CGPoint] = []
+            let minDistSq = Double(minDistance * minDistance)
+            
+            for point in points {
+                let isDuplicate = result.contains { existing in
+                    let dx = existing.x - point.x
+                    let dy = existing.y - point.y
+                    return (dx * dx + dy * dy) < minDistSq
+                }
+                
+                if !isDuplicate {
+                    result.append(point)
+                }
+            }
+            
+            return result
         }
         
         /// Clear all survey markers from scene

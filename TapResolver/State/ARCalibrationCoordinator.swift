@@ -1380,7 +1380,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             // Plant origin marker at map center projected via bilinear
             if let mapSize = cachedMapSize {
                 let mapCenter = CGPoint(x: mapSize.width / 2, y: mapSize.height / 2)
-                if var originPosition = projectPointBilinear(point: mapCenter, corners2D: sortedZoneCorners2D, corners3D: sortedZoneCorners3D) {
+                if var originPosition = projectPointViaBilinear(mapPoint: mapCenter) {
                     // Ground the marker: use Y from first placed corner
                     if let firstPlacedID = placedMarkers.first,
                        let groundY = mapPointARPositions[firstPlacedID]?.y {
@@ -1589,11 +1589,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             }
             
             // Project via bilinear interpolation from zone corners
-            guard var finalGhostPosition = projectPointBilinear(
-                point: mapPoint.mapPoint,
-                corners2D: sortedZoneCorners2D,
-                corners3D: sortedZoneCorners3D
-            ) else {
+            guard var finalGhostPosition = projectPointViaBilinear(mapPoint: mapPoint.mapPoint) else {
                 print("⚠️ [ZONE_CORNER_GHOSTS_BILINEAR] \(String(vertexID.uuidString.prefix(8))): Outside zone quad at \(mapPoint.mapPoint)")
                 skippedOutsideQuad += 1
                 continue
@@ -1623,6 +1619,19 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("   Skipped (already has position): \(skippedHasPosition)")
         print("   Skipped (outside zone quad): \(skippedOutsideQuad)")
         print("   Skipped (MapPoint not found): \(skippedNoMapPoint)")
+    }
+    
+    /// Projects a 2D map point to AR space using bilinear interpolation from zone corners
+    /// - Parameter mapPoint: The 2D map position in pixels
+    /// - Returns: The AR position, or nil if bilinear corners aren't set up
+    func projectPointViaBilinear(mapPoint: CGPoint) -> simd_float3? {
+        guard hasBilinearCorners else { return nil }
+        
+        return projectPointBilinear(
+            point: mapPoint,
+            corners2D: sortedZoneCorners2D,
+            corners3D: sortedZoneCorners3D
+        )
     }
     
     // MARK: - Drift Detection
