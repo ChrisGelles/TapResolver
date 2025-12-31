@@ -959,27 +959,18 @@ struct ARViewWithOverlays: View {
                                     print("🔄 [DEMOTE_READJUST] Adjusting demoted marker to crosshair position")
                                     print("   MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
                                     
-                                    // Remove ghost from scene
-                                    NotificationCenter.default.post(
-                                        name: NSNotification.Name("RemoveGhostMarker"),
-                                        object: nil,
-                                        userInfo: ["mapPointID": ghostMapPointID]
-                                    )
-                                    
-                                    // Place marker at crosshair (normal placement, NOT crawl mode)
+                                    // Place marker at crosshair - ghost removal deferred until placement succeeds
                                     NotificationCenter.default.post(
                                         name: NSNotification.Name("PlaceMarkerAtCursor"),
                                         object: nil,
-                                        userInfo: ["ghostMapPointID": ghostMapPointID]
+                                        userInfo: [
+                                            "ghostMapPointID": ghostMapPointID,
+                                            "removeGhostOnSuccess": true,
+                                            "isDemoteReadjust": true
+                                        ]
                                     )
                                     
-                                    // Clear demote state
-                                    arCalibrationCoordinator.demotedGhostMapPointIDs.remove(ghostMapPointID)
-                                    arCalibrationCoordinator.selectedGhostMapPointID = nil
-                                    arCalibrationCoordinator.selectedGhostEstimatedPosition = nil
-                                    arCalibrationCoordinator.repositionModeActive = false
-                                    
-                                    print("✅ [DEMOTE_READJUST] Marker adjusted, demote state cleared")
+                                    // State clearing happens in handlePlaceMarkerAtCursor after successful placement
                                     return
                                 }
                                 
@@ -1005,24 +996,17 @@ struct ARViewWithOverlays: View {
                                     arCalibrationCoordinator.repositionModeActive = false
                                 } else if case .placingVertices = arCalibrationCoordinator.calibrationState,
                                           let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID {
-                                    // 3rd vertex ghost adjustment - if ANY ghost is selected during vertex placement, remove it
                                     print("🔗 [3RD_VERTEX_ADJUST] Adjusting vertex ghost position via crosshair")
                                     print("   Ghost MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
                                     
-                                    // Remove the ghost marker first
-                                    NotificationCenter.default.post(
-                                        name: NSNotification.Name("RemoveGhostMarker"),
-                                        object: nil,
-                                        userInfo: ["mapPointID": ghostMapPointID]
-                                    )
-                                    
-                                    // Clear ghost selection
-                                    arCalibrationCoordinator.selectedGhostMapPointID = nil
-                                    
-                                    // Then place marker at crosshair (normal placement, not crawl mode)
+                                    // Place marker at crosshair - ghost removal deferred until placement succeeds
                                     NotificationCenter.default.post(
                                         name: NSNotification.Name("PlaceMarkerAtCursor"),
-                                        object: nil
+                                        object: nil,
+                                        userInfo: [
+                                            "ghostMapPointID": ghostMapPointID,
+                                            "removeGhostOnSuccess": true
+                                        ]
                                     )
                                     
                                     // Clear reposition mode if it was active

@@ -426,6 +426,12 @@ struct ARViewContainer: UIViewRepresentable {
                 print("📍 [PLACE_MARKER_CROSSHAIR] Using lingered position (age: \(String(format: "%.0f", Date().timeIntervalSince(timestamp) * 1000))ms)")
             } else {
                 print("⚠️ [PLACE_MARKER_CROSSHAIR] No cursor position available (live: nil, lingered: expired)")
+                print("   Ghost NOT removed - user can retry when floor plane is detected")
+                // Optionally post a notification for UI feedback
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("PlacementFailedNoSurface"),
+                    object: nil
+                )
                 return
             }
             
@@ -492,6 +498,20 @@ struct ARViewContainer: UIViewRepresentable {
                     // Track that this ghost was converted to AR marker (prevents re-planting)
                     arCalibrationCoordinator?.adjustedGhostMapPoints.insert(ghostMapPointID)
                     print("📍 [SWATH_TRACK] Marked \(String(ghostMapPointID.uuidString.prefix(8))) as adjusted")
+                    
+                    // Clear demote state if this was a demote readjust
+                    let isDemoteReadjust = notification.userInfo?["isDemoteReadjust"] as? Bool ?? false
+                    if isDemoteReadjust {
+                        arCalibrationCoordinator?.demotedGhostMapPointIDs.remove(ghostMapPointID)
+                        arCalibrationCoordinator?.selectedGhostMapPointID = nil
+                        arCalibrationCoordinator?.selectedGhostEstimatedPosition = nil
+                        print("✅ [DEMOTE_READJUST] Demote state cleared after successful placement")
+                    }
+                    
+                    // Clear ghost selection for all paths
+                    if arCalibrationCoordinator?.selectedGhostMapPointID == ghostMapPointID {
+                        arCalibrationCoordinator?.selectedGhostMapPointID = nil
+                    }
                 }
                 
                 // Place the real marker at crosshair position (this posts ARMarkerPlaced)
