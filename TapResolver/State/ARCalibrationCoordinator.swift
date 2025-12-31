@@ -1564,6 +1564,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         var skippedHasPosition = 0
         var skippedOutsideQuad = 0
         var skippedNoMapPoint = 0
+        var usedBakedCount = 0
+        var usedBilinearCount = 0
         
         // Get ground Y from first placed corner for consistent height
         let groundY: Float = placedMarkers.first.flatMap { mapPointARPositions[$0]?.y } ?? -1.0
@@ -1588,22 +1590,49 @@ final class ARCalibrationCoordinator: ObservableObject {
                 continue
             }
             
-            // Project using bilinear interpolation
-            guard var ghostPosition = projectPointBilinear(
-                point: mapPoint.mapPoint,
-                corners2D: sortedZoneCorners2D,
-                corners3D: sortedZoneCorners3D
-            ) else {
+            // PRIORITY 1: Use baked canonical position if available
+            var ghostPosition: simd_float3?
+            var positionSource = "bilinear"
+            
+            if let bakedPosition = mapPoint.canonicalPosition,
+               let projectedPosition = projectBakedToSession(bakedPosition) {
+                ghostPosition = projectedPosition
+                positionSource = "baked→session"
+                print("📍 [GHOST_PLANT_DIAG] \(String(vertexID.uuidString.prefix(8))): Using baked position")
+                print("   Baked: (\(String(format: "%.2f", bakedPosition.x)), \(String(format: "%.2f", bakedPosition.y)), \(String(format: "%.2f", bakedPosition.z)))")
+                print("   Projected: (\(String(format: "%.2f", projectedPosition.x)), \(String(format: "%.2f", projectedPosition.y)), \(String(format: "%.2f", projectedPosition.z)))")
+            }
+            
+            // PRIORITY 2: Fallback to bilinear projection
+            if ghostPosition == nil {
+                ghostPosition = projectPointBilinear(
+                    point: mapPoint.mapPoint,
+                    corners2D: sortedZoneCorners2D,
+                    corners3D: sortedZoneCorners3D
+                )
+                if ghostPosition != nil {
+                    print("📍 [GHOST_PLANT_DIAG] \(String(vertexID.uuidString.prefix(8))): Fallback to bilinear (no baked data)")
+                }
+            }
+            
+            guard var finalGhostPosition = ghostPosition else {
                 print("⚠️ [ZONE_CORNER_GHOSTS_BILINEAR] \(String(vertexID.uuidString.prefix(8))): Outside zone quad at \(mapPoint.mapPoint)")
                 skippedOutsideQuad += 1
                 continue
             }
             
+            // Track which method was used
+            if positionSource == "baked→session" {
+                usedBakedCount += 1
+            } else {
+                usedBilinearCount += 1
+            }
+            
             // Ground the ghost to floor level
-            ghostPosition.y = groundY
+            finalGhostPosition.y = groundY
             
             // Track ghost position
-            ghostMarkerPositions[vertexID] = ghostPosition
+            ghostMarkerPositions[vertexID] = finalGhostPosition
             
             // Post notification to render ghost in AR view
             NotificationCenter.default.post(
@@ -1611,7 +1640,7 @@ final class ARCalibrationCoordinator: ObservableObject {
                 object: nil,
                 userInfo: [
                     "mapPointID": vertexID,
-                    "position": ghostPosition
+                    "position": finalGhostPosition
                 ]
             )
             
@@ -1620,6 +1649,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         print("👻 [ZONE_CORNER_GHOSTS_BILINEAR] Complete:")
         print("   Planted: \(ghostsPlanted)")
+        print("   Baked positions used: \(usedBakedCount)")
+        print("   Bilinear fallback: \(usedBilinearCount)")
         print("   Skipped (has position): \(skippedHasPosition)")
         print("   Skipped (outside quad): \(skippedOutsideQuad)")
         print("   Skipped (no MapPoint): \(skippedNoMapPoint)")

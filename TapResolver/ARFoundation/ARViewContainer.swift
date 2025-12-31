@@ -1116,10 +1116,11 @@ struct ARViewContainer: UIViewRepresentable {
             }
             
             // Create visual marker at ghost position
+            // Use blue (markerBase) since this is a confirmed marker, not a ghost
             let markerNode = ARMarkerRenderer.createNode(
                 at: estimatedPosition,
                 options: MarkerOptions(
-                    color: .orange,  // Standard calibration marker color
+                    color: UIColor.ARPalette.markerBase,  // Blue for confirmed markers
                     markerID: markerID,
                     userDeviceHeight: userDeviceHeight,
                     badgeColor: nil,
