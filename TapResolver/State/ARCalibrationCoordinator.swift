@@ -1374,7 +1374,20 @@ final class ARCalibrationCoordinator: ObservableObject {
                 print("   \(label): \(String(corner.id.uuidString.prefix(8))) at 2D\(corner.position) → AR(\(String(format: "%.2f", sortedZoneCorners3D[i].x)), \(String(format: "%.2f", sortedZoneCorners3D[i].y)), \(String(format: "%.2f", sortedZoneCorners3D[i].z)))")
             }
             
-            // Plant ghosts using bilinear projection
+            // Compute session transform for baked data projection (uses first 2 corners)
+            if let pixelsPerMeter = getPixelsPerMeter() {
+                let metersPerPixel = 1.0 / pixelsPerMeter
+                if let mapSize = cachedMapSize {
+                    let success = computeSessionTransformForBakedData(mapSize: mapSize, metersPerPixel: metersPerPixel)
+                    print("📐 [ZONE_CORNER] Session transform for baked data: \(success ? "✅ COMPUTED" : "❌ FAILED")")
+                } else {
+                    print("⚠️ [ZONE_CORNER] Cannot compute session transform - cachedMapSize is nil")
+                }
+            } else {
+                print("⚠️ [ZONE_CORNER] Cannot compute session transform - pixelsPerMeter unavailable")
+            }
+            
+            // Plant ghosts using bilinear projection (with baked position priority when transform available)
             plantGhostsForAllTriangleVerticesBilinear()
             
             // Plant origin marker at map center projected via bilinear
@@ -1545,6 +1558,30 @@ final class ARCalibrationCoordinator: ObservableObject {
     private func plantGhostsForAllTriangleVerticesBilinear() {
         print("👻 [ZONE_CORNER_GHOSTS_BILINEAR] Planting ghosts using bilinear projection...")
         
+        // DEBUG: Trace MapPointStore instance
+        print("📊 [STORE_DEBUG] MapPointStore check at ghost planting:")
+        print("   safeMapStore points count: \(safeMapStore.points.count)")
+        print("   safeMapStore identity: \(ObjectIdentifier(safeMapStore))")
+        let pointsWithBaked = safeMapStore.points.filter { $0.canonicalPosition != nil }.count
+        print("   Points with canonicalPosition: \(pointsWithBaked)")
+        
+        // DEBUG: Check transform availability
+        print("🔄 [TRANSFORM_CHECK] Before ghost planting:")
+        print("   hasValidSessionTransform: \(hasValidSessionTransform)")
+        print("   cachedCanonicalToSessionTransform: \(cachedCanonicalToSessionTransform != nil ? "EXISTS" : "NIL")")
+        
+        // DEBUG: Check zone corners' canonical positions
+        print("📊 [ZONE_CORNER_BAKED_CHECK] Zone corner canonical positions:")
+        for cornerID in triangleVertices {
+            if let mapPoint = safeMapStore.points.first(where: { $0.id == cornerID }) {
+                let hasBaked = mapPoint.canonicalPosition != nil
+                print("   \(String(cornerID.uuidString.prefix(8))): \(hasBaked ? "HAS canonicalPosition" : "NO canonicalPosition")")
+                if let cp = mapPoint.canonicalPosition {
+                    print("      value: (\(String(format: "%.2f", cp.x)), \(String(format: "%.2f", cp.y)), \(String(format: "%.2f", cp.z)))")
+                }
+            }
+        }
+        
         guard hasBilinearCorners else {
             print("❌ [ZONE_CORNER_GHOSTS_BILINEAR] Bilinear corners not set up")
             return
@@ -1589,6 +1626,16 @@ final class ARCalibrationCoordinator: ObservableObject {
                 skippedNoMapPoint += 1
                 continue
             }
+            
+            // DEBUG: Trace MapPoint baked data availability
+            print("📊 [BAKED_DEBUG] MapPoint \(String(vertexID.uuidString.prefix(8))):")
+            print("   canonicalPosition: \(mapPoint.canonicalPosition != nil ? "EXISTS" : "NIL")")
+            if let cp = mapPoint.canonicalPosition {
+                print("   value: (\(String(format: "%.2f", cp.x)), \(String(format: "%.2f", cp.y)), \(String(format: "%.2f", cp.z)))")
+            }
+            print("   canonicalSampleCount: \(mapPoint.canonicalSampleCount)")
+            print("   canonicalConfidence: \(mapPoint.canonicalConfidence ?? -1)")
+            print("   arPositionHistory count: \(mapPoint.arPositionHistory.count)")
             
             // PRIORITY 1: Use baked canonical position if available
             var ghostPosition: simd_float3?
@@ -3134,7 +3181,12 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Project a baked canonical position to current session AR space
     /// Returns nil if no valid transform is cached
     public func projectBakedToSession(_ bakedPosition: SIMD3<Float>) -> SIMD3<Float>? {
+        print("🔄 [PROJECT_BAKED] Attempting projection")
+        print("   Input baked position: (\(String(format: "%.3f", bakedPosition.x)), \(String(format: "%.3f", bakedPosition.y)), \(String(format: "%.3f", bakedPosition.z)))")
+        print("   hasValidSessionTransform: \(hasValidSessionTransform)")
+        
         guard let transform = cachedCanonicalToSessionTransform else {
+            print("   ❌ FAILED: cachedCanonicalToSessionTransform is nil")
             return nil
         }
         
@@ -3155,7 +3207,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         )
         
         // Apply translation
-        return rotated + transform.translation
+        let result = rotated + transform.translation
+        print("   ✅ SUCCESS: Projected to (\(String(format: "%.3f", result.x)), \(String(format: "%.3f", result.y)), \(String(format: "%.3f", result.z)))")
+        return result
     }
     
     /// Projects an AR session position to map pixel coordinates using the global session transform

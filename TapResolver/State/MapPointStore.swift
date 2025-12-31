@@ -2020,6 +2020,12 @@ public final class MapPointStore: ObservableObject {
         lastBakeSessionCount = sessionsProcessed
         save()
         
+        // DEBUG: Trace MapPointStore after baking
+        print("📊 [BAKE_COMPLETE_DEBUG] MapPointStore state after baking:")
+        print("   Instance identity: \(ObjectIdentifier(self))")
+        let bakedCount = points.filter { $0.canonicalPosition != nil }.count
+        print("   Points with canonicalPosition: \(bakedCount)/\(points.count)")
+        
         let duration = Date().timeIntervalSince(startTime) * 1000
         
         print("\n" + String(repeating: "=", count: 70))
