@@ -1012,31 +1012,49 @@ struct ARViewWithOverlays: View {
                                     // Clear reposition mode if it was active
                                     arCalibrationCoordinator.repositionModeActive = false
                                 } else if let ghostMapPointID = arCalibrationCoordinator.selectedGhostMapPointID {
-                                    // Generic ghost adjustment - ghost selected in any other state
-                                    // DON'T remove ghost here - let handlePlaceMarkerAtCursor do it after cursor validation
-                                    print("🔗 [GENERIC_ADJUST] Adjusting ghost position via crosshair")
-                                    print("   Ghost MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
-                                    print("   Current state: \(arCalibrationCoordinator.stateDescription)")
-                                    
-                                    // Capture original ghost position before clearing (for distortion vector)
-                                    let originalGhostPosition = arCalibrationCoordinator.selectedGhostEstimatedPosition
-                                    
-                                    // Clear ghost selection (user can tap again if placement fails)
-                                    arCalibrationCoordinator.selectedGhostMapPointID = nil
-                                    
-                                    // Post PlaceMarkerAtCursor - ghost removal happens there after cursor validation
-                                    var userInfo: [String: Any] = [
-                                        "ghostMapPointID": ghostMapPointID,
-                                        "removeGhostOnSuccess": true  // Flag to trigger ghost removal after cursor check
-                                    ]
-                                    if let origPos = originalGhostPosition {
-                                        userInfo["originalGhostPosition"] = [origPos.x, origPos.y, origPos.z]
+                                    // Zone Corner mode: simple adjustment (no crawl/adjacent triangle activation)
+                                    if arCalibrationCoordinator.isZoneCornerMode {
+                                        print("🎯 [ZONE_CORNER_ADJUST] Adjusting ghost position via crosshair")
+                                        print("   Ghost MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
+                                        
+                                        // Place marker at crosshair - ghost removal deferred until placement succeeds
+                                        NotificationCenter.default.post(
+                                            name: NSNotification.Name("PlaceMarkerAtCursor"),
+                                            object: nil,
+                                            userInfo: [
+                                                "ghostMapPointID": ghostMapPointID,
+                                                "removeGhostOnSuccess": true
+                                            ]
+                                        )
+                                        
+                                        // Clear ghost selection
+                                        arCalibrationCoordinator.selectedGhostMapPointID = nil
+                                        arCalibrationCoordinator.selectedGhostEstimatedPosition = nil
+                                    } else {
+                                        // Crawl mode - adjust ghost and activate adjacent triangle
+                                        print("🔗 [CRAWL_ADJUST] Adjusting ghost position via crosshair")
+                                        print("   Ghost MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
+                                        print("   Active Triangle: \(arCalibrationCoordinator.activeTriangleID.map { String($0.uuidString.prefix(8)) } ?? "nil")")
+                                        
+                                        // Get original ghost position for distortion vector calculation
+                                        let originalGhostPosition = arCalibrationCoordinator.selectedGhostEstimatedPosition
+                                        
+                                        NotificationCenter.default.post(
+                                            name: NSNotification.Name("PlaceMarkerAtCursor"),
+                                            object: nil,
+                                            userInfo: [
+                                                "isCrawlMode": true,
+                                                "ghostMapPointID": ghostMapPointID,
+                                                "currentTriangleID": arCalibrationCoordinator.activeTriangleID as Any,
+                                                "originalGhostPosition": originalGhostPosition.map { [$0.x, $0.y, $0.z] } as Any,
+                                                "removeGhostOnSuccess": true
+                                            ]
+                                        )
+                                        
+                                        // Clear ghost selection
+                                        arCalibrationCoordinator.selectedGhostMapPointID = nil
+                                        arCalibrationCoordinator.selectedGhostEstimatedPosition = nil
                                     }
-                                    NotificationCenter.default.post(
-                                        name: NSNotification.Name("PlaceMarkerAtCursor"),
-                                        object: nil,
-                                        userInfo: userInfo
-                                    )
                                     
                                     // Clear reposition mode if it was active
                                     arCalibrationCoordinator.repositionModeActive = false
