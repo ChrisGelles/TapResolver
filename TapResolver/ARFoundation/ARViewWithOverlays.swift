@@ -231,7 +231,8 @@ struct ARViewWithOverlays: View {
                 
                 // Check if this is a ghost confirmation
                 let isGhostConfirm = notification.userInfo?["isGhostConfirm"] as? Bool ?? false
-                let ghostMapPointID = notification.userInfo?["ghostMapPointID"] as? UUID
+                // Accept either "ghostMapPointID" (crawl mode) or "mapPointID" (Zone Corner mode)
+                let ghostMapPointID = notification.userInfo?["ghostMapPointID"] as? UUID ?? notification.userInfo?["mapPointID"] as? UUID
                 
                 if isGhostConfirm, let ghostID = ghostMapPointID {
                     print("🎯 [REGISTER_MARKER_TRACE] Ghost confirm for MapPoint \(String(ghostID.uuidString.prefix(8)))")
@@ -345,9 +346,16 @@ struct ARViewWithOverlays: View {
                             isAnchor: false
                         )
                         
-                        // Register the ghost-confirmed marker as a zone corner anchor
-                        arCalibrationCoordinator.registerZoneCornerAnchor(mapPointID: ghostID, marker: marker)
-                        print("✅ [ZONE_CORNER_GHOST] Registered ghost-confirmed marker for MapPoint \(String(ghostID.uuidString.prefix(8)))")
+                        // Check if this is a corner or a fill point
+                        if arCalibrationCoordinator.isZoneCorner(mapPointID: ghostID) {
+                            // Corner vertex - use full registration flow
+                            arCalibrationCoordinator.registerZoneCornerAnchor(mapPointID: ghostID, marker: marker)
+                            print("✅ [ZONE_CORNER_GHOST] Registered corner ghost for MapPoint \(String(ghostID.uuidString.prefix(8)))")
+                        } else {
+                            // Fill point - register marker→MapPoint mapping directly
+                            arCalibrationCoordinator.registerFillPointMarker(markerID: markerID, mapPointID: ghostID, position: arPosition)
+                            print("✅ [ZONE_CORNER_GHOST] Registered fill point ghost for MapPoint \(String(ghostID.uuidString.prefix(8)))")
+                        }
                         return
                     }
                 }

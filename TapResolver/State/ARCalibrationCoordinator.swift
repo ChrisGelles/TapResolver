@@ -1409,6 +1409,37 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("📍 [ZONE_CORNER] registerZoneCornerAnchor END: \(formatter.string(from: Date()))")
     }
     
+    /// Check if a MapPoint is one of the zone corner vertices
+    func isZoneCorner(mapPointID: UUID) -> Bool {
+        return triangleVertices.contains(mapPointID)
+    }
+    
+    /// Register a fill point marker in Zone Corner mode (non-corner ghost confirmation)
+    /// This registers the marker→MapPoint mapping without the corner-specific validation
+    func registerFillPointMarker(markerID: UUID, mapPointID: UUID, position: simd_float3) {
+        print("📍 [FILL_POINT] Registering fill point marker")
+        print("   MarkerID: \(String(markerID.uuidString.prefix(8)))")
+        print("   MapPointID: \(String(mapPointID.uuidString.prefix(8)))")
+        print("   Position: (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
+        
+        // Register marker→MapPoint mapping for tap-to-demote functionality
+        sessionMarkerToMapPoint[markerID.uuidString] = mapPointID
+        sessionMarkerPositions[markerID.uuidString] = position
+        mapPointARPositions[mapPointID] = position
+        
+        // Record in position history
+        let record = ARPositionRecord(
+            position: position,
+            sessionID: safeARStore.currentSessionID,
+            sourceType: .ghostConfirm,
+            distortionVector: nil,
+            confidenceScore: 0.90
+        )
+        safeMapStore.addPositionRecord(mapPointID: mapPointID, record: record)
+        
+        print("✅ [FILL_POINT] Registered fill point marker for demote tracking")
+    }
+    
     /// Plants ghost markers for all triangle vertices that have baked canonical positions
     /// Called after Zone Corner calibration completes
     private func plantGhostsForAllTriangleVertices() {
