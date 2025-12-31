@@ -1165,6 +1165,9 @@ private struct DebugSettingsPanel: View {
     @State private var showingPurgeCanonicalAlert = false
     @State private var canonicalPurgeResultMessage = ""
     @State private var showCanonicalPurgeResult = false
+    @State private var showingPurgeTrianglePatchAlert = false
+    @State private var trianglePatchPurgeResultMessage = ""
+    @State private var showTrianglePatchPurgeResult = false
     @State private var showingLogShare = false
     @State private var showingStorageAuditShare = false
     @State private var storageAuditURL: URL? = nil
@@ -1677,6 +1680,25 @@ private struct DebugSettingsPanel: View {
                         }
                         .buttonStyle(.plain)
                         
+                        // MARK: - Zone Corner Migration
+                        
+                        // Purge Triangle Patch Era Data (for Zone Corner migration)
+                        Button(role: .destructive) {
+                            showingPurgeTrianglePatchAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "arrow.triangle.2.circlepath.circle")
+                                    .font(.system(size: 24))
+                                Text("Purge Rigid Body Data")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
                         // === END ONE-TIME CLEANUP UTILITY ===
                     }
                     .padding(.horizontal, 20)
@@ -1773,6 +1795,41 @@ private struct DebugSettingsPanel: View {
             Button("OK") { }
         } message: {
             Text(canonicalPurgeResultMessage)
+        }
+        .alert("Purge Triangle Patch Era Data?", isPresented: $showingPurgeTrianglePatchAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Purge All", role: .destructive) {
+                let withCanonical = mapPointStore.points.filter { $0.canonicalPosition != nil }.count
+                let totalHistory = mapPointStore.points.reduce(0) { $0 + $1.arPositionHistory.count }
+                mapPointStore.purgeTrianglePatchPositionData()
+                trianglePatchPurgeResultMessage = """
+                    Purged Triangle Patch era data:
+                    • \(withCanonical) canonical positions cleared
+                    • \(totalHistory) history records removed
+                    
+                    Zone Corner bilinear calibration is now ready.
+                    """
+                showTrianglePatchPurgeResult = true
+            }
+        } message: {
+            let withCanonical = mapPointStore.points.filter { $0.canonicalPosition != nil }.count
+            let totalHistory = mapPointStore.points.reduce(0) { $0 + $1.arPositionHistory.count }
+            Text("""
+                This will permanently delete ALL position data from the Triangle Patch / Rigid Body era:
+                
+                • \(withCanonical) canonical position(s)
+                • \(totalHistory) AR history record(s)
+                
+                Required before Zone Corner bilinear calibration.
+                
+                2D coordinates and triangle topology will be preserved.
+                This cannot be undone.
+                """)
+        }
+        .alert("Purge Complete", isPresented: $showTrianglePatchPurgeResult) {
+            Button("OK") { }
+        } message: {
+            Text(trianglePatchPurgeResultMessage)
         }
         .sheet(isPresented: $showMapSVGSheet) {
             if let url = mapSVGURL {

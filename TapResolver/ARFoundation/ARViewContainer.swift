@@ -497,6 +497,10 @@ struct ARViewContainer: UIViewRepresentable {
                 // Place the real marker at crosshair position (this posts ARMarkerPlaced)
                 let markerID = placeMarker(at: position)
                 
+                // Register marker→MapPoint association for demote support
+                arCalibrationCoordinator?.sessionMarkerToMapPoint[markerID.uuidString] = ghostMapPointID
+                print("📍 [GENERIC_ADJUST] Registered marker \(String(markerID.uuidString.prefix(8))) → MapPoint \(String(ghostMapPointID.uuidString.prefix(8)))")
+                
                 // Re-post ARMarkerPlaced with originalGhostPosition for distortion vector calculation
                 // (placeMarker already posted it, but we need to add the ghost info)
                 var userInfo: [String: Any] = [

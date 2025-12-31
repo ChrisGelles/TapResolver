@@ -956,6 +956,65 @@ public final class MapPointStore: ObservableObject {
         return clearedCount
     }
     
+    /// Purges ALL position data from Triangle Patch / Rigid Body era.
+    /// This is required before using Zone Corner bilinear projection, as the
+    /// historical 3D canonical positions are incompatible with bilinear math.
+    ///
+    /// Purges: canonicalPosition, canonicalConfidence, canonicalSampleCount, arPositionHistory
+    /// Retains: MapPoint definitions, IDs, roles, 2D coordinates, triangle topology
+    func purgeTrianglePatchPositionData() {
+        print("")
+        print("╔══════════════════════════════════════════════════════════════════════════════╗")
+        print("║  🗑️  PURGE TRIANGLE PATCH ERA POSITION DATA                                  ║")
+        print("╠══════════════════════════════════════════════════════════════════════════════╣")
+        print("║  Location: \(PersistenceContext.shared.locationID.padding(toLength: 58, withPad: " ", startingAt: 0)) ║")
+        print("║  Total MapPoints: \(String(points.count).padding(toLength: 55, withPad: " ", startingAt: 0)) ║")
+        print("╚══════════════════════════════════════════════════════════════════════════════╝")
+        
+        var purgedCanonicalCount = 0
+        var purgedHistoryRecords = 0
+        
+        for i in 0..<points.count {
+            let hadCanonical = points[i].canonicalPosition != nil
+            let historyCount = points[i].arPositionHistory.count
+            
+            if hadCanonical || historyCount > 0 {
+                print("   🗑️ \(String(points[i].id.uuidString.prefix(8))): ", terminator: "")
+                if hadCanonical {
+                    print("canonical ✓ ", terminator: "")
+                    purgedCanonicalCount += 1
+                }
+                if historyCount > 0 {
+                    print("history(\(historyCount)) ✓", terminator: "")
+                    purgedHistoryRecords += historyCount
+                }
+                print("")
+            }
+            
+            points[i].arPositionHistory = []
+            points[i].canonicalPosition = nil
+            points[i].canonicalConfidence = nil
+            points[i].canonicalSampleCount = 0
+        }
+        
+        save()
+        
+        print("")
+        print("╔══════════════════════════════════════════════════════════════════════════════╗")
+        print("║  ✅ PURGE COMPLETE                                                           ║")
+        print("╠══════════════════════════════════════════════════════════════════════════════╣")
+        print("║  MapPoints with canonical data cleared: \(String(purgedCanonicalCount).padding(toLength: 32, withPad: " ", startingAt: 0)) ║")
+        print("║  AR position history records purged: \(String(purgedHistoryRecords).padding(toLength: 35, withPad: " ", startingAt: 0)) ║")
+        print("║  Total MapPoints retained: \(String(points.count).padding(toLength: 45, withPad: " ", startingAt: 0)) ║")
+        print("╠══════════════════════════════════════════════════════════════════════════════╣")
+        print("║  RETAINED: IDs, roles, 2D coordinates, triangle topology                     ║")
+        print("║  PURGED: canonicalPosition, confidence, sampleCount, arPositionHistory       ║")
+        print("║                                                                              ║")
+        print("║  Ready for Zone Corner bilinear calibration.                                 ║")
+        print("╚══════════════════════════════════════════════════════════════════════════════╝")
+        print("")
+    }
+    
     // MARK: - Photo Management
     
     /// Purge all photo assets for current location
