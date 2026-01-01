@@ -211,6 +211,11 @@ public final class MapPointStore: ObservableObject {
         public var canonicalConfidence: Float?             // Aggregate confidence (0.0-1.0)
         public var canonicalSampleCount: Int = 0           // Number of calibration sessions that contributed
         
+        /// Offset from idealized map geometry in canonical frame (meters)
+        /// Computed as: canonicalPosition - idealCanonicalPosition
+        /// Represents how much reality deviates from the 2D map at this point
+        public var consensusDistortionVector: SIMD3<Float>?
+        
         public var mapPoint: CGPoint {
             get { position }
             set { position = newValue }
@@ -231,7 +236,8 @@ public final class MapPointStore: ObservableObject {
             arPositionHistory: [ARPositionRecord] = [],
             canonicalPosition: SIMD3<Float>? = nil,
             canonicalConfidence: Float? = nil,
-            canonicalSampleCount: Int = 0
+            canonicalSampleCount: Int = 0,
+            consensusDistortionVector: SIMD3<Float>? = nil
         ) {
             self.id = id ?? UUID()
             self.position = mapPoint
@@ -249,6 +255,7 @@ public final class MapPointStore: ObservableObject {
             self.canonicalPosition = canonicalPosition
             self.canonicalConfidence = canonicalConfidence
             self.canonicalSampleCount = canonicalSampleCount
+            self.consensusDistortionVector = consensusDistortionVector
         }
         
         // MARK: - Consensus Position (Milestone 2)
@@ -320,6 +327,7 @@ public final class MapPointStore: ObservableObject {
             case bakedCanonicalPositionArray   // Maps to: canonicalPosition
             case bakedConfidence               // Maps to: canonicalConfidence
             case bakedSampleCount              // Maps to: canonicalSampleCount
+            case consensusDistortionVectorArray // Maps to: consensusDistortionVector
         }
         
         public init(from decoder: Decoder) throws {
@@ -357,6 +365,14 @@ public final class MapPointStore: ObservableObject {
             }
             canonicalConfidence = try container.decodeIfPresent(Float.self, forKey: .bakedConfidence)
             canonicalSampleCount = try container.decodeIfPresent(Int.self, forKey: .bakedSampleCount) ?? 0
+            
+            // Decode consensusDistortionVector
+            if let distortionArray = try container.decodeIfPresent([Float].self, forKey: .consensusDistortionVectorArray),
+               distortionArray.count == 3 {
+                consensusDistortionVector = SIMD3<Float>(distortionArray[0], distortionArray[1], distortionArray[2])
+            } else {
+                consensusDistortionVector = nil
+            }
         }
         
         public func encode(to encoder: Encoder) throws {
@@ -389,6 +405,11 @@ public final class MapPointStore: ObservableObject {
             try container.encodeIfPresent(canonicalConfidence, forKey: .bakedConfidence)
             if canonicalSampleCount > 0 {
                 try container.encode(canonicalSampleCount, forKey: .bakedSampleCount)
+            }
+            
+            // Encode consensusDistortionVector
+            if let distortion = consensusDistortionVector {
+                try container.encode([distortion.x, distortion.y, distortion.z], forKey: .consensusDistortionVectorArray)
             }
         }
     }
@@ -2069,6 +2090,19 @@ public final class MapPointStore: ObservableObject {
                 points[index].canonicalConfidence = avgConfidence
                 points[index].canonicalSampleCount = samples.count
             
+            // Compute and store distortion vector
+            let mapPosition = points[index].position
+            let pixelsPerMeter = 1.0 / metersPerPixel
+            let canonicalOrigin = CGPoint(x: mapSize.width / 2, y: mapSize.height / 2)
+            let floorHeight: Float = -1.1
+            
+            let idealCanonical = SIMD3<Float>(
+                Float(mapPosition.x - canonicalOrigin.x) / pixelsPerMeter,
+                floorHeight,
+                Float(mapPosition.y - canonicalOrigin.y) / pixelsPerMeter
+            )
+            points[index].consensusDistortionVector = bakedPosition - idealCanonical
+            
             print("   ✅ \(String(mapPointID.uuidString.prefix(8))): (\(String(format: "%.2f", bakedPosition.x)), \(String(format: "%.2f", bakedPosition.y)), \(String(format: "%.2f", bakedPosition.z))) [samples: \(samples.count), conf: \(String(format: "%.2f", avgConfidence))]")
             
             updatedCount += 1
@@ -2138,6 +2172,44 @@ public final class MapPointStore: ObservableObject {
                 }
             }
         }
+        print(String(repeating: "=", count: 60) + "\n")
+    }
+    
+    /// Debug function to display distortion vector summary
+    func debugDistortionSummary() {
+        print("\n" + String(repeating: "=", count: 60))
+        print("📐 [DISTORTION_SUMMARY] Consensus Distortion Vectors")
+        print(String(repeating: "=", count: 60))
+        
+        let pointsWithDistortion = points.filter { $0.consensusDistortionVector != nil }
+        
+        if pointsWithDistortion.isEmpty {
+            print("   No distortion vectors computed yet")
+        } else {
+            var totalMagnitude: Float = 0
+            var maxMagnitude: Float = 0
+            var maxMagnitudeID: UUID?
+            
+            for point in pointsWithDistortion {
+                guard let distortion = point.consensusDistortionVector else { continue }
+                let magnitude = simd_length(distortion)
+                totalMagnitude += magnitude
+                
+                if magnitude > maxMagnitude {
+                    maxMagnitude = magnitude
+                    maxMagnitudeID = point.id
+                }
+                
+                print("   \(String(point.id.uuidString.prefix(8))): (\(String(format: "%.3f", distortion.x)), \(String(format: "%.3f", distortion.y)), \(String(format: "%.3f", distortion.z)))m  |  \(String(format: "%.3f", magnitude))m")
+            }
+            
+            let avgMagnitude = totalMagnitude / Float(pointsWithDistortion.count)
+            print("")
+            print("   Points with distortion: \(pointsWithDistortion.count)")
+            print("   Average magnitude: \(String(format: "%.3f", avgMagnitude))m")
+            print("   Max magnitude: \(String(format: "%.3f", maxMagnitude))m at \(maxMagnitudeID.map { String($0.uuidString.prefix(8)) } ?? "?")")
+        }
+        
         print(String(repeating: "=", count: 60) + "\n")
     }
     

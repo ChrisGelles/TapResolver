@@ -4569,6 +4569,24 @@ final class ARCalibrationCoordinator: ObservableObject {
         safeMapStore.points[index].canonicalConfidence = newConfidence
         safeMapStore.points[index].canonicalSampleCount = newSampleCount
         
+        // Compute and store distortion vector
+        if let mapSize = cachedMapSize,
+           let metersPerPixel = cachedMetersPerPixel {
+            let mapPosition = safeMapStore.points[index].position
+            let idealCanonical = computeIdealCanonicalPosition(
+                from: mapPosition,
+                mapSize: mapSize,
+                metersPerPixel: metersPerPixel
+            )
+            let distortionVector = newBakedPosition - idealCanonical
+            safeMapStore.points[index].consensusDistortionVector = distortionVector
+            
+            let magnitude = simd_length(distortionVector)
+            print("📐 [DISTORTION] \(String(mapPointID.uuidString.prefix(8))): vector=(\(String(format: "%.3f", distortionVector.x)), \(String(format: "%.3f", distortionVector.y)), \(String(format: "%.3f", distortionVector.z)))m, magnitude=\(String(format: "%.3f", magnitude))m")
+        } else {
+            print("⚠️ [DISTORTION] Cannot compute distortion - missing map parameters")
+        }
+        
         // Update bake timestamp in MapPointStore
         safeMapStore.lastBakeTimestamp = Date()
         safeMapStore.save()
@@ -4577,6 +4595,36 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Debug function to display current baked positions
     func debugBakedPositions() {
         safeMapStore.debugBakedPositionSummary()
+    }
+    
+    // MARK: - Ideal Canonical Position
+    
+    /// Computes the "ideal" canonical position from 2D map coordinates
+    /// This represents where the point WOULD be if the map were geometrically perfect
+    /// - Parameters:
+    ///   - mapPosition: 2D position in map pixels
+    ///   - mapSize: Size of the map in pixels
+    ///   - metersPerPixel: Scale factor from MetricSquare
+    /// - Returns: 3D position in canonical frame (Y=0 floor plane)
+    private func computeIdealCanonicalPosition(
+        from mapPosition: CGPoint,
+        mapSize: CGSize,
+        metersPerPixel: Float
+    ) -> SIMD3<Float> {
+        // Convert pixels to meters
+        let xMeters = Float(mapPosition.x) * metersPerPixel
+        let zMeters = Float(mapPosition.y) * metersPerPixel
+        
+        // Compute map center in meters
+        let centerXMeters = Float(mapSize.width) * metersPerPixel / 2.0
+        let centerZMeters = Float(mapSize.height) * metersPerPixel / 2.0
+        
+        // Canonical frame is centered on map, Y=0 is floor
+        return SIMD3<Float>(
+            xMeters - centerXMeters,  // X offset from center
+            0,                         // Floor level
+            zMeters - centerZMeters   // Z offset from center
+        )
     }
     
     // MARK: - Crawl Coverage Diagnostics
