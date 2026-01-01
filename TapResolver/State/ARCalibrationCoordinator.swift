@@ -1584,6 +1584,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         var skippedHasPosition = 0
         var skippedOutsideQuad = 0
         var skippedNoMapPoint = 0
+        var ghostsWithCorrection = 0
+        var ghostsBilinearOnly = 0
         
         // Get ground Y from first placed corner for consistent height
         let groundY: Float = placedMarkers.first.flatMap { mapPointARPositions[$0]?.y } ?? -1.0
@@ -1610,13 +1612,25 @@ final class ARCalibrationCoordinator: ObservableObject {
             
             // Project via bilinear interpolation from zone corners
             guard var finalGhostPosition = projectPointViaBilinear(mapPoint: mapPoint.mapPoint) else {
-                print("⚠️ [ZONE_CORNER_GHOSTS_BILINEAR] \(String(vertexID.uuidString.prefix(8))): Outside zone quad at \(mapPoint.mapPoint)")
                 skippedOutsideQuad += 1
                 continue
             }
             
             // Ground the ghost to floor level
             finalGhostPosition.y = groundY
+            
+            // Apply distortion correction if available from previous calibrations
+            // Only apply horizontal correction (X, Z) - Y is handled by grounding
+            if let distortion = mapPoint.consensusDistortionVector {
+                let horizontalCorrection = simd_float3(distortion.x, 0, distortion.z)
+                finalGhostPosition += horizontalCorrection
+                
+                let correctionMagnitude = simd_length(horizontalCorrection)
+                print("📐 [GHOST_CORRECTION] \(String(vertexID.uuidString.prefix(8))): applied distortion (\(String(format: "%.3f", distortion.x)), \(String(format: "%.3f", distortion.z)))m, magnitude=\(String(format: "%.3f", correctionMagnitude))m")
+                ghostsWithCorrection += 1
+            } else {
+                ghostsBilinearOnly += 1
+            }
             
             // Track ghost position
             ghostMarkerPositions[vertexID] = finalGhostPosition
@@ -1635,10 +1649,11 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
         
         print("👻 [ZONE_CORNER_GHOSTS_BILINEAR] Complete:")
-        print("   Ghosts planted: \(ghostsPlanted)")
-        print("   Skipped (already has position): \(skippedHasPosition)")
-        print("   Skipped (outside zone quad): \(skippedOutsideQuad)")
-        print("   Skipped (MapPoint not found): \(skippedNoMapPoint)")
+        print("   Planted: \(ghostsPlanted)")
+        print("      ↳ With distortion correction: \(ghostsWithCorrection)")
+        print("      ↳ Bilinear only: \(ghostsBilinearOnly)")
+        print("   Skipped (has position): \(skippedHasPosition)")
+        print("   Skipped (calc failed): \(skippedOutsideQuad)")
     }
     
     /// Projects a 2D map point to AR space using bilinear interpolation from zone corners
