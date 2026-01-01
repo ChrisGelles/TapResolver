@@ -4653,6 +4653,13 @@ final class ARCalibrationCoordinator: ObservableObject {
             print("⚠️ [DISTORTION] Cannot compute distortion - missing map parameters")
         }
         
+        // DIAGNOSTIC: Verify distortion is set before save
+        if let finalDistortion = safeMapStore.points[index].consensusDistortionVector {
+            print("✅ [PRE_SAVE_DIAG] \(String(mapPointID.uuidString.prefix(8))): distortion EXISTS before save: (\(String(format: "%.3f", finalDistortion.x)), \(String(format: "%.3f", finalDistortion.y)), \(String(format: "%.3f", finalDistortion.z)))")
+        } else {
+            print("❌ [PRE_SAVE_DIAG] \(String(mapPointID.uuidString.prefix(8))): distortion is NIL before save!")
+        }
+        
         // Update bake timestamp in MapPointStore
         safeMapStore.lastBakeTimestamp = Date()
         safeMapStore.save()

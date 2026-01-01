@@ -1182,6 +1182,14 @@ public final class MapPointStore: ObservableObject {
             let pointsWithHistory = points.filter { !$0.arPositionHistory.isEmpty }.count
             print("📊 [DATA_SUMMARY] \(points.count) MapPoints, \(pointsWithHistory) with history, \(totalRecords) total position records across \(uniqueSessions.count) sessions")
             
+            // DIAGNOSTIC: Check if any points have distortion after load
+            let pointsWithDistortion = points.filter { $0.consensusDistortionVector != nil }
+            print("📖 [POST_LOAD_DIAG] Loaded \(points.count) points, \(pointsWithDistortion.count) have distortion vectors")
+            for point in pointsWithDistortion {
+                let d = point.consensusDistortionVector!
+                print("   📐 \(String(point.id.uuidString.prefix(8))): (\(String(format: "%.3f", d.x)), \(String(format: "%.3f", d.y)), \(String(format: "%.3f", d.z)))")
+            }
+            
             // DEBUG: Show distortion vector summary after load
             debugDistortionSummary()
         } else {
