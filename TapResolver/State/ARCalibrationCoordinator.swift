@@ -4606,7 +4606,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         let currentSampleCount = safeMapStore.points[index].canonicalSampleCount
         
         // Compute new weighted average
-        let newBakedPosition: SIMD3<Float>
+        var newBakedPosition: SIMD3<Float>
         let newConfidence: Float
         let newSampleCount: Int
         
@@ -4630,6 +4630,9 @@ final class ARCalibrationCoordinator: ObservableObject {
             print("🔥 [BAKE_UPDATE] \(String(mapPointID.uuidString.prefix(8))): NEW baked position, conf=\(String(format: "%.2f", newConfidence))")
         }
         
+        // Force Y to 0 - canonical frame is always at floor level
+        newBakedPosition.y = 0
+        
         // Update and save
         safeMapStore.points[index].canonicalPosition = newBakedPosition
         safeMapStore.points[index].canonicalConfidence = newConfidence
@@ -4644,7 +4647,8 @@ final class ARCalibrationCoordinator: ObservableObject {
                 mapSize: mapSize,
                 metersPerPixel: metersPerPixel
             )
-            let distortionVector = newBakedPosition - idealCanonical
+            var distortionVector = newBakedPosition - idealCanonical
+            distortionVector.y = 0  // Distortion is horizontal only (canonical frame is at floor level)
             safeMapStore.points[index].consensusDistortionVector = distortionVector
             
             let magnitude = simd_length(distortionVector)

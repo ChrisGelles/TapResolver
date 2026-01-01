@@ -1033,14 +1033,25 @@ struct ARViewWithOverlays: View {
                                         print("🎯 [ZONE_CORNER_ADJUST] Adjusting ghost position via crosshair")
                                         print("   Ghost MapPoint: \(String(ghostMapPointID.uuidString.prefix(8)))")
                                         
+                                        // Get original ghost position for distortion calculation
+                                        var ghostUserInfo: [String: Any] = [
+                                            "ghostMapPointID": ghostMapPointID,
+                                            "removeGhostOnSuccess": true
+                                        ]
+                                        
+                                        // Include original position if available
+                                        if let originalPos = arCalibrationCoordinator.selectedGhostEstimatedPosition {
+                                            ghostUserInfo["originalGhostPosition"] = [originalPos.x, originalPos.y, originalPos.z]
+                                            print("📍 [GHOST_POS_PASS] Passing originalGhostPosition: (\(String(format: "%.3f", originalPos.x)), \(String(format: "%.3f", originalPos.y)), \(String(format: "%.3f", originalPos.z)))")
+                                        } else {
+                                            print("⚠️ [GHOST_POS_PASS] selectedGhostEstimatedPosition is nil!")
+                                        }
+                                        
                                         // Place marker at crosshair - ghost removal deferred until placement succeeds
                                         NotificationCenter.default.post(
                                             name: NSNotification.Name("PlaceMarkerAtCursor"),
                                             object: nil,
-                                            userInfo: [
-                                                "ghostMapPointID": ghostMapPointID,
-                                                "removeGhostOnSuccess": true
-                                            ]
+                                            userInfo: ghostUserInfo
                                         )
                                         
                                         // Clear ghost selection
