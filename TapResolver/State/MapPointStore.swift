@@ -812,6 +812,9 @@ public final class MapPointStore: ObservableObject {
         let bakedCanonicalPositionArray: [Float]?  // [x, y, z] in canonical frame → canonicalPosition
         let bakedConfidence: Float?                 // → canonicalConfidence
         let bakedSampleCount: Int?                  // → canonicalSampleCount
+        
+        // Distortion vector for mesh refinement
+        let consensusDistortionVectorArray: [Float]?  // [x, y, z] → consensusDistortionVector
     }
 
     internal func save() {
@@ -863,7 +866,8 @@ public final class MapPointStore: ObservableObject {
                 // Canonical position (stored with "baked" keys for backward compatibility)
                 bakedCanonicalPositionArray: point.canonicalPosition.map { [$0.x, $0.y, $0.z] },
                 bakedConfidence: point.canonicalConfidence,
-                bakedSampleCount: point.canonicalSampleCount > 0 ? point.canonicalSampleCount : nil
+                bakedSampleCount: point.canonicalSampleCount > 0 ? point.canonicalSampleCount : nil,
+                consensusDistortionVectorArray: point.consensusDistortionVector.map { [$0.x, $0.y, $0.z] }
             )
         }
         
@@ -1126,6 +1130,14 @@ public final class MapPointStore: ObservableObject {
                     return nil
                 }()
                 
+                // Convert distortion vector array back to SIMD3
+                let distortionVector: SIMD3<Float>?
+                if let arr = dtoItem.consensusDistortionVectorArray, arr.count == 3 {
+                    distortionVector = SIMD3<Float>(arr[0], arr[1], arr[2])
+                } else {
+                    distortionVector = nil
+                }
+                
                 var point = MapPoint(
                     id: dtoItem.id,
                     mapPoint: CGPoint(x: dtoItem.x, y: dtoItem.y),
@@ -1141,7 +1153,8 @@ public final class MapPointStore: ObservableObject {
                     // Baked canonical position (Milestone 5)
                     canonicalPosition: bakedPosition,
                     canonicalConfidence: dtoItem.bakedConfidence,
-                    canonicalSampleCount: dtoItem.bakedSampleCount ?? 0
+                    canonicalSampleCount: dtoItem.bakedSampleCount ?? 0,
+                    consensusDistortionVector: distortionVector
                 )
                 
                 // Set photo tracking fields
