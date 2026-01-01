@@ -1610,6 +1610,13 @@ final class ARCalibrationCoordinator: ObservableObject {
                 continue
             }
             
+            // DIAGNOSTIC: Log distortion vector state for each vertex
+            if let distortion = mapPoint.consensusDistortionVector {
+                print("📐 [GHOST_DIAG] \(String(vertexID.uuidString.prefix(8))): HAS distortion (\(String(format: "%.3f", distortion.x)), \(String(format: "%.3f", distortion.z)))m")
+            } else {
+                print("📐 [GHOST_DIAG] \(String(vertexID.uuidString.prefix(8))): NO distortion (nil)")
+            }
+            
             // Project via bilinear interpolation from zone corners
             guard var finalGhostPosition = projectPointViaBilinear(mapPoint: mapPoint.mapPoint) else {
                 skippedOutsideQuad += 1

@@ -371,6 +371,7 @@ public final class MapPointStore: ObservableObject {
             if let distortionArray = try container.decodeIfPresent([Float].self, forKey: .consensusDistortionVectorArray),
                distortionArray.count == 3 {
                 consensusDistortionVector = SIMD3<Float>(distortionArray[0], distortionArray[1], distortionArray[2])
+                print("📖 [DECODE_DIAG] \(String(id.uuidString.prefix(8))): decoded distortion (\(String(format: "%.3f", distortionArray[0])), \(String(format: "%.3f", distortionArray[1])), \(String(format: "%.3f", distortionArray[2])))")
             } else {
                 consensusDistortionVector = nil
             }
@@ -411,6 +412,7 @@ public final class MapPointStore: ObservableObject {
             // Encode consensusDistortionVector
             if let distortion = consensusDistortionVector {
                 try container.encode([distortion.x, distortion.y, distortion.z], forKey: .consensusDistortionVectorArray)
+                print("💾 [ENCODE_DIAG] \(String(id.uuidString.prefix(8))): encoded distortion (\(String(format: "%.3f", distortion.x)), \(String(format: "%.3f", distortion.y)), \(String(format: "%.3f", distortion.z)))")
             }
         }
     }
@@ -1179,6 +1181,9 @@ public final class MapPointStore: ObservableObject {
             let uniqueSessions = Set(points.flatMap { $0.arPositionHistory.map { $0.sessionID } })
             let pointsWithHistory = points.filter { !$0.arPositionHistory.isEmpty }.count
             print("📊 [DATA_SUMMARY] \(points.count) MapPoints, \(pointsWithHistory) with history, \(totalRecords) total position records across \(uniqueSessions.count) sessions")
+            
+            // DEBUG: Show distortion vector summary after load
+            debugDistortionSummary()
         } else {
             self.points = []
             print("✅ MapPointStore: No saved data found - starting fresh")
