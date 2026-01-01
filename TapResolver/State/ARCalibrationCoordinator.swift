@@ -1563,6 +1563,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Called after Zone Corner calibration completes with bilinear setup.
     private func plantGhostsForAllTriangleVerticesBilinear() {
         print("👻 [ZONE_CORNER_GHOSTS_BILINEAR] Planting ghosts using bilinear projection...")
+        print("📐 [ZONE_CORNER_GHOSTS] Map params: size=\(cachedMapSize?.debugDescription ?? "nil"), metersPerPixel=\(cachedMetersPerPixel?.description ?? "nil")")
         
         guard hasBilinearCorners else {
             print("❌ [ZONE_CORNER_GHOSTS_BILINEAR] Bilinear corners not set up")
@@ -4525,33 +4526,57 @@ final class ARCalibrationCoordinator: ObservableObject {
         sessionPosition: SIMD3<Float>,
         confidence: Float
     ) {
-        guard let transform = cachedCanonicalToSessionTransform,
-              let mapSize = cachedMapSize,
-              let metersPerPixel = cachedMetersPerPixel else {
-            print("⚠️ [BAKE_UPDATE] No cached transform - cannot update baked position")
-            return
-        }
-        
         guard let index = safeMapStore.points.firstIndex(where: { $0.id == mapPointID }) else {
             print("⚠️ [BAKE_UPDATE] MapPoint \(String(mapPointID.uuidString.prefix(8))) not found")
             return
         }
         
-        // Compute inverse transform: session → canonical
-        // The cached transform is canonical→session, so we need to invert it
-        let inverseRotation = -transform.rotationY
-        let inverseScale = 1.0 / transform.scale
+        // Compute canonical position
+        let canonicalPosition: simd_float3
         
-        // Invert: first remove translation, then rotate, then scale
-        let translated = sessionPosition - transform.translation
-        let cosR = cos(inverseRotation)
-        let sinR = sin(inverseRotation)
-        let rotated = SIMD3<Float>(
-            translated.x * cosR - translated.z * sinR,
-            translated.y,
-            translated.x * sinR + translated.z * cosR
-        )
-        let canonicalPosition = rotated * inverseScale
+        if isZoneCornerMode {
+            // Zone Corner Mode: Canonical is derived from 2D map position (deterministic)
+            // The 2D position defines where the point IS on the map
+            // Session position captures where it appears in AR (used for distortion)
+            guard let mapPoint = safeMapStore.points.first(where: { $0.id == mapPointID }) else {
+                print("⚠️ [BAKE_UPDATE] MapPoint \(String(mapPointID.uuidString.prefix(8))) not found")
+                return
+            }
+            
+            guard let idealCanonical = computeCanonicalFromMapPosition(mapPoint.position) else {
+                print("⚠️ [BAKE_UPDATE] Cannot compute canonical from map position")
+                return
+            }
+            
+            canonicalPosition = idealCanonical
+            print("📍 [BAKE_UPDATE] Zone Corner mode: canonical from map position")
+            print("   2D Map: (\(String(format: "%.1f", mapPoint.position.x)), \(String(format: "%.1f", mapPoint.position.y))) px")
+            print("   Canonical: (\(String(format: "%.3f", canonicalPosition.x)), \(String(format: "%.3f", canonicalPosition.y)), \(String(format: "%.3f", canonicalPosition.z))) m")
+        } else {
+            // Triangle Calibration Mode: Use rigid body transform (legacy)
+            guard let transform = cachedCanonicalToSessionTransform,
+                  let mapSize = cachedMapSize,
+                  let metersPerPixel = cachedMetersPerPixel else {
+                print("⚠️ [BAKE_UPDATE] No cached transform - cannot update baked position")
+                return
+            }
+            
+            // Compute inverse transform: session → canonical
+            // The cached transform is canonical→session, so we need to invert it
+            let inverseRotation = -transform.rotationY
+            let inverseScale = 1.0 / transform.scale
+            
+            // Invert: first remove translation, then rotate, then scale
+            let translated = sessionPosition - transform.translation
+            let cosR = cos(inverseRotation)
+            let sinR = sin(inverseRotation)
+            let rotated = SIMD3<Float>(
+                translated.x * cosR - translated.z * sinR,
+                translated.y,
+                translated.x * sinR + translated.z * cosR
+            )
+            canonicalPosition = rotated * inverseScale
+        }
         
         // Get current baked state
         let currentBaked = safeMapStore.points[index].canonicalPosition
@@ -4644,6 +4669,33 @@ final class ARCalibrationCoordinator: ObservableObject {
             0,                         // Floor level
             zMeters - centerZMeters   // Z offset from center
         )
+    }
+    
+    // MARK: - Ideal Canonical Position (Zone Corner Mode)
+    
+    /// Computes the canonical position from 2D map coordinates
+    /// This is deterministic - same 2D position always yields same canonical position
+    /// Used in Zone Corner mode instead of session transform
+    /// - Parameters:
+    ///   - mapPosition: 2D position in map pixels
+    /// - Returns: 3D position in canonical frame (map-meters, centered on map)
+    private func computeCanonicalFromMapPosition(_ mapPosition: CGPoint) -> simd_float3? {
+        guard let mapSize = cachedMapSize,
+              let metersPerPixel = cachedMetersPerPixel else {
+            print("⚠️ [CANONICAL] Cannot compute canonical - missing map parameters")
+            return nil
+        }
+        
+        // Map center in pixels
+        let mapCenterX = Float(mapSize.width) / 2.0
+        let mapCenterZ = Float(mapSize.height) / 2.0
+        
+        // Convert pixel position to meters, centered on map
+        let canonicalX = (Float(mapPosition.x) - mapCenterX) * metersPerPixel
+        let canonicalZ = (Float(mapPosition.y) - mapCenterZ) * metersPerPixel
+        
+        // Y is floor level (0 in canonical frame)
+        return simd_float3(canonicalX, 0, canonicalZ)
     }
     
     // MARK: - Crawl Coverage Diagnostics

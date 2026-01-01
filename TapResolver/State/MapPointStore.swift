@@ -212,8 +212,9 @@ public final class MapPointStore: ObservableObject {
         public var canonicalSampleCount: Int = 0           // Number of calibration sessions that contributed
         
         /// Offset from idealized map geometry in canonical frame (meters)
-        /// Computed as: canonicalPosition - idealCanonicalPosition
-        /// Represents how much reality deviates from the 2D map at this point
+        /// Represents how much physical reality differs from the 2D map at this point
+        /// Computed as: adjustedSessionPosition - bilinearProjectedPosition
+        /// Used to correct future ghost projections for improved accuracy
         public var consensusDistortionVector: SIMD3<Float>?
         
         public var mapPoint: CGPoint {
