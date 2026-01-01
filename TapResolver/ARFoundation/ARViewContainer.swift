@@ -532,12 +532,14 @@ struct ARViewContainer: UIViewRepresentable {
                 arCalibrationCoordinator?.sessionMarkerToMapPoint[markerID.uuidString] = ghostMapPointID
                 print("📍 [GENERIC_ADJUST] Registered marker \(String(markerID.uuidString.prefix(8))) → MapPoint \(String(ghostMapPointID.uuidString.prefix(8)))")
                 
-                // Re-post ARMarkerPlaced with originalGhostPosition for distortion vector calculation
+                // Re-post ARMarkerPlaced with ghost info for registration
                 // (placeMarker already posted it, but we need to add the ghost info)
                 var userInfo: [String: Any] = [
                     "markerID": markerID,
                     "position": [position.x, position.y, position.z],
-                    "ghostMapPointID": ghostMapPointID
+                    "ghostMapPointID": ghostMapPointID,
+                    "isGhostConfirm": true,  // Critical: triggers registerFillPointMarker() path
+                    "mapPointID": ghostMapPointID  // Alias for Zone Corner handler compatibility
                 ]
                 if let origPos = originalGhostPosition {
                     userInfo["originalGhostPosition"] = [origPos.x, origPos.y, origPos.z]
@@ -547,6 +549,7 @@ struct ARViewContainer: UIViewRepresentable {
                     object: nil,
                     userInfo: userInfo
                 )
+                print("📍 [GHOST_ADJUST_NOTIFY] Re-posted ARMarkerPlaced with isGhostConfirm=true for MapPoint \(String(ghostMapPointID.uuidString.prefix(8)))")
             } else {
                 // Normal marker placement
                 let _ = placeMarker(at: position)

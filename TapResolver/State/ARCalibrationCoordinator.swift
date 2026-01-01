@@ -1416,7 +1416,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     
     /// Register a fill point marker in Zone Corner mode (non-corner ghost confirmation)
     /// This registers the marker→MapPoint mapping without the corner-specific validation
-    func registerFillPointMarker(markerID: UUID, mapPointID: UUID, position: simd_float3) {
+    func registerFillPointMarker(markerID: UUID, mapPointID: UUID, position: simd_float3, originalGhostPosition: simd_float3? = nil) {
         print("📍 [FILL_POINT] Registering fill point marker")
         print("   MarkerID: \(String(markerID.uuidString.prefix(8)))")
         print("   MapPointID: \(String(mapPointID.uuidString.prefix(8)))")
@@ -1427,17 +1427,36 @@ final class ARCalibrationCoordinator: ObservableObject {
         sessionMarkerPositions[markerID.uuidString] = position
         mapPointARPositions[mapPointID] = position
         
+        // Calculate distortion vector if original ghost position available
+        let distortionVector: simd_float3?
+        if let origPos = originalGhostPosition {
+            distortionVector = position - origPos
+            let magnitude = simd_length(distortionVector!)
+            print("📐 [FILL_POINT] Distortion vector: (\(String(format: "%.3f", distortionVector!.x)), \(String(format: "%.3f", distortionVector!.y)), \(String(format: "%.3f", distortionVector!.z)))m, magnitude: \(String(format: "%.3f", magnitude))m")
+        } else {
+            distortionVector = nil
+        }
+        
         // Record in position history
         let record = ARPositionRecord(
             position: position,
             sessionID: safeARStore.currentSessionID,
-            sourceType: .ghostConfirm,
-            distortionVector: nil,
+            sourceType: .ghostAdjust,  // Changed from .ghostConfirm to reflect adjustment
+            distortionVector: distortionVector,
             confidenceScore: 0.90
         )
         safeMapStore.addPositionRecord(mapPointID: mapPointID, record: record)
+        print("📝 [FILL_POINT] Added position record to history")
         
-        print("✅ [FILL_POINT] Registered fill point marker for demote tracking")
+        // Update baked canonical position for persistence across sessions
+        updateBakedPositionIncrementally(
+            mapPointID: mapPointID,
+            sessionPosition: position,
+            confidence: 0.90
+        )
+        print("🔥 [FILL_POINT] Updated baked canonical position")
+        
+        print("✅ [FILL_POINT] Registered fill point marker with position history and baked update")
     }
     
     /// Plants ghost markers for all triangle vertices that have baked canonical positions

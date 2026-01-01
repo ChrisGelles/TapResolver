@@ -356,7 +356,20 @@ struct ARViewWithOverlays: View {
                             print("✅ [ZONE_CORNER_GHOST] Registered corner ghost for MapPoint \(String(ghostID.uuidString.prefix(8)))")
                         } else {
                             // Fill point - register marker→MapPoint mapping directly
-                            arCalibrationCoordinator.registerFillPointMarker(markerID: markerID, mapPointID: ghostID, position: arPosition)
+                            // Extract original ghost position for distortion vector calculation
+                            let originalGhostPosition: simd_float3?
+                            if let origPosArray = notification.userInfo?["originalGhostPosition"] as? [Float], origPosArray.count == 3 {
+                                originalGhostPosition = simd_float3(origPosArray[0], origPosArray[1], origPosArray[2])
+                            } else {
+                                originalGhostPosition = nil
+                            }
+                            
+                            arCalibrationCoordinator.registerFillPointMarker(
+                                markerID: markerID,
+                                mapPointID: ghostID,
+                                position: arPosition,
+                                originalGhostPosition: originalGhostPosition
+                            )
                             print("✅ [ZONE_CORNER_GHOST] Registered fill point ghost for MapPoint \(String(ghostID.uuidString.prefix(8)))")
                         }
                         return
