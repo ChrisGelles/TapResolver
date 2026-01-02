@@ -14,11 +14,12 @@ struct MapPointOverlay: View {
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var hud: HUDPanelsState
     @EnvironmentObject private var triangleStore: TrianglePatchStore
+    @EnvironmentObject private var zoneStore: ZoneStore
 
     var body: some View {
         ZStack {
-            // Show map points when the drawer is open OR when creating triangles
-            if hud.isMapPointOpen || triangleStore.isCreatingTriangle {
+            // Show map points when the drawer is open OR when creating triangles OR when creating zones
+            if hud.isMapPointOpen || triangleStore.isCreatingTriangle || zoneStore.isCreatingZone {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)  // Never intercept taps - let points handle everything
@@ -30,6 +31,7 @@ struct MapPointOverlay: View {
         }
         .animation(.easeInOut(duration: 0.25), value: hud.isMapPointOpen)
         .animation(.easeInOut(duration: 0.25), value: triangleStore.isCreatingTriangle)
+        .animation(.easeInOut(duration: 0.25), value: zoneStore.isCreatingZone)
     }
     
     // MARK: - Single draggable map point subview
@@ -38,6 +40,7 @@ struct MapPointOverlay: View {
         @EnvironmentObject private var mapPointStore: MapPointStore
         @EnvironmentObject private var mapTransform: MapTransformStore
         @EnvironmentObject private var triangleStore: TrianglePatchStore
+        @EnvironmentObject private var zoneStore: ZoneStore
         
         private let dotSize: CGFloat = 12
         private let hitPadding: CGFloat = 8
@@ -94,11 +97,20 @@ struct MapPointOverlay: View {
                 .onTapGesture {
                     print("MapPoint tapped: \(point.id)")
                     
+                    // UNIFICATION CANDIDATE: These two creation mode checks follow identical patterns.
+                    // Consider a unified CreationModeCoordinator that handles both.
+                    
                     // Triangle creation handling
                     if triangleStore.isCreatingTriangle {
                         if let error = triangleStore.addCreationVertex(point.id, mapPointStore: mapPointStore) {
                             print("❌ Cannot add vertex: \(error)")
                         }
+                        return
+                    }
+                    
+                    // Zone creation handling
+                    if zoneStore.isCreatingZone {
+                        zoneStore.addCreationCorner(point.id, mapPointStore: mapPointStore)
                         return
                     }
                     

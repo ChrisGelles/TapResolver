@@ -43,6 +43,7 @@ struct HUDContainer: View {
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var beaconState: BeaconStateManager
     @EnvironmentObject private var triangleStore: TrianglePatchStore
+    @EnvironmentObject private var zoneStore: ZoneStore
     @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
     @EnvironmentObject private var surveySelectionCoordinator: SurveySelectionCoordinator
     @StateObject private var beaconLogger = SimpleBeaconLogger()
@@ -102,6 +103,7 @@ struct HUDContainer: View {
             .overlay { arViewOverlay }
             .overlay(alignment: .top) { interpolationModeBanner }
             .overlay { triangleCreationInstructions }
+            .overlay { zoneCreationInstructions }
             .overlay(alignment: .bottomTrailing) { relocalizationDebugOverlay }
             .onAppear {
                 // Update coordinator to use actual ARWorldMapStore
@@ -352,6 +354,37 @@ struct HUDContainer: View {
                 .padding(.top, 80)
             }
             
+            // MARK: - Zone Creation Button
+            // UNIFICATION CANDIDATE: This button pattern mirrors the triangle creation button above.
+            // Consider extracting a reusable CreationModeButton component.
+            
+            if !zoneStore.isCreatingZone {
+                Button {
+                    zoneStore.startCreatingZone()
+                } label: {
+                    Image(systemName: "square.dashed")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 48, height: 48)
+                        .background(Color.orange.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .padding(.top, 8)
+            } else {
+                // Cancel button during zone creation
+                Button {
+                    zoneStore.cancelCreatingZone()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 48, height: 48)
+                        .background(Color.red.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .padding(.top, 8)
+            }
+            
             // Zone Corner Calibration button
             if surveySelectionCoordinator.state == .idle && !triangleStore.isCreatingTriangle {
                 Button {
@@ -549,6 +582,35 @@ struct HUDContainer: View {
                             .foregroundColor(.white)
                             .padding(12)
                             .background(.ultraThinMaterial)
+                            .cornerRadius(8)
+                        
+                        Spacer()
+                    }
+                    .padding(.leading, 80)
+                    .padding(.top, 120)
+                    
+                    Spacer()
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var zoneCreationInstructions: some View {
+        // MARK: - Zone Creation Instructions
+        // UNIFICATION CANDIDATE: This banner mirrors triangleCreationInstructions.
+        // Consider extracting a shared CreationInstructionsBanner component.
+        
+        Group {
+            if zoneStore.isCreatingZone {
+                VStack {
+                    HStack {
+                        Text("Tap \(4 - zoneStore.creationCorners.count) Zone Corner point(s)")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.orange.opacity(0.85))
                             .cornerRadius(8)
                         
                         Spacer()

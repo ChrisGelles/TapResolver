@@ -13,6 +13,16 @@ import CoreGraphics
 public class ZoneStore: ObservableObject {
     @Published public var zones: [Zone] = []
     
+    // MARK: - Zone Creation State
+    // UNIFICATION CANDIDATE: These properties mirror TrianglePatchStore.isCreatingTriangle 
+    // and TrianglePatchStore.creationVertices. Consider extracting a shared CreationModeCoordinator.
+    
+    /// Flag indicating zone creation mode is active
+    @Published public var isCreatingZone: Bool = false
+    
+    /// Corners selected so far during zone creation (0-4 UUIDs)
+    @Published public var creationCorners: [UUID] = []
+    
     /// Counter for auto-generating zone names
     private var zoneNameCounter: Int = 1
     
@@ -357,6 +367,122 @@ public class ZoneStore: ObservableObject {
     /// Reload for active location (call when location changes)
     public func reloadForActiveLocation() {
         load()
+    }
+    
+    // MARK: - Zone Creation Methods
+    // UNIFICATION CANDIDATE: These methods mirror TrianglePatchStore's triangle creation methods.
+    // Consider extracting shared logic into a CreationModeCoordinator protocol or base class.
+    
+    /// Begin zone creation mode
+    /// UNIFICATION CANDIDATE: Mirrors TrianglePatchStore.startCreatingTriangle()
+    func startCreatingZone() {
+        isCreatingZone = true
+        creationCorners = []
+        print("🔷 [ZoneStore] Started zone creation mode")
+    }
+    
+    /// Cancel zone creation mode without creating a zone
+    /// UNIFICATION CANDIDATE: Mirrors TrianglePatchStore.cancelCreatingTriangle()
+    func cancelCreatingZone() {
+        isCreatingZone = false
+        creationCorners = []
+        print("🔷 [ZoneStore] Cancelled zone creation")
+    }
+    
+    /// Add a corner during zone creation
+    /// - Parameters:
+    ///   - pointID: The MapPoint UUID to add as a corner
+    ///   - mapPointStore: Reference to MapPointStore for validation
+    /// - Returns: Bool indicating success
+    /// UNIFICATION CANDIDATE: Mirrors TrianglePatchStore.addCreationVertex(_:mapPointStore:)
+    @discardableResult
+    func addCreationCorner(_ pointID: UUID, mapPointStore: MapPointStore) -> Bool {
+        // Validate point exists
+        guard let point = mapPointStore.points.first(where: { $0.id == pointID }) else {
+            print("⚠️ [ZoneStore] Cannot add corner: MapPoint \(String(pointID.uuidString.prefix(8))) not found")
+            return false
+        }
+        
+        // Validate role (must be zoneCorner)
+        guard point.roles.contains(.zoneCorner) else {
+            print("⚠️ [ZoneStore] Cannot add corner: MapPoint \(String(pointID.uuidString.prefix(8))) is not a Zone Corner")
+            return false
+        }
+        
+        // Validate not already selected
+        guard !creationCorners.contains(pointID) else {
+            print("⚠️ [ZoneStore] Cannot add corner: MapPoint \(String(pointID.uuidString.prefix(8))) already selected")
+            return false
+        }
+        
+        // Add corner
+        creationCorners.append(pointID)
+        print("🔷 [ZoneStore] Added corner \(creationCorners.count)/4: \(String(pointID.uuidString.prefix(8)))")
+        
+        // Auto-finish when 4 corners selected
+        if creationCorners.count == 4 {
+            finishCreatingZone(mapPointStore: mapPointStore)
+        }
+        
+        return true
+    }
+    
+    /// Complete zone creation with the 4 selected corners
+    /// - Parameter mapPointStore: Reference to MapPointStore for position lookups
+    /// UNIFICATION CANDIDATE: Mirrors TrianglePatchStore.finishCreatingTriangle(mapPointStore:)
+    private func finishCreatingZone(mapPointStore: MapPointStore) {
+        guard creationCorners.count == 4 else {
+            print("⚠️ [ZoneStore] Cannot finish: need 4 corners, have \(creationCorners.count)")
+            cancelCreatingZone()
+            return
+        }
+        
+        // Get corner positions for validation
+        let cornerPositions: [CGPoint] = creationCorners.compactMap { cornerID in
+            mapPointStore.points.first { $0.id == cornerID }?.mapPoint
+        }
+        
+        guard cornerPositions.count == 4 else {
+            print("⚠️ [ZoneStore] Cannot finish: could not find all corner positions")
+            cancelCreatingZone()
+            return
+        }
+        
+        // Validate quad is not self-intersecting
+        if isQuadSelfIntersecting(cornerPositions) {
+            print("⚠️ [ZoneStore] Cannot finish: quad is self-intersecting. Select corners in CCW order.")
+            // Don't cancel - let user try again by removing last corner (future improvement)
+            // For now, cancel and they can restart
+            cancelCreatingZone()
+            return
+        }
+        
+        // Create the zone
+        let zone = createZone(cornerIDs: creationCorners)
+        print("✅ [ZoneStore] Created zone '\(zone.name)' with \(zone.triangleIDs.count) member triangles")
+        
+        // Reset creation state
+        isCreatingZone = false
+        creationCorners = []
+    }
+    
+    /// Check if a quadrilateral is self-intersecting
+    /// - Parameter corners: 4 corner positions in order
+    /// - Returns: true if any non-adjacent edges cross
+    private func isQuadSelfIntersecting(_ corners: [CGPoint]) -> Bool {
+        guard corners.count == 4 else { return true }
+        
+        // Check if edge 0-1 intersects edge 2-3
+        if edgesIntersect(corners[0], corners[1], corners[2], corners[3]) {
+            return true
+        }
+        
+        // Check if edge 1-2 intersects edge 3-0
+        if edgesIntersect(corners[1], corners[2], corners[3], corners[0]) {
+            return true
+        }
+        
+        return false
     }
 }
 
