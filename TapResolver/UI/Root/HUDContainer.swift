@@ -388,13 +388,23 @@ struct HUDContainer: View {
             // Zone Corner Calibration button
             if surveySelectionCoordinator.state == .idle && !triangleStore.isCreatingTriangle {
                 Button {
-                    let zoneCorners = mapPointStore.points.filter { $0.roles.contains(.zoneCorner) }
-                    if zoneCorners.count >= 2 {
-                        let sortedIDs = zoneCorners.map { $0.id }
-                        print("🏁 [HUD] Launching Zone Corner Calibration with \(sortedIDs.count) corners")
-                        arViewLaunchContext.launchZoneCornerCalibration(zoneCornerIDs: sortedIDs)
-                    } else {
-                        print("⚠️ [HUD] Zone Corner Calibration requires at least 2 Zone Corner points (found \(zoneCorners.count))")
+                    // Use Zone entity instead of role-based filtering
+                    // This preserves user-defined corner order and enables rotation feature
+                    
+                    switch zoneStore.zones.count {
+                    case 0:
+                        print("⚠️ [HUD] No zones defined. Create a zone first using the Zone Creator button.")
+                    case 1:
+                        let zone = zoneStore.zones[0]
+                        guard zone.cornerIDs.count == 4 else {
+                            print("⚠️ [HUD] Zone '\(zone.name)' has \(zone.cornerIDs.count) corners, need 4")
+                            return
+                        }
+                        print("🏁 [HUD] Launching Zone Corner Calibration for '\(zone.name)' with corners: \(zone.cornerIDs.map { String($0.uuidString.prefix(8)) })")
+                        arViewLaunchContext.launchZoneCornerCalibration(zoneCornerIDs: zone.cornerIDs)
+                    default:
+                        // Multiple zones - future: show Zone Drawer picker
+                        print("⚠️ [HUD] Multiple zones exist (\(zoneStore.zones.count)). Zone picker coming soon.")
                     }
                 } label: {
                     Image(systemName: "rectangle.dashed")
