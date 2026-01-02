@@ -14,6 +14,7 @@ public struct ZoneDTO: Codable {
     public var cornerIDs: [String]
     public var triangleIDs: [String]
     public var lastStartingCornerIndex: Int?
+    public var isLocked: Bool
     public var createdAt: Date
     public var modifiedAt: Date
     
@@ -24,6 +25,7 @@ public struct ZoneDTO: Codable {
         self.cornerIDs = zone.cornerIDs.map { $0.uuidString }
         self.triangleIDs = zone.triangleIDs.map { $0.uuidString }
         self.lastStartingCornerIndex = zone.lastStartingCornerIndex
+        self.isLocked = zone.isLocked
         self.createdAt = zone.createdAt
         self.modifiedAt = zone.modifiedAt
     }
@@ -53,6 +55,7 @@ public struct ZoneDTO: Codable {
             cornerIDs: parsedCornerIDs,
             triangleIDs: parsedTriangleIDs,
             lastStartingCornerIndex: lastStartingCornerIndex,
+            isLocked: isLocked,
             createdAt: createdAt,
             modifiedAt: modifiedAt
         )

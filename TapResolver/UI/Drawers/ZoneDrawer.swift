@@ -17,7 +17,7 @@ struct ZoneDrawer: View {
     private let expandedWidth: CGFloat = 180
     private let topBarHeight: CGFloat = 48
     private let drawerMaxHeight: CGFloat = 240
-    private let rowHeight: CGFloat = 52
+    private let rowHeight: CGFloat = 44
     private let rowSpacing: CGFloat = 6
     
     private var idealOpenHeight: CGFloat {
@@ -114,6 +114,9 @@ struct ZoneDrawer: View {
                         },
                         onDelete: {
                             zoneStore.deleteZone(zone.id)
+                        },
+                        onToggleLock: {
+                            zoneStore.toggleLock(zoneID: zone.id)
                         }
                     )
                 }
@@ -131,67 +134,72 @@ struct ZoneListItem: View {
     let isSelected: Bool
     let onSelect: () -> Void
     let onDelete: () -> Void
+    let onToggleLock: () -> Void
     
     @State private var showDeleteConfirmation = false
     
     var body: some View {
-        HStack(spacing: 8) {
-            // Selection indicator
-            Circle()
-                .fill(isSelected ? Color(hex: 0x10fff1).opacity(0.9) : Color.clear)
-                .frame(width: 8, height: 8)
-            
-            // Zone info (tappable)
+        HStack(spacing: 6) {
+            // Zone name button (tappable, shows selection state)
             Button(action: onSelect) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(zone.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                    
-                    HStack(spacing: 4) {
-                        // Corner count
-                        Image(systemName: "square.dashed")
-                            .font(.system(size: 9))
-                        Text("\(zone.cornerIDs.count)")
-                            .font(.system(size: 10))
-                        
-                        // Triangle count
-                        Image(systemName: "triangle")
-                            .font(.system(size: 9))
-                        Text("\(zone.triangleIDs.count)")
-                            .font(.system(size: 10))
-                    }
-                    .foregroundColor(.secondary)
-                }
-                
-                Spacer()
+                Text(zone.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(isSelected ? Color(hex: 0x10fff1).opacity(0.9) : Color.blue.opacity(0.2))
+                    )
             }
             .buttonStyle(.plain)
             
-            // Delete button
-            Button {
-                showDeleteConfirmation = true
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.red.opacity(0.8))
-                    .frame(width: 28, height: 28)
-                    .background(Circle().fill(Color.white.opacity(0.1)))
+            Spacer()
+            
+            // Triangle count
+            HStack(spacing: 2) {
+                Image(systemName: "triangle")
+                    .font(.system(size: 9))
+                Text("\(zone.triangleIDs.count)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
             }
-            .confirmationDialog("Delete '\(zone.name)'?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
-                Button("Delete", role: .destructive) {
-                    onDelete()
+            .foregroundColor(.secondary)
+            
+            // Lock toggle
+            Button(action: onToggleLock) {
+                Image(systemName: zone.isLocked ? "lock.fill" : "lock.open")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(zone.isLocked ? .yellow : .primary)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            
+            // Delete button (only when unlocked)
+            if !zone.isLocked {
+                Button {
+                    showDeleteConfirmation = true
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.red.opacity(0.8))
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.white.opacity(0.1)))
                 }
-                Button("Cancel", role: .cancel) {}
+                .confirmationDialog("Delete '\(zone.name)'?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
+                    Button("Delete", role: .destructive) {
+                        onDelete()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .frame(height: 52)
+        .padding(.vertical, 4)
+        .frame(height: 44)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.orange.opacity(0.15) : Color.white.opacity(0.08))
+                .fill(Color.white.opacity(0.08))
         )
     }
 }

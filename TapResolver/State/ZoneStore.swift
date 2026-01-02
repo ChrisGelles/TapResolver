@@ -136,6 +136,19 @@ public class ZoneStore: ObservableObject {
         }
     }
     
+    /// Toggle the lock state of a zone
+    func toggleLock(zoneID: UUID) {
+        guard let index = zones.firstIndex(where: { $0.id == zoneID }) else {
+            print("⚠️ [ZoneStore] Cannot toggle lock: zone not found")
+            return
+        }
+        
+        zones[index].isLocked.toggle()
+        zones[index].modifiedAt = Date()
+        save()
+        print("🔒 [ZoneStore] Zone '\(zones[index].name)' \(zones[index].isLocked ? "locked" : "unlocked")")
+    }
+    
     // MARK: - Queries
     
     /// Find zone by ID

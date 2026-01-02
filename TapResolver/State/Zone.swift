@@ -16,6 +16,7 @@ public struct Zone: Identifiable, Codable, Equatable {
     public var cornerIDs: [UUID]              // 4 MapPoint IDs in CCW order
     public var triangleIDs: [UUID]            // Triangles with any area inside zone
     public var lastStartingCornerIndex: Int?  // For rotation feature (0-3), nil if never calibrated
+    public var isLocked: Bool                  // Prevents deletion when true
     public var createdAt: Date
     public var modifiedAt: Date
     
@@ -36,6 +37,7 @@ public struct Zone: Identifiable, Codable, Equatable {
         cornerIDs: [UUID],
         triangleIDs: [UUID] = [],
         lastStartingCornerIndex: Int? = nil,
+        isLocked: Bool = false,
         createdAt: Date = Date(),
         modifiedAt: Date = Date()
     ) {
@@ -44,6 +46,7 @@ public struct Zone: Identifiable, Codable, Equatable {
         self.cornerIDs = cornerIDs
         self.triangleIDs = triangleIDs
         self.lastStartingCornerIndex = lastStartingCornerIndex
+        self.isLocked = isLocked
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
     }
