@@ -48,6 +48,7 @@ struct TapResolverApp: App {
     @StateObject private var surveySelectionCoordinator = SurveySelectionCoordinator()
     @StateObject private var arViewLaunchContext = ARViewLaunchContext()
     @StateObject private var arCalibrationCoordinator: ARCalibrationCoordinator
+    @StateObject private var zoneStore = ZoneStore()
     
     @State private var showAuthorNamePrompt = AppSettings.needsAuthorName
     
@@ -94,6 +95,7 @@ struct TapResolverApp: App {
                 .environmentObject(surveySelectionCoordinator)
                 .environmentObject(arViewLaunchContext)  // Unified AR view launch context
                 .environmentObject(arCalibrationCoordinator)
+                .environmentObject(zoneStore)
                 .onAppear {
                     // Configure coordinator with actual store instances
                     arCalibrationCoordinator.configure(
@@ -112,6 +114,10 @@ struct TapResolverApp: App {
                     
                     // Configure survey session collector
                     surveySessionCollector.configure(surveyPointStore: surveyPointStore, bluetoothScanner: btScanner, beaconLists: beaconLists, orientationManager: orientationManager)
+                    
+                    // Configure ZoneStore with dependencies and load zones
+                    zoneStore.configure(mapPointStore: mapPointStore, triangleStore: trianglePatchStore)
+                    zoneStore.load()
                     
                     LocationMigration.runIfNeeded()
                     squareMetrics.setMetricSquareStore(metricSquares)
