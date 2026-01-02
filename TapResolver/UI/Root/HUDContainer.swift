@@ -133,7 +133,9 @@ struct HUDContainer: View {
                         BeaconDrawer()
                         MorgueDrawer()
                         MapPointDrawer()
-                        MapPointLogButton() //This log panel is a good example for the Debug/Settings panel I'd like to see.
+                        if FeatureFlags.showMapPointLogPanel {
+                            MapPointLogButton() //This log panel is a good example for the Debug/Settings panel I'd like to see.
+                        }
                         ResetMapButton()
                         RSSIMeterButton()
                         DebugSettingsButton() // Opens Debug/Settings Panel with moved buttons
@@ -1428,6 +1430,25 @@ private struct DebugSettingsPanel: View {
                                     .font(.system(size: 12, weight: .medium))
                             }
                             .foregroundColor(AppSettings.followUserInMainMap ? .green : .gray)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // MARK: - Feature Flags
+                        
+                        // Show Map Point Log Panel Toggle
+                        Button {
+                            FeatureFlags.showMapPointLogPanel.toggle()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: FeatureFlags.showMapPointLogPanel ? "list.bullet.rectangle.fill" : "list.bullet.rectangle")
+                                    .font(.system(size: 24))
+                                Text("Map Log Panel")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(FeatureFlags.showMapPointLogPanel ? .green : .gray)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
                             .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
