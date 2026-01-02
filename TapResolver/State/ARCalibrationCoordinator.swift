@@ -102,6 +102,12 @@ final class ARCalibrationCoordinator: ObservableObject {
     @Published var completedMarkerCount: Int = 0
     @Published var calibrationState: CalibrationState = .idle
     
+    /// Zone ID for the current calibration session (for saving starting index)
+    private var activeZoneID: UUID?
+    
+    /// Starting corner index for the current session
+    private var currentStartingCornerIndex: Int?
+    
     // User position tracking (updated from ARPiPMapView)
     @Published private(set) var lastKnownUserPosition: CGPoint? = nil
     
@@ -118,6 +124,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     private weak var mapStore: MapPointStore?
     private weak var triangleStore: TrianglePatchStore?
     private weak var metricSquareStore: MetricSquareStore?
+    private weak var safeZoneStore: ZoneStore?
     
     // MARK: - Baked Position Session Transform (Milestone 5 - Step 4)
     
@@ -185,12 +192,14 @@ final class ARCalibrationCoordinator: ObservableObject {
         arStore: ARWorldMapStore,
         mapStore: MapPointStore,
         triangleStore: TrianglePatchStore,
-        metricSquareStore: MetricSquareStore
+        metricSquareStore: MetricSquareStore,
+        zoneStore: ZoneStore? = nil
     ) {
         self.arStore = arStore
         self.mapStore = mapStore
         self.triangleStore = triangleStore
         self.metricSquareStore = metricSquareStore
+        self.safeZoneStore = zoneStore
         print("🎯 [ARCalibrationCoordinator] Configured with stores")
         
         // Listen for DemoteMarkerToGhost requests
@@ -500,7 +509,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Starts Zone Corner calibration mode with dynamic vertex count
     /// Unlike triangle calibration (3 vertices) or swath anchoring (3 anchors),
     /// this accepts any number >= 2 of Zone Corner MapPoints.
-    func startZoneCornerCalibration(zoneCornerIDs: [UUID]) {
+    func startZoneCornerCalibration(zoneCornerIDs: [UUID], zoneID: UUID? = nil, startingCornerIndex: Int? = nil) {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss.SSS"
         print("🚀 [ZONE_CORNER] startZoneCornerCalibration() BEGIN: \(formatter.string(from: Date()))")
@@ -514,6 +523,10 @@ final class ARCalibrationCoordinator: ObservableObject {
         if let coordinator = ARViewContainer.Coordinator.current {
             coordinator.clearCalibrationMarkers()
         }
+        
+        // Store zone metadata for saving after completion
+        self.activeZoneID = zoneID
+        self.currentStartingCornerIndex = startingCornerIndex
         
         // Zone Corner: No triangle state, just set vertices directly
         activeTriangleID = nil
@@ -1314,6 +1327,13 @@ final class ARCalibrationCoordinator: ObservableObject {
         } else {
             // All corners placed - set up bilinear projection and plant ghosts
             print("✅ [ZONE_CORNER] All \(totalCorners) corners placed")
+            
+            // Save the starting corner index to Zone for rotation tracking
+            if let zoneID = activeZoneID,
+               let startingIndex = currentStartingCornerIndex {
+                safeZoneStore?.updateLastStartingCornerIndex(zoneID: zoneID, index: startingIndex)
+                print("💾 [ZONE_CORNER] Saved starting index \(startingIndex) to Zone")
+            }
             
             // BILINEAR SETUP: Gather and sort corner data
             print("📐 [BILINEAR_SETUP] Gathering zone corner data...")

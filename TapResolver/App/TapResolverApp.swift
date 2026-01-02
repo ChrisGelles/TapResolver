@@ -102,7 +102,8 @@ struct TapResolverApp: App {
                         arStore: arWorldMapStore,
                         mapStore: mapPointStore,
                         triangleStore: trianglePatchStore,
-                        metricSquareStore: metricSquares
+                        metricSquareStore: metricSquares,
+                        zoneStore: zoneStore
                     )
                     
                     surveySelectionCoordinator.configure(

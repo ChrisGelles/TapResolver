@@ -142,7 +142,11 @@ struct ARViewWithOverlays: View {
                     // Zone Corner Calibration mode: Initialize with zone corner points
                     DispatchQueue.main.async {
                         let cornerIDs = arViewLaunchContext.zoneCornerIDs
-                        arCalibrationCoordinator.startZoneCornerCalibration(zoneCornerIDs: cornerIDs)
+                        arCalibrationCoordinator.startZoneCornerCalibration(
+                            zoneCornerIDs: cornerIDs,
+                            zoneID: arViewLaunchContext.activeZoneID,
+                            startingCornerIndex: arViewLaunchContext.zoneStartingCornerIndex
+                        )
                         currentMode = .idle  // Will show calibration UI via calibrationState
                         print("🎯 ARViewWithOverlays: Auto-initialized Zone Corner calibration with \(cornerIDs.count) corners")
                     }

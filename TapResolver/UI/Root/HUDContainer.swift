@@ -400,8 +400,29 @@ struct HUDContainer: View {
                             print("⚠️ [HUD] Zone '\(zone.name)' has \(zone.cornerIDs.count) corners, need 4")
                             return
                         }
-                        print("🏁 [HUD] Launching Zone Corner Calibration for '\(zone.name)' with corners: \(zone.cornerIDs.map { String($0.uuidString.prefix(8)) })")
-                        arViewLaunchContext.launchZoneCornerCalibration(zoneCornerIDs: zone.cornerIDs)
+                        
+                        // Compute rotated starting index
+                        let lastIndex = zone.lastStartingCornerIndex ?? -1
+                        let newStartIndex = (lastIndex + 1) % 4
+                        
+                        // Rotate corner array so newStartIndex becomes position 0
+                        var rotatedCorners = zone.cornerIDs
+                        for i in 0..<4 {
+                            rotatedCorners[i] = zone.cornerIDs[(newStartIndex + i) % 4]
+                        }
+                        
+                        print("🔄 [HUD] Rotating start point:")
+                        print("   Last starting index: \(zone.lastStartingCornerIndex.map { String($0) } ?? "nil (first run)")")
+                        print("   New starting index: \(newStartIndex)")
+                        print("   Original order: \(zone.cornerIDs.map { String($0.uuidString.prefix(8)) })")
+                        print("   Rotated order: \(rotatedCorners.map { String($0.uuidString.prefix(8)) })")
+                        
+                        print("🏁 [HUD] Launching Zone Corner Calibration for '\(zone.name)'")
+                        arViewLaunchContext.launchZoneCornerCalibration(
+                            zoneCornerIDs: rotatedCorners,
+                            zoneID: zone.id,
+                            startingCornerIndex: newStartIndex
+                        )
                     default:
                         // Multiple zones - future: show Zone Drawer picker
                         print("⚠️ [HUD] Multiple zones exist (\(zoneStore.zones.count)). Zone picker coming soon.")

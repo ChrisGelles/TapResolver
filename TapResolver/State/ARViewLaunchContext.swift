@@ -28,6 +28,12 @@ final class ARViewLaunchContext: ObservableObject {
     /// Zone Corner MapPoint IDs for Zone Corner Calibration
     @Published var zoneCornerIDs: [UUID] = []
     
+    /// The Zone ID being calibrated (for saving starting index after completion)
+    @Published var activeZoneID: UUID?
+    
+    /// The starting corner index used for this calibration session
+    @Published var zoneStartingCornerIndex: Int?
+    
     /// Launch AR view in generic mode
     func launchGeneric() {
         DispatchQueue.main.async {
@@ -68,16 +74,22 @@ final class ARViewLaunchContext: ObservableObject {
     }
     
     /// Launch AR for Zone Corner Calibration
-    func launchZoneCornerCalibration(zoneCornerIDs: [UUID]) {
+    /// - Parameters:
+    ///   - zoneCornerIDs: Corner IDs in rotated order (first element = first corner to place)
+    ///   - zoneID: The Zone entity ID (for saving starting index after completion)
+    ///   - startingCornerIndex: Which corner index (0-3) this session starts with
+    func launchZoneCornerCalibration(zoneCornerIDs: [UUID], zoneID: UUID, startingCornerIndex: Int) {
         DispatchQueue.main.async {
             self.zoneCornerIDs = zoneCornerIDs
+            self.activeZoneID = zoneID
+            self.zoneStartingCornerIndex = startingCornerIndex
             self.launchMode = .zoneCornerCalibration
             self.isCalibrationMode = true
             self.selectedTriangle = nil
             self.swathTriangleIDs.removeAll()
             self.suggestedAnchorIDs.removeAll()
             self.isPresented = true
-            print("📱 [ARViewLaunchContext] Zone Corner Calibration mode: \(zoneCornerIDs.count) corners")
+            print("📱 [ARViewLaunchContext] Zone Corner Calibration mode: \(zoneCornerIDs.count) corners, starting at index \(startingCornerIndex)")
         }
     }
     
@@ -90,6 +102,8 @@ final class ARViewLaunchContext: ObservableObject {
             self.swathTriangleIDs.removeAll()
             self.suggestedAnchorIDs.removeAll()
             self.zoneCornerIDs.removeAll()
+            self.activeZoneID = nil
+            self.zoneStartingCornerIndex = nil
             print("🚀 ARViewLaunchContext: Dismissed AR view")
         }
     }
