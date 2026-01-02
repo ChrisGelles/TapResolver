@@ -149,6 +149,27 @@ public class ZoneStore: ObservableObject {
         print("🔒 [ZoneStore] Zone '\(zones[index].name)' \(zones[index].isLocked ? "locked" : "unlocked")")
     }
     
+    /// Rename a zone
+    func renameZone(zoneID: UUID, newName: String) {
+        guard let index = zones.firstIndex(where: { $0.id == zoneID }) else {
+            print("⚠️ [ZoneStore] Cannot rename: zone not found")
+            return
+        }
+        
+        let oldName = zones[index].name
+        let trimmedName = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        guard !trimmedName.isEmpty else {
+            print("⚠️ [ZoneStore] Cannot rename: new name is empty")
+            return
+        }
+        
+        zones[index].name = trimmedName
+        zones[index].modifiedAt = Date()
+        save()
+        print("✏️ [ZoneStore] Renamed zone '\(oldName)' → '\(trimmedName)'")
+    }
+    
     // MARK: - Queries
     
     /// Find zone by ID

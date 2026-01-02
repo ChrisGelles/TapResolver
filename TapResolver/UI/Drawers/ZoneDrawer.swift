@@ -117,6 +117,9 @@ struct ZoneDrawer: View {
                         },
                         onToggleLock: {
                             zoneStore.toggleLock(zoneID: zone.id)
+                        },
+                        onRename: { newName in
+                            zoneStore.renameZone(zoneID: zone.id, newName: newName)
                         }
                     )
                 }
@@ -135,25 +138,44 @@ struct ZoneListItem: View {
     let onSelect: () -> Void
     let onDelete: () -> Void
     let onToggleLock: () -> Void
+    let onRename: (String) -> Void
     
     @State private var showDeleteConfirmation = false
+    @State private var showRenameDialog = false
+    @State private var newName = ""
     
     var body: some View {
         HStack(spacing: 6) {
-            // Zone name button (tappable, shows selection state)
-            Button(action: onSelect) {
-                Text(zone.name)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(isSelected ? Color(hex: 0x10fff1).opacity(0.9) : Color.blue.opacity(0.2))
-                    )
-            }
-            .buttonStyle(.plain)
+            // Zone name button (tap to select, long-press to rename)
+            Text(zone.name)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isSelected ? Color(hex: 0x10fff1).opacity(0.9) : Color.blue.opacity(0.2))
+                )
+                .onTapGesture {
+                    onSelect()
+                }
+                .onLongPressGesture {
+                    newName = zone.name
+                    showRenameDialog = true
+                }
+                .alert("Rename Zone", isPresented: $showRenameDialog) {
+                    TextField("Zone name", text: $newName)
+                    Button("Cancel", role: .cancel) {
+                        newName = ""
+                    }
+                    Button("Rename") {
+                        onRename(newName)
+                        newName = ""
+                    }
+                } message: {
+                    Text("Enter a new name for '\(zone.name)'")
+                }
             
             Spacer()
             
