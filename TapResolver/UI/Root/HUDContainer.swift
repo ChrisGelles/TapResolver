@@ -135,6 +135,7 @@ struct HUDContainer: View {
                         BeaconDrawer()
                         MorgueDrawer()
                         MapPointDrawer()
+                        ZoneDrawer()
                         if FeatureFlags.showMapPointLogPanel {
                             MapPointLogButton() //This log panel is a good example for the Debug/Settings panel I'd like to see.
                         }
@@ -388,45 +389,50 @@ struct HUDContainer: View {
             // Zone Corner Calibration button
             if surveySelectionCoordinator.state == .idle && !triangleStore.isCreatingTriangle {
                 Button {
-                    // Use Zone entity instead of role-based filtering
-                    // This preserves user-defined corner order and enables rotation feature
+                    // Prefer selected zone, fall back to single zone
+                    let targetZone: Zone?
                     
-                    switch zoneStore.zones.count {
-                    case 0:
+                    if let selectedID = zoneStore.selectedZoneID,
+                       let selected = zoneStore.zone(withID: selectedID) {
+                        targetZone = selected
+                    } else if zoneStore.zones.count == 1 {
+                        targetZone = zoneStore.zones[0]
+                    } else if zoneStore.zones.isEmpty {
                         print("⚠️ [HUD] No zones defined. Create a zone first using the Zone Creator button.")
-                    case 1:
-                        let zone = zoneStore.zones[0]
-                        guard zone.cornerIDs.count == 4 else {
-                            print("⚠️ [HUD] Zone '\(zone.name)' has \(zone.cornerIDs.count) corners, need 4")
-                            return
-                        }
-                        
-                        // Compute rotated starting index
-                        let lastIndex = zone.lastStartingCornerIndex ?? -1
-                        let newStartIndex = (lastIndex + 1) % 4
-                        
-                        // Rotate corner array so newStartIndex becomes position 0
-                        var rotatedCorners = zone.cornerIDs
-                        for i in 0..<4 {
-                            rotatedCorners[i] = zone.cornerIDs[(newStartIndex + i) % 4]
-                        }
-                        
-                        print("🔄 [HUD] Rotating start point:")
-                        print("   Last starting index: \(zone.lastStartingCornerIndex.map { String($0) } ?? "nil (first run)")")
-                        print("   New starting index: \(newStartIndex)")
-                        print("   Original order: \(zone.cornerIDs.map { String($0.uuidString.prefix(8)) })")
-                        print("   Rotated order: \(rotatedCorners.map { String($0.uuidString.prefix(8)) })")
-                        
-                        print("🏁 [HUD] Launching Zone Corner Calibration for '\(zone.name)'")
-                        arViewLaunchContext.launchZoneCornerCalibration(
-                            zoneCornerIDs: rotatedCorners,
-                            zoneID: zone.id,
-                            startingCornerIndex: newStartIndex
-                        )
-                    default:
-                        // Multiple zones - future: show Zone Drawer picker
-                        print("⚠️ [HUD] Multiple zones exist (\(zoneStore.zones.count)). Zone picker coming soon.")
+                        targetZone = nil
+                    } else {
+                        print("⚠️ [HUD] Multiple zones exist. Select one from the Zone Drawer first.")
+                        targetZone = nil
                     }
+                    
+                    guard let zone = targetZone else { return }
+                    
+                    guard zone.cornerIDs.count == 4 else {
+                        print("⚠️ [HUD] Zone '\(zone.name)' has \(zone.cornerIDs.count) corners, need 4")
+                        return
+                    }
+                    
+                    // Compute rotated starting index
+                    let lastIndex = zone.lastStartingCornerIndex ?? -1
+                    let newStartIndex = (lastIndex + 1) % 4
+                    
+                    // Rotate corner array so newStartIndex becomes position 0
+                    var rotatedCorners = zone.cornerIDs
+                    for i in 0..<4 {
+                        rotatedCorners[i] = zone.cornerIDs[(newStartIndex + i) % 4]
+                    }
+                    
+                    print("🔄 [HUD] Rotating start point for '\(zone.name)':")
+                    print("   Last starting index: \(zone.lastStartingCornerIndex.map { String($0) } ?? "nil (first run)")")
+                    print("   New starting index: \(newStartIndex)")
+                    print("   Rotated order: \(rotatedCorners.map { String($0.uuidString.prefix(8)) })")
+                    
+                    print("🏁 [HUD] Launching Zone Corner Calibration for '\(zone.name)'")
+                    arViewLaunchContext.launchZoneCornerCalibration(
+                        zoneCornerIDs: rotatedCorners,
+                        zoneID: zone.id,
+                        startingCornerIndex: newStartIndex
+                    )
                 } label: {
                     Image(systemName: "rectangle.dashed")
                         .font(.system(size: 20, weight: .semibold))

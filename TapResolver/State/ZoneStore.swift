@@ -13,6 +13,9 @@ import CoreGraphics
 public class ZoneStore: ObservableObject {
     @Published public var zones: [Zone] = []
     
+    /// Currently selected zone for calibration (nil = none selected)
+    @Published public var selectedZoneID: UUID?
+    
     // MARK: - Zone Creation State
     // UNIFICATION CANDIDATE: These properties mirror TrianglePatchStore.isCreatingTriangle 
     // and TrianglePatchStore.creationVertices. Consider extracting a shared CreationModeCoordinator.
@@ -121,6 +124,16 @@ public class ZoneStore: ObservableObject {
         zones[zoneIndex].modifiedAt = Date()
         save()
         print("🔄 [ZoneStore] Updated lastStartingCornerIndex to \(index) for zone '\(zones[zoneIndex].name)'")
+    }
+    
+    /// Select a zone for calibration
+    func selectZone(_ zoneID: UUID?) {
+        selectedZoneID = zoneID
+        if let id = zoneID, let zone = zone(withID: id) {
+            print("🔷 [ZoneStore] Selected zone: '\(zone.name)'")
+        } else {
+            print("🔷 [ZoneStore] Deselected zone")
+        }
     }
     
     // MARK: - Queries

@@ -13,6 +13,7 @@ final class HUDPanelsState: ObservableObject {
     @Published var isSquareOpen: Bool = false
     @Published var isMorgueOpen: Bool = false
     @Published var isMapPointOpen: Bool = false
+    @Published var isZoneOpen: Bool = false
     @Published var isMapPointLogOpen = false
     @Published var isDebugSettingsOpen = false
     @Published var surveyThreadTraceEnabled = false
@@ -22,11 +23,19 @@ final class HUDPanelsState: ObservableObject {
     /// When true, show the UserFacing calibration overlay (tools layer).
     @Published var isCalibratingFacing: Bool = false
 
-    func openBeacon() { isBeaconOpen = true; isSquareOpen = false; isMorgueOpen = false; isMapPointOpen = false }
-    func openSquares() { isSquareOpen = true; isBeaconOpen = false; isMorgueOpen = false; isMapPointOpen = false }
-    func openMorgue() { isMorgueOpen = true; isBeaconOpen = false; isSquareOpen = false; isMapPointOpen = false }
-    func openMapPoint() { isMapPointOpen = true; isBeaconOpen = false; isSquareOpen = false; isMorgueOpen = false }
-    func closeAll() { isBeaconOpen = false; isSquareOpen = false; isMorgueOpen = false; isMapPointOpen = false }
+    func openBeacon() { isBeaconOpen = true; isSquareOpen = false; isMorgueOpen = false; isMapPointOpen = false; isZoneOpen = false }
+    func openSquares() { isSquareOpen = true; isBeaconOpen = false; isMorgueOpen = false; isMapPointOpen = false; isZoneOpen = false }
+    func openMorgue() { isMorgueOpen = true; isBeaconOpen = false; isSquareOpen = false; isMapPointOpen = false; isZoneOpen = false }
+    func openMapPoint() { isMapPointOpen = true; isBeaconOpen = false; isSquareOpen = false; isMorgueOpen = false; isZoneOpen = false }
+    func openZone() {
+        isBeaconOpen = false
+        isSquareOpen = false
+        isMorgueOpen = false
+        isMapPointOpen = false
+        isZoneOpen = true
+        print("🔷 Zone Drawer: OPEN")
+    }
+    func closeAll() { isBeaconOpen = false; isSquareOpen = false; isMorgueOpen = false; isMapPointOpen = false; isZoneOpen = false }
     
     func toggleMapPointLog() {
         isMapPointLogOpen.toggle()
