@@ -86,20 +86,6 @@ class SVGDocument {
         addLayer(id: id, content: content)
     }
     
-    /// Add a layer with circle elements using multiple CSS classes
-    /// - Parameters:
-    ///   - id: Layer ID
-    ///   - circles: Array of circle data (cx, cy, r, elementID, classes)
-    func addMultiClassCircleLayer(id: String, circles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, elementID: String?, classes: [String])]) {
-        var content = ""
-        for circle in circles {
-            let idAttr = circle.elementID.map { "id=\"\($0)\" " } ?? ""
-            let classAttr = circle.classes.joined(separator: " ")
-            content += "<circle \(idAttr)class=\"\(classAttr)\" cx=\"\(String(format: "%.1f", circle.cx))\" cy=\"\(String(format: "%.1f", circle.cy))\" r=\"\(String(format: "%.1f", circle.r))\"/>\n"
-        }
-        addLayer(id: id, content: content)
-    }
-    
     /// Add a layer with line elements
     func addLineLayer(id: String, lines: [(x1: CGFloat, y1: CGFloat, x2: CGFloat, y2: CGFloat, stroke: String, strokeWidth: CGFloat)]) {
         var content = ""

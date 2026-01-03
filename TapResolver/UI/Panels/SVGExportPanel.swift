@@ -239,20 +239,21 @@ struct SVGExportPanel: View {
     /// Add RSSI heatmap layers to the SVG document (one layer per beacon)
     private func addRSSIHeatmapLayers(to doc: SVGDocument, mapSize: CGSize, surveyPoints: [SurveyPoint], beaconDots: [BeaconDotStore.Dot]) {
         
-        // Register dBm opacity bucket styles
-        doc.registerStyle(className: "dBm-100", css: "fill-opacity: 0.05;")
-        doc.registerStyle(className: "dBm-90", css: "fill-opacity: 0.20;")
-        doc.registerStyle(className: "dBm-80", css: "fill-opacity: 0.35;")
-        doc.registerStyle(className: "dBm-70", css: "fill-opacity: 0.50;")
-        doc.registerStyle(className: "dBm-60", css: "fill-opacity: 0.65;")
-        doc.registerStyle(className: "dBm-50", css: "fill-opacity: 0.80;")
-        doc.registerStyle(className: "dBm-40", css: "fill-opacity: 0.95;")
-        doc.registerStyle(className: "dBm-30", css: "fill-opacity: 1.0;")
-        doc.registerStyle(className: "beacon-dot", css: "stroke: #000000; stroke-width: 3;")
-        
         // Calculate circle radius: 0.4m in pixels
         let metersPerPixel: CGFloat = 0.0056  // TODO: Get from location metadata
         let radiusPixels = 0.4 / metersPerPixel
+        
+        // Opacity values for each dBm bucket
+        let dBmOpacities: [Int: String] = [
+            -100: "0.05",
+            -90: "0.20",
+            -80: "0.35",
+            -70: "0.50",
+            -60: "0.65",
+            -50: "0.80",
+            -40: "0.95",
+            -30: "1.0"
+        ]
         
         // Collect all unique beacon IDs from survey data
         var beaconIDs = Set<String>()
@@ -267,20 +268,29 @@ struct SVGExportPanel: View {
         print("📡 [SVGExport] Processing \(beaconIDs.count) beacons across \(surveyPoints.count) survey points")
         
         // Process each beacon
-        for (beaconIndex, beaconID) in beaconIDs.sorted().enumerated() {
+        for beaconID in beaconIDs.sorted() {
             // Generate beacon color from ID hash (same algorithm as BeaconDotStore)
             let hash = beaconID.hash
             let hue = Double(abs(hash % 360)) / 360.0
             let hexColor = hsbToHex(hue: hue, saturation: 0.7, brightness: 0.8)
             
-            // Create sanitized class name from beacon ID
+            // Create sanitized class name from beacon ID (no leading numbers for CSS)
             let beaconClassName = sanitizeClassName(beaconID)
+            // Element ID keeps numbers (for group IDs and dot IDs)
+            let beaconElementID = sanitizeElementID(beaconID)
             
-            // Register beacon color style
-            doc.registerStyle(className: beaconClassName, css: "fill: \(hexColor);")
+            // Register compound styles for each dBm bucket (beacon color + opacity)
+            for (dBm, opacity) in dBmOpacities {
+                let compoundClass = "\(beaconClassName)-dBm\(abs(dBm))"
+                doc.registerStyle(className: compoundClass, css: "fill: \(hexColor); fill-opacity: \(opacity);")
+            }
             
-            // Collect circles for this beacon
-            var rssiCircles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, elementID: String?, classes: [String])] = []
+            // Register beacon dot style (color + stroke)
+            let beaconDotClass = "\(beaconClassName)-beacon"
+            doc.registerStyle(className: beaconDotClass, css: "fill: \(hexColor); stroke: #000000; stroke-width: 3;")
+            
+            // Build layer content directly
+            var layerContent = ""
             
             for surveyPoint in surveyPoints {
                 // Calculate weighted average median RSSI for this beacon at this point
@@ -301,35 +311,25 @@ struct SVGExportPanel: View {
                 
                 let averageRSSI = totalWeightedRSSI / Double(totalSamples)
                 let dBmBucket = rssiToBucket(averageRSSI)
-                let dBmClass = "dBm-\(abs(dBmBucket))"
+                let compoundClass = "\(beaconClassName)-dBm\(abs(dBmBucket))"
                 
                 let coordID = String(format: "%.0f-%.0f", surveyPoint.mapX, surveyPoint.mapY)
                 
-                rssiCircles.append((
-                    cx: CGFloat(surveyPoint.mapX),
-                    cy: CGFloat(surveyPoint.mapY),
-                    r: radiusPixels,
-                    elementID: coordID,
-                    classes: [beaconClassName, dBmClass]
-                ))
+                layerContent += "<circle id=\"\(coordID)\" class=\"\(compoundClass)\" cx=\"\(String(format: "%.1f", surveyPoint.mapX))\" cy=\"\(String(format: "%.1f", surveyPoint.mapY))\" r=\"\(String(format: "%.1f", radiusPixels))\"/>\n"
             }
             
             // Add beacon position dot if we have it
             if let dot = beaconDots.first(where: { $0.beaconID == beaconID }) {
-                rssiCircles.append((
-                    cx: dot.mapPoint.x,
-                    cy: dot.mapPoint.y,
-                    r: 10,
-                    elementID: beaconClassName,
-                    classes: [beaconClassName, "beacon-dot"]
-                ))
+                let dotID = beaconElementID
+                layerContent += "<circle id=\"\(dotID)\" class=\"\(beaconDotClass)\" cx=\"\(String(format: "%.1f", dot.mapPoint.x))\" cy=\"\(String(format: "%.1f", dot.mapPoint.y))\" r=\"10.0\"/>\n"
             }
             
             // Add layer for this beacon
-            let layerID = "\(beaconIndex)-\(beaconClassName)-rssi"
-            doc.addMultiClassCircleLayer(id: layerID, circles: rssiCircles)
+            let layerID = "\(beaconElementID)-rssi"
+            doc.addLayer(id: layerID, content: layerContent)
             
-            print("📡 [SVGExport] Added layer '\(layerID)' with \(rssiCircles.count) circles")
+            let circleCount = layerContent.components(separatedBy: "<circle").count - 1
+            print("📡 [SVGExport] Added layer '\(layerID)' with \(circleCount) circles")
         }
     }
     
@@ -363,9 +363,26 @@ struct SVGExportPanel: View {
         return String(format: "#%02x%02x%02x", ri, gi, bi)
     }
     
-    /// Sanitize beacon ID for use as CSS class name
+    /// Sanitize beacon ID for use as CSS class name (must not start with number)
     private func sanitizeClassName(_ beaconID: String) -> String {
         // Remove invalid characters, keep alphanumeric and hyphens
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
+        var result = beaconID.unicodeScalars
+            .filter { allowed.contains($0) }
+            .map { Character($0) }
+            .map { String($0) }
+            .joined()
+        
+        // CSS class names cannot start with a digit - strip leading digits and hyphens
+        while let first = result.first, first.isNumber || first == "-" {
+            result.removeFirst()
+        }
+        
+        return result
+    }
+    
+    /// Sanitize beacon ID for use as element ID (can start with number)
+    private func sanitizeElementID(_ beaconID: String) -> String {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
         return beaconID.unicodeScalars
             .filter { allowed.contains($0) }
