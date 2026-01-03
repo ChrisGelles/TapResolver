@@ -13,6 +13,7 @@ struct SVGExportPanel: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var surveyPointStore: SurveyPointStore
     @EnvironmentObject private var beaconDotStore: BeaconDotStore
+    @EnvironmentObject private var metricSquareStore: MetricSquareStore
     
     @Binding var isPresented: Bool
     
@@ -127,6 +128,7 @@ struct SVGExportPanel: View {
         let points = mapPointStore.points  // Capture points array
         let surveyPoints = Array(surveyPointStore.surveyPoints.values)
         let beaconDots = beaconDotStore.dots
+        let pixelsPerMeter = getPixelsPerMeter()
         
         // Run export on background thread
         DispatchQueue.global(qos: .userInitiated).async {
@@ -151,12 +153,12 @@ struct SVGExportPanel: View {
             
             // Phase 2: Add calibration mesh layers
             if exportOptions.includeCalibrationMesh {
-                self.addCalibrationMeshLayers(to: doc, mapSize: mapImage.size, points: points)
+                self.addCalibrationMeshLayers(to: doc, mapSize: mapImage.size, points: points, pixelsPerMeter: pixelsPerMeter)
             }
             
             // Phase 3: Add RSSI heatmap layers
             if exportOptions.includeRSSIHeatmap {
-                self.addRSSIHeatmapLayers(to: doc, mapSize: mapImage.size, surveyPoints: surveyPoints, beaconDots: beaconDots)
+                self.addRSSIHeatmapLayers(to: doc, mapSize: mapImage.size, surveyPoints: surveyPoints, beaconDots: beaconDots, pixelsPerMeter: pixelsPerMeter)
             }
             
             // Write to file
@@ -179,16 +181,17 @@ struct SVGExportPanel: View {
     // MARK: - Calibration Mesh Export
     
     /// Add calibration mesh layers to the SVG document
-    private func addCalibrationMeshLayers(to doc: SVGDocument, mapSize: CGSize, points: [MapPointStore.MapPoint]) {
+    private func addCalibrationMeshLayers(to doc: SVGDocument, mapSize: CGSize, points: [MapPointStore.MapPoint], pixelsPerMeter: CGFloat?) {
         
         // Register styles for circle fills
         doc.registerStyle(className: "mappoint-original", css: "fill: #0064ff; fill-opacity: 0.7;")
         doc.registerStyle(className: "mappoint-adjusted", css: "fill: #00c864; fill-opacity: 0.7;")
         
         // Get map parameters for coordinate conversion
-        // TODO: Get from location metadata. Using home map default for now.
-        let metersPerPixel: CGFloat = 0.0056
-        let pixelsPerMeter = 1.0 / metersPerPixel
+        guard let pixelsPerMeter = pixelsPerMeter else {
+            print("⚠️ [SVGExport] No MetricSquare available for scale conversion")
+            return
+        }
         let originX = mapSize.width / 2
         let originY = mapSize.height / 2
         
@@ -237,11 +240,14 @@ struct SVGExportPanel: View {
     // MARK: - RSSI Heatmap Export
     
     /// Add RSSI heatmap layers to the SVG document (one layer per beacon)
-    private func addRSSIHeatmapLayers(to doc: SVGDocument, mapSize: CGSize, surveyPoints: [SurveyPoint], beaconDots: [BeaconDotStore.Dot]) {
+    private func addRSSIHeatmapLayers(to doc: SVGDocument, mapSize: CGSize, surveyPoints: [SurveyPoint], beaconDots: [BeaconDotStore.Dot], pixelsPerMeter: CGFloat?) {
         
         // Calculate circle radius: 0.4m in pixels
-        let metersPerPixel: CGFloat = 0.0056  // TODO: Get from location metadata
-        let radiusPixels = 0.4 / metersPerPixel
+        guard let pixelsPerMeter = pixelsPerMeter else {
+            print("⚠️ [SVGExport] No MetricSquare available for scale conversion")
+            return
+        }
+        let radiusPixels = 0.4 * pixelsPerMeter
         
         // Opacity values for each dBm bucket
         let dBmOpacities: [Int: String] = [
@@ -389,6 +395,17 @@ struct SVGExportPanel: View {
             .map { Character($0) }
             .map { String($0) }
             .joined()
+    }
+    
+    /// Get pixels per meter from MetricSquareStore (prefers locked squares)
+    private func getPixelsPerMeter() -> CGFloat? {
+        let lockedSquares = metricSquareStore.squares.filter { $0.isLocked }
+        let squaresToUse = lockedSquares.isEmpty ? metricSquareStore.squares : lockedSquares
+        
+        guard let square = squaresToUse.first, square.meters > 0 else { return nil }
+        
+        let pixelsPerMeter = CGFloat(square.side) / CGFloat(square.meters)
+        return pixelsPerMeter > 0 ? pixelsPerMeter : nil
     }
 }
 
