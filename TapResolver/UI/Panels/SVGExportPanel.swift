@@ -249,6 +249,9 @@ struct SVGExportPanel: View {
         }
         let radiusPixels = 0.4 * pixelsPerMeter
         
+        // Register text label style
+        doc.registerStyle(className: "beaconLabels", css: "font-family: Arial, sans-serif; font-size: 12px; fill: #000000;")
+        
         // Opacity values for each dBm bucket
         let dBmOpacities: [Int: String] = [
             -100: "0.05",
@@ -324,10 +327,31 @@ struct SVGExportPanel: View {
                 layerContent += "<circle id=\"\(coordID)\" class=\"\(compoundClass)\" cx=\"\(String(format: "%.1f", surveyPoint.mapX))\" cy=\"\(String(format: "%.1f", surveyPoint.mapY))\" r=\"\(String(format: "%.1f", radiusPixels))\"/>\n"
             }
             
-            // Add beacon position dot if we have it
+            // Add beacon position dot and label if we have it
             if let dot = beaconDots.first(where: { $0.beaconID == beaconID }) {
                 let dotID = beaconElementID
                 layerContent += "<circle id=\"\(dotID)\" class=\"\(beaconDotClass)\" cx=\"\(String(format: "%.1f", dot.mapPoint.x))\" cy=\"\(String(format: "%.1f", dot.mapPoint.y))\" r=\"10.0\"/>\n"
+                
+                // Calculate min/max RSSI for this beacon
+                var allRSSIValues: [Double] = []
+                for surveyPoint in surveyPoints {
+                    for session in surveyPoint.sessions {
+                        for beacon in session.beacons where beacon.beaconID == beaconID {
+                            if !beacon.samples.isEmpty {
+                                allRSSIValues.append(Double(beacon.stats.median_dbm))
+                            }
+                        }
+                    }
+                }
+                
+                // Add min/max label near beacon dot
+                if let minRSSI = allRSSIValues.min(), let maxRSSI = allRSSIValues.max() {
+                    let labelID = "\(beaconElementID)-minmax"
+                    let labelX = dot.mapPoint.x + 15  // Offset right of beacon dot
+                    let labelY = dot.mapPoint.y + 4   // Vertically centered with dot
+                    let labelText = "\(beaconElementID) min \(Int(minRSSI)) max \(Int(maxRSSI))"
+                    layerContent += "<text id=\"\(labelID)\" class=\"beaconLabels\" x=\"\(String(format: "%.1f", labelX))\" y=\"\(String(format: "%.1f", labelY))\">\(labelText)</text>\n"
+                }
             }
             
             // Add layer for this beacon
