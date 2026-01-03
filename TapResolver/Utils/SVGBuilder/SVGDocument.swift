@@ -17,12 +17,34 @@ class SVGDocument {
     let height: CGFloat
     private var layers: [(id: String, content: String)] = []
     private var backgroundImageData: String?  // Base64 PNG
+    private var styles: [String: String] = [:]  // className -> CSS properties
     
     // MARK: - Initialization
     
     init(width: CGFloat, height: CGFloat) {
         self.width = width
         self.height = height
+    }
+    
+    // MARK: - Style Registry
+    
+    /// Register a CSS style class
+    /// - Parameters:
+    ///   - className: The class name (without leading dot)
+    ///   - css: The CSS properties (e.g., "fill: #0064ff;")
+    func registerStyle(className: String, css: String) {
+        styles[className] = css
+    }
+    
+    /// Convert rgba() to hex color for CSS
+    static func rgbaToHex(_ r: Int, _ g: Int, _ b: Int, _ a: Double = 1.0) -> String {
+        if a < 1.0 {
+            // Use rgba for transparency
+            return "rgba(\(r), \(g), \(b), \(a))"
+        } else {
+            // Use hex for solid colors
+            return String(format: "#%02x%02x%02x", r, g, b)
+        }
     }
     
     // MARK: - Background Image
@@ -44,14 +66,16 @@ class SVGDocument {
         layers.append((id: id, content: content))
     }
     
-    /// Add a layer with circle elements
-    func addCircleLayer(id: String, circles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, fill: String, title: String?)]) {
+    /// Add a layer with circle elements using CSS class
+    /// - Parameters:
+    ///   - id: Layer ID
+    ///   - circles: Array of circle data (cx, cy, r, title)
+    ///   - styleClass: CSS class name for fill color
+    func addCircleLayer(id: String, circles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, title: String?)], styleClass: String) {
         var content = ""
         for circle in circles {
             let titleElement = circle.title.map { "<title>\($0)</title>" } ?? ""
-            content += """
-                <circle cx="\(String(format: "%.1f", circle.cx))" cy="\(String(format: "%.1f", circle.cy))" r="\(String(format: "%.1f", circle.r))" fill="\(circle.fill)">\(titleElement)</circle>\n
-            """
+            content += "<circle class=\"\(styleClass)\" cx=\"\(String(format: "%.1f", circle.cx))\" cy=\"\(String(format: "%.1f", circle.cy))\" r=\"\(String(format: "%.1f", circle.r))\">\(titleElement)</circle>\n"
         }
         addLayer(id: id, content: content)
     }
@@ -60,9 +84,7 @@ class SVGDocument {
     func addLineLayer(id: String, lines: [(x1: CGFloat, y1: CGFloat, x2: CGFloat, y2: CGFloat, stroke: String, strokeWidth: CGFloat)]) {
         var content = ""
         for line in lines {
-            content += """
-                <line x1="\(String(format: "%.1f", line.x1))" y1="\(String(format: "%.1f", line.y1))" x2="\(String(format: "%.1f", line.x2))" y2="\(String(format: "%.1f", line.y2))" stroke="\(line.stroke)" stroke-width="\(String(format: "%.1f", line.strokeWidth))"/>\n
-            """
+            content += "<line x1=\"\(String(format: "%.1f", line.x1))\" y1=\"\(String(format: "%.1f", line.y1))\" x2=\"\(String(format: "%.1f", line.x2))\" y2=\"\(String(format: "%.1f", line.y2))\" stroke=\"\(line.stroke)\" stroke-width=\"\(String(format: "%.1f", line.strokeWidth))\"/>\n"
         }
         addLayer(id: id, content: content)
     }
@@ -74,9 +96,7 @@ class SVGDocument {
         let pointsString = points.map { "\(String(format: "%.1f", $0.x)),\(String(format: "%.1f", $0.y))" }.joined(separator: " ")
         let dashAttr = strokeDasharray.map { " stroke-dasharray=\"\($0)\"" } ?? ""
         
-        let content = """
-            <polygon points="\(pointsString)" stroke="\(stroke)" stroke-width="\(String(format: "%.1f", strokeWidth))" fill="\(fill)"\(dashAttr)/>\n
-        """
+        let content = "<polygon points=\"\(pointsString)\" stroke=\"\(stroke)\" stroke-width=\"\(String(format: "%.1f", strokeWidth))\" fill=\"\(fill)\"\(dashAttr)/>\n"
         addLayer(id: id, content: content)
     }
     
@@ -84,9 +104,7 @@ class SVGDocument {
     func addPathLayer(id: String, paths: [(d: String, stroke: String, strokeWidth: CGFloat, fill: String)]) {
         var content = ""
         for path in paths {
-            content += """
-                <path d="\(path.d)" stroke="\(path.stroke)" stroke-width="\(String(format: "%.1f", path.strokeWidth))" fill="\(path.fill)"/>\n
-            """
+            content += "<path d=\"\(path.d)\" stroke=\"\(path.stroke)\" stroke-width=\"\(String(format: "%.1f", path.strokeWidth))\" fill=\"\(path.fill)\"/>\n"
         }
         addLayer(id: id, content: content)
     }
@@ -97,26 +115,37 @@ class SVGDocument {
     func generateSVG() -> String {
         var svg = """
         <?xml version="1.0" encoding="UTF-8"?>
-        <svg viewBox="0 0 \(Int(width)) \(Int(height))" 
+        <svg viewBox="0 0 \(Int(width)) \(Int(height))"
              xmlns="http://www.w3.org/2000/svg"
              xmlns:xlink="http://www.w3.org/1999/xlink">
         
         """
         
+        // Defs section with styles (if any styles registered)
+        if !styles.isEmpty {
+            svg += "  <defs>\n"
+            svg += "    <style>\n"
+            for (className, css) in styles.sorted(by: { $0.key < $1.key }) {
+                svg += "      .\(className) {\n"
+                svg += "        \(css)\n"
+                svg += "      }\n"
+            }
+            svg += "    </style>\n"
+            svg += "  </defs>\n\n"
+        }
+        
         // Background image (if embedded)
         if let imageData = backgroundImageData {
-            // Single-line format with width/height before href for better compatibility
             svg += "  <image id=\"map-background\" width=\"\(Int(width))\" height=\"\(Int(height))\" xlink:href=\"data:image/png;base64,\(imageData)\"/>\n\n"
         }
         
         // Layers
         for layer in layers {
-            svg += """
-              <g id="\(layer.id)">
-            \(layer.content.split(separator: "\n").map { "    \($0)" }.joined(separator: "\n"))
-              </g>
-            
-            """
+            svg += "  <g id=\"\(layer.id)\">\n"
+            for line in layer.content.split(separator: "\n") {
+                svg += "    \(line)\n"
+            }
+            svg += "  </g>\n\n"
         }
         
         svg += "</svg>\n"
@@ -141,4 +170,3 @@ class SVGDocument {
         }
     }
 }
-

@@ -160,6 +160,10 @@ struct SVGExportPanel: View {
     /// Add calibration mesh layers to the SVG document
     private func addCalibrationMeshLayers(to doc: SVGDocument, mapSize: CGSize, points: [MapPointStore.MapPoint]) {
         
+        // Register styles for circle fills
+        doc.registerStyle(className: "mappoint-original", css: "fill: #0064ff; fill-opacity: 0.7;")
+        doc.registerStyle(className: "mappoint-adjusted", css: "fill: #00c864; fill-opacity: 0.7;")
+        
         // Get map parameters for coordinate conversion
         // TODO: Get from location metadata. Using home map default for now.
         let metersPerPixel: CGFloat = 0.0056
@@ -168,7 +172,7 @@ struct SVGExportPanel: View {
         let originY = mapSize.height / 2
         
         // Layer 1: Original MapPoint positions (blue)
-        var originalCircles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, fill: String, title: String?)] = []
+        var originalCircles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, title: String?)] = []
         
         for point in points {
             let shortID = String(point.id.uuidString.prefix(8))
@@ -176,16 +180,15 @@ struct SVGExportPanel: View {
                 cx: point.mapPoint.x,
                 cy: point.mapPoint.y,
                 r: 6,
-                fill: "rgba(0, 100, 255, 0.7)",
                 title: "\(shortID) (original)"
             ))
         }
         
-        doc.addCircleLayer(id: "mappoints-original", circles: originalCircles)
+        doc.addCircleLayer(id: "mappoints-original", circles: originalCircles, styleClass: "mappoint-original")
         print("📐 [SVGExport] Added \(originalCircles.count) original MapPoint positions")
         
         // Layer 2: Adjusted/baked positions (green)
-        var adjustedCircles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, fill: String, title: String?)] = []
+        var adjustedCircles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, title: String?)] = []
         
         for point in points {
             // Only include points with baked canonical positions
@@ -202,12 +205,11 @@ struct SVGExportPanel: View {
                 cx: pixelX,
                 cy: pixelY,
                 r: 6,
-                fill: "rgba(0, 200, 100, 0.7)",
                 title: "\(shortID) (adjusted)"
             ))
         }
         
-        doc.addCircleLayer(id: "mappoints-adjusted", circles: adjustedCircles)
+        doc.addCircleLayer(id: "mappoints-adjusted", circles: adjustedCircles, styleClass: "mappoint-adjusted")
         print("📐 [SVGExport] Added \(adjustedCircles.count) adjusted MapPoint positions")
     }
 }
