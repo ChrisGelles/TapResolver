@@ -25,7 +25,6 @@ struct SVGExportPanel: View {
                     Toggle("Map Background", isOn: $exportOptions.includeMapBackground)
                     
                     Toggle("Calibration Mesh", isOn: $exportOptions.includeCalibrationMesh)
-                        .disabled(true)  // Phase 2 - not yet implemented
                     
                     Toggle("RSSI Heatmap", isOn: $exportOptions.includeRSSIHeatmap)
                         .disabled(true)  // Phase 3 - not yet implemented
@@ -45,6 +44,15 @@ struct SVGExportPanel: View {
                         Spacer()
                         Text("\(mapPointStore.points.count)")
                             .foregroundColor(.secondary)
+                    }
+                    
+                    if exportOptions.includeCalibrationMesh {
+                        HStack {
+                            Text("With Baked Position")
+                            Spacer()
+                            Text("\(mapPointStore.points.filter { $0.canonicalPosition != nil }.count)")
+                                .foregroundColor(.secondary)
+                        }
                     }
                     
                     HStack {
@@ -98,8 +106,9 @@ struct SVGExportPanel: View {
     private func performExport() {
         exportOptions.isExporting = true
         
-        // Capture locationID on main thread before background work
+        // Capture data on main thread before background work
         let locationID = locationManager.currentLocationID
+        let points = mapPointStore.points  // Capture points array
         
         // Run export on background thread
         DispatchQueue.global(qos: .userInitiated).async {
@@ -121,8 +130,10 @@ struct SVGExportPanel: View {
                 doc.setBackgroundImage(mapImage)
             }
             
-            // Phase 2: Add calibration mesh layers here
-            // if exportOptions.includeCalibrationMesh { ... }
+            // Phase 2: Add calibration mesh layers
+            if exportOptions.includeCalibrationMesh {
+                self.addCalibrationMeshLayers(to: doc, mapSize: mapImage.size, points: points)
+            }
             
             // Phase 3: Add RSSI heatmap layers here
             // if exportOptions.includeRSSIHeatmap { ... }
@@ -142,6 +153,62 @@ struct SVGExportPanel: View {
                 }
             }
         }
+    }
+    
+    // MARK: - Calibration Mesh Export
+    
+    /// Add calibration mesh layers to the SVG document
+    private func addCalibrationMeshLayers(to doc: SVGDocument, mapSize: CGSize, points: [MapPointStore.MapPoint]) {
+        
+        // Get map parameters for coordinate conversion
+        // TODO: Get from location metadata. Using home map default for now.
+        let metersPerPixel: CGFloat = 0.0056
+        let pixelsPerMeter = 1.0 / metersPerPixel
+        let originX = mapSize.width / 2
+        let originY = mapSize.height / 2
+        
+        // Layer 1: Original MapPoint positions (blue)
+        var originalCircles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, fill: String, title: String?)] = []
+        
+        for point in points {
+            let shortID = String(point.id.uuidString.prefix(8))
+            originalCircles.append((
+                cx: point.mapPoint.x,
+                cy: point.mapPoint.y,
+                r: 6,
+                fill: "rgba(0, 100, 255, 0.7)",
+                title: "\(shortID) (original)"
+            ))
+        }
+        
+        doc.addCircleLayer(id: "mappoints-original", circles: originalCircles)
+        print("📐 [SVGExport] Added \(originalCircles.count) original MapPoint positions")
+        
+        // Layer 2: Adjusted/baked positions (green)
+        var adjustedCircles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, fill: String, title: String?)] = []
+        
+        for point in points {
+            // Only include points with baked canonical positions
+            guard let canonical = point.canonicalPosition else { continue }
+            
+            // Convert canonical (meters) to pixel coordinates
+            // Canonical: X = right, Z = forward (toward top of map)
+            // Pixel: X = right, Y = down
+            let pixelX = CGFloat(canonical.x) * pixelsPerMeter + originX
+            let pixelY = CGFloat(canonical.z) * pixelsPerMeter + originY
+            
+            let shortID = String(point.id.uuidString.prefix(8))
+            adjustedCircles.append((
+                cx: pixelX,
+                cy: pixelY,
+                r: 6,
+                fill: "rgba(0, 200, 100, 0.7)",
+                title: "\(shortID) (adjusted)"
+            ))
+        }
+        
+        doc.addCircleLayer(id: "mappoints-adjusted", circles: adjustedCircles)
+        print("📐 [SVGExport] Added \(adjustedCircles.count) adjusted MapPoint positions")
     }
 }
 
