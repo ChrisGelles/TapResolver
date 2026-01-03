@@ -46,6 +46,7 @@ struct HUDContainer: View {
     @EnvironmentObject private var zoneStore: ZoneStore
     @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
     @EnvironmentObject private var surveySelectionCoordinator: SurveySelectionCoordinator
+    @EnvironmentObject private var svgExportOptions: SVGExportOptions
     @StateObject private var beaconLogger = SimpleBeaconLogger()
     @StateObject private var relocalizationCoordinator: RelocalizationCoordinator
 
@@ -136,6 +137,17 @@ struct HUDContainer: View {
                         MorgueDrawer()
                         MapPointDrawer()
                         ZoneDrawer()
+                        // SVG Export button
+                        Button {
+                            hud.toggleSVGExport()
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(.white)
+                                .frame(width: 40, height: 40)
+                                .background(Circle().fill(Color.purple.opacity(0.7)))
+                        }
+                        .padding(.top, 8)
                         if FeatureFlags.showMapPointLogPanel {
                             MapPointLogButton() //This log panel is a good example for the Debug/Settings panel I'd like to see.
                         }
@@ -243,6 +255,9 @@ struct HUDContainer: View {
         .zIndex(100)
         .animation(.easeInOut(duration: 0.3), value: hud.isMapPointLogOpen)
         .animation(.easeInOut(duration: 0.3), value: hud.isDebugSettingsOpen)
+        .sheet(isPresented: $hud.isSVGExportOpen) {
+            SVGExportPanel(isPresented: $hud.isSVGExportOpen)
+        }
     }
 
     @ViewBuilder

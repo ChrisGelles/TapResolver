@@ -22,6 +22,7 @@ final class HUDPanelsState: ObservableObject {
     
     /// When true, show the UserFacing calibration overlay (tools layer).
     @Published var isCalibratingFacing: Bool = false
+    @Published var isSVGExportOpen: Bool = false
 
     func openBeacon() { isBeaconOpen = true; isSquareOpen = false; isMorgueOpen = false; isMapPointOpen = false; isZoneOpen = false }
     func openSquares() { isSquareOpen = true; isBeaconOpen = false; isMorgueOpen = false; isMapPointOpen = false; isZoneOpen = false }
@@ -51,6 +52,13 @@ final class HUDPanelsState: ObservableObject {
         surveyThreadTraceEnabled.toggle()
         UserDefaults.standard.set(surveyThreadTraceEnabled, forKey: "debug.surveyThreadTrace")
         print("🔍 Survey Thread Trace: \(surveyThreadTraceEnabled ? "ON" : "OFF")")
+    }
+    
+    func toggleSVGExport() {
+        isSVGExportOpen.toggle()
+        if isSVGExportOpen {
+            print("📤 SVG Export Panel: OPEN")
+        }
     }
     
     init() {
