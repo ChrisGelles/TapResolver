@@ -11,6 +11,8 @@ struct SVGExportPanel: View {
     @EnvironmentObject private var exportOptions: SVGExportOptions
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var mapPointStore: MapPointStore
+    @EnvironmentObject private var surveyPointStore: SurveyPointStore
+    @EnvironmentObject private var beaconDotStore: BeaconDotStore
     
     @Binding var isPresented: Bool
     
@@ -27,7 +29,6 @@ struct SVGExportPanel: View {
                     Toggle("Calibration Mesh", isOn: $exportOptions.includeCalibrationMesh)
                     
                     Toggle("RSSI Heatmap", isOn: $exportOptions.includeRSSIHeatmap)
-                        .disabled(true)  // Phase 3 - not yet implemented
                 }
                 
                 // MARK: - Preview Info
@@ -51,6 +52,21 @@ struct SVGExportPanel: View {
                             Text("With Baked Position")
                             Spacer()
                             Text("\(mapPointStore.points.filter { $0.canonicalPosition != nil }.count)")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if exportOptions.includeRSSIHeatmap {
+                        HStack {
+                            Text("Survey Points")
+                            Spacer()
+                            Text("\(surveyPointStore.surveyPoints.count)")
+                                .foregroundColor(.secondary)
+                        }
+                        HStack {
+                            Text("Beacons")
+                            Spacer()
+                            Text("\(beaconDotStore.dots.count)")
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -109,6 +125,8 @@ struct SVGExportPanel: View {
         // Capture data on main thread before background work
         let locationID = locationManager.currentLocationID
         let points = mapPointStore.points  // Capture points array
+        let surveyPoints = Array(surveyPointStore.surveyPoints.values)
+        let beaconDots = beaconDotStore.dots
         
         // Run export on background thread
         DispatchQueue.global(qos: .userInitiated).async {
@@ -136,8 +154,10 @@ struct SVGExportPanel: View {
                 self.addCalibrationMeshLayers(to: doc, mapSize: mapImage.size, points: points)
             }
             
-            // Phase 3: Add RSSI heatmap layers here
-            // if exportOptions.includeRSSIHeatmap { ... }
+            // Phase 3: Add RSSI heatmap layers
+            if exportOptions.includeRSSIHeatmap {
+                self.addRSSIHeatmapLayers(to: doc, mapSize: mapImage.size, surveyPoints: surveyPoints, beaconDots: beaconDots)
+            }
             
             // Write to file
             if let url = doc.writeToTempFile(filename: filename) {
@@ -212,6 +232,146 @@ struct SVGExportPanel: View {
         
         doc.addCircleLayer(id: "mappoints-adjusted", circles: adjustedCircles, styleClass: "mappoint-adjusted")
         print("📐 [SVGExport] Added \(adjustedCircles.count) adjusted MapPoint positions")
+    }
+    
+    // MARK: - RSSI Heatmap Export
+    
+    /// Add RSSI heatmap layers to the SVG document (one layer per beacon)
+    private func addRSSIHeatmapLayers(to doc: SVGDocument, mapSize: CGSize, surveyPoints: [SurveyPoint], beaconDots: [BeaconDotStore.Dot]) {
+        
+        // Register dBm opacity bucket styles
+        doc.registerStyle(className: "dBm-100", css: "fill-opacity: 0.05;")
+        doc.registerStyle(className: "dBm-90", css: "fill-opacity: 0.20;")
+        doc.registerStyle(className: "dBm-80", css: "fill-opacity: 0.35;")
+        doc.registerStyle(className: "dBm-70", css: "fill-opacity: 0.50;")
+        doc.registerStyle(className: "dBm-60", css: "fill-opacity: 0.65;")
+        doc.registerStyle(className: "dBm-50", css: "fill-opacity: 0.80;")
+        doc.registerStyle(className: "dBm-40", css: "fill-opacity: 0.95;")
+        doc.registerStyle(className: "dBm-30", css: "fill-opacity: 1.0;")
+        doc.registerStyle(className: "beacon-dot", css: "stroke: #000000; stroke-width: 3;")
+        
+        // Calculate circle radius: 0.4m in pixels
+        let metersPerPixel: CGFloat = 0.0056  // TODO: Get from location metadata
+        let radiusPixels = 0.4 / metersPerPixel
+        
+        // Collect all unique beacon IDs from survey data
+        var beaconIDs = Set<String>()
+        for surveyPoint in surveyPoints {
+            for session in surveyPoint.sessions {
+                for beacon in session.beacons {
+                    beaconIDs.insert(beacon.beaconID)
+                }
+            }
+        }
+        
+        print("📡 [SVGExport] Processing \(beaconIDs.count) beacons across \(surveyPoints.count) survey points")
+        
+        // Process each beacon
+        for (beaconIndex, beaconID) in beaconIDs.sorted().enumerated() {
+            // Generate beacon color from ID hash (same algorithm as BeaconDotStore)
+            let hash = beaconID.hash
+            let hue = Double(abs(hash % 360)) / 360.0
+            let hexColor = hsbToHex(hue: hue, saturation: 0.7, brightness: 0.8)
+            
+            // Create sanitized class name from beacon ID
+            let beaconClassName = sanitizeClassName(beaconID)
+            
+            // Register beacon color style
+            doc.registerStyle(className: beaconClassName, css: "fill: \(hexColor);")
+            
+            // Collect circles for this beacon
+            var rssiCircles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, elementID: String?, classes: [String])] = []
+            
+            for surveyPoint in surveyPoints {
+                // Calculate weighted average median RSSI for this beacon at this point
+                var totalWeightedRSSI: Double = 0
+                var totalSamples: Int = 0
+                
+                for session in surveyPoint.sessions {
+                    for beacon in session.beacons where beacon.beaconID == beaconID {
+                        let sampleCount = beacon.samples.count
+                        if sampleCount > 0 {
+                            totalWeightedRSSI += Double(beacon.stats.median_dbm) * Double(sampleCount)
+                            totalSamples += sampleCount
+                        }
+                    }
+                }
+                
+                guard totalSamples > 0 else { continue }
+                
+                let averageRSSI = totalWeightedRSSI / Double(totalSamples)
+                let dBmBucket = rssiToBucket(averageRSSI)
+                let dBmClass = "dBm-\(abs(dBmBucket))"
+                
+                let coordID = String(format: "%.0f-%.0f", surveyPoint.mapX, surveyPoint.mapY)
+                
+                rssiCircles.append((
+                    cx: CGFloat(surveyPoint.mapX),
+                    cy: CGFloat(surveyPoint.mapY),
+                    r: radiusPixels,
+                    elementID: coordID,
+                    classes: [beaconClassName, dBmClass]
+                ))
+            }
+            
+            // Add beacon position dot if we have it
+            if let dot = beaconDots.first(where: { $0.beaconID == beaconID }) {
+                rssiCircles.append((
+                    cx: dot.mapPoint.x,
+                    cy: dot.mapPoint.y,
+                    r: 10,
+                    elementID: beaconClassName,
+                    classes: [beaconClassName, "beacon-dot"]
+                ))
+            }
+            
+            // Add layer for this beacon
+            let layerID = "\(beaconIndex)-\(beaconClassName)-rssi"
+            doc.addMultiClassCircleLayer(id: layerID, circles: rssiCircles)
+            
+            print("📡 [SVGExport] Added layer '\(layerID)' with \(rssiCircles.count) circles")
+        }
+    }
+    
+    /// Convert RSSI to 10-dBm bucket
+    private func rssiToBucket(_ rssi: Double) -> Int {
+        let rounded = Int(round(rssi / 10.0)) * 10
+        return max(-100, min(-30, rounded))
+    }
+    
+    /// Convert HSB to hex color string
+    private func hsbToHex(hue: Double, saturation: Double, brightness: Double) -> String {
+        let h = hue * 6
+        let c = brightness * saturation
+        let x = c * (1 - abs(h.truncatingRemainder(dividingBy: 2) - 1))
+        let m = brightness - c
+        
+        var r: Double, g: Double, b: Double
+        switch Int(h) {
+        case 0: (r, g, b) = (c, x, 0)
+        case 1: (r, g, b) = (x, c, 0)
+        case 2: (r, g, b) = (0, c, x)
+        case 3: (r, g, b) = (0, x, c)
+        case 4: (r, g, b) = (x, 0, c)
+        default: (r, g, b) = (c, 0, x)
+        }
+        
+        let ri = Int((r + m) * 255)
+        let gi = Int((g + m) * 255)
+        let bi = Int((b + m) * 255)
+        
+        return String(format: "#%02x%02x%02x", ri, gi, bi)
+    }
+    
+    /// Sanitize beacon ID for use as CSS class name
+    private func sanitizeClassName(_ beaconID: String) -> String {
+        // Remove invalid characters, keep alphanumeric and hyphens
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
+        return beaconID.unicodeScalars
+            .filter { allowed.contains($0) }
+            .map { Character($0) }
+            .map { String($0) }
+            .joined()
     }
 }
 
