@@ -18,6 +18,7 @@ class SVGDocument {
     private var layers: [(id: String, content: String)] = []
     private var backgroundImageData: String?  // Base64 PNG
     private var styles: [String: String] = [:]  // className -> CSS properties
+    private var documentID: String?  // Root SVG element ID
     
     // MARK: - Initialization
     
@@ -34,6 +35,11 @@ class SVGDocument {
     ///   - css: The CSS properties (e.g., "fill: #0064ff;")
     func registerStyle(className: String, css: String) {
         styles[className] = css
+    }
+    
+    /// Set the document ID (appears on root <svg> element)
+    func setDocumentID(_ id: String) {
+        documentID = id
     }
     
     /// Convert rgba() to hex color for CSS
@@ -69,13 +75,13 @@ class SVGDocument {
     /// Add a layer with circle elements using CSS class
     /// - Parameters:
     ///   - id: Layer ID
-    ///   - circles: Array of circle data (cx, cy, r, title)
+    ///   - circles: Array of circle data (cx, cy, r, elementID)
     ///   - styleClass: CSS class name for fill color
-    func addCircleLayer(id: String, circles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, title: String?)], styleClass: String) {
+    func addCircleLayer(id: String, circles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, elementID: String?)], styleClass: String) {
         var content = ""
         for circle in circles {
-            let titleElement = circle.title.map { "<title>\($0)</title>" } ?? ""
-            content += "<circle class=\"\(styleClass)\" cx=\"\(String(format: "%.1f", circle.cx))\" cy=\"\(String(format: "%.1f", circle.cy))\" r=\"\(String(format: "%.1f", circle.r))\">\(titleElement)</circle>\n"
+            let idAttr = circle.elementID.map { "id=\"\($0)\" " } ?? ""
+            content += "<circle \(idAttr)class=\"\(styleClass)\" cx=\"\(String(format: "%.1f", circle.cx))\" cy=\"\(String(format: "%.1f", circle.cy))\" r=\"\(String(format: "%.1f", circle.r))\"/>\n"
         }
         addLayer(id: id, content: content)
     }
@@ -113,9 +119,10 @@ class SVGDocument {
     
     /// Generate the complete SVG string
     func generateSVG() -> String {
+        let idAttr = documentID.map { "id=\"\($0)\" " } ?? ""
         var svg = """
         <?xml version="1.0" encoding="UTF-8"?>
-        <svg viewBox="0 0 \(Int(width)) \(Int(height))"
+        <svg \(idAttr)viewBox="0 0 \(Int(width)) \(Int(height))"
              xmlns="http://www.w3.org/2000/svg"
              xmlns:xlink="http://www.w3.org/1999/xlink">
         

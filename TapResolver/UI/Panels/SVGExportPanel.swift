@@ -124,6 +124,7 @@ struct SVGExportPanel: View {
             }
             
             let doc = SVGDocument(width: mapImage.size.width, height: mapImage.size.height)
+            doc.setDocumentID("\(locationID)-map")
             
             // Add background if selected
             if exportOptions.includeMapBackground {
@@ -172,7 +173,7 @@ struct SVGExportPanel: View {
         let originY = mapSize.height / 2
         
         // Layer 1: Original MapPoint positions (blue)
-        var originalCircles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, title: String?)] = []
+        var originalCircles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, elementID: String?)] = []
         
         for point in points {
             let shortID = String(point.id.uuidString.prefix(8))
@@ -180,7 +181,7 @@ struct SVGExportPanel: View {
                 cx: point.mapPoint.x,
                 cy: point.mapPoint.y,
                 r: 6,
-                title: "\(shortID) (original)"
+                elementID: shortID
             ))
         }
         
@@ -188,7 +189,7 @@ struct SVGExportPanel: View {
         print("📐 [SVGExport] Added \(originalCircles.count) original MapPoint positions")
         
         // Layer 2: Adjusted/baked positions (green)
-        var adjustedCircles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, title: String?)] = []
+        var adjustedCircles: [(cx: CGFloat, cy: CGFloat, r: CGFloat, elementID: String?)] = []
         
         for point in points {
             // Only include points with baked canonical positions
@@ -205,7 +206,7 @@ struct SVGExportPanel: View {
                 cx: pixelX,
                 cy: pixelY,
                 r: 6,
-                title: "\(shortID) (adjusted)"
+                elementID: shortID
             ))
         }
         
