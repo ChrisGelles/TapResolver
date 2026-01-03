@@ -50,7 +50,7 @@ struct SVGExportPanel: View {
                     HStack {
                         Text("Filename")
                         Spacer()
-                        Text(exportOptions.generateFilename(locationID: locationManager.currentLocationID))
+                        Text(exportOptions.previewFilename(locationID: locationManager.currentLocationID))
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundColor(.secondary)
                             .lineLimit(1)

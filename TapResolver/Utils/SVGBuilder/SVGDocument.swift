@@ -98,7 +98,6 @@ class SVGDocument {
         var svg = """
         <?xml version="1.0" encoding="UTF-8"?>
         <svg viewBox="0 0 \(Int(width)) \(Int(height))" 
-             width="\(Int(width))" height="\(Int(height))"
              xmlns="http://www.w3.org/2000/svg"
              xmlns:xlink="http://www.w3.org/1999/xlink">
         
@@ -106,13 +105,8 @@ class SVGDocument {
         
         // Background image (if embedded)
         if let imageData = backgroundImageData {
-            svg += """
-              <image id="map-background" 
-                     xlink:href="data:image/png;base64,\(imageData)"
-                     width="\(Int(width))" height="\(Int(height))"
-                     x="0" y="0"/>
-            
-            """
+            // Single-line format with width/height before href for better compatibility
+            svg += "  <image id=\"map-background\" width=\"\(Int(width))\" height=\"\(Int(height))\" xlink:href=\"data:image/png;base64,\(imageData)\"/>\n\n"
         }
         
         // Layers
