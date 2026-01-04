@@ -855,7 +855,7 @@ class SurveySessionCollector: ObservableObject {
         let sectorIndex = sectorIndexFromHeading(Double(yawDegrees))
         
         // DIAGNOSTIC: Uncomment to debug facing calculation
-        // print("🧭 [FacingRose] Yaw: \(String(format: "%.1f", yawDegrees))° → Sector \(sectorIndex) | Hits: \(session.sectorHitCounts)")
+        print("🧭 [FacingRose] Yaw: \(String(format: "%.1f", yawDegrees))° → Sector \(sectorIndex) | Hits: \(session.sectorHitCounts)")
         
         return FacingSectorSnapshot(
             sectorHitCounts: session.sectorHitCounts,
@@ -865,10 +865,12 @@ class SurveySessionCollector: ObservableObject {
     }
     
     /// Extract yaw (rotation around Y axis) from quaternion
+    /// ARKit uses Y-up coordinate system: +Y up, +Z toward viewer, +X right
     private func yawFromQuaternion(qx: Float, qy: Float, qz: Float, qw: Float) -> Float {
-        // Yaw = atan2(2(qw*qy + qx*qz), 1 - 2(qx² + qy²))
-        let siny_cosp = 2.0 * (qw * qy + qx * qz)
-        let cosy_cosp = 1.0 - 2.0 * (qx * qx + qy * qy)
+        // Correct formula for Y-axis rotation in Y-up coordinate system
+        // Yaw = atan2(2(qw*qy - qx*qz), 1 - 2(qy² + qz²))
+        let siny_cosp = 2.0 * (qw * qy - qx * qz)  // MINUS, not plus
+        let cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)  // qy² + qz², not qx² + qy²
         return atan2(siny_cosp, cosy_cosp)
     }
     
