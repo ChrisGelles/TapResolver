@@ -112,6 +112,8 @@ class SurveySessionCollector: ObservableObject {
     private weak var bluetoothScanner: BluetoothScanner?
     private weak var beaconLists: BeaconListsStore?
     private weak var orientationManager: CompassOrientationManager?
+    private weak var mapPointStore: MapPointStore?
+    private weak var arCalibrationCoordinator: ARCalibrationCoordinator?
     private var bleSubscription: AnyCancellable?
     
     /// Motion manager for magnetometer sampling
@@ -193,16 +195,28 @@ class SurveySessionCollector: ObservableObject {
     // MARK: - Configuration
     
     /// Configure with required dependencies
-    func configure(surveyPointStore: SurveyPointStore, bluetoothScanner: BluetoothScanner, beaconLists: BeaconListsStore, orientationManager: CompassOrientationManager) {
+    func configure(
+        surveyPointStore: SurveyPointStore,
+        bluetoothScanner: BluetoothScanner,
+        beaconLists: BeaconListsStore,
+        orientationManager: CompassOrientationManager,
+        mapPointStore: MapPointStore,
+        arCalibrationCoordinator: ARCalibrationCoordinator
+    ) {
         self.surveyPointStore = surveyPointStore
         self.bluetoothScanner = bluetoothScanner
         self.beaconLists = beaconLists
         self.orientationManager = orientationManager
+        self.mapPointStore = mapPointStore
+        self.arCalibrationCoordinator = arCalibrationCoordinator
         
         // Set up reverse reference for direct BLE injection during dwell
         bluetoothScanner.surveyCollector = self
         
-        print("📊 [SurveySessionCollector] Configured with SurveyPointStore, BluetoothScanner, BeaconListsStore (\(beaconLists.beacons.count) beacons), and CompassOrientationManager")
+        // DIAGNOSTIC: Verify coordinator reference was stored (weak reference)
+        print("📊 [SurveySessionCollector] ARCalibrationCoordinator connected: \(ObjectIdentifier(arCalibrationCoordinator))")
+        
+        print("📊 [SurveySessionCollector] Configured with SurveyPointStore, BluetoothScanner, BeaconListsStore (\(beaconLists.beacons.count) beacons), CompassOrientationManager, MapPointStore, and ARCalibrationCoordinator")
     }
     
     // MARK: - Notification Setup
@@ -805,36 +819,93 @@ class SurveySessionCollector: ObservableObject {
     
     // MARK: - Facing Sector Data (for HUD)
     
-    /// Compute current facing sector index from latest pose
-    /// Returns nil if no pose data available
-    /// Single source of truth for sector calculation - used by both HUD and hit counting
+    /// Compute the north direction angle in AR space by projecting north/south MapPoints
+    /// through bilinear interpolation and extracting the yaw of the resulting vector.
+    /// Returns nil if north/south MapPoints don't exist or bilinear projection unavailable.
+    private func computeARNorthAngleDegrees() -> Double? {
+        guard let store = mapPointStore,
+              let coordinator = arCalibrationCoordinator else {
+            return nil
+        }
+        
+        // Find MapPoints with directional roles
+        let northMapPoint = store.points.first { $0.roles.contains(.directionalNorth) }
+        let southMapPoint = store.points.first { $0.roles.contains(.directionalSouth) }
+        
+        guard let north = northMapPoint, let south = southMapPoint else {
+            print("⚠️ [AR_NORTH] Missing north or south MapPoint")
+            return nil
+        }
+        
+        // Check if bilinear projection is available (Zone Corner Calibration completed)
+        guard coordinator.hasBilinearCorners else {
+            print("⚠️ [AR_NORTH] Bilinear corners not available (Zone Corner Calibration required)")
+            return nil
+        }
+        
+        // Project both points into AR space via bilinear interpolation
+        guard let northAR = coordinator.projectPointViaBilinear(mapPoint: north.position),
+              let southAR = coordinator.projectPointViaBilinear(mapPoint: south.position) else {
+            print("⚠️ [AR_NORTH] Failed to project north/south MapPoints via bilinear")
+            return nil
+        }
+        
+        // Compute vector from south to north in AR space (XZ plane, Y is up)
+        let dx = northAR.x - southAR.x
+        let dz = northAR.z - southAR.z
+        
+        // Extract yaw angle (rotation around Y axis)
+        // atan2(z, x) gives angle from +X axis in XZ plane
+        let northAngleRadians = atan2(Double(dz), Double(dx))
+        let northAngleDegrees = northAngleRadians * 180.0 / .pi
+        
+        // DIAGNOSTIC
+        print("🧭 [AR_NORTH] South=(\(String(format: "%.2f", southAR.x)), \(String(format: "%.2f", southAR.z))) North=(\(String(format: "%.2f", northAR.x)), \(String(format: "%.2f", northAR.z))) → AR north angle=\(String(format: "%.1f", northAngleDegrees))°")
+        
+        return northAngleDegrees
+    }
+    
+    /// Compute current facing sector index using AR north vector from projected MapPoints.
+    /// AR session yaw - AR north angle → map-relative heading → sector
+    /// Returns nil if required data unavailable.
     private func currentFacingSectorIndex() -> Int? {
         guard let session = activeSession,
               let latestPose = session.poseTrack.last else {
             return nil
         }
         
-        let yawRadians = yawFromQuaternion(
+        // Step 1: Extract yaw from AR pose quaternion
+        let deviceYawRadians = yawFromQuaternion(
             qx: latestPose.qx, qy: latestPose.qy,
             qz: latestPose.qz, qw: latestPose.qw
         )
+        let deviceYawDegrees = Double(deviceYawRadians) * 180.0 / .pi
         
-        // Convert to degrees (NO negation for now - let's see raw values)
-        let rawYawDegrees = Double(yawRadians * 180.0 / .pi)
+        // Step 2: Get AR north angle from projected north/south MapPoints
+        guard let arNorthAngle = computeARNorthAngleDegrees() else {
+            // Cannot compute without bilinear projection and north/south MapPoints
+            return nil
+        }
+        
+        // Step 3: Compute map-relative heading
+        // The quaternion yaw and atan2 angle use different reference conventions
+        // Quaternion yaw: 0° = facing -Z, increases counterclockwise
+        // atan2(dz, dx): 0° = +X direction, increases counterclockwise
+        // The correct relationship requires inverting the subtraction and adding 180°
+        var mapRelativeHeading = 180.0 - arNorthAngle - deviceYawDegrees
         
         // Normalize to 0-360
-        var yawDegrees = rawYawDegrees
-        while yawDegrees < 0 { yawDegrees += 360 }
-        while yawDegrees >= 360 { yawDegrees -= 360 }
+        while mapRelativeHeading < 0 { mapRelativeHeading += 360 }
+        while mapRelativeHeading >= 360 { mapRelativeHeading -= 360 }
         
-        let sectorIndex = sectorIndexFromHeading(yawDegrees)
+        let sectorIndex = sectorIndexFromHeading(mapRelativeHeading)
         
-        // DIAGNOSTIC: Log at ~1 Hz to avoid spam
+        // DIAGNOSTIC: Log at ~1 Hz
         let now = CACurrentMediaTime()
         if now - lastFacingDiagnosticTime >= 1.0 {
             lastFacingDiagnosticTime = now
             let sectorNames = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-            print("🧭 [FACING] q=(\(String(format: "%.2f", latestPose.qx)), \(String(format: "%.2f", latestPose.qy)), \(String(format: "%.2f", latestPose.qz)), \(String(format: "%.2f", latestPose.qw))) → rawYaw=\(String(format: "%.1f", rawYawDegrees))° → sector \(sectorIndex) (\(sectorNames[sectorIndex])) | magnetic=\(String(format: "%.1f", session.compassHeading))°")
+            print("🧭 [FACING] deviceYaw=\(String(format: "%.1f", deviceYawDegrees))° - arNorth=\(String(format: "%.1f", arNorthAngle))° → mapHeading=\(String(format: "%.1f", mapRelativeHeading))° → sector \(sectorIndex) (\(sectorNames[sectorIndex]))")
         }
         
         return sectorIndex
