@@ -12,6 +12,22 @@ import simd
 import QuartzCore
 import CoreMotion
 
+// MARK: - Facing Sector Snapshot (for HUD consumption)
+
+/// Lightweight snapshot for FacingRoseHUD - computed on demand, NOT @Published
+/// This avoids reactive overhead during time-critical data collection
+struct FacingSectorSnapshot {
+    let sectorHitCounts: [Int]      // 8 elements: [N, NE, E, SE, S, SW, W, NW]
+    let currentSectorIndex: Int     // 0-7, which sector device is currently facing
+    let isValid: Bool               // false if no pose/session data available
+    
+    static let empty = FacingSectorSnapshot(
+        sectorHitCounts: [0, 0, 0, 0, 0, 0, 0, 0],
+        currentSectorIndex: 0,
+        isValid: false
+    )
+}
+
 // MARK: - Console Timestamp Helper
 
 /// Formats a Date for console output in local time (East Coast US style: HH:mm:ss)
@@ -143,6 +159,10 @@ class SurveySessionCollector: ObservableObject {
         
         /// Per-beacon sample buffers (beaconID → lean RSSI samples)
         var beaconSamples: [String: [RssiSample]] = [:]
+        
+        /// Hit counts per facing sector during this session (for live HUD feedback)
+        /// Index 0 = N, 1 = NE, 2 = E, etc.
+        var sectorHitCounts: [Int] = [0, 0, 0, 0, 0, 0, 0, 0]
         
         /// Elapsed milliseconds since session start
         func elapsedMs() -> Int64 {
@@ -545,6 +565,23 @@ class SurveySessionCollector: ObservableObject {
         }
         
         session.beaconSamples[beaconID]?.append(sample)
+        
+        // Increment facing sector hit count for HUD feedback
+        if let latestPose = session.poseTrack.last {
+            let yaw = yawFromQuaternion(qx: latestPose.qx, qy: latestPose.qy, qz: latestPose.qz, qw: latestPose.qw)
+            var yawDeg = Double(yaw * 180.0 / .pi)
+            if let orientationMgr = orientationManager {
+                // Note: CompassOrientationManager doesn't have northOffsetDegrees property
+                // Using 0 as fallback - may need to pass SquareMetrics or access differently
+                let northOffset = 0.0  // TODO: Get from SquareMetrics if needed
+                yawDeg = yawDeg - northOffset
+            }
+            while yawDeg < 0 { yawDeg += 360 }
+            while yawDeg >= 360 { yawDeg -= 360 }
+            let sectorIdx = sectorIndexFromHeading(yawDeg)
+            session.sectorHitCounts[sectorIdx] += 1
+        }
+        
         activeSession = session
         
         // Log periodically (every 10th sample per beacon to reduce spam)
@@ -772,5 +809,87 @@ class SurveySessionCollector: ObservableObject {
             binSize_db: binSize,
             counts: counts
         )
+    }
+    
+    // MARK: - Facing Sector Data (for HUD)
+    
+    /// Compute facing sector snapshot for HUD consumption
+    /// Called at ~8 Hz by FacingRoseHUD timer - intentionally NOT reactive
+    func getFacingSectorData() -> FacingSectorSnapshot {
+        guard let session = activeSession else {
+            return .empty
+        }
+        
+        // Get current facing from most recent pose in poseTrack, or return invalid
+        guard let latestPose = session.poseTrack.last else {
+            // DIAGNOSTIC: Uncomment to debug pose availability
+            // print("🧭 [FacingRose] No pose data in active session")
+            return FacingSectorSnapshot(
+                sectorHitCounts: session.sectorHitCounts,
+                currentSectorIndex: 0,
+                isValid: false
+            )
+        }
+        
+        // Extract yaw from quaternion
+        let yawRadians = yawFromQuaternion(
+            qx: latestPose.qx, qy: latestPose.qy,
+            qz: latestPose.qz, qw: latestPose.qw
+        )
+        // Negate yaw to correct for ARKit→screen coordinate handedness (fixes E-W inversion)
+        var yawDegrees = -yawRadians * 180.0 / .pi
+        
+        // Apply north offset if available (AR yaw → compass heading)
+        // Falls back to raw AR yaw if offset not configured
+        if let orientationMgr = orientationManager {
+            // Note: CompassOrientationManager doesn't have northOffsetDegrees property
+            // Using 0 as fallback - may need to pass SquareMetrics or access differently
+            let northOffset = 0.0  // TODO: Get from SquareMetrics if needed
+            yawDegrees = yawDegrees - Float(northOffset)
+        }
+        
+        // Normalize to 0-360
+        while yawDegrees < 0 { yawDegrees += 360 }
+        while yawDegrees >= 360 { yawDegrees -= 360 }
+        
+        let sectorIndex = sectorIndexFromHeading(Double(yawDegrees))
+        
+        // DIAGNOSTIC: Uncomment to debug facing calculation
+        // print("🧭 [FacingRose] Yaw: \(String(format: "%.1f", yawDegrees))° → Sector \(sectorIndex) | Hits: \(session.sectorHitCounts)")
+        
+        return FacingSectorSnapshot(
+            sectorHitCounts: session.sectorHitCounts,
+            currentSectorIndex: sectorIndex,
+            isValid: true
+        )
+    }
+    
+    /// Extract yaw (rotation around Y axis) from quaternion
+    private func yawFromQuaternion(qx: Float, qy: Float, qz: Float, qw: Float) -> Float {
+        // Yaw = atan2(2(qw*qy + qx*qz), 1 - 2(qx² + qy²))
+        let siny_cosp = 2.0 * (qw * qy + qx * qz)
+        let cosy_cosp = 1.0 - 2.0 * (qx * qx + qy * qy)
+        return atan2(siny_cosp, cosy_cosp)
+    }
+    
+    /// Map heading (0-360°) to sector index (0-7)
+    /// Sector 0 = N (337.5° - 22.5°), Sector 1 = NE (22.5° - 67.5°), etc.
+    private func sectorIndexFromHeading(_ heading: Double) -> Int {
+        // Offset by 22.5° so that 0° (north) falls in center of sector 0
+        let adjusted = heading + 22.5
+        let normalized = adjusted.truncatingRemainder(dividingBy: 360.0)
+        let index = Int(normalized / 45.0) % 8
+        return index
+    }
+    
+    /// Increment hit count for the sector corresponding to current device facing
+    /// Called when BLE reading is received during dwell
+    func incrementSectorHit(forHeadingDegrees heading: Double) {
+        guard activeSession != nil else { return }
+        let sectorIndex = sectorIndexFromHeading(heading)
+        activeSession?.sectorHitCounts[sectorIndex] += 1
+        
+        // DIAGNOSTIC: Uncomment to trace sector hits
+        // print("🧭 [FacingRose] Hit in sector \(sectorIndex) (heading: \(String(format: "%.1f", heading))°)")
     }
 }

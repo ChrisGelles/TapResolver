@@ -74,6 +74,7 @@ struct ARViewWithOverlays: View {
     @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
     @EnvironmentObject private var metricSquares: MetricSquareStore
     @EnvironmentObject private var surveyPointStore: SurveyPointStore
+    @EnvironmentObject private var surveySessionCollector: SurveySessionCollector
     @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
     @EnvironmentObject private var btScanner: BluetoothScanner
     
@@ -1371,6 +1372,14 @@ struct ARViewWithOverlays: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .zIndex(999)
             }
+            
+            // Facing Rose HUD - shows sector coverage during dwell
+            GeometryReader { geo in
+                FacingRoseHUD(isVisible: showDwellTimer)
+                    .position(x: 80, y: geo.size.height - 100)
+            }
+            .zIndex(998)  // Just below dwell timer (999)
+            .allowsHitTesting(false)
             
             // Place AR Marker Button + Strategy Picker (bottom) - only in idle mode with no triangle selected
             // Exclude Swath Survey and Zone Corner Calibration modes - they have their own workflows
