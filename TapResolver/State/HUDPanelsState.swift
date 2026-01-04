@@ -16,6 +16,7 @@ final class HUDPanelsState: ObservableObject {
     @Published var isZoneOpen: Bool = false
     @Published var isMapPointLogOpen = false
     @Published var isDebugSettingsOpen = false
+    @Published var isBeaconSettingsOpen = false
     @Published var surveyThreadTraceEnabled = false
     @Published var isCalibratingNorth: Bool = false
     @Published var showFacingOverlay: Bool = true

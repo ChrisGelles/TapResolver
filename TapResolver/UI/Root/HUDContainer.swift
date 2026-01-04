@@ -258,6 +258,9 @@ struct HUDContainer: View {
         .sheet(isPresented: $hud.isSVGExportOpen) {
             SVGExportPanel(isPresented: $hud.isSVGExportOpen)
         }
+        .sheet(isPresented: $hud.isBeaconSettingsOpen) {
+            BeaconSettingsPanel(isPresented: $hud.isBeaconSettingsOpen)
+        }
     }
 
     @ViewBuilder
@@ -1792,6 +1795,24 @@ private struct DebugSettingsPanel: View {
                                     .font(.system(size: 12, weight: .medium))
                             }
                             .foregroundColor(isBeaconScanning ? .green : .blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Beacon Settings Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            hudPanels.isBeaconSettingsOpen = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "antenna.radiowaves.left.and.right.circle")
+                                    .font(.system(size: 24))
+                                Text("Beacon Settings")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.purple)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
                             .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))

@@ -114,6 +114,49 @@ class KBeaconConnectionManager: NSObject, ObservableObject {
             firmwareVersion: commonCfg.getVersion()
         )
     }
+    
+    // MARK: - Configuration Writing
+    
+    /// Write TX power and advertising interval to a connected beacon
+    /// - Parameters:
+    ///   - beacon: The connected KBeacon device
+    ///   - txPower: TX power in dBm (valid range: -40 to 8)
+    ///   - intervalMs: Advertising interval in milliseconds
+    ///   - completion: Callback with (success, message)
+    func writeConfiguration(
+        to beacon: KBeacon,
+        txPower: Int,
+        intervalMs: Float,
+        completion: @escaping (Bool, String) -> Void
+    ) {
+        guard connectionState == .connected else {
+            completion(false, "Beacon not connected")
+            return
+        }
+        
+        guard let slotCfg = beacon.getSlotCfg(0) as? KBCfgAdvBase else {
+            completion(false, "Failed to get slot configuration")
+            return
+        }
+        
+        // Set TX Power
+        slotCfg.setTxPower(Int(txPower))
+        
+        // Set Advertising Interval
+        slotCfg.setAdvPeriod(intervalMs)
+        
+        // Write to device
+        beacon.modifyConfig(obj: slotCfg) { success, error in
+            DispatchQueue.main.async {
+                if success {
+                    completion(true, "Configuration written successfully")
+                } else {
+                    let errorMsg = error?.errorDescription ?? "Unknown error"
+                    completion(false, errorMsg)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - KBeaconMgrDelegate
