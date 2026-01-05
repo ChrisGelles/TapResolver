@@ -1086,6 +1086,15 @@ struct ARViewContainer: UIViewRepresentable {
             ghostMarkers.removeValue(forKey: mapPointID)
             ghostMarkerPositions.removeValue(forKey: mapPointID)
             arCalibrationCoordinator?.ghostMarkerPositions.removeValue(forKey: mapPointID)
+            
+            // Clear selection if this was the selected ghost
+            if arCalibrationCoordinator?.selectedGhostMapPointID == mapPointID {
+                arCalibrationCoordinator?.selectedGhostMapPointID = nil
+                arCalibrationCoordinator?.selectedGhostEstimatedPosition = nil
+                arCalibrationCoordinator?.nearbyButNotVisibleGhostID = nil
+                print("👻 [GHOST_REMOVE] Cleared selection for removed ghost")
+            }
+            
             print("🗑️ [GHOST_REMOVE] Removed ghost for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
         }
         
@@ -1100,6 +1109,14 @@ struct ARViewContainer: UIViewRepresentable {
             // Remove from tracking dictionary
             ghostMarkerPositions.removeValue(forKey: mapPointID)
             arCalibrationCoordinator?.ghostMarkerPositions.removeValue(forKey: mapPointID)
+            
+            // Clear selection if this was the selected ghost
+            if arCalibrationCoordinator?.selectedGhostMapPointID == mapPointID {
+                arCalibrationCoordinator?.selectedGhostMapPointID = nil
+                arCalibrationCoordinator?.selectedGhostEstimatedPosition = nil
+                arCalibrationCoordinator?.nearbyButNotVisibleGhostID = nil
+                print("👻 [GHOST_REMOVE] Cleared selection for removed ghost")
+            }
             
             // Find and remove the ghost node from scene
             let nodeName = "ghostMarker_\(mapPointID.uuidString)"
