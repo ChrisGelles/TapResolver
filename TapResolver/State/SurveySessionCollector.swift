@@ -17,13 +17,13 @@ import CoreMotion
 /// Lightweight snapshot for FacingRoseHUD - computed on demand, NOT @Published
 /// This avoids reactive overhead during time-critical data collection
 struct FacingSectorSnapshot {
-    let sectorHitCounts: [Int]      // 8 elements: [N, NE, E, SE, S, SW, W, NW]
+    let sectorTime_s: [Double]      // 8 elements: accumulated seconds per sector [N, NE, E, SE, S, SW, W, NW]
     let currentSectorIndex: Int     // 0-7, which sector device is currently facing
-    let currentHeading: Double       // 0-360°, for smooth rotation
+    let currentHeading: Double      // 0-360°, for smooth rotation
     let isValid: Bool               // false if no pose/session data available
     
     static let empty = FacingSectorSnapshot(
-        sectorHitCounts: [0, 0, 0, 0, 0, 0, 0, 0],
+        sectorTime_s: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         currentSectorIndex: 0,
         currentHeading: 0.0,
         isValid: false
@@ -167,9 +167,13 @@ class SurveySessionCollector: ObservableObject {
         /// Per-beacon sample buffers (beaconID → lean RSSI samples)
         var beaconSamples: [String: [RssiSample]] = [:]
         
-        /// Hit counts per facing sector during this session (for live HUD feedback)
+        /// Accumulated time per facing sector during this session (for live HUD feedback)
         /// Index 0 = N, 1 = NE, 2 = E, etc.
-        var sectorHitCounts: [Int] = [0, 0, 0, 0, 0, 0, 0, 0]
+        var sectorTime_s: [Double] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        
+        /// Tracking for time-based sector accumulation
+        var lastSectorIndex: Int? = nil
+        var lastSectorUpdateTime: TimeInterval = 0
         
         /// Elapsed milliseconds since session start
         func elapsedMs() -> Int64 {
@@ -585,9 +589,19 @@ class SurveySessionCollector: ObservableObject {
         
         session.beaconSamples[beaconID]?.append(sample)
         
-        // Increment facing sector hit count for HUD feedback
-        if let sectorIdx = currentFacingSectorIndex() {
-            session.sectorHitCounts[sectorIdx] += 1
+        // Accumulate time in facing sector for HUD feedback
+        let now = CACurrentMediaTime()
+        if let currentSector = currentFacingSectorIndex() {
+            if let lastSector = session.lastSectorIndex {
+                // Accumulate time since last update into the PREVIOUS sector
+                let delta = now - session.lastSectorUpdateTime
+                if delta > 0 && delta < 1.0 {  // Sanity check: ignore gaps > 1 second
+                    session.sectorTime_s[lastSector] += delta
+                }
+            }
+            // Update tracking for next iteration
+            session.lastSectorIndex = currentSector
+            session.lastSectorUpdateTime = now
         }
         
         activeSession = session
@@ -924,7 +938,7 @@ class SurveySessionCollector: ObservableObject {
               let arNorthAngle = computeARNorthAngleDegrees() else {
             // No pose or north data available
             return FacingSectorSnapshot(
-                sectorHitCounts: session.sectorHitCounts,
+                sectorTime_s: session.sectorTime_s,
                 currentSectorIndex: 0,
                 currentHeading: 0.0,
                 isValid: false
@@ -947,7 +961,7 @@ class SurveySessionCollector: ObservableObject {
         let sectorIndex = sectorIndexFromHeading(mapRelativeHeading)
         
         return FacingSectorSnapshot(
-            sectorHitCounts: session.sectorHitCounts,
+            sectorTime_s: session.sectorTime_s,
             currentSectorIndex: sectorIndex,
             currentHeading: mapRelativeHeading,
             isValid: true
@@ -974,14 +988,4 @@ class SurveySessionCollector: ObservableObject {
         return index
     }
     
-    /// Increment hit count for the sector corresponding to current device facing
-    /// Called when BLE reading is received during dwell
-    func incrementSectorHit(forHeadingDegrees heading: Double) {
-        guard activeSession != nil else { return }
-        let sectorIndex = sectorIndexFromHeading(heading)
-        activeSession?.sectorHitCounts[sectorIndex] += 1
-        
-        // DIAGNOSTIC: Uncomment to trace sector hits
-        // print("🧭 [FacingRose] Hit in sector \(sectorIndex) (heading: \(String(format: "%.1f", heading))°)")
-    }
 }

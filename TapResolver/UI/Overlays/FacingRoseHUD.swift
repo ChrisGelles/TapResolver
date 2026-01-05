@@ -50,7 +50,7 @@ struct FacingRoseHUD: View {
                                 
                                 let color = colorForSector(
                                     index: i,
-                                    hitCount: sectorData.sectorHitCounts[i],
+                                    time_s: sectorData.sectorTime_s[i],
                                     isCurrentFacing: sectorData.isValid && i == sectorData.currentSectorIndex
                                 )
                                 
@@ -180,17 +180,17 @@ struct FacingRoseHUD: View {
     
     // MARK: - Color Logic
     
-    private func colorForSector(index: Int, hitCount: Int, isCurrentFacing: Bool) -> Color {
+    private func colorForSector(index: Int, time_s: Double, isCurrentFacing: Bool) -> Color {
         if isCurrentFacing {
             return .yellow  // Always highlight current facing
         }
         
-        switch hitCount {
-        case 0:
+        // Time thresholds: 0s = red, <1s = orange, ≥1s = green
+        if time_s < 0.001 {
             return Color.red.opacity(0.7)
-        case 1...2:
+        } else if time_s < 1.0 {
             return Color.orange.opacity(0.8)
-        default:
+        } else {
             return Color.green.opacity(0.9)
         }
     }
