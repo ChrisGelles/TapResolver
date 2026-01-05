@@ -747,12 +747,34 @@ class SurveySessionCollector: ObservableObject {
             beacons: beaconMeasurements
         )
         
+        // Persist sector time data for angular coverage
+        // Convert sector times to heading-based calls for AngularCoverage
+        // Note: This approach converts sector index → center heading → back to sector index inside addTime().
+        //       We may opt to use a more direct, more efficient method in the near future.
+        let sectorCenterHeadings = [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0]
+        var sectorTimeData: [(heading: Double, time: Double)] = []
+        for i in 0..<8 {
+            if session.sectorTime_s[i] > 0.001 {  // Skip negligible values
+                sectorTimeData.append((heading: sectorCenterHeadings[i], time: session.sectorTime_s[i]))
+            }
+        }
+        
+        surveyTrace("finalizeSessionAsync", context: "sector times: \(sectorTimeData.map { "(\(Int($0.heading))°: \(String(format: "%.2f", $0.time))s)" }.joined(separator: ", "))")
+        
         surveyTrace("finalizeSessionAsync", context: "computation complete, hopping to MainActor for store write")
         
         // Hop to MainActor ONLY for the store write, then notify
         await MainActor.run {
             surveyTrace("storeWrite", context: "on MainActor, writing to store")
             store.addSession(surveySession, atMapCoordinate: mapCoordinate)
+            
+            // Apply sector time to angular coverage on the persisted point
+            let (nearestPoint, _) = store.findNearestPoint(to: mapCoordinate)
+            if let point = nearestPoint {
+                for (heading, time) in sectorTimeData {
+                    store.addAngularCoverageTime(time, atHeading: heading, toPointID: point.id)
+                }
+            }
             
             // Notify AR view to update marker colors (still on MainActor)
             NotificationCenter.default.post(

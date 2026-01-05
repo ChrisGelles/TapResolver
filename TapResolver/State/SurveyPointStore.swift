@@ -515,6 +515,23 @@ public class SurveyPointStore: ObservableObject {
         }
     }
     
+    /// Add time to a point's angular coverage at a specific heading
+    /// Called after session persistence to update facing coverage data
+    ///
+    /// - Note: POTENTIAL INEFFICIENCY - This method calls `save()` on each invocation.
+    ///   When called in a loop (e.g., 8 sectors), this results in 8 separate UserDefaults writes.
+    ///   Future improvement: Add batch method or deferred save flag to write once after all updates.
+    public func addAngularCoverageTime(_ seconds: Double, atHeading heading: Double, toPointID pointID: String) {
+        guard var point = surveyPoints[pointID] else {
+            print("⚠️ [SurveyPointStore] Cannot add angular coverage - point \(pointID) not found")
+            return
+        }
+        
+        point.quality.angularCoverage.addTime(seconds, atHeading: heading)
+        surveyPoints[pointID] = point
+        save()
+    }
+    
     /// Merge a session into an existing point with weighted coordinate averaging
     private func mergeSession(_ session: SurveySession, into pointID: String, atMapX: Double, atMapY: Double) {
         guard var point = surveyPoints[pointID] else {
@@ -529,7 +546,7 @@ public class SurveyPointStore: ObservableObject {
     
     /// Find the nearest survey point to given coordinates
     /// Returns (point, distance) or (nil, .infinity) if no points exist
-    private func findNearestPoint(to coordinate: CGPoint) -> (SurveyPoint?, Double) {
+    public func findNearestPoint(to coordinate: CGPoint) -> (SurveyPoint?, Double) {
         var nearest: SurveyPoint?
         var minDistance = Double.infinity
         

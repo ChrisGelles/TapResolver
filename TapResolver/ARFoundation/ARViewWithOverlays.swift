@@ -1166,7 +1166,8 @@ struct ARViewWithOverlays: View {
                     
                     // Survey Button Bar - show different layout for Zone Mode vs Calibration Crawl
                     // Ghost Confirm/Adjust takes UI priority
-                    if arCalibrationCoordinator.selectedGhostMapPointID == nil {
+                    // Hide during survey marker dwell
+                    if arCalibrationCoordinator.selectedGhostMapPointID == nil && !surveySessionCollector.isCollecting {
                         if arCalibrationCoordinator.isZoneCornerMode {
                             // ZONE MODE LAYOUT
                             SurveyButtonBar(
