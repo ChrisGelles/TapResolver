@@ -318,6 +318,20 @@ class SurveySessionCollector: ObservableObject {
             compassHeading: compassHeading
         )
         
+        // Load historical angular coverage from existing SurveyPoint (if any)
+        if let coord = mapCoordinate,
+           let store = surveyPointStore {
+            let (nearestPoint, distance) = store.findNearestPoint(to: coord)
+            if let existingPoint = nearestPoint, distance < 3.0 {
+                // Seed sector times from historical data
+                let historicalTimes = existingPoint.quality.angularCoverage.sectorTime_s
+                activeSession?.sectorTime_s = historicalTimes
+                print("📊 [SurveySessionCollector] Loaded historical angular coverage from point \(String(existingPoint.id.prefix(8))): \(historicalTimes.map { String(format: "%.1f", $0) })")
+            } else {
+                print("📊 [SurveySessionCollector] No historical angular coverage found for this location")
+            }
+        }
+        
         // Reset throttle state for new session
         lastSampleTime.removeAll()
         lastPoseSampleTime = 0
