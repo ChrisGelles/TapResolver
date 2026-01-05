@@ -24,53 +24,92 @@ struct FacingRoseHUD: View {
     @State private var updateTimer: Timer?
     
     var body: some View {
-        if isVisible {
-            Canvas { context, size in
-                let center = CGPoint(x: size.width / 2, y: size.height / 2)
-                let outerRadius = min(size.width, size.height) / 2
-                let innerRadius = outerRadius * innerRadiusRatio
-                
-                // Draw 8 wedges
-                for i in 0..<8 {
-                    let startAngle = Angle(degrees: Double(i) * 45.0 - 90.0 - 22.5)
-                    let endAngle = Angle(degrees: Double(i) * 45.0 - 90.0 + 22.5)
+        ZStack {
+            // Only render rose when we have valid data
+            if isVisible && sectorData.isValid {
+                ZStack {
+                    // Rose and labels together, rotating as a unit
+                    ZStack {
+                        Canvas { context, size in
+                            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                            let outerRadius = min(size.width, size.height) / 2
+                            let innerRadius = outerRadius * innerRadiusRatio
+                            
+                            // Draw 8 wedges
+                            for i in 0..<8 {
+                                let startAngle = Angle(degrees: Double(i) * 45.0 - 90.0 - 22.5)
+                                let endAngle = Angle(degrees: Double(i) * 45.0 - 90.0 + 22.5)
+                                
+                                let wedgePath = createWedgePath(
+                                    center: center,
+                                    innerRadius: innerRadius,
+                                    outerRadius: outerRadius,
+                                    startAngle: startAngle,
+                                    endAngle: endAngle
+                                )
+                                
+                                let color = colorForSector(
+                                    index: i,
+                                    hitCount: sectorData.sectorHitCounts[i],
+                                    isCurrentFacing: sectorData.isValid && i == sectorData.currentSectorIndex
+                                )
+                                
+                                context.fill(wedgePath, with: .color(color))
+                                context.stroke(wedgePath, with: .color(.black.opacity(0.3)), lineWidth: 1)
+                            }
+                            
+                            drawCardinalTicks(context: context, center: center, radius: outerRadius)
+                        }
+                        .frame(width: diameter, height: diameter)
+                        
+                        // Cardinal direction labels - fixed positions, rotated by parent ZStack
+                        let cardinals = [("N", 0.0), ("E", 90.0), ("S", 180.0), ("W", 270.0)]
+                        let centerPt = diameter / 2
+                        let labelRadius = diameter * 0.28
+                        
+                        ForEach(cardinals, id: \.0) { label, cardinalAngle in
+                            let baseAngle = cardinalAngle - 90.0  // -90 puts N at top (screen coords)
+                            let angleRadians = baseAngle * .pi / 180.0
+                            let x = centerPt + labelRadius * CGFloat(cos(angleRadians))
+                            let y = centerPt + labelRadius * CGFloat(sin(angleRadians))
+                            
+                            Text(label)
+                                .font(.system(size: 14, weight: .heavy))
+                                .foregroundColor(.white)
+                                .position(x: x, y: y)
+                        }
+                    }
+                    .rotationEffect(Angle(degrees: -sectorData.currentHeading))
                     
-                    let wedgePath = createWedgePath(
-                        center: center,
-                        innerRadius: innerRadius,
-                        outerRadius: outerRadius,
-                        startAngle: startAngle,
-                        endAngle: endAngle
-                    )
-                    
-                    let color = colorForSector(
-                        index: i,
-                        hitCount: sectorData.sectorHitCounts[i],
-                        isCurrentFacing: sectorData.isValid && i == sectorData.currentSectorIndex
-                    )
-                    
-                    context.fill(wedgePath, with: .color(color))
-                    
-                    // Subtle border between wedges
-                    context.stroke(wedgePath, with: .color(.black.opacity(0.3)), lineWidth: 1)
+                    // Fixed facing indicator at top
+                    Image(systemName: "arrowtriangle.down.fill")
+                        .font(.system(size: 10))
+                        .foregroundColor(.yellow)
+                        .position(x: diameter / 2, y: 8)
                 }
-                
-                // Draw cardinal direction indicators (small ticks)
-                drawCardinalTicks(context: context, center: center, radius: outerRadius)
-                
+                .frame(width: diameter, height: diameter)
+                .drawingGroup()
             }
-            .frame(width: diameter, height: diameter)
-            .drawingGroup() // Flatten for compositor efficiency
-            .onAppear {
+        }
+        // CRITICAL: These modifiers are OUTSIDE the conditional so they always fire
+        .onChange(of: isVisible) { oldValue, newValue in
+            if newValue {
                 startUpdateTimer()
-                // DIAGNOSTIC: Uncomment to confirm HUD activation
-                print("🧭 [FacingRoseHUD] Visible - timer started")
-            }
-            .onDisappear {
+                print("🧭 [FacingRoseHUD] isVisible changed to true - timer started")
+            } else {
                 stopUpdateTimer()
-                // DIAGNOSTIC: Uncomment to confirm HUD deactivation
-                print("🧭 [FacingRoseHUD] Hidden - timer stopped")
+                print("🧭 [FacingRoseHUD] isVisible changed to false - timer stopped")
             }
+        }
+        .onAppear {
+            if isVisible {
+                startUpdateTimer()
+                print("🧭 [FacingRoseHUD] onAppear (visible) - timer started")
+            }
+        }
+        .onDisappear {
+            stopUpdateTimer()
+            print("🧭 [FacingRoseHUD] onDisappear - timer stopped")
         }
     }
     

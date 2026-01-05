@@ -19,11 +19,13 @@ import CoreMotion
 struct FacingSectorSnapshot {
     let sectorHitCounts: [Int]      // 8 elements: [N, NE, E, SE, S, SW, W, NW]
     let currentSectorIndex: Int     // 0-7, which sector device is currently facing
+    let currentHeading: Double       // 0-360°, for smooth rotation
     let isValid: Bool               // false if no pose/session data available
     
     static let empty = FacingSectorSnapshot(
         sectorHitCounts: [0, 0, 0, 0, 0, 0, 0, 0],
         currentSectorIndex: 0,
+        currentHeading: 0.0,
         isValid: false
     )
 }
@@ -918,21 +920,36 @@ class SurveySessionCollector: ObservableObject {
             return .empty
         }
         
-        guard let sectorIndex = currentFacingSectorIndex() else {
-            // No pose data available
+        guard let latestPose = session.poseTrack.last,
+              let arNorthAngle = computeARNorthAngleDegrees() else {
+            // No pose or north data available
             return FacingSectorSnapshot(
                 sectorHitCounts: session.sectorHitCounts,
                 currentSectorIndex: 0,
+                currentHeading: 0.0,
                 isValid: false
             )
         }
         
-        // DIAGNOSTIC: Uncomment to debug facing calculation
-        // print("🧭 [FacingRose] Sector \(sectorIndex) | Hits: \(session.sectorHitCounts)")
+        // Compute heading (same logic as currentFacingSectorIndex but returns heading)
+        let deviceYawRadians = yawFromQuaternion(
+            qx: latestPose.qx, qy: latestPose.qy,
+            qz: latestPose.qz, qw: latestPose.qw
+        )
+        let deviceYawDegrees = Double(deviceYawRadians) * 180.0 / .pi
+        
+        var mapRelativeHeading = 180.0 - arNorthAngle - deviceYawDegrees
+        
+        // Normalize to 0-360
+        while mapRelativeHeading < 0 { mapRelativeHeading += 360 }
+        while mapRelativeHeading >= 360 { mapRelativeHeading -= 360 }
+        
+        let sectorIndex = sectorIndexFromHeading(mapRelativeHeading)
         
         return FacingSectorSnapshot(
             sectorHitCounts: session.sectorHitCounts,
             currentSectorIndex: sectorIndex,
+            currentHeading: mapRelativeHeading,
             isValid: true
         )
     }
