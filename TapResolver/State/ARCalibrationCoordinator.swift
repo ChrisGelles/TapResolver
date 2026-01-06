@@ -250,6 +250,12 @@ final class ARCalibrationCoordinator: ObservableObject {
         return cachedCanonicalToSessionTransform
     }
     
+    /// Returns the rotation angle (in radians) from session to canonical frame, if available.
+    /// This can be used to compute AR North direction when bilinear corners aren't available.
+    public var sessionToCanonicalRotationRadians: Float? {
+        return cachedCanonicalToSessionTransform?.rotationY
+    }
+    
     // MARK: - Safe Store Accessors
     // These provide clear crash messages if stores are accessed before configure() is called.
     // In Step 4, all internal usages of mapStore/arStore/triangleStore will use these instead.

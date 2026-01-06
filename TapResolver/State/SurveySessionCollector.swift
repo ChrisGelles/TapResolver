@@ -890,8 +890,43 @@ class SurveySessionCollector: ObservableObject {
         }
         
         // Check if bilinear projection is available (Zone Corner Calibration completed)
-        guard coordinator.hasBilinearCorners else {
-            print("⚠️ [AR_NORTH] Bilinear corners not available (Zone Corner Calibration required)")
+        if !coordinator.hasBilinearCorners {
+            // Fallback: Try using cached session transform from Triangle Patch calibration
+            if let rotationRadians = coordinator.sessionToCanonicalRotationRadians,
+               let northCanonical = north.canonicalPosition,
+               let southCanonical = south.canonicalPosition {
+                
+                // Compute north direction in canonical space
+                let canonicalNorthDir = simd_normalize(SIMD3<Float>(
+                    northCanonical.x - southCanonical.x,
+                    0,  // Ignore Y for direction calculation
+                    northCanonical.z - southCanonical.z
+                ))
+                
+                // Transform direction to session space (inverse rotation only needed for direction)
+                // Session→Canonical uses +rotationY, so Canonical→Session uses -rotationY
+                let inverseRotation = -rotationRadians
+                let cosR = cos(inverseRotation)
+                let sinR = sin(inverseRotation)
+                let sessionNorthDir = SIMD3<Float>(
+                    canonicalNorthDir.x * cosR - canonicalNorthDir.z * sinR,
+                    0,
+                    canonicalNorthDir.x * sinR + canonicalNorthDir.z * cosR
+                )
+                
+                // Compute angle from +X axis in XZ plane
+                let northAngleRadians = atan2(Double(sessionNorthDir.z), Double(sessionNorthDir.x))
+                let northAngleDegrees = northAngleRadians * 180.0 / .pi
+                
+                print("🧭 [AR_NORTH] Using session transform fallback:")
+                print("   Canonical north dir: (\(String(format: "%.3f", canonicalNorthDir.x)), \(String(format: "%.3f", canonicalNorthDir.z)))")
+                print("   Session north dir: (\(String(format: "%.3f", sessionNorthDir.x)), \(String(format: "%.3f", sessionNorthDir.z)))")
+                print("   AR north angle: \(String(format: "%.1f", northAngleDegrees))°")
+                
+                return northAngleDegrees
+            }
+            
+            print("⚠️ [AR_NORTH] Bilinear corners not available and session transform fallback unavailable")
             return nil
         }
         
