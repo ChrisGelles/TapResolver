@@ -116,7 +116,14 @@ struct TapResolverApp: App {
                     )
                     
                     // Configure survey session collector
-                    surveySessionCollector.configure(surveyPointStore: surveyPointStore, bluetoothScanner: btScanner, beaconLists: beaconLists, orientationManager: orientationManager)
+                    surveySessionCollector.configure(
+                        surveyPointStore: surveyPointStore,
+                        bluetoothScanner: btScanner,
+                        beaconLists: beaconLists,
+                        orientationManager: orientationManager,
+                        mapPointStore: mapPointStore,
+                        arCalibrationCoordinator: arCalibrationCoordinator
+                    )
                     
                     // Configure ZoneStore with dependencies and load zones
                     zoneStore.configure(mapPointStore: mapPointStore, triangleStore: trianglePatchStore)
