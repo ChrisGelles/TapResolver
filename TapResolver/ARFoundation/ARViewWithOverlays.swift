@@ -334,6 +334,29 @@ struct ARViewWithOverlays: View {
                         
                         arCalibrationCoordinator.registerZoneCornerAnchor(mapPointID: currentVertexID, marker: marker)
                         print("✅ [ZONE_CORNER_TRACE] Registered zone corner for MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
+                        
+                        // Capture photo for Zone Corner (same logic as Triangle Calibration)
+                        if let mapPointForPhoto = mapPointStore.points.first(where: { $0.id == currentVertexID }) {
+                            if let coordinator = ARViewContainer.Coordinator.current {
+                                coordinator.captureARFrame { image in
+                                    guard let image = image else {
+                                        print("⚠️ [PHOTO_TRACE] Failed to capture AR frame for Zone Corner photo")
+                                        return
+                                    }
+                                    if let imageData = image.jpegData(compressionQuality: 0.8) {
+                                        if mapPointStore.savePhotoToDisk(for: currentVertexID, photoData: imageData) {
+                                            if let index = mapPointStore.points.firstIndex(where: { $0.id == currentVertexID }) {
+                                                mapPointStore.points[index].photoCapturedAtPosition = mapPointForPhoto.mapPoint
+                                                mapPointStore.points[index].photoOutdated = false
+                                                mapPointStore.save()
+                                            }
+                                            print("📸 [PHOTO_TRACE] Captured photo for Zone Corner MapPoint \(String(currentVertexID.uuidString.prefix(8)))")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
                         return
                         
                     } else if isZoneCornerGhostConfirm, let ghostID = zoneCornerGhostMapPointID {
@@ -359,6 +382,28 @@ struct ARViewWithOverlays: View {
                             // Corner vertex - use full registration flow
                             arCalibrationCoordinator.registerZoneCornerAnchor(mapPointID: ghostID, marker: marker)
                             print("✅ [ZONE_CORNER_GHOST] Registered corner ghost for MapPoint \(String(ghostID.uuidString.prefix(8)))")
+                            
+                            // Capture photo for Zone Corner ghost (same logic as Triangle Calibration)
+                            if let mapPointForPhoto = mapPointStore.points.first(where: { $0.id == ghostID }) {
+                                if let coordinator = ARViewContainer.Coordinator.current {
+                                    coordinator.captureARFrame { image in
+                                        guard let image = image else {
+                                            print("⚠️ [PHOTO_TRACE] Failed to capture AR frame for Zone Corner ghost photo")
+                                            return
+                                        }
+                                        if let imageData = image.jpegData(compressionQuality: 0.8) {
+                                            if mapPointStore.savePhotoToDisk(for: ghostID, photoData: imageData) {
+                                                if let index = mapPointStore.points.firstIndex(where: { $0.id == ghostID }) {
+                                                    mapPointStore.points[index].photoCapturedAtPosition = mapPointForPhoto.mapPoint
+                                                    mapPointStore.points[index].photoOutdated = false
+                                                    mapPointStore.save()
+                                                }
+                                                print("📸 [PHOTO_TRACE] Captured photo for Zone Corner ghost MapPoint \(String(ghostID.uuidString.prefix(8)))")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         } else {
                             // Fill point - register marker→MapPoint mapping directly
                             // Extract original ghost position for distortion vector calculation
