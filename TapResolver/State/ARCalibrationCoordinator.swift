@@ -2504,7 +2504,6 @@ final class ARCalibrationCoordinator: ObservableObject {
             avgDistortion /= Float(distortionHistory.count)
             print("   AVG: (\(String(format: "%.3f", avgDistortion.x)), \(String(format: "%.3f", avgDistortion.y)), \(String(format: "%.3f", avgDistortion.z)))")
             print("   Magnitude: \(String(format: "%.3f", simd_length(avgDistortion)))m")
-            print("   ⚠️ [NOT APPLIED] This correction is stored but not used in prediction!")
         } else {
             print("📐 [GHOST_CALC] No historical distortion vectors for this point")
         }
@@ -2526,11 +2525,33 @@ final class ARCalibrationCoordinator: ObservableObject {
             print("📏 [GHOST_CALC] No leg measurements available for this triangle")
         }
         
+        // Apply consensusDistortionVector from Zone Mesh history (same pattern as plantGhostsForZoneCornerBilinear)
+        var finalPosition = sessionPosition
+        if let distortion = targetMapPoint.consensusDistortionVector {
+            let horizontalCorrection = simd_float3(distortion.x, 0, distortion.z)
+            finalPosition += horizontalCorrection
+            let correctionMagnitude = simd_length(horizontalCorrection)
+            print("📐 [GHOST_CORRECTION] \(String(targetMapPointID.uuidString.prefix(8))): applied consensusDistortionVector (\(String(format: "%.3f", distortion.x)), \(String(format: "%.3f", distortion.z)))m, magnitude=\(String(format: "%.3f", correctionMagnitude))m")
+        } else {
+            print("📐 [GHOST_CALC] No consensusDistortionVector for this point (bilinear only)")
+        }
+        
+        // Ground ghost to session floor level (same pattern as plantGhostsForZoneCornerBilinear)
+        // Use Y from first placed marker as ground reference
+        if let firstPlacedID = placedMarkers.first,
+           let groundY = mapPointARPositions[firstPlacedID]?.y {
+            let originalY = finalPosition.y
+            finalPosition.y = groundY
+            print("📐 [GHOST_GROUND] Grounded Y from \(String(format: "%.3f", originalY)) to \(String(format: "%.3f", groundY))m")
+        } else {
+            print("⚠️ [GHOST_GROUND] No placed marker for ground reference, using raw Y=\(String(format: "%.3f", finalPosition.y))")
+        }
+        
         // Task 6: Final position diagnostic
-        print("👻 [GHOST_CALC] Final ghost position: (\(String(format: "%.3f", sessionPosition.x)), \(String(format: "%.3f", sessionPosition.y)), \(String(format: "%.3f", sessionPosition.z)))")
+        print("👻 [GHOST_CALC] Final ghost position: (\(String(format: "%.3f", finalPosition.x)), \(String(format: "%.3f", finalPosition.y)), \(String(format: "%.3f", finalPosition.z)))")
         print("═══════════════════════════════════════════════════════════")
         
-        return sessionPosition
+        return finalPosition
     }
     
     /// Calculate ghost position for 3rd vertex when only 2 markers are placed
