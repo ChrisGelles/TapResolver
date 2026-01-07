@@ -81,6 +81,7 @@ struct LocationMenuView: View {
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
     @EnvironmentObject private var mapPointStore: MapPointStore
+    @EnvironmentObject private var backupExportOptions: BackupExportOptions
     @State private var locationSummaries: [LocationSummary] = []
     @State private var showingImportSheet = false
     @State private var showingPhotosPicker = false
@@ -94,6 +95,8 @@ struct LocationMenuView: View {
     @State private var showRestorePicker: Bool = false
     @State private var showRestoreConfirmation: Bool = false
     @State private var backupURL: URL?
+    @State private var showBackupShareSheet: Bool = false
+    @State private var showBackupMethodChoice: Bool = false
     
     // Import state
     @State private var showingImportPicker = false
@@ -330,11 +333,32 @@ struct LocationMenuView: View {
                 isPresented: $showBackupPicker,
                 document: backupURL.map { ZIPDocument(url: $0) },
                 contentType: UTType(filenameExtension: "tapmap") ?? .zip,
-                defaultFilename: backupURL?.lastPathComponent ?? "TapResolver_Backup.tapmap"
+                defaultFilename: backupExportOptions.fullFilename()
             ) { result in
                 if case .success(let url) = result {
                     print("✅ Backup saved to: \(url)")
                 }
+            }
+            .sheet(isPresented: $showBackupShareSheet) {
+                if let url = backupURL {
+                    ShareSheet(items: [url])
+                }
+            }
+            .alert("Export Backup", isPresented: $showBackupMethodChoice) {
+                TextField("Filename", text: $backupExportOptions.editableFilename)
+                Button("AirDrop / Share") {
+                    finalizeBackup(useShareSheet: true)
+                }
+                Button("Save to Files") {
+                    finalizeBackup(useShareSheet: false)
+                }
+                Button("Cancel", role: .cancel) {
+                    showBackupMethodChoice = false
+                    backupMode = .none
+                    selectedLocationIDs.removeAll()
+                }
+            } message: {
+                Text("Choose how to export your backup")
             }
             .fileImporter(
                 isPresented: $showRestorePicker,
@@ -607,18 +631,58 @@ struct LocationMenuView: View {
     }
 
     private func performBackup() {
+        // Get location names for filename generation
+        let selectedNames = locationSummaries
+            .filter { selectedLocationIDs.contains($0.id) }
+            .map { $0.name }
+        
+        // Generate default filename and set it as editable
+        let defaultName = backupExportOptions.generateDefaultFilename(locationNames: selectedNames)
+        backupExportOptions.editableFilename = defaultName
+        
         do {
             let zipURL = try UserDataBackup.backupLocations(
                 locationIDs: Array(selectedLocationIDs),
                 includeAssets: includeAssets
             )
             backupURL = zipURL
-            showBackupPicker = true
-            backupMode = .none
-            selectedLocationIDs.removeAll()
+            backupExportOptions.lastExportURL = zipURL
+            
+            // Show method choice (AirDrop vs Save to Files)
+            showBackupMethodChoice = true
         } catch {
             print("❌ Backup failed: \(error)")
         }
+    }
+    
+    private func finalizeBackup(useShareSheet: Bool) {
+        if useShareSheet {
+            // Rename file to user's chosen filename before sharing
+            if let originalURL = backupURL {
+                let tempDir = FileManager.default.temporaryDirectory
+                let newFilename = backupExportOptions.fullFilename()
+                let newURL = tempDir.appendingPathComponent(newFilename)
+                
+                // Remove existing file if present
+                try? FileManager.default.removeItem(at: newURL)
+                
+                // Rename the file
+                do {
+                    try FileManager.default.moveItem(at: originalURL, to: newURL)
+                    backupURL = newURL
+                    backupExportOptions.lastExportURL = newURL
+                    print("✅ Renamed backup file to: \(newFilename)")
+                } catch {
+                    print("⚠️ Failed to rename backup file: \(error), using original name")
+                }
+            }
+            showBackupShareSheet = true
+        } else {
+            showBackupPicker = true
+        }
+        backupMode = .none
+        selectedLocationIDs.removeAll()
+        showBackupMethodChoice = false
     }
 
     private func performRestore(from url: URL) {

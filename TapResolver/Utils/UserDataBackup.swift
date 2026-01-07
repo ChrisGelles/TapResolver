@@ -29,7 +29,7 @@ enum UserDataBackup {
             .replacingOccurrences(of: "T", with: "_")
             .prefix(19) // YYYY-MM-DD_HHmmss
         
-        let zipFileName = "TapResolver_Backup_\(timestamp).tapmap"
+        let zipFileName = "TapResolver_Backup_\(timestamp).tapmap"  // Temp name, final name set by user
         let tempDir = FileManager.default.temporaryDirectory
         let zipURL = tempDir.appendingPathComponent(zipFileName)
         
@@ -180,6 +180,34 @@ enum UserDataBackup {
         } else {
             print("   ⏭️ Skipping assets (user chose not to include)")
         }
+        
+        // 5. Backup map-points photos (reference photos stored on disk)
+        let mapPointsDir = locationDir.appendingPathComponent("map-points", isDirectory: true)
+        if FileManager.default.fileExists(atPath: mapPointsDir.path) {
+            do {
+                let photoFiles = try FileManager.default.contentsOfDirectory(at: mapPointsDir, includingPropertiesForKeys: nil)
+                let imageFiles = photoFiles.filter { ["jpg", "jpeg", "png"].contains($0.pathExtension.lowercased()) }
+                
+                if !imageFiles.isEmpty {
+                    print("   📷 Found \(imageFiles.count) reference photo(s) in map-points directory:")
+                    for photoFile in imageFiles {
+                        let fileName = photoFile.lastPathComponent
+                        let fileSize = (try? FileManager.default.attributesOfItem(atPath: photoFile.path)[.size] as? Int64) ?? 0
+                        let fileSizeKB = Double(fileSize) / 1024.0
+                        
+                        print("      • \(fileName) (\(String(format: "%.1f", fileSizeKB)) KB)")
+                        
+                        let photoData = try Data(contentsOf: photoFile)
+                        try archive.addEntry(with: "\(locationID)/map-points/\(fileName)", type: .file, uncompressedSize: UInt32(photoData.count), provider: { position, size in
+                            return photoData.subdata(in: position..<position+size)
+                        })
+                    }
+                    print("   ✓ Backed up \(imageFiles.count) reference photo(s)")
+                }
+            } catch {
+                print("   ⚠️ Error backing up map-points: \(error.localizedDescription)")
+            }
+        }
     }
     
     private static func backupUserDefaults(locationID: String) throws -> [String: Any] {
@@ -310,6 +338,18 @@ enum UserDataBackup {
             try? FileManager.default.removeItem(at: targetAssetsDir) // Clear old assets
             try FileManager.default.copyItem(at: assetsDir, to: targetAssetsDir)
             print("   ✓ assets folder")
+        }
+        
+        // 5. Restore map-points photos
+        let mapPointsDir = extractedDir.appendingPathComponent("map-points")
+        if FileManager.default.fileExists(atPath: mapPointsDir.path) {
+            let targetMapPointsDir = targetLocationDir.appendingPathComponent("map-points", isDirectory: true)
+            try? FileManager.default.removeItem(at: targetMapPointsDir) // Clear old photos
+            try FileManager.default.copyItem(at: mapPointsDir, to: targetMapPointsDir)
+            
+            // Count restored photos for logging
+            let photoCount = (try? FileManager.default.contentsOfDirectory(at: targetMapPointsDir, includingPropertiesForKeys: nil))?.count ?? 0
+            print("   ✓ map-points folder (\(photoCount) photo(s))")
         }
     }
     

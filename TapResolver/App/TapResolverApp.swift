@@ -50,6 +50,7 @@ struct TapResolverApp: App {
     @StateObject private var arCalibrationCoordinator: ARCalibrationCoordinator
     @StateObject private var zoneStore = ZoneStore()
     @StateObject private var svgExportOptions = SVGExportOptions()
+    @StateObject private var backupExportOptions = BackupExportOptions()
     
     @State private var showAuthorNamePrompt = AppSettings.needsAuthorName
     
@@ -98,6 +99,7 @@ struct TapResolverApp: App {
                 .environmentObject(arCalibrationCoordinator)
                 .environmentObject(zoneStore)
                 .environmentObject(svgExportOptions)
+                .environmentObject(backupExportOptions)
                 .onAppear {
                     // Configure coordinator with actual store instances
                     arCalibrationCoordinator.configure(
