@@ -1855,6 +1855,42 @@ private struct DebugSettingsPanel: View {
                         }
                         .buttonStyle(.plain)
                         
+                        // MARK: - Data Recovery
+                        
+                        // Diagnose Beacon Dots Button
+                        Button {
+                            diagnoseBeaconDots()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "magnifyingglass.circle")
+                                    .font(.system(size: 24))
+                                Text("Diagnose Dots")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Recover Beacon Dots Button
+                        Button {
+                            recoverBeaconDotsFromUserDefaults()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "arrow.counterclockwise.circle.fill")
+                                    .font(.system(size: 24))
+                                Text("Recover Dots")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
                         // === END ONE-TIME CLEANUP UTILITY ===
                     }
                     .padding(.horizontal, 20)
@@ -2306,6 +2342,292 @@ private struct DebugSettingsPanel: View {
         } catch {
             print("❌ [SVG_EXPORT] Failed: \(error)")
         }
+    }
+    
+    // MARK: - Beacon Dot Recovery
+    
+    private func diagnoseBeaconDots() {
+        let locationID = PersistenceContext.shared.locationID
+        let ctx = PersistenceContext.shared
+        let ud = UserDefaults.standard
+        
+        print("\n" + String(repeating: "=", count: 70))
+        print("🔍 COMPREHENSIVE BEACON DOT DIAGNOSTIC")
+        print(String(repeating: "=", count: 70))
+        print("Location: \(locationID)")
+        print("Time: \(ISO8601DateFormatter().string(from: Date()))")
+        
+        // MARK: - 1. Check dots.json file
+        print("\n📄 DOTS.JSON FILE:")
+        let dotsFile = ctx.locationDir.appendingPathComponent("dots.json")
+        print("   Path: \(dotsFile.path)")
+        
+        var fileDotsCount = 0
+        var fileBeaconIDs: Set<String> = []
+        
+        if FileManager.default.fileExists(atPath: dotsFile.path) {
+            if let data = try? Data(contentsOf: dotsFile) {
+                print("   ✓ Exists, size: \(data.count) bytes")
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                    fileDotsCount = json.count
+                    print("   ✓ Contains \(json.count) dots:")
+                    for dot in json {
+                        if let beaconID = dot["beaconID"] as? String {
+                            fileBeaconIDs.insert(beaconID)
+                            let x = dot["x"] as? Double ?? 0
+                            let y = dot["y"] as? Double ?? 0
+                            let elev = dot["elevation"] as? Double ?? 0
+                            let tx = dot["txPower"] as? Int
+                            print("      • \(beaconID): (\(String(format: "%.0f", x)), \(String(format: "%.0f", y))) elev=\(String(format: "%.2f", elev))m tx=\(tx.map { "\($0)dBm" } ?? "nil")")
+                        }
+                    }
+                } else {
+                    print("   ⚠️ File exists but failed to parse as JSON")
+                }
+            } else {
+                print("   ⚠️ File exists but failed to read")
+            }
+        } else {
+            print("   ❌ FILE DOES NOT EXIST")
+        }
+        
+        // MARK: - 2. Check UserDefaults BeaconDots_v1 (fallback)
+        print("\n📦 USERDEFAULTS BeaconDots_v1 (fallback):")
+        let dotsKey = "locations.\(locationID).BeaconDots_v1"
+        
+        var udDotsCount = 0
+        var udBeaconIDs: Set<String> = []
+        
+        if let data = ud.data(forKey: dotsKey) {
+            print("   ✓ Exists, size: \(data.count) bytes")
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                udDotsCount = json.count
+                print("   ✓ Contains \(json.count) dots:")
+                for dot in json {
+                    if let beaconID = dot["beaconID"] as? String {
+                        udBeaconIDs.insert(beaconID)
+                        let x = dot["x"] as? Double ?? 0
+                        let y = dot["y"] as? Double ?? 0
+                        let elev = dot["elevation"] as? Double ?? 0
+                        print("      • \(beaconID): (\(String(format: "%.0f", x)), \(String(format: "%.0f", y))) elev=\(String(format: "%.2f", elev))m")
+                    }
+                }
+            }
+        } else {
+            print("   ❌ NO DATA at key: \(dotsKey)")
+        }
+        
+        // MARK: - 3. Check Locks
+        print("\n🔒 USERDEFAULTS BeaconLocks_v1:")
+        let locksKey = "locations.\(locationID).BeaconLocks_v1"
+        if let data = ud.data(forKey: locksKey) {
+            print("   ✓ Exists, size: \(data.count) bytes")
+            if let wrapper = try? JSONDecoder().decode([String: [String: Bool]].self, from: data),
+               let locks = wrapper["locks"] {
+                let lockedCount = locks.filter { $0.value }.count
+                print("   ✓ \(locks.count) entries, \(lockedCount) locked:")
+                for (beaconID, isLocked) in locks.sorted(by: { $0.key < $1.key }) {
+                    print("      • \(beaconID): \(isLocked ? "🔒 LOCKED" : "🔓 unlocked")")
+                }
+            } else if let locks = try? JSONDecoder().decode([String: Bool].self, from: data) {
+                // Alternative format without wrapper
+                let lockedCount = locks.filter { $0.value }.count
+                print("   ✓ \(locks.count) entries, \(lockedCount) locked")
+            } else {
+                print("   ⚠️ Failed to decode locks")
+            }
+        } else {
+            print("   ❌ NO DATA at key: \(locksKey)")
+        }
+        
+        // MARK: - 4. Check Elevations
+        print("\n📏 USERDEFAULTS BeaconElevations_v1:")
+        let elevKey = "locations.\(locationID).BeaconElevations_v1"
+        if let data = ud.data(forKey: elevKey) {
+            print("   ✓ Exists, size: \(data.count) bytes")
+            if let elevations = try? JSONDecoder().decode([String: Double].self, from: data) {
+                print("   ✓ \(elevations.count) entries:")
+                for (beaconID, elev) in elevations.sorted(by: { $0.key < $1.key }) {
+                    print("      • \(beaconID): \(String(format: "%.2f", elev))m")
+                }
+            } else {
+                print("   ⚠️ Failed to decode elevations")
+            }
+        } else {
+            print("   ❌ NO DATA at key: \(elevKey)")
+        }
+        
+        // MARK: - 5. Check TxPower
+        print("\n📡 USERDEFAULTS BeaconTxPower_v1:")
+        let txKey = "locations.\(locationID).BeaconTxPower_v1"
+        if let data = ud.data(forKey: txKey) {
+            print("   ✓ Exists, size: \(data.count) bytes")
+            if let txPower = try? JSONDecoder().decode([String: Int].self, from: data) {
+                print("   ✓ \(txPower.count) entries:")
+                for (beaconID, tx) in txPower.sorted(by: { $0.key < $1.key }) {
+                    print("      • \(beaconID): \(tx) dBm")
+                }
+            } else {
+                print("   ⚠️ Failed to decode txPower")
+            }
+        } else {
+            print("   ❌ NO DATA at key: \(txKey)")
+        }
+        
+        // MARK: - 6. Check Advertising Intervals
+        print("\n⏱️ USERDEFAULTS advertisingIntervals:")
+        let intervalKey = "locations.\(locationID).advertisingIntervals"
+        if let data = ud.data(forKey: intervalKey) {
+            print("   ✓ Exists, size: \(data.count) bytes")
+            if let intervals = try? JSONDecoder().decode([String: Double].self, from: data) {
+                print("   ✓ \(intervals.count) entries:")
+                for (beaconID, interval) in intervals.sorted(by: { $0.key < $1.key }) {
+                    print("      • \(beaconID): \(Int(interval))ms")
+                }
+            }
+        } else {
+            print("   ❌ NO DATA at key: \(intervalKey)")
+        }
+        
+        // MARK: - 7. Comparison
+        print("\n" + String(repeating: "-", count: 70))
+        print("📊 COMPARISON:")
+        print("   dots.json:    \(fileDotsCount) dots")
+        print("   UserDefaults: \(udDotsCount) dots")
+        
+        let missingInFile = udBeaconIDs.subtracting(fileBeaconIDs)
+        let missingInUD = fileBeaconIDs.subtracting(udBeaconIDs)
+        
+        if !missingInFile.isEmpty {
+            print("\n   ⚠️ In UserDefaults but NOT in dots.json:")
+            for id in missingInFile.sorted() {
+                print("      • \(id)")
+            }
+        }
+        
+        if !missingInUD.isEmpty {
+            print("\n   ⚠️ In dots.json but NOT in UserDefaults:")
+            for id in missingInUD.sorted() {
+                print("      • \(id)")
+            }
+        }
+        
+        if missingInFile.isEmpty && missingInUD.isEmpty && fileDotsCount == udDotsCount {
+            print("\n   ✅ File and UserDefaults are in sync")
+        }
+        
+        print("\n" + String(repeating: "=", count: 70) + "\n")
+    }
+    
+    private func recoverBeaconDotsFromUserDefaults() {
+        let locationID = PersistenceContext.shared.locationID
+        let ctx = PersistenceContext.shared
+        let ud = UserDefaults.standard
+        
+        print("\n" + String(repeating: "=", count: 70))
+        print("🔧 FULL BEACON DOT RECOVERY FROM USERDEFAULTS")
+        print(String(repeating: "=", count: 70))
+        print("Location: \(locationID)")
+        
+        var recoveredItems: [String] = []
+        var failedItems: [String] = []
+        
+        // MARK: - 1. Recover dots.json from BeaconDots_v1
+        let dotsKey = "locations.\(locationID).BeaconDots_v1"
+        if let data = ud.data(forKey: dotsKey) {
+            let dotsFile = ctx.locationDir.appendingPathComponent("dots.json")
+            do {
+                try FileManager.default.createDirectory(at: ctx.locationDir, withIntermediateDirectories: true)
+                try data.write(to: dotsFile)
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                    recoveredItems.append("dots.json (\(json.count) dots)")
+                    print("✓ Recovered dots.json with \(json.count) dots")
+                } else {
+                    recoveredItems.append("dots.json (raw data)")
+                    print("✓ Recovered dots.json (could not count)")
+                }
+            } catch {
+                failedItems.append("dots.json: \(error.localizedDescription)")
+                print("❌ Failed to write dots.json: \(error)")
+            }
+        } else {
+            failedItems.append("dots.json: No source data in UserDefaults")
+            print("⚠️ No BeaconDots_v1 data to recover")
+        }
+        
+        // MARK: - 2. Verify Locks exist (already in UserDefaults, just report)
+        let locksKey = "locations.\(locationID).BeaconLocks_v1"
+        if let data = ud.data(forKey: locksKey) {
+            if let wrapper = try? JSONDecoder().decode([String: [String: Bool]].self, from: data),
+               let locks = wrapper["locks"] {
+                let lockedCount = locks.filter { $0.value }.count
+                print("✓ Locks key exists: \(locks.count) entries, \(lockedCount) locked")
+                recoveredItems.append("locks (\(lockedCount) locked)")
+            } else {
+                print("✓ Locks key exists but format unclear")
+            }
+        } else {
+            print("⚠️ No locks data found")
+        }
+        
+        // MARK: - 3. Verify Elevations exist
+        let elevKey = "locations.\(locationID).BeaconElevations_v1"
+        if let data = ud.data(forKey: elevKey) {
+            if let elevations = try? JSONDecoder().decode([String: Double].self, from: data) {
+                print("✓ Elevations key exists: \(elevations.count) entries")
+                recoveredItems.append("elevations (\(elevations.count))")
+            }
+        } else {
+            print("⚠️ No elevations data found")
+        }
+        
+        // MARK: - 4. Verify TxPower exist
+        let txKey = "locations.\(locationID).BeaconTxPower_v1"
+        if let data = ud.data(forKey: txKey) {
+            if let txPower = try? JSONDecoder().decode([String: Int].self, from: data) {
+                print("✓ TxPower key exists: \(txPower.count) entries")
+                recoveredItems.append("txPower (\(txPower.count))")
+            }
+        } else {
+            print("⚠️ No txPower data found")
+        }
+        
+        // MARK: - 5. Verify Intervals exist
+        let intervalKey = "locations.\(locationID).advertisingIntervals"
+        if let data = ud.data(forKey: intervalKey) {
+            if let intervals = try? JSONDecoder().decode([String: Double].self, from: data) {
+                print("✓ Intervals key exists: \(intervals.count) entries")
+                recoveredItems.append("intervals (\(intervals.count))")
+            }
+        } else {
+            print("⚠️ No intervals data found")
+        }
+        
+        // MARK: - 6. Trigger full reload
+        print("\n📢 Posting locationDidChange to trigger full reload...")
+        NotificationCenter.default.post(name: .locationDidChange, object: nil)
+        
+        // MARK: - Summary
+        print("\n" + String(repeating: "-", count: 70))
+        print("📊 RECOVERY SUMMARY:")
+        if !recoveredItems.isEmpty {
+            print("   ✅ Recovered/Verified:")
+            for item in recoveredItems {
+                print("      • \(item)")
+            }
+        }
+        if !failedItems.isEmpty {
+            print("   ❌ Failed:")
+            for item in failedItems {
+                print("      • \(item)")
+            }
+        }
+        print("\n⚠️  NOTE: Elevations, TxPower, Locks, Intervals are stored in")
+        print("   separate UserDefaults keys. If dots are missing those values,")
+        print("   the source data may be incomplete or was never saved.")
+        print("\n   The dots.json file only stores positions + elevation + txPower")
+        print("   that were present AT THE TIME the dot was last saved.")
+        print(String(repeating: "=", count: 70) + "\n")
     }
 }
 
