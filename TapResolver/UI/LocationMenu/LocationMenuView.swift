@@ -678,8 +678,8 @@ struct LocationMenuView: View {
             
             let metadata = try JSONDecoder().decode(BackupMetadata.self, from: metadataData)
             
-            // 4. Validate format
-            guard metadata.format == "tapresolver.backup.v1" else {
+            // 4. Validate format (accept v1 and v2)
+            guard metadata.format == "tapresolver.backup.v1" || metadata.format == "tapresolver.backup.v2" else {
                 throw NSError(domain: "ImportError", code: 3,
                              userInfo: [NSLocalizedDescriptionKey: "Unsupported format: \(metadata.format)"])
             }

@@ -188,16 +188,33 @@ enum UserDataBackup {
         
         var data: [String: Any] = [:]
         
-        // Keys to backup
+        // Keys to backup (standard namespaced keys)
         let keys = [
+            // Map data
             "MapPoints_v1",
+            "ActivePointID",
+            
+            // Triangle calibration
+            "triangles_v1",
+            
+            // Beacon configuration
             "BeaconLocks_v1",
             "BeaconElevations_v1",
             "BeaconTxPower_v1",
             "advertisingIntervals",
-            "ActivePointID",
+            
+            // Beacon lists (whitelist + morgue)
+            "BeaconLists_v1",
+            "BeaconLists_beacons_v1",
+            "beaconLists.morgue.v1",
+            
+            // Metric calibration
             "MetricSquares_v1",
-            "BeaconLists_v1"
+            
+            // Compass calibration
+            "mapMetrics.northOffsetDeg.v1",
+            "mapMetrics.facingFineTuneDeg.v1",
+            "mapMetrics.mapBaseOrientation.v1"
         ]
         
         for key in keys {
@@ -210,6 +227,13 @@ enum UserDataBackup {
                     data[key] = value
                 }
             }
+        }
+        
+        // SPECIAL CASE: Zones use non-standard key format "zones_<locationID>"
+        let zoneKey = "zones_\(locationID)"
+        if let zoneData = ud.data(forKey: zoneKey) {
+            data["zones_v1"] = ["__data_base64": zoneData.base64EncodedString()]
+            print("   ✓ Backed up zones: \(zoneData.count) bytes")
         }
         
         return data
@@ -231,6 +255,11 @@ enum UserDataBackup {
             let prefix = "locations.\(locationID)."
             
             for (key, value) in dict {
+                // Skip zones_v1 here - handle separately below
+                if key == "zones_v1" {
+                    continue
+                }
+                
                 // Convert Base64 strings back to Data objects
                 if let dataDict = value as? [String: String],
                    let base64String = dataDict["__data_base64"],
@@ -238,6 +267,17 @@ enum UserDataBackup {
                     ud.set(restoredData, forKey: prefix + key)
                 } else {
                     ud.set(value, forKey: prefix + key)
+                }
+            }
+            
+            // SPECIAL CASE: Restore zones to non-standard key format
+            if let zoneValue = dict["zones_v1"] {
+                let zoneKey = "zones_\(locationID)"
+                if let base64Dict = zoneValue as? [String: String],
+                   let base64String = base64Dict["__data_base64"],
+                   let zoneData = Data(base64Encoded: base64String) {
+                    ud.set(zoneData, forKey: zoneKey)
+                    print("   ✓ Restored zones: \(zoneData.count) bytes")
                 }
             }
             
@@ -317,7 +357,7 @@ enum UserDataBackup {
         }
         
         let metadata = BackupMetadata(
-            format: "tapresolver.backup.v1",
+            format: "tapresolver.backup.v2",
             exportedBy: "TapResolver iOS v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")",
             exportDate: ISO8601DateFormatter().string(from: Date()),
             authorName: AppSettings.authorName,
