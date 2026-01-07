@@ -1891,6 +1891,40 @@ private struct DebugSettingsPanel: View {
                         }
                         .buttonStyle(.plain)
                         
+                        // Dump V2 Data Button
+                        Button {
+                            dumpV2Data()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "doc.text.magnifyingglass")
+                                    .font(.system(size: 24))
+                                Text("Dump V2 Data")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.cyan)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Force V2 Re-Migration Button
+                        Button {
+                            forceV2Remigration()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 24))
+                                Text("Force V2 Re-Migration")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
                         // === END ONE-TIME CLEANUP UTILITY ===
                     }
                     .padding(.horizontal, 20)
@@ -2628,6 +2662,78 @@ private struct DebugSettingsPanel: View {
         print("\n   The dots.json file only stores positions + elevation + txPower")
         print("   that were present AT THE TIME the dot was last saved.")
         print(String(repeating: "=", count: 70) + "\n")
+    }
+    
+    private func dumpV2Data() {
+        let locationID = PersistenceContext.shared.locationID
+        let ud = UserDefaults.standard
+        let v2Key = "locations.\(locationID).BeaconDots_v2"
+        
+        print("\n" + String(repeating: "=", count: 70))
+        print("📦 V2 DATA DUMP")
+        print(String(repeating: "=", count: 70))
+        print("Location: \(locationID)")
+        print("Key: \(v2Key)")
+        
+        guard let data = ud.data(forKey: v2Key) else {
+            print("❌ NO V2 DATA FOUND")
+            return
+        }
+        
+        print("✓ Size: \(data.count) bytes")
+        
+        // Decode and print each dot's full data
+        struct V2Dot: Codable {
+            let beaconID: String
+            var x: Double
+            var y: Double
+            var elevation: Double
+            var txPower: Int?
+            var advertisingInterval: Double?
+            var isLocked: Bool
+            var macAddress: String?
+            var model: String?
+            var firmware: String?
+            var lastConfigReadSession: Int?
+        }
+        
+        do {
+            let v2Dots = try JSONDecoder().decode([V2Dot].self, from: data)
+            print("✓ Contains \(v2Dots.count) dots:\n")
+            
+            for dot in v2Dots.sorted(by: { $0.beaconID < $1.beaconID }) {
+                print("   \(dot.beaconID):")
+                print("      Position: (\(String(format: "%.0f", dot.x)), \(String(format: "%.0f", dot.y)))")
+                print("      Elevation: \(String(format: "%.2f", dot.elevation))m")
+                print("      TxPower: \(dot.txPower.map { "\($0) dBm" } ?? "nil")")
+                print("      Interval: \(dot.advertisingInterval.map { "\(Int($0))ms" } ?? "nil")")
+                print("      Locked: \(dot.isLocked)")
+                if let mac = dot.macAddress { print("      MAC: \(mac)") }
+                if let model = dot.model { print("      Model: \(model)") }
+                if let firmware = dot.firmware { print("      Firmware: \(firmware)") }
+                if let session = dot.lastConfigReadSession { print("      LastRead: Session #\(session)") }
+                print("")
+            }
+        } catch {
+            print("❌ Failed to decode: \(error)")
+        }
+        
+        print(String(repeating: "=", count: 70) + "\n")
+    }
+    
+    private func forceV2Remigration() {
+        let locationID = PersistenceContext.shared.locationID
+        let v2Key = "locations.\(locationID).BeaconDots_v2"
+        
+        print("\n🔄 Forcing V2 re-migration for \(locationID)...")
+        
+        // Delete existing V2 data
+        UserDefaults.standard.removeObject(forKey: v2Key)
+        print("   ✓ Deleted existing V2 data")
+        
+        // Trigger reload which will re-migrate
+        NotificationCenter.default.post(name: .locationDidChange, object: nil)
+        print("   ✓ Posted locationDidChange to trigger re-migration")
     }
 }
 

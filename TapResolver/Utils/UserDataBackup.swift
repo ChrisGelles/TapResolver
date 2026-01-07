@@ -135,15 +135,16 @@ enum UserDataBackup {
         })
         print("   ✓ UserDefaults: \(userDefaultsData.count) keys")
         
-        // 2. Backup dots.json
+        // 2. Backup dots.json (legacy support) - V2 data is in UserDefaults
         let dotsFile = locationDir.appendingPathComponent("dots.json")
         if FileManager.default.fileExists(atPath: dotsFile.path) {
             let dotsData = try Data(contentsOf: dotsFile)
             try archive.addEntry(with: "\(locationID)/dots.json", type: .file, uncompressedSize: UInt32(dotsData.count), provider: { position, size in
                 return dotsData.subdata(in: position..<position+size)
             })
-            print("   ✓ dots.json")
+            print("   ✓ dots.json (legacy)")
         }
+        // Note: BeaconDots_v2 is backed up via UserDefaults keys above
         
         // 3. Backup location.json
         let locationFile = locationDir.appendingPathComponent("location.json")
@@ -230,6 +231,7 @@ enum UserDataBackup {
             "BeaconElevations_v1",
             "BeaconTxPower_v1",
             "advertisingIntervals",
+            "BeaconDots_v2",
             
             // Beacon lists (whitelist + morgue)
             "BeaconLists_v1",

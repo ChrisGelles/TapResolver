@@ -33,6 +33,37 @@ public final class BeaconDotStore: ObservableObject {
         public var elevation: Double = 0.75  // elevation in meters, default 0.75
     }
 
+    // MARK: - V2 Persistence Model (Single Source of Truth)
+
+    /// Consolidated beacon dot storage - replaces dots.json and all separate metadata keys
+    public struct BeaconDotV2: Codable {
+        public let beaconID: String
+        public var x: Double
+        public var y: Double
+        public var elevation: Double
+        public var txPower: Int?
+        public var advertisingInterval: Double?
+        public var isLocked: Bool
+        public var macAddress: String?
+        public var model: String?
+        public var firmware: String?
+        public var lastConfigReadSession: Int?
+        
+        public init(beaconID: String, x: Double, y: Double, elevation: Double = 0.75) {
+            self.beaconID = beaconID
+            self.x = x
+            self.y = y
+            self.elevation = elevation
+            self.txPower = nil
+            self.advertisingInterval = nil
+            self.isLocked = false
+            self.macAddress = nil
+            self.model = nil
+            self.firmware = nil
+            self.lastConfigReadSession = nil
+        }
+    }
+
     @Published public private(set) var dots: [Dot] = []
     // beaconID -> locked?
     @Published private(set) var locked: [String: Bool] = [:]
@@ -64,19 +95,19 @@ public final class BeaconDotStore: ObservableObject {
     private let elevationsKey  = "BeaconElevations_v1"
     private let txPowerKey     = "BeaconTxPower_v1"
     private let dotsFileName   = "dots.json"           // file with coordinates
+    private let dotsV2Key      = "BeaconDots_v2"       // Consolidated storage (single source of truth)
 
     public init() {
-        // Do not load from any legacy/global path
-        loadLocks()
-        loadElevations()
-        loadTxPower()
-        loadAdvertisingIntervals()
-        loadDotsFromDisk()
-        loadMacAddresses()
-        loadLastConfigReadSessions()
-        loadModels()
-        loadFirmware()
         incrementSessionNumber()
+        
+        // Try V2 format first
+        if loadV2() {
+            print("📊 [BeaconDotStore] Using V2 storage")
+        } else {
+            // Fall back to migration from legacy sources
+            print("📊 [BeaconDotStore] V2 not found, migrating from legacy...")
+            migrateToV2()
+        }
     }
 
     public func dot(for beaconID: String) -> Dot? {
@@ -89,11 +120,11 @@ public final class BeaconDotStore: ObservableObject {
     public func toggleDot(for beaconID: String, mapPoint: CGPoint, color: Color) {
         if let idx = dots.firstIndex(where: { $0.beaconID == beaconID }) {
             dots.remove(at: idx)
-            saveDotsToDisk()
+            saveV2()
             print("Removed dot for \(beaconID)")
         } else {
             dots.append(Dot(beaconID: beaconID, color: color, mapPoint: mapPoint))
-            saveDotsToDisk()
+            saveV2()
             print("Added dot for \(beaconID) @ map (\(Int(mapPoint.x)), \(Int(mapPoint.y)))")
         }
     }
@@ -102,19 +133,19 @@ public final class BeaconDotStore: ObservableObject {
     public func updateDot(id: UUID, to newPoint: CGPoint) {
         if let idx = dots.firstIndex(where: { $0.id == id }) {
             dots[idx].mapPoint = newPoint
-            saveDotsToDisk()
+            saveV2()
         }
     }
 
     public func clear() {
         dots.removeAll()
-        saveDotsToDisk()
+        saveV2()
     }
     
     /// Clear dots for unlocked beacons only (preserves locked beacons)
     public func clearUnlockedDots() {
         dots.removeAll { !isLocked($0.beaconID) }
-        saveDotsToDisk()
+        saveV2()
     }
     
     /// Get only the locked beacon dots
@@ -127,7 +158,7 @@ public final class BeaconDotStore: ObservableObject {
     
     public func setElevation(for beaconID: String, elevation: Double) {
         elevations[beaconID] = elevation
-        saveElevations()
+        saveV2()
     }
     
     public func getElevation(for beaconID: String) -> Double {
@@ -160,7 +191,7 @@ public final class BeaconDotStore: ObservableObject {
         } else {
             txPowerByID.removeValue(forKey: beaconID)
         }
-        saveTxPower()
+        saveV2()
     }
     
     public func getTxPower(for beaconID: String) -> Int? {
@@ -175,7 +206,7 @@ public final class BeaconDotStore: ObservableObject {
         } else {
             advertisingIntervalByID.removeValue(forKey: beaconID)
         }
-        saveAdvertisingIntervals()
+        saveV2()
     }
     
     public func getAdvertisingInterval(for beaconID: String) -> Double {
@@ -219,20 +250,15 @@ public final class BeaconDotStore: ObservableObject {
         modelByID.removeAll()
         firmwareByID.removeAll()
 
-        // Pure load for the active namespace and file
-        // Load dots first (positions only), then metadata from dedicated sources
-        loadDotsFromDisk()
-        loadLocks()
-        loadElevations()
-        loadTxPower()
-        loadAdvertisingIntervals()
-        loadMacAddresses()
-        loadLastConfigReadSessions()
-        loadModels()
-        loadFirmware()
+        // Load from V2 or migrate
+        if loadV2() {
+            print("📊 [BeaconDotStore] Reloaded from V2 storage")
+        } else {
+            print("📊 [BeaconDotStore] V2 not found during reload, migrating...")
+            migrateToV2()
+        }
         
         // Remove any dots that don't correspond to active beacons
-        // (e.g., demoted beacons that left orphaned dots)
         removeOrphanedDots()
         
         objectWillChange.send()
@@ -287,15 +313,7 @@ public final class BeaconDotStore: ObservableObject {
         }
         
         // Save changes
-        saveDotsToDisk()
-        saveLocks()
-        saveElevations()
-        saveTxPower()
-        saveAdvertisingIntervals()
-        saveMacAddresses()
-        saveLastConfigReadSessions()
-        saveModels()
-        saveFirmware()
+        saveV2()
         
         print("🧹 [BeaconDotStore] Removed \(orphanedDots.count) orphaned dot(s) and their metadata")
         
@@ -311,8 +329,7 @@ public final class BeaconDotStore: ObservableObject {
     public func toggleLock(_ beaconID: String) {
         let newVal = !(locked[beaconID] ?? false)
         locked[beaconID] = newVal
-        saveLocks()
-        saveDotsToDisk() // Also save dot data when locking/unlocking
+        saveV2()
     }
 
     // MARK: - Persistence
@@ -328,9 +345,7 @@ public final class BeaconDotStore: ObservableObject {
     private struct LocksDTO: Codable { let locks: [String: Bool] }
 
     private func save() {
-        // Save dots to file (authoritative for coordinates)
-        saveDotsToDisk()
-        saveLocks()
+        saveV2()
     }
 
     private func saveLocks() {
@@ -417,6 +432,156 @@ public final class BeaconDotStore: ObservableObject {
         firmwareByID = ctx.read("BeaconFirmware_v1", as: [String: String].self) ?? [:]
     }
     
+    // MARK: - V2 Consolidated Persistence
+
+    /// Save all beacon dot data to single UserDefaults key
+    private func saveV2() {
+        let v2Dots: [BeaconDotV2] = dots.map { dot in
+            var v2 = BeaconDotV2(
+                beaconID: dot.beaconID,
+                x: dot.mapPoint.x,
+                y: dot.mapPoint.y,
+                elevation: elevations[dot.beaconID] ?? dot.elevation
+            )
+            v2.txPower = txPowerByID[dot.beaconID]
+            v2.advertisingInterval = advertisingIntervalByID[dot.beaconID]
+            v2.isLocked = locked[dot.beaconID] ?? false
+            v2.macAddress = macAddressByID[dot.beaconID]
+            v2.model = modelByID[dot.beaconID]
+            v2.firmware = firmwareByID[dot.beaconID]
+            v2.lastConfigReadSession = lastConfigReadSession[dot.beaconID]
+            return v2
+        }
+        
+        ctx.write(dotsV2Key, value: v2Dots)
+        print("💾 [BeaconDotStore] Saved \(v2Dots.count) dots to \(dotsV2Key)")
+    }
+
+    /// Load all beacon dot data from single UserDefaults key
+    /// Returns true if V2 data was found, false if migration needed
+    private func loadV2() -> Bool {
+        guard let v2Dots: [BeaconDotV2] = ctx.read(dotsV2Key, as: [BeaconDotV2].self), !v2Dots.isEmpty else {
+            return false
+        }
+        
+        // Clear existing in-memory state
+        dots.removeAll()
+        locked.removeAll()
+        elevations.removeAll()
+        txPowerByID.removeAll()
+        advertisingIntervalByID.removeAll()
+        macAddressByID.removeAll()
+        lastConfigReadSession.removeAll()
+        modelByID.removeAll()
+        firmwareByID.removeAll()
+        
+        // Populate from V2 data
+        for v2 in v2Dots {
+            var dot = Dot(
+                beaconID: v2.beaconID,
+                color: beaconColor(for: v2.beaconID),
+                mapPoint: CGPoint(x: v2.x, y: v2.y)
+            )
+            dot.elevation = v2.elevation
+            dots.append(dot)
+            
+            // Populate side tables
+            if v2.isLocked {
+                locked[v2.beaconID] = true
+            }
+            elevations[v2.beaconID] = v2.elevation
+            if let tx = v2.txPower {
+                txPowerByID[v2.beaconID] = tx
+            }
+            if let interval = v2.advertisingInterval {
+                advertisingIntervalByID[v2.beaconID] = interval
+            }
+            if let mac = v2.macAddress {
+                macAddressByID[v2.beaconID] = mac
+            }
+            if let model = v2.model {
+                modelByID[v2.beaconID] = model
+            }
+            if let firmware = v2.firmware {
+                firmwareByID[v2.beaconID] = firmware
+            }
+            if let session = v2.lastConfigReadSession {
+                lastConfigReadSession[v2.beaconID] = session
+            }
+        }
+        
+        print("📂 [BeaconDotStore] Loaded \(dots.count) dots from \(dotsV2Key)")
+        return true
+    }
+
+    /// Migrate from legacy storage (dots.json + separate keys) to V2
+    private func migrateToV2() {
+        print("🔄 [BeaconDotStore] Migrating to V2 format...")
+        
+        // Load from all legacy sources
+        loadDotsFromDisk()      // dots.json → dots array
+        loadLocks()             // BeaconLocks_v1 → locked dict
+        loadElevations()        // BeaconElevations_v1 → elevations dict
+        loadTxPower()           // BeaconTxPower_v1 → txPowerByID dict
+        loadAdvertisingIntervals()
+        loadMacAddresses()
+        loadLastConfigReadSessions()
+        loadModels()
+        loadFirmware()
+        
+        // CRITICAL FIX: loadDotsFromDisk() sets dot.elevation but doesn't populate 
+        // the elevations dictionary. The separate BeaconElevations_v1 key may be 
+        // empty/incomplete. Ensure elevations dict has values from embedded dots.json data.
+        print("   📊 Pre-merge state: \(dots.count) dots, \(elevations.count) elevations in dict")
+        for dot in dots {
+            let dictValue = elevations[dot.beaconID]
+            let dotValue = dot.elevation
+            if dictValue == nil && dotValue != 0.75 {
+                // dots.json had a non-default elevation that wasn't in BeaconElevations_v1
+                elevations[dot.beaconID] = dotValue
+                print("   📏 Recovered elevation for \(dot.beaconID): \(dotValue)m (from dots.json)")
+            } else if dictValue == nil {
+                // No elevation anywhere, use the dot's value (even if default)
+                elevations[dot.beaconID] = dotValue
+            }
+            // Also recover txPower if it was embedded in dots.json but not in separate key
+            // (DotDTO includes txPower, but loadDotsFromDisk doesn't populate txPowerByID)
+        }
+        print("   📊 Post-merge state: \(elevations.count) elevations in dict")
+        
+        // Also check UserDefaults fallback for any dots not in dots.json
+        let fallbackKey = "locations.\(ctx.locationID).\(dotsKey)"
+        if let data = UserDefaults.standard.data(forKey: fallbackKey),
+           let legacyDots = try? JSONDecoder().decode([DotDTO].self, from: data) {
+            print("   📦 Found \(legacyDots.count) dots in UserDefaults fallback")
+            for dto in legacyDots {
+                // Only add if not already present from dots.json
+                if !dots.contains(where: { $0.beaconID == dto.beaconID }) {
+                    var dot = Dot(
+                        beaconID: dto.beaconID,
+                        color: beaconColor(for: dto.beaconID),
+                        mapPoint: CGPoint(x: dto.x, y: dto.y)
+                    )
+                    dot.elevation = dto.elevation
+                    dots.append(dot)
+                    elevations[dto.beaconID] = dto.elevation
+                    if let tx = dto.txPower {
+                        txPowerByID[dto.beaconID] = tx
+                    }
+                    print("   + Recovered \(dto.beaconID) from UserDefaults fallback")
+                }
+            }
+        }
+        
+        // Save to V2 format
+        saveV2()
+        
+        // Clean up legacy storage (optional - keep for one version for safety)
+        // deleteLegacyStorage()
+        
+        print("✅ [BeaconDotStore] Migration complete: \(dots.count) dots in V2 format")
+    }
+    
     // MARK: - Session Number Management
     
     private func incrementSessionNumber() {
@@ -441,33 +606,30 @@ public final class BeaconDotStore: ObservableObject {
     ) {
         // Update TX Power
         txPowerByID[beaconName] = txPower
-        saveTxPower()
         
         // Update Interval
         advertisingIntervalByID[beaconName] = Double(intervalMs)
-        saveAdvertisingIntervals()
         
         // Update MAC
         if let mac = mac, !mac.isEmpty {
             macAddressByID[beaconName] = mac
-            saveMacAddresses()
         }
         
         // Update Model
         if let model = model {
             modelByID[beaconName] = model
-            saveModels()
         }
         
         // Update Firmware
         if let firmware = firmware {
             firmwareByID[beaconName] = firmware
-            saveFirmware()
         }
         
         // Mark as read this session
         lastConfigReadSession[beaconName] = currentSessionNumber
-        saveLastConfigReadSessions()
+        
+        // Single save for all updates
+        saveV2()
         
         print("📊 [BeaconDotStore] Updated \(beaconName): TX=\(txPower)dBm, Interval=\(Int(intervalMs))ms, Session=\(currentSessionNumber)")
     }
@@ -535,10 +697,20 @@ public final class BeaconDotStore: ObservableObject {
                               color: beaconColor(for: $0.beaconID),
                               mapPoint: CGPoint(x: $0.x, y: $0.y))
                 dot.elevation = $0.elevation
-                // NOTE: Side table rehydration removed - elevations, txPower, and advertisingInterval
-                // are now loaded separately via their dedicated load methods
                 return dot
             }
+            // CRITICAL: Also populate side tables from embedded DotDTO values
+            // This ensures elevations/txPower from dots.json aren't lost
+            for dto in dtos {
+                // Only set if not already present (preserve separate key values)
+                if elevations[dto.beaconID] == nil {
+                    elevations[dto.beaconID] = dto.elevation
+                }
+                if let tx = dto.txPower, txPowerByID[dto.beaconID] == nil {
+                    txPowerByID[dto.beaconID] = tx
+                }
+            }
+            print("📂 [BeaconDotStore] Loaded \(dots.count) dots from dots.json, populated \(elevations.count) elevations")
         } catch {
             print("⚠️ loadDotsFromDisk failed: \(error)")
             dots = []
