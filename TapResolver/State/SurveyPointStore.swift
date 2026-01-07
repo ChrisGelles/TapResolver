@@ -644,6 +644,29 @@ public class SurveyPointStore: ObservableObject {
         print("🗑️ [SurveyPointStore] Purged \(count) points from \(key)")
     }
     
+    /// Purge session data but retain quality metrics
+    /// Survey Markers will still show colors based on past data collection
+    /// Use this after successful export to free storage while preserving coverage display
+    public func purgeSessions() {
+        var sessionCount = 0
+        for key in surveyPoints.keys {
+            sessionCount += surveyPoints[key]?.sessions.count ?? 0
+            surveyPoints[key]?.sessions = []
+        }
+        save()
+        print("🗑️ [SurveyPointStore] Purged \(sessionCount) sessions, retained \(surveyPoints.count) quality records")
+    }
+    
+    /// Full reset - removes all survey points including quality data
+    /// Use when environment changes significantly (TxPower updates, beacon moves, etc.)
+    /// This resets the coverage display - helpers will need to re-survey all areas
+    public func fullReset() {
+        let count = surveyPoints.count
+        surveyPoints.removeAll()
+        save()
+        print("🗑️ [SurveyPointStore] Full reset - cleared \(count) survey points and all quality data")
+    }
+    
     /// Get all survey points as an array (alias for allPoints for consistency)
     public var points: [SurveyPoint] {
         allPoints

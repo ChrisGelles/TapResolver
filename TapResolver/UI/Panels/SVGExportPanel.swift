@@ -14,21 +14,63 @@ struct SVGExportPanel: View {
     @EnvironmentObject private var surveyPointStore: SurveyPointStore
     @EnvironmentObject private var beaconDotStore: BeaconDotStore
     @EnvironmentObject private var metricSquareStore: MetricSquareStore
+    @EnvironmentObject private var surveyExportOptions: SurveyExportOptions
+    @EnvironmentObject private var beaconListsStore: BeaconListsStore
     
     @Binding var isPresented: Bool
     
     @State private var showShareSheet = false
     @State private var exportedFileURL: URL?
+    @State private var showJSONShareSheet = false
+    @State private var jsonExportURL: URL?
+    @State private var showInitialsPrompt = false
+    @State private var tempInitials: String = ""
+    @State private var showJSONDocumentPicker = false
     
     var body: some View {
         NavigationView {
             Form {
-                // MARK: - Layer Options
-                Section(header: Text("Layers to Include")) {
+                // MARK: - Survey Data Export (JSON)
+                Section(header: Text("Survey Data Export")) {
+                    HStack {
+                        Text("Survey Points")
+                        Spacer()
+                        Text("\(surveyPointStore.surveyPoints.count)")
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    HStack {
+                        Text("Total Sessions")
+                        Spacer()
+                        Text("\(surveyPointStore.totalSessionCount)")
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Button(action: {
+                        tempInitials = surveyExportOptions.helperInitials
+                        showInitialsPrompt = true
+                    }) {
+                        HStack {
+                            Spacer()
+                            Image(systemName: "square.and.arrow.up.fill")
+                                .foregroundColor(.white)
+                            Text("Export Survey Data (.mapsurvey)")
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
+                            Spacer()
+                        }
+                        .padding()
+                        .background(surveyPointStore.surveyPoints.isEmpty ? Color.gray : Color.red)
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(surveyPointStore.surveyPoints.isEmpty || surveyExportOptions.isExporting)
+                }
+                
+                // MARK: - SVG Export Options
+                Section(header: Text("SVG Export (Visualization)")) {
                     Toggle("Map Background", isOn: $exportOptions.includeMapBackground)
-                    
                     Toggle("Calibration Mesh", isOn: $exportOptions.includeCalibrationMesh)
-                    
                     Toggle("RSSI Heatmap", isOn: $exportOptions.includeRSSIHeatmap)
                 }
                 
@@ -101,7 +143,7 @@ struct SVGExportPanel: View {
                     .disabled(exportOptions.isExporting)
                 }
             }
-            .navigationTitle("SVG Export")
+            .navigationTitle("Export Options")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -114,6 +156,27 @@ struct SVGExportPanel: View {
         .sheet(isPresented: $showShareSheet) {
             if let url = exportedFileURL {
                 ShareSheet(items: [url])
+            }
+        }
+        .alert("Enter Your Initials", isPresented: $showInitialsPrompt) {
+            TextField("Initials (e.g., CG)", text: $tempInitials)
+                .autocapitalization(.allCharacters)
+            Button("Export") {
+                surveyExportOptions.helperInitials = tempInitials
+                performJSONExport()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Your initials will be included in the filename for tracking.")
+        }
+        .sheet(isPresented: $showJSONDocumentPicker) {
+            if let url = jsonExportURL {
+                DocumentExportPicker(fileURL: url) { success in
+                    showJSONDocumentPicker = false
+                    if success {
+                        print("✅ [MapSurvey] Export saved successfully")
+                    }
+                }
             }
         }
     }
@@ -173,6 +236,91 @@ struct SVGExportPanel: View {
             } else {
                 DispatchQueue.main.async {
                     exportOptions.isExporting = false
+                }
+            }
+        }
+    }
+    
+    // MARK: - JSON Survey Export
+
+    private func performJSONExport() {
+        surveyExportOptions.isExporting = true
+        
+        let locationID = locationManager.currentLocationID
+        let surveyPoints = Array(surveyPointStore.surveyPoints.values)
+        let beaconDots = beaconDotStore.dots
+        let pixelsPerMeter = getPixelsPerMeter()
+        let initials = surveyExportOptions.helperInitials
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Build location info
+            let mapImage = LocationImportUtils.loadDisplayImage(locationID: locationID)
+            let locationName: String
+            let locationDir = PersistenceContext.shared.docs.appendingPathComponent("locations/\(locationID)", isDirectory: true)
+            let stubURL = locationDir.appendingPathComponent("location.json")
+            if let data = try? Data(contentsOf: stubURL),
+               let stub = try? JSONDecoder().decode(LocationStub.self, from: data) {
+                locationName = stub.name
+            } else {
+                locationName = locationID
+            }
+            
+            let locationInfo = LocationInfo(
+                id: locationID,
+                name: locationName,
+                pixelsPerMeter: pixelsPerMeter.map { Double($0) },
+                mapDimensions_px: mapImage.map { [Int($0.size.width), Int($0.size.height)] }
+            )
+            
+            // Build beacon reference (only beacons with map positions)
+            let beaconReference: [BeaconReferenceInfo] = beaconDots.map { dot in
+                BeaconReferenceInfo(
+                    beaconID: dot.beaconID,
+                    mapX_px: Double(dot.mapPoint.x),
+                    mapY_px: Double(dot.mapPoint.y),
+                    elevation_m: self.beaconDotStore.elevations[dot.beaconID],
+                    txPower_dBm: self.beaconDotStore.txPowerByID[dot.beaconID]
+                )
+            }
+            
+            // Build export structure
+            let export = MapSurveyExport(
+                collector: CollectorInfo(initials: initials),
+                location: locationInfo,
+                beaconReference: beaconReference,
+                surveyPoints: surveyPoints
+            )
+            
+            // Encode to JSON
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            
+            guard let jsonData = try? encoder.encode(export) else {
+                print("❌ [MapSurvey] Failed to encode export")
+                DispatchQueue.main.async {
+                    surveyExportOptions.isExporting = false
+                }
+                return
+            }
+            
+            // Write to temp file
+            let filename = surveyExportOptions.generateFilename(initials: initials)
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            
+            do {
+                try jsonData.write(to: tempURL)
+                print("✅ [MapSurvey] Export ready: \(filename) (\(jsonData.count) bytes)")
+                
+                DispatchQueue.main.async {
+                    jsonExportURL = tempURL
+                    surveyExportOptions.lastExportURL = tempURL
+                    surveyExportOptions.isExporting = false
+                    showJSONDocumentPicker = true
+                }
+            } catch {
+                print("❌ [MapSurvey] Failed to write file: \(error)")
+                DispatchQueue.main.async {
+                    surveyExportOptions.isExporting = false
                 }
             }
         }
