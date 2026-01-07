@@ -656,26 +656,27 @@ struct LocationMenuView: View {
     }
     
     private func finalizeBackup(useShareSheet: Bool) {
-        if useShareSheet {
-            // Rename file to user's chosen filename before sharing
-            if let originalURL = backupURL {
-                let tempDir = FileManager.default.temporaryDirectory
-                let newFilename = backupExportOptions.fullFilename()
-                let newURL = tempDir.appendingPathComponent(newFilename)
-                
-                // Remove existing file if present
-                try? FileManager.default.removeItem(at: newURL)
-                
-                // Rename the file
-                do {
-                    try FileManager.default.moveItem(at: originalURL, to: newURL)
-                    backupURL = newURL
-                    backupExportOptions.lastExportURL = newURL
-                    print("✅ Renamed backup file to: \(newFilename)")
-                } catch {
-                    print("⚠️ Failed to rename backup file: \(error), using original name")
-                }
+        // Rename file to user's chosen filename before exporting (works for both ShareSheet and fileExporter)
+        if let originalURL = backupURL {
+            let tempDir = FileManager.default.temporaryDirectory
+            let newFilename = backupExportOptions.fullFilename()
+            let newURL = tempDir.appendingPathComponent(newFilename)
+            
+            // Remove existing file if present
+            try? FileManager.default.removeItem(at: newURL)
+            
+            // Rename the file
+            do {
+                try FileManager.default.moveItem(at: originalURL, to: newURL)
+                backupURL = newURL
+                backupExportOptions.lastExportURL = newURL
+                print("✅ Renamed backup file to: \(newFilename)")
+            } catch {
+                print("⚠️ Failed to rename backup file: \(error), using original name")
             }
+        }
+        
+        if useShareSheet {
             showBackupShareSheet = true
         } else {
             showBackupPicker = true
