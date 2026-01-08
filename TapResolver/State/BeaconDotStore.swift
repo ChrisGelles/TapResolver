@@ -249,9 +249,6 @@ public final class BeaconDotStore: ObservableObject {
             print("📊 [BeaconDotStore] No V2 data for this location")
         }
         
-        // Remove any dots that don't correspond to active beacons
-        removeOrphanedDots()
-        
         objectWillChange.send()
     }
     
@@ -367,20 +364,19 @@ public final class BeaconDotStore: ObservableObject {
         firmwareByID.removeAll()
         
         // Populate from V2 data
-        for v2 in v2Dots {
-            var dot = Dot(
-                beaconID: v2.beaconID,
-                color: beaconColor(for: v2.beaconID),
-                mapPoint: CGPoint(x: v2.x, y: v2.y)
-            )
+        dots = v2Dots.map { v2 in
+            var dot = Dot(beaconID: v2.beaconID,
+                          color: beaconColor(for: v2.beaconID),
+                          mapPoint: CGPoint(x: v2.x, y: v2.y))
             dot.elevation = v2.elevation
-            dots.append(dot)
-            
-            // Populate side tables
-            if v2.isLocked {
-                locked[v2.beaconID] = true
-            }
+            return dot
+        }
+
+        // CRITICAL: Populate side tables from V2 data
+        // The UI reads from these dictionaries, not from dot.elevation
+        for v2 in v2Dots {
             elevations[v2.beaconID] = v2.elevation
+            locked[v2.beaconID] = v2.isLocked
             if let tx = v2.txPower {
                 txPowerByID[v2.beaconID] = tx
             }
