@@ -27,6 +27,17 @@ public final class BeaconDotStore: ObservableObject {
     private let ctx = PersistenceContext.shared
     // MARK: - V2 Persistence Model (Single Source of Truth)
 
+    /// Tracks when beacon radio settings were last changed in the app
+    public struct ConfigChangeInfo: Codable, Equatable {
+        public let timestamp: Double    // Unix timestamp (seconds since 1970)
+        public let changed: String      // "txPower", "interval", or "both"
+        
+        public init(timestamp: Double, changed: String) {
+            self.timestamp = timestamp
+            self.changed = changed
+        }
+    }
+
     /// Consolidated beacon dot storage - single source of truth
     public struct BeaconDotV2: Codable, Identifiable {
         public var id: String { beaconID }  // Identifiable conformance
@@ -41,6 +52,7 @@ public final class BeaconDotStore: ObservableObject {
         public var model: String?
         public var firmware: String?
         public var lastConfigReadSession: Int?
+        public var lastConfigChange: ConfigChangeInfo?
         
         public init(beaconID: String, x: Double, y: Double, elevation: Double = 0.75) {
             self.beaconID = beaconID
@@ -178,7 +190,14 @@ public final class BeaconDotStore: ObservableObject {
     
     public func setTxPower(for beaconID: String, dbm: Int?) {
         if let idx = dots.firstIndex(where: { $0.beaconID == beaconID }) {
+            let oldValue = dots[idx].txPower
             dots[idx].txPower = dbm
+            
+            // Record change if value actually changed
+            if oldValue != dbm {
+                recordConfigChange(at: idx, field: "txPower")
+            }
+            
             save()
         }
     }
@@ -191,7 +210,14 @@ public final class BeaconDotStore: ObservableObject {
     
     public func setAdvertisingInterval(for beaconID: String, ms: Double?) {
         if let idx = dots.firstIndex(where: { $0.beaconID == beaconID }) {
+            let oldValue = dots[idx].advertisingInterval
             dots[idx].advertisingInterval = ms
+            
+            // Record change if value actually changed
+            if oldValue != ms {
+                recordConfigChange(at: idx, field: "interval")
+            }
+            
             save()
         }
     }
@@ -216,6 +242,26 @@ public final class BeaconDotStore: ObservableObject {
         }
         
         return trimmed + " ms"
+    }
+    
+    // MARK: - Config Change Tracking
+    
+    /// Records when a radio setting (txPower or interval) was changed
+    /// If both fields change in rapid succession, updates to "both"
+    private func recordConfigChange(at idx: Int, field: String) {
+        let now = Date().timeIntervalSince1970
+        
+        // Check if there's a recent change (within 5 seconds) - might be updating both
+        if let existing = dots[idx].lastConfigChange {
+            let elapsed = now - existing.timestamp
+            if elapsed < 5.0 && existing.changed != field && existing.changed != "both" {
+                // Recent change to the OTHER field - mark as "both"
+                dots[idx].lastConfigChange = ConfigChangeInfo(timestamp: now, changed: "both")
+                return
+            }
+        }
+        
+        dots[idx].lastConfigChange = ConfigChangeInfo(timestamp: now, changed: field)
     }
     
     /// Reload data for the active location
