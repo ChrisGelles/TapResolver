@@ -18,6 +18,7 @@ import kbeaconlib2
 
 struct BeaconSettingsPanel: View {
     @EnvironmentObject private var beaconDotStore: BeaconDotStore
+    @EnvironmentObject private var beaconListsStore: BeaconListsStore
     @EnvironmentObject private var locationManager: LocationManager
     
     @StateObject private var kbeaconManager = KBeaconConnectionManager()
@@ -36,6 +37,12 @@ struct BeaconSettingsPanel: View {
     @State private var configurationResults: [BeaconConfigResult] = []
     
     private let txPowerOptions: [Int] = [8, 4, 0, -4, -8, -12, -16, -20, -40]
+
+    /// Dots filtered to only beacons in the current location's whitelist
+    private var filteredDots: [BeaconDotStore.BeaconDotV2] {
+        let whitelistedBeaconIDs = Set(beaconListsStore.beacons)
+        return beaconDotStore.dots.filter { whitelistedBeaconIDs.contains($0.beaconID) }
+    }
     
     var body: some View {
         NavigationView {
@@ -118,14 +125,14 @@ struct BeaconSettingsPanel: View {
                 .padding(.horizontal)
             
             HStack {
-                Text("Select Beacons (\(beaconDotStore.dots.count))")
+                Text("Select Beacons (\(filteredDots.count))")
                     .font(.system(size: 14, weight: .semibold))
                 Spacer()
-                Button(selectedBeaconIDs.count == beaconDotStore.dots.count ? "Deselect All" : "Select All") {
-                    if selectedBeaconIDs.count == beaconDotStore.dots.count {
+                Button(selectedBeaconIDs.count == filteredDots.count ? "Deselect All" : "Select All") {
+                    if selectedBeaconIDs.count == filteredDots.count {
                         selectedBeaconIDs.removeAll()
                     } else {
-                        selectedBeaconIDs = Set(beaconDotStore.dots.map { $0.beaconID })
+                        selectedBeaconIDs = Set(filteredDots.map { $0.beaconID })
                     }
                 }
                 .font(.system(size: 12))
@@ -135,7 +142,7 @@ struct BeaconSettingsPanel: View {
             
             ScrollView {
                 LazyVStack(spacing: 4) {
-                    ForEach(beaconDotStore.dots.sorted(by: { $0.beaconID < $1.beaconID }), id: \.beaconID) { dot in
+                    ForEach(filteredDots.sorted(by: { $0.beaconID < $1.beaconID }), id: \.beaconID) { dot in
                         BeaconSelectionRow(
                             beaconID: dot.beaconID,
                             isSelected: selectedBeaconIDs.contains(dot.beaconID),
