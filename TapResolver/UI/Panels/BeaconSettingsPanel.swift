@@ -21,6 +21,7 @@ struct BeaconSettingsPanel: View {
     @EnvironmentObject private var beaconDotStore: BeaconDotStore
     @EnvironmentObject private var beaconListsStore: BeaconListsStore
     @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var mapTransform: MapTransformStore
     
     @StateObject private var kbeaconManager = KBeaconConnectionManager()
     
@@ -235,6 +236,15 @@ struct BeaconSettingsPanel: View {
                 }
                 .padding(.horizontal)
             }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        mapTransform.isHUDInteracting = true
+                    }
+                    .onEnded { _ in
+                        mapTransform.isHUDInteracting = false
+                    }
+            )
         }
     }
     

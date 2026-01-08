@@ -11,6 +11,7 @@ import SwiftUI
 struct ZoneDrawer: View {
     @EnvironmentObject private var hud: HUDPanelsState
     @EnvironmentObject private var zoneStore: ZoneStore
+    @EnvironmentObject private var mapTransform: MapTransformStore
     
     // MARK: - Layout Constants
     private let collapsedWidth: CGFloat = 56
@@ -127,6 +128,15 @@ struct ZoneDrawer: View {
             .padding(.horizontal, 8)
             .padding(.bottom, 8)
         }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    mapTransform.isHUDInteracting = true
+                }
+                .onEnded { _ in
+                    mapTransform.isHUDInteracting = false
+                }
+        )
     }
 }
 

@@ -46,7 +46,7 @@ public struct BeaconOverlayDots: View {
 
     // MARK: - Single draggable dot subview
     private struct DraggableDot: View {
-        let dot: BeaconDotStore.Dot
+        let dot: BeaconDotStore.BeaconDotV2
         @EnvironmentObject private var store: BeaconDotStore
         @EnvironmentObject private var mapTransform: MapTransformStore
 
@@ -80,7 +80,7 @@ public struct BeaconOverlayDots: View {
                         let dMap = mapTransform.screenTranslationToMap(value.translation)
                         let base = startPoint ?? dot.mapPoint
                         let newPoint = CGPoint(x: base.x + dMap.width, y: base.y + dMap.height)
-                        store.updateDot(id: dot.id, to: newPoint)
+                        store.updateDot(for: dot.beaconID, newMapPoint: newPoint)
                     }
                     .onEnded { _ in
                         startPoint = nil

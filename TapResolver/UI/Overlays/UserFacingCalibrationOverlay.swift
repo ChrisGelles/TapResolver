@@ -76,5 +76,15 @@ struct UserFacingCalibrationOverlay: View {
         }
         .ignoresSafeArea()
         .allowsHitTesting(true) // When this is visible, it should own the gestures.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    mapTransform.isHUDInteracting = true
+                }
+                .onEnded { _ in
+                    mapTransform.isHUDInteracting = false
+                }
+        )
     }
+    
 }

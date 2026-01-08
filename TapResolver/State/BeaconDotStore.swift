@@ -399,8 +399,29 @@ public final class BeaconDotStore: ObservableObject {
             return
         }
         
+        let oldTx = dots[idx].txPower
+        let oldInterval = dots[idx].advertisingInterval
+        
         dots[idx].txPower = txPower
         dots[idx].advertisingInterval = Double(intervalMs)
+        
+        // Record config change timestamp
+        let txChanged = oldTx != txPower
+        let intervalChanged = oldInterval != Double(intervalMs)
+        if txChanged || intervalChanged {
+            let changed: String
+            if txChanged && intervalChanged {
+                changed = "both"
+            } else if txChanged {
+                changed = "txPower"
+            } else {
+                changed = "interval"
+            }
+            dots[idx].lastConfigChange = ConfigChangeInfo(
+                timestamp: Date().timeIntervalSince1970,
+                changed: changed
+            )
+        }
         
         if let mac = mac, !mac.isEmpty {
             dots[idx].macAddress = mac

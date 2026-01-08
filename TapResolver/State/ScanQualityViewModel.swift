@@ -246,7 +246,7 @@ extension ScanQualityViewModel {
     ) -> ScanQualityViewModel {
 
         // Get all beacons that have dots on the map
-        let beaconsWithDots: [BeaconDotStore.Dot] = beaconDotStore.dots
+        let beaconsWithDots: [BeaconDotStore.BeaconDotV2] = beaconDotStore.dots
         let totalBeacons: Int = beaconsWithDots.count
 
         // ARCHITECTURAL UPDATE: Query BeaconStateManager instead of BluetoothScanner

@@ -6,6 +6,7 @@
 import SwiftUI
 
 @inline(__always)
+
 private func radiansCCW_to_degreesCW(_ r: Double) -> Double {
     // Map transform is typically +CCW (math). SwiftUI's rotationEffect uses +CW on screen.
     return -(r * 180.0 / .pi)
@@ -54,6 +55,15 @@ struct CompassCalibrationOverlay: View {
         }
         .ignoresSafeArea()
         .allowsHitTesting(true)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    mapTransform.isHUDInteracting = true
+                }
+                .onEnded { _ in
+                    mapTransform.isHUDInteracting = false
+                }
+        )
     }
 }
 

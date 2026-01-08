@@ -16,6 +16,8 @@ struct SVGExportPanel: View {
     @EnvironmentObject private var metricSquareStore: MetricSquareStore
     @EnvironmentObject private var surveyExportOptions: SurveyExportOptions
     @EnvironmentObject private var beaconListsStore: BeaconListsStore
+    @EnvironmentObject private var mapTransform: MapTransformStore
+
     
     @Binding var isPresented: Bool
     
@@ -142,7 +144,17 @@ struct SVGExportPanel: View {
                     }
                     .disabled(exportOptions.isExporting)
                 }
+                
             }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        mapTransform.isHUDInteracting = true
+                    }
+                    .onEnded { _ in
+                        mapTransform.isHUDInteracting = false
+                    }
+            )
             .navigationTitle("Export Options")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -278,8 +290,8 @@ struct SVGExportPanel: View {
                     beaconID: dot.beaconID,
                     mapX_px: Double(dot.mapPoint.x),
                     mapY_px: Double(dot.mapPoint.y),
-                    elevation_m: self.beaconDotStore.elevations[dot.beaconID],
-                    txPower_dBm: self.beaconDotStore.txPowerByID[dot.beaconID]
+                    elevation_m: self.beaconDotStore.getElevation(for: dot.beaconID),
+                    txPower_dBm: self.beaconDotStore.getTxPower(for: dot.beaconID)
                 )
             }
             
@@ -388,7 +400,7 @@ struct SVGExportPanel: View {
     // MARK: - RSSI Heatmap Export
     
     /// Add RSSI heatmap layers to the SVG document (one layer per beacon)
-    private func addRSSIHeatmapLayers(to doc: SVGDocument, mapSize: CGSize, surveyPoints: [SurveyPoint], beaconDots: [BeaconDotStore.Dot], pixelsPerMeter: CGFloat?) {
+    private func addRSSIHeatmapLayers(to doc: SVGDocument, mapSize: CGSize, surveyPoints: [SurveyPoint], beaconDots: [BeaconDotStore.BeaconDotV2], pixelsPerMeter: CGFloat?) {
         
         // Calculate circle radius: 0.4m in pixels
         guard let pixelsPerMeter = pixelsPerMeter else {
