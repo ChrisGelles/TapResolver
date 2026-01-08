@@ -11,6 +11,9 @@ import Combine
 
 @main
 struct TapResolverApp: App {
+    // Static flag to ensure launch timestamp prints only once
+    private static var hasLoggedLaunchTime = false
+    
     // Global app state objects used across views
     @StateObject private var mapTransform = MapTransformStore()
     @StateObject private var beaconDotStore = BeaconDotStore()   // dots (map-local)
@@ -38,8 +41,40 @@ struct TapResolverApp: App {
     // ARCHITECTURAL ADDITION: Single source of truth for live beacon state
     // Consolidates polling logic previously duplicated in RSSILabelsOverlay and ScanQualityViewModel
     @StateObject private var beaconState = BeaconStateManager()
+    @StateObject private var arWorldMapStore = ARWorldMapStore()
+    @StateObject private var trianglePatchStore = TrianglePatchStore()
+    @StateObject private var surveyPointStore = SurveyPointStore()
+    @StateObject private var surveySessionCollector = SurveySessionCollector()
+    @StateObject private var surveySelectionCoordinator = SurveySelectionCoordinator()
+    @StateObject private var arViewLaunchContext = ARViewLaunchContext()
+    @StateObject private var arCalibrationCoordinator: ARCalibrationCoordinator
+    @StateObject private var zoneStore = ZoneStore()
+    @StateObject private var svgExportOptions = SVGExportOptions()
+    @StateObject private var backupExportOptions = BackupExportOptions()
+    @StateObject private var surveyExportOptions = SurveyExportOptions()
     
     @State private var showAuthorNamePrompt = AppSettings.needsAuthorName
+    
+    init() {
+        // Print app launch timestamp (once per app launch)
+        if !Self.hasLoggedLaunchTime {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .medium
+            let launchTime = formatter.string(from: Date())
+            print("\n" + String(repeating: "=", count: 80))
+            print("🚀 TapResolver App Launch")
+            print("   Date & Time: \(launchTime)")
+            print(String(repeating: "=", count: 80) + "\n")
+            Self.hasLoggedLaunchTime = true
+        }
+        
+        // Print total UserDefaults size at launch
+        UserDefaultsDiagnostics.printTotalSize()
+        
+        // Initialize coordinator without stores - configure() called in onAppear
+        _arCalibrationCoordinator = StateObject(wrappedValue: ARCalibrationCoordinator())
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -56,7 +91,48 @@ struct TapResolverApp: App {
                 .environmentObject(orientationManager)
                 .environmentObject(scanUtility)
                 .environmentObject(beaconState)  // Inject BeaconStateManager into view hierarchy
+                .environmentObject(arWorldMapStore)
+                .environmentObject(trianglePatchStore)  // Shared TrianglePatchStore instance
+                .environmentObject(surveyPointStore)
+                .environmentObject(surveySessionCollector)
+                .environmentObject(surveySelectionCoordinator)
+                .environmentObject(arViewLaunchContext)  // Unified AR view launch context
+                .environmentObject(arCalibrationCoordinator)
+                .environmentObject(zoneStore)
+                .environmentObject(svgExportOptions)
+                .environmentObject(backupExportOptions)
+                .environmentObject(surveyExportOptions)
                 .onAppear {
+                    // Configure coordinator with actual store instances
+                    arCalibrationCoordinator.configure(
+                        arStore: arWorldMapStore,
+                        mapStore: mapPointStore,
+                        triangleStore: trianglePatchStore,
+                        metricSquareStore: metricSquares,
+                        zoneStore: zoneStore
+                    )
+                    
+                    surveySelectionCoordinator.configure(
+                        triangleStore: trianglePatchStore,
+                        metricSquareStore: metricSquares,
+                        mapPointStore: mapPointStore,
+                        mapTransformStore: mapTransform
+                    )
+                    
+                    // Configure survey session collector
+                    surveySessionCollector.configure(
+                        surveyPointStore: surveyPointStore,
+                        bluetoothScanner: btScanner,
+                        beaconLists: beaconLists,
+                        orientationManager: orientationManager,
+                        mapPointStore: mapPointStore,
+                        arCalibrationCoordinator: arCalibrationCoordinator
+                    )
+                    
+                    // Configure ZoneStore with dependencies and load zones
+                    zoneStore.configure(mapPointStore: mapPointStore, triangleStore: trianglePatchStore)
+                    zoneStore.load()
+                    
                     LocationMigration.runIfNeeded()
                     squareMetrics.setMetricSquareStore(metricSquares)
                     orientationManager.start()

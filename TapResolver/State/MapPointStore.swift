@@ -8,6 +8,133 @@
 import SwiftUI
 import CoreGraphics
 import Combine
+import simd
+import UIKit
+
+// MARK: - Position History Types (Milestone 2)
+
+/// Categorizes how an AR position was recorded
+public enum SourceType: String, Codable {
+    case calibration      // Manual placement during triangle calibration
+    case ghostConfirm     // User confirmed ghost position was accurate
+    case ghostAdjust      // User adjusted ghost to correct position
+    case relocalized      // Position derived from session transform
+}
+
+/// Records a single AR position measurement for a MapPoint
+public struct ARPositionRecord: Codable, Identifiable {
+    public let id: UUID
+    let position: SIMD3<Float>      // 3D AR position (simd_float3)
+    let sessionID: UUID              // Which AR session created this
+    let timestamp: Date              // When recorded
+    let sourceType: SourceType       // How it was recorded
+    let distortionVector: SIMD3<Float>?  // Difference from estimated (nil if no adjustment)
+    let confidenceScore: Float       // 0.0 - 1.0, used for weighted averaging
+    
+    public init(
+        id: UUID = UUID(),
+        position: SIMD3<Float>,
+        sessionID: UUID,
+        timestamp: Date = Date(),
+        sourceType: SourceType,
+        distortionVector: SIMD3<Float>? = nil,
+        confidenceScore: Float
+    ) {
+        self.id = id
+        self.position = position
+        self.sessionID = sessionID
+        self.timestamp = timestamp
+        self.sourceType = sourceType
+        self.distortionVector = distortionVector
+        self.confidenceScore = confidenceScore
+    }
+    
+    // MARK: - Codable (encode simd_float3 as [Float])
+    
+    enum CodingKeys: String, CodingKey {
+        case id, sessionID, timestamp, sourceType, confidenceScore
+        case positionArray, distortionArray
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        sessionID = try container.decode(UUID.self, forKey: .sessionID)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        sourceType = try container.decode(SourceType.self, forKey: .sourceType)
+        confidenceScore = try container.decode(Float.self, forKey: .confidenceScore)
+        
+        let posArray = try container.decode([Float].self, forKey: .positionArray)
+        position = SIMD3<Float>(posArray[0], posArray[1], posArray[2])
+        
+        if let distArray = try container.decodeIfPresent([Float].self, forKey: .distortionArray) {
+            distortionVector = SIMD3<Float>(distArray[0], distArray[1], distArray[2])
+        } else {
+            distortionVector = nil
+        }
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(sourceType, forKey: .sourceType)
+        try container.encode(confidenceScore, forKey: .confidenceScore)
+        try container.encode([position.x, position.y, position.z], forKey: .positionArray)
+        
+        if let dist = distortionVector {
+            try container.encode([dist.x, dist.y, dist.z], forKey: .distortionArray)
+        }
+    }
+}
+
+extension ARPositionRecord: CustomDebugStringConvertible {
+    public var debugDescription: String {
+        let ts = timestamp.formatted(date: .omitted, time: .standard)
+        return "[\(sourceType.rawValue)] (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z))) • \(ts) • conf: \(String(format: "%.2f", confidenceScore))"
+    }
+}
+
+public enum MapPointRole: String, Codable, CaseIterable, Identifiable {
+    case triangleEdge = "triangle_edge"
+    case featureMarker = "feature_marker"
+    case directionalNorth = "directional_north"
+    case directionalSouth = "directional_south"
+    case zoneCorner = "zone_corner"
+    
+    public var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .triangleEdge: return "Triangle Edge"
+        case .featureMarker: return "Feature Marker"
+        case .directionalNorth: return "North Calibration"
+        case .directionalSouth: return "South Calibration"
+        case .zoneCorner: return "Zone Corner"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .triangleEdge: return "triangle"
+        case .featureMarker: return "mappin.circle"
+        case .directionalNorth: return "location.north.fill"
+        case .directionalSouth: return "s.circle.fill"
+        case .zoneCorner: return "rectangle.dashed"
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .triangleEdge: return .blue
+        case .featureMarker: return .green
+        case .directionalNorth: return .red
+        case .directionalSouth: return .orange
+        case .zoneCorner: return .purple
+        }
+    }
+}
 
 // Notification for when map points reload
 extension Notification.Name {
@@ -23,21 +150,270 @@ public final class MapPointStore: ObservableObject {
     // CRITICAL: Prevent data loss during reload operations
     internal var isReloading: Bool = false
     
+    // MARK: - Bake-Down Freshness Tracking (Milestone 5)
+    
+    /// Timestamp of last successful bake-down operation
+    @Published public var lastBakeTimestamp: Date? = nil
+    
+    /// Number of sessions that were included in the last bake
+    public var lastBakeSessionCount: Int = 0
+    
+    /// UserDefaults key for persisting bake timestamp
+    private var bakeTimestampKey: String {
+        return ctx.key("BakeTimestamp_v1")
+    }
+    
+    /// UserDefaults key for persisting bake session count
+    private var bakeSessionCountKey: String {
+        return ctx.key("BakeSessionCount_v1")
+    }
+    
     // DIAGNOSTIC: Track which instance this is
     internal let instanceID = UUID().uuidString
     
-    public struct MapPoint: Identifiable {
+    public struct MapPoint: Codable, Identifiable {
         public let id: UUID
-        public var mapPoint: CGPoint    // map-local (untransformed) coords
+        public var position: CGPoint    // map-local (untransformed) coords
+        public var name: String?
         public let createdDate: Date
         public var sessions: [ScanSession] = []  // Full scan session data stored in UserDefaults
+        var linkedARMarkerID: UUID?  // Optional - links to legacy ARMarker if one exists
+        public var arMarkerID: String?  // Links to ARWorldMapStore marker
+        public var roles: Set<MapPointRole> = []
+        public var locationPhotoData: Data? = nil
+        public var photoFilename: String? = nil  // NEW: Filename of photo on disk
+        public var photoOutdated: Bool? = nil  // Flagged when MapPoint position changes after photo was captured
+        public var photoCapturedAtPosition: CGPoint? = nil  // Position when photo was last captured
+        public var triangleMemberships: [UUID] = []
+        public var isLocked: Bool = true  // ✅ New points default to locked
+        
+        // MARK: - Position History (Milestone 2)
+        public var arPositionHistory: [ARPositionRecord] = []
+        
+        // MARK: - Canonical Position (Physical Reality)
+        
+        // ═══════════════════════════════════════════════════════════════════════
+        // CANONICAL COORDINATE SPACE
+        // ═══════════════════════════════════════════════════════════════════════
+        // Origin: Center of map image at floor level
+        // Units: Meters
+        // Orientation: +X right, +Z down (map coords), +Y up (toward ceiling)
+        //
+        // This represents where the point ACTUALLY IS in physical space,
+        // accumulated from multiple AR calibration sessions. Ghost markers
+        // are projected FROM this position into current session coordinates.
+        //
+        // FUTURE: Discrepancy between canonicalPosition and mapPixelPosition
+        // (after scale/rotation) indicates map distortion to be corrected.
+        // ═══════════════════════════════════════════════════════════════════════
+        
+        public var canonicalPosition: SIMD3<Float>?       // Position in canonical frame (meters)
+        public var canonicalConfidence: Float?             // Aggregate confidence (0.0-1.0)
+        public var canonicalSampleCount: Int = 0           // Number of calibration sessions that contributed
+        
+        /// Offset from idealized map geometry in canonical frame (meters)
+        /// Represents how much physical reality differs from the 2D map at this point
+        /// Computed as: adjustedSessionPosition - bilinearProjectedPosition
+        /// Used to correct future ghost projections for improved accuracy
+        public var consensusDistortionVector: SIMD3<Float>?
+        
+        public var mapPoint: CGPoint {
+            get { position }
+            set { position = newValue }
+        }
         
         // Initializer that accepts existing ID or generates new one
-        init(id: UUID? = nil, mapPoint: CGPoint, createdDate: Date? = nil, sessions: [ScanSession] = []) {
+        init(
+            id: UUID? = nil,
+            mapPoint: CGPoint,
+            name: String? = nil,
+            createdDate: Date? = nil,
+            sessions: [ScanSession] = [],
+            roles: Set<MapPointRole> = [],
+            locationPhotoData: Data? = nil,
+            photoFilename: String? = nil,  // NEW
+            triangleMemberships: [UUID] = [],
+            isLocked: Bool = true,  // ✅ ADD THIS PARAMETER
+            arPositionHistory: [ARPositionRecord] = [],
+            canonicalPosition: SIMD3<Float>? = nil,
+            canonicalConfidence: Float? = nil,
+            canonicalSampleCount: Int = 0,
+            consensusDistortionVector: SIMD3<Float>? = nil
+        ) {
             self.id = id ?? UUID()
-            self.mapPoint = mapPoint
+            self.position = mapPoint
+            self.name = name
             self.createdDate = createdDate ?? Date()
             self.sessions = sessions
+            self.linkedARMarkerID = nil
+            self.arMarkerID = nil
+            self.roles = roles
+            self.locationPhotoData = locationPhotoData
+            self.photoFilename = photoFilename  // NEW
+            self.triangleMemberships = triangleMemberships
+            self.isLocked = isLocked  // ✅ ADD THIS ASSIGNMENT
+            self.arPositionHistory = arPositionHistory  // NEW
+            self.canonicalPosition = canonicalPosition
+            self.canonicalConfidence = canonicalConfidence
+            self.canonicalSampleCount = canonicalSampleCount
+            self.consensusDistortionVector = consensusDistortionVector
+        }
+        
+        // MARK: - Consensus Position (Milestone 2)
+        
+        private static let outlierThresholdMeters: Float = 0.15
+        
+        /// Calculates weighted average position with outlier rejection
+        var consensusPosition: SIMD3<Float>? {
+            guard !arPositionHistory.isEmpty else { return nil }
+            
+            // Single record - return it directly
+            if arPositionHistory.count == 1 {
+                return arPositionHistory[0].position
+            }
+            
+            // Calculate initial centroid (unweighted)
+            var sum = SIMD3<Float>(0, 0, 0)
+            for record in arPositionHistory {
+                sum += record.position
+            }
+            let centroid = sum / Float(arPositionHistory.count)
+            
+            // Filter outliers (distance > threshold from centroid)
+            let inliers = arPositionHistory.filter { record in
+                let dist = simd_distance(record.position, centroid)
+                return dist <= Self.outlierThresholdMeters
+            }
+            
+            // If all filtered out, fall back to all records
+            let recordsToUse = inliers.isEmpty ? arPositionHistory : inliers
+            
+            // Weighted average using confidence scores
+            var weightedSum = SIMD3<Float>(0, 0, 0)
+            var totalWeight: Float = 0
+            
+            for record in recordsToUse {
+                weightedSum += record.position * record.confidenceScore
+                totalWeight += record.confidenceScore
+            }
+            
+            guard totalWeight > 0 else { return nil }
+            return weightedSum / totalWeight
+        }
+        
+        /// Prints position history for debugging
+        public func debugHistory() {
+            print("🧠 History for MapPoint \(id.uuidString.prefix(8)) (\(arPositionHistory.count) records):")
+            if arPositionHistory.isEmpty {
+                print("   (empty)")
+            } else {
+                for record in arPositionHistory {
+                    print("   • \(record.debugDescription)")
+                }
+            }
+            if let consensus = consensusPosition {
+                print("   📍 Consensus: (\(String(format: "%.2f", consensus.x)), \(String(format: "%.2f", consensus.y)), \(String(format: "%.2f", consensus.z)))")
+            }
+        }
+        
+        // MARK: - Codable
+        
+        enum CodingKeys: String, CodingKey {
+            case id, position, name, createdDate, sessions
+            case linkedARMarkerID, arMarkerID, roles
+            case locationPhotoData, photoFilename, photoOutdated, photoCapturedAtPosition
+            case triangleMemberships, isLocked, arPositionHistory
+            // NOTE: These keys use "baked" prefix for backward compatibility with stored data.
+            // Swift properties use "canonical" prefix (renamed for clarity).
+            case bakedCanonicalPositionArray   // Maps to: canonicalPosition
+            case bakedConfidence               // Maps to: canonicalConfidence
+            case bakedSampleCount              // Maps to: canonicalSampleCount
+            case consensusDistortionVectorArray // Maps to: consensusDistortionVector
+        }
+        
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(UUID.self, forKey: .id)
+            position = try container.decode(CGPoint.self, forKey: .position)
+            name = try container.decodeIfPresent(String.self, forKey: .name)
+            createdDate = try container.decode(Date.self, forKey: .createdDate)
+            sessions = try container.decode([ScanSession].self, forKey: .sessions)
+            linkedARMarkerID = try container.decodeIfPresent(UUID.self, forKey: .linkedARMarkerID)
+            arMarkerID = try container.decodeIfPresent(String.self, forKey: .arMarkerID)
+            
+            // Decode roles
+            if let rolesArray = try container.decodeIfPresent([MapPointRole].self, forKey: .roles) {
+                roles = Set(rolesArray)
+            } else {
+                roles = []
+            }
+            
+            locationPhotoData = try container.decodeIfPresent(Data.self, forKey: .locationPhotoData)
+            photoFilename = try container.decodeIfPresent(String.self, forKey: .photoFilename)
+            photoOutdated = try container.decodeIfPresent(Bool.self, forKey: .photoOutdated)
+            photoCapturedAtPosition = try container.decodeIfPresent(CGPoint.self, forKey: .photoCapturedAtPosition)
+            
+            triangleMemberships = try container.decodeIfPresent([UUID].self, forKey: .triangleMemberships) ?? []
+            isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? true
+            arPositionHistory = try container.decodeIfPresent([ARPositionRecord].self, forKey: .arPositionHistory) ?? []
+            
+            // Decode canonical position (stored with "baked" keys for backward compatibility)
+            if let bakedArray = try container.decodeIfPresent([Float].self, forKey: .bakedCanonicalPositionArray),
+               bakedArray.count == 3 {
+                canonicalPosition = SIMD3<Float>(bakedArray[0], bakedArray[1], bakedArray[2])
+            } else {
+                canonicalPosition = nil
+            }
+            canonicalConfidence = try container.decodeIfPresent(Float.self, forKey: .bakedConfidence)
+            canonicalSampleCount = try container.decodeIfPresent(Int.self, forKey: .bakedSampleCount) ?? 0
+            
+            // Decode consensusDistortionVector
+            if let distortionArray = try container.decodeIfPresent([Float].self, forKey: .consensusDistortionVectorArray),
+               distortionArray.count == 3 {
+                consensusDistortionVector = SIMD3<Float>(distortionArray[0], distortionArray[1], distortionArray[2])
+                print("📖 [DECODE_DIAG] \(String(id.uuidString.prefix(8))): decoded distortion (\(String(format: "%.3f", distortionArray[0])), \(String(format: "%.3f", distortionArray[1])), \(String(format: "%.3f", distortionArray[2])))")
+            } else {
+                consensusDistortionVector = nil
+            }
+        }
+        
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(id, forKey: .id)
+            try container.encode(position, forKey: .position)
+            try container.encodeIfPresent(name, forKey: .name)
+            try container.encode(createdDate, forKey: .createdDate)
+            try container.encode(sessions, forKey: .sessions)
+            try container.encodeIfPresent(linkedARMarkerID, forKey: .linkedARMarkerID)
+            try container.encodeIfPresent(arMarkerID, forKey: .arMarkerID)
+            try container.encode(Array(roles), forKey: .roles)
+            try container.encodeIfPresent(locationPhotoData, forKey: .locationPhotoData)
+            try container.encodeIfPresent(photoFilename, forKey: .photoFilename)
+            try container.encodeIfPresent(photoOutdated, forKey: .photoOutdated)
+            try container.encodeIfPresent(photoCapturedAtPosition, forKey: .photoCapturedAtPosition)
+            
+            if !triangleMemberships.isEmpty {
+                try container.encode(triangleMemberships, forKey: .triangleMemberships)
+            }
+            try container.encode(isLocked, forKey: .isLocked)
+            if !arPositionHistory.isEmpty {
+                try container.encode(arPositionHistory, forKey: .arPositionHistory)
+            }
+            
+            // Encode canonical position (using "baked" keys for backward compatibility)
+            if let canonical = canonicalPosition {
+                try container.encode([canonical.x, canonical.y, canonical.z], forKey: .bakedCanonicalPositionArray)
+            }
+            try container.encodeIfPresent(canonicalConfidence, forKey: .bakedConfidence)
+            if canonicalSampleCount > 0 {
+                try container.encode(canonicalSampleCount, forKey: .bakedSampleCount)
+            }
+            
+            // Encode consensusDistortionVector
+            if let distortion = consensusDistortionVector {
+                try container.encode([distortion.x, distortion.y, distortion.z], forKey: .consensusDistortionVectorArray)
+                print("💾 [ENCODE_DIAG] \(String(id.uuidString.prefix(8))): encoded distortion (\(String(format: "%.3f", distortion.x)), \(String(format: "%.3f", distortion.y)), \(String(format: "%.3f", distortion.z)))")
+            }
         }
     }
     
@@ -96,7 +472,26 @@ public final class MapPointStore: ObservableObject {
     }
 
     @Published public internal(set) var points: [MapPoint] = []
+    @Published var arMarkers: [ARMarker] = []
+    @Published var anchorPackages: [AnchorPointPackage] = []
+    
+    // Calibration state (session-only, never persisted)
+    // TODO: Re-enable after Phase 4 coordinator integration
+    // @Published var calibrationPoints: [CalibrationMarker] = []
+    @Published var isCalibrated: Bool = false
+    
     @Published public private(set) var activePointID: UUID? = nil
+    @Published var selectedPointID: UUID? = nil
+    
+    // Interpolation mode state
+    @Published var isInterpolationMode: Bool = false
+    @Published var interpolationFirstPointID: UUID? = nil
+    @Published var interpolationSecondPointID: UUID? = nil
+    
+    var mapPoints: [MapPoint] {
+        get { points }
+        set { points = newValue }
+    }
     
     /// Get the currently active map point
     public var activePoint: MapPoint? {
@@ -118,6 +513,7 @@ public final class MapPointStore: ObservableObject {
         // Clear in-memory data
         points.removeAll()
         activePointID = nil
+        selectedPointID = nil
         
         // Load fresh data for current location
         load()
@@ -141,6 +537,7 @@ public final class MapPointStore: ObservableObject {
         
         points.removeAll()
         activePointID = nil
+        selectedPointID = nil
         
         // Temporarily allow empty save for explicit clear
         let wasReloading = isReloading
@@ -154,6 +551,7 @@ public final class MapPointStore: ObservableObject {
     func flush() {
         points.removeAll()
         activePointID = nil
+        selectedPointID = nil
         objectWillChange.send()
     }
 
@@ -162,8 +560,18 @@ public final class MapPointStore: ObservableObject {
     private let activePointKey = "MapPointsActive_v1"
 
     public init() {
-        print("ðŸ§  MapPointStore init â€” ID: \(String(instanceID.prefix(8)))...")
-        load()
+        print("🧱 MapPointStore init — ID: \(String(instanceID.prefix(8)))...")
+        
+        // Delay load() until locationID is set to avoid race condition
+        Task {
+            // Wait briefly for locationID to propagate from LocationManager
+            try? await Task.sleep(nanoseconds: 300_000_000)  // 0.3 sec
+            await MainActor.run { [weak self] in
+                guard let self = self else { return }
+                print("🔄 MapPointStore: Initial load for location '\(ctx.locationID)'")
+                self.load()
+            }
+        }
         
         // Listen for scan session saves
         scanSessionCancellable = NotificationCenter.default.publisher(for: .scanSessionSaved)
@@ -184,8 +592,14 @@ public final class MapPointStore: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            print("📍 MapPointStore: Location changed, reloading...")
-            self?.reloadForActiveLocation()
+            // Defer reload to avoid "Publishing changes from within view updates"
+            DispatchQueue.main.async {
+                print("📍 MapPointStore: Location changed, reloading...")
+                self?.reloadForActiveLocation()
+                
+                // AR markers are now session-only; skip reloading persisted markers
+                // self?.loadARMarkers()
+            }
         }
     }
 
@@ -205,8 +619,9 @@ public final class MapPointStore: ObservableObject {
         
         let newPoint = MapPoint(mapPoint: mapPoint)
         points.append(newPoint)
-        // Set the new point as active (deactivating any previous active point)
+        // Set the new point as active and selected
         activePointID = newPoint.id
+        selectedPointID = newPoint.id
         print("âœ¨ Map Point Created:")
         print("   ID: \(newPoint.id.uuidString)")
         print("   Position: (\(Int(mapPoint.x)), \(Int(mapPoint.y)))")
@@ -228,11 +643,37 @@ public final class MapPointStore: ObservableObject {
     }
 
     /// Update a map point's position (used while dragging)
-    public func updatePoint(id: UUID, to newPoint: CGPoint) {
-        if let idx = points.firstIndex(where: { $0.id == id }) {
-            points[idx].mapPoint = newPoint
-            save()
+    public func updatePoint(id: UUID, to newPosition: CGPoint) {
+        guard let index = points.firstIndex(where: { $0.id == id }) else { return }
+        let point = points[index]
+        
+        // Check if position changed significantly and photo exists
+        if let capturedPosition = point.photoCapturedAtPosition,
+           point.locationPhotoData != nil || point.photoFilename != nil {
+            let distance = sqrt(
+                pow(newPosition.x - capturedPosition.x, 2) +
+                pow(newPosition.y - capturedPosition.y, 2)
+            )
+            // Mark as outdated if moved more than 1 pixel (movementThreshold)
+            // Using epsilon tolerance for float precision (0.1 pixels)
+            let movementThreshold: CGFloat = 1.0
+            let epsilon: CGFloat = 0.1
+            if distance > (movementThreshold + epsilon) {
+                points[index].photoOutdated = true
+                print("⚠️ Photo marked as outdated: MapPoint moved \(String(format: "%.2f", distance)) pixels from capture position (threshold: \(movementThreshold))")
+            }
+        } else if (point.locationPhotoData != nil || point.photoFilename != nil) && point.photoCapturedAtPosition == nil {
+            // Migration: Existing photos without capture position are considered outdated
+            // until they are recaptured with proper position tracking
+            if point.photoOutdated == nil {
+                points[index].photoOutdated = true
+                print("⚠️ Photo marked as outdated: No capture position recorded (migration)")
+            }
         }
+        
+        points[index].position = newPosition
+        // Note: We don't save() here to avoid excessive I/O during drag
+        // The position will be saved when drag ends via the existing save mechanism
     }
 
     public func clear() {
@@ -246,9 +687,13 @@ public final class MapPointStore: ObservableObject {
         if activePointID == id {
             // Deactivate if currently active
             activePointID = nil
+            if selectedPointID == id {
+                selectedPointID = nil
+            }
         } else {
             // Activate this point (deactivating any other active point)
             activePointID = id
+            selectedPointID = id
         }
         save()
     }
@@ -256,18 +701,85 @@ public final class MapPointStore: ObservableObject {
     /// Deactivate all map points (called when drawer closes)
     public func deactivateAll() {
         activePointID = nil
+        selectedPointID = nil
         save()
     }
 
-    /// Select a point by ID (used when tapping on map dots)
-    public func selectPoint(id: UUID) {
-        activePointID = id
-        save()
-    }
+    // DEPRECATED: selectPoint() removed - use selectedPointID directly for UI selection
+    // activePointID is only for scan operations, set it explicitly when needed
 
     /// Check if a point is currently active
     public func isActive(_ id: UUID) -> Bool {
         return activePointID == id
+    }
+
+    /// Toggle the lock state of a map point
+    public func toggleLock(id: UUID) {
+        guard let index = points.firstIndex(where: { $0.id == id }) else { return }
+        points[index].isLocked.toggle()
+        print("🔒 Map Point \(points[index].isLocked ? "locked" : "unlocked"): \(id)")
+        save()
+    }
+    
+    /// Check if a point is locked
+    public func isLocked(_ id: UUID) -> Bool {
+        return points.first(where: { $0.id == id })?.isLocked ?? true
+    }
+    
+    // MARK: - Position History (Milestone 2)
+    
+    private let maxHistoryRecords = 20
+    
+    /// Adds a position record to a MapPoint's history with FIFO eviction
+    func addPositionRecord(mapPointID: UUID, record: ARPositionRecord) {
+        guard let index = points.firstIndex(where: { $0.id == mapPointID }) else {
+            print("⚠️ [POSITION_HISTORY] MapPoint not found: \(mapPointID.uuidString.prefix(8))")
+            return
+        }
+        
+        points[index].arPositionHistory.append(record)
+        
+        // FIFO eviction if over limit
+        if points[index].arPositionHistory.count > maxHistoryRecords {
+            let removed = points[index].arPositionHistory.removeFirst()
+            print("🗑️ [POSITION_HISTORY] Evicted oldest record from \(mapPointID.uuidString.prefix(8)) (session: \(removed.sessionID.uuidString.prefix(8)))")
+        }
+        
+        print("📍 [POSITION_HISTORY] \(record.sourceType.rawValue) → MapPoint \(mapPointID.uuidString.prefix(8)) (#\(points[index].arPositionHistory.count))")
+        print("   ↳ pos: (\(String(format: "%.2f", record.position.x)), \(String(format: "%.2f", record.position.y)), \(String(format: "%.2f", record.position.z))) @ \(record.timestamp.formatted(date: .omitted, time: .standard))")
+        
+        save()
+    }
+    
+    /// Prints position history for all MapPoints that have history
+    func debugAllHistories() {
+        let pointsWithHistory = points.filter { !$0.arPositionHistory.isEmpty }
+        
+        if pointsWithHistory.isEmpty {
+            print("📊 [DEBUG] No MapPoints have position history yet")
+            return
+        }
+        
+        print("📊 [DEBUG] Position histories for \(pointsWithHistory.count) MapPoint(s):")
+        for point in pointsWithHistory {
+            point.debugHistory()
+            print("")  // Blank line between entries
+        }
+    }
+    
+    /// Prints a compact summary of consensus positions
+    func debugConsensusSummary() {
+        print("📍 [CONSENSUS SUMMARY]")
+        var count = 0
+        for point in points {
+            if let consensus = point.consensusPosition {
+                print("   MP \(point.id.uuidString.prefix(8)) → (\(String(format: "%.2f", consensus.x)), \(String(format: "%.2f", consensus.y)), \(String(format: "%.2f", consensus.z)))")
+                count += 1
+            }
+        }
+        if count == 0 {
+            print("   (no consensus positions available)")
+        }
     }
 
     /// Get coordinate string for display in drawer
@@ -281,8 +793,28 @@ public final class MapPointStore: ObservableObject {
         let id: UUID
         let x: CGFloat
         let y: CGFloat
+        let name: String?
         let createdDate: Date
         let sessions: [ScanSession]
+        let linkedARMarkerID: UUID?
+        let arMarkerID: String?
+        let roles: [MapPointRole]?
+        let locationPhotoData: Data?
+        let photoFilename: String?  // NEW
+        let photoOutdated: Bool?  // Optional for backward compatibility
+        let photoCapturedAtPositionX: CGFloat?  // Optional for backward compatibility
+        let photoCapturedAtPositionY: CGFloat?  // Optional for backward compatibility
+        let triangleMemberships: [UUID]?
+        let isLocked: Bool?  // ✅ Optional for backward compatibility
+        let arPositionHistory: [ARPositionRecord]?  // Optional for migration from old data
+        
+        // Canonical position (stored with "baked" keys for backward compatibility)
+        let bakedCanonicalPositionArray: [Float]?  // [x, y, z] in canonical frame → canonicalPosition
+        let bakedConfidence: Float?                 // → canonicalConfidence
+        let bakedSampleCount: Int?                  // → canonicalSampleCount
+        
+        // Distortion vector for mesh refinement
+        let consensusDistortionVectorArray: [Float]?  // [x, y, z] → consensusDistortionVector
     }
 
     internal func save() {
@@ -297,62 +829,435 @@ public final class MapPointStore: ObservableObject {
             // Check if UserDefaults has existing data
             if let existingDTO: [MapPointDTO] = ctx.read(pointsKey, as: [MapPointDTO].self),
                !existingDTO.isEmpty {
-                print("🛑 CRITICAL: Blocked save of empty array - UserDefaults has \(existingDTO.count) points")
-                print("   This prevents accidental data loss. If you want to delete all points, use clearAllPoints() explicitly.")
+                print("🛑 CRITICAL: Blocked save of empty array (prevents data loss)")
                 return
             }
         }
         
-        let dto = points.map { MapPointDTO(
-            id: $0.id,
-            x: $0.mapPoint.x,
-            y: $0.mapPoint.y,
-            createdDate: $0.createdDate,
-            sessions: $0.sessions
-        )}
+        let dto = points.map { point -> MapPointDTO in
+            // Only include locationPhotoData if there's no filename (legacy data)
+            let photoData: Data?
+            if point.photoFilename != nil {
+                // Photo is on disk, don't save to UserDefaults
+                photoData = nil
+            } else {
+                // Legacy: photo still in memory
+                photoData = point.locationPhotoData
+            }
+            
+            return MapPointDTO(
+                id: point.id,
+                x: point.mapPoint.x,
+                y: point.mapPoint.y,
+                name: point.name,
+                createdDate: point.createdDate,
+                sessions: point.sessions,
+                linkedARMarkerID: point.linkedARMarkerID,
+                arMarkerID: point.arMarkerID,
+                roles: Array(point.roles),
+                locationPhotoData: photoData,
+                photoFilename: point.photoFilename,  // NEW
+                photoOutdated: point.photoOutdated,
+                photoCapturedAtPositionX: point.photoCapturedAtPosition?.x,
+                photoCapturedAtPositionY: point.photoCapturedAtPosition?.y,
+                triangleMemberships: point.triangleMemberships.isEmpty ? nil : point.triangleMemberships,
+                isLocked: point.isLocked,
+                arPositionHistory: point.arPositionHistory.isEmpty ? nil : point.arPositionHistory,
+                // Canonical position (stored with "baked" keys for backward compatibility)
+                bakedCanonicalPositionArray: point.canonicalPosition.map { [$0.x, $0.y, $0.z] },
+                bakedConfidence: point.canonicalConfidence,
+                bakedSampleCount: point.canonicalSampleCount > 0 ? point.canonicalSampleCount : nil,
+                consensusDistortionVectorArray: point.consensusDistortionVector.map { [$0.x, $0.y, $0.z] }
+            )
+        }
+        
         ctx.write(pointsKey, value: dto)
+        
         if let activeID = activePointID {
             ctx.write(activePointKey, value: activeID)
         }
         
-        print("ðŸ’¾ Saved Map Points to UserDefaults:")
-        print("   Location: \(ctx.locationID)")
-        print("   Points: \(points.count)")
-        for point in points {
-            print("   â€¢ \(String(point.id.uuidString.prefix(8)))... @ (\(Int(point.mapPoint.x)),\(Int(point.mapPoint.y))) - \(point.sessions.count) sessions")
+        // Summary log only
+        print("💾 Saved \(points.count) Map Point(s)")
+        
+        // Also persist bake metadata
+        if let bakeTime = lastBakeTimestamp {
+            UserDefaults.standard.set(bakeTime, forKey: bakeTimestampKey)
+            UserDefaults.standard.set(lastBakeSessionCount, forKey: bakeSessionCountKey)
         }
+        
+        // Save AR Markers
+        // saveARMarkers()  // AR Markers no longer persisted
+    }
+    
+    /// Purges all AR position history from MapPoints for the current location
+    /// This resets the consensus position calculations while preserving 2D map coordinates
+    func purgeARPositionHistory() {
+        print("================================================================================")
+        print("🧹 PURGE AR POSITION HISTORY")
+        print("================================================================================")
+        print("📍 Location: '\(ctx.locationID)'")
+        print("📊 MapPoints to purge: \(points.count)")
+        
+        var totalRecordsPurged = 0
+        
+        for i in points.indices {
+            let recordCount = points[i].arPositionHistory.count
+            if recordCount > 0 {
+                print("   🗑️ \(String(points[i].id.uuidString.prefix(8))): purging \(recordCount) position record(s)")
+                totalRecordsPurged += recordCount
+                points[i].arPositionHistory = []
+            }
+        }
+        
+        save()
+        
+        print("================================================================================")
+        print("✅ Purged \(totalRecordsPurged) AR position record(s) from \(points.count) MapPoint(s)")
+        print("   2D map coordinates preserved")
+        print("   Triangle structure preserved")
+        print("   Ready for fresh calibration")
+        print("================================================================================")
+    }
+    
+    // MARK: - Canonical Position Purge
+    
+    /// Purges canonical/baked position data AND position history for a single MapPoint
+    /// This ensures the next bake starts fresh with only new placements
+    /// - Parameter mapPointID: The MapPoint to reset
+    /// - Returns: true if the MapPoint was found and updated
+    @discardableResult
+    func purgeCanonicalPosition(for mapPointID: UUID) -> Bool {
+        guard let index = points.firstIndex(where: { $0.id == mapPointID }) else {
+            print("⚠️ [PURGE_CANONICAL] MapPoint \(String(mapPointID.uuidString.prefix(8))) not found")
+            return false
+        }
+        
+        let hadCanonical = points[index].canonicalPosition != nil
+        let historyCount = points[index].arPositionHistory.count
+        
+        // Clear computed canonical position
+        points[index].canonicalPosition = nil
+        points[index].canonicalConfidence = nil
+        points[index].canonicalSampleCount = 0
+        
+        // Clear source position history so next bake starts fresh
+        points[index].arPositionHistory = []
+        
+        if hadCanonical || historyCount > 0 {
+            print("🧹 [PURGE_CANONICAL] Cleared MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            print("   Canonical position: \(hadCanonical ? "cleared" : "was nil")")
+            print("   Position history: \(historyCount) record(s) purged")
+            print("   Ghost placement will use barycentric interpolation until new data is collected")
+        } else {
+            print("ℹ️ [PURGE_CANONICAL] MapPoint \(String(mapPointID.uuidString.prefix(8))) had no data to purge")
+        }
+        
+        save()
+        return hadCanonical || historyCount > 0
+    }
+    
+    /// Purges ALL canonical/baked position data for the current location
+    /// - Returns: Number of MapPoints that had data cleared
+    @discardableResult
+    func purgeAllCanonicalPositions() -> Int {
+        var clearedCount = 0
+        
+        print("🧹 [PURGE_CANONICAL] Starting purge of all canonical positions...")
+        print("   Location: \(PersistenceContext.shared.locationID)")
+        print("   Total MapPoints: \(points.count)")
+        
+        for index in points.indices {
+            if points[index].canonicalPosition != nil {
+                points[index].canonicalPosition = nil
+                points[index].canonicalConfidence = nil
+                points[index].canonicalSampleCount = 0
+                clearedCount += 1
+            }
+        }
+        
+        save()
+        
+        print("✅ [PURGE_CANONICAL] Cleared canonical data from \(clearedCount) MapPoint(s)")
+        print("   Remaining MapPoints: \(points.count) (structure preserved)")
+        
+        return clearedCount
+    }
+    
+    /// Purges ALL position data from Triangle Patch / Rigid Body era.
+    /// This is required before using Zone Corner bilinear projection, as the
+    /// historical 3D canonical positions are incompatible with bilinear math.
+    ///
+    /// Purges: canonicalPosition, canonicalConfidence, canonicalSampleCount, arPositionHistory
+    /// Retains: MapPoint definitions, IDs, roles, 2D coordinates, triangle topology
+    func purgeTrianglePatchPositionData() {
+        print("")
+        print("╔══════════════════════════════════════════════════════════════════════════════╗")
+        print("║  🗑️  PURGE TRIANGLE PATCH ERA POSITION DATA                                  ║")
+        print("╠══════════════════════════════════════════════════════════════════════════════╣")
+        print("║  Location: \(PersistenceContext.shared.locationID.padding(toLength: 58, withPad: " ", startingAt: 0)) ║")
+        print("║  Total MapPoints: \(String(points.count).padding(toLength: 55, withPad: " ", startingAt: 0)) ║")
+        print("╚══════════════════════════════════════════════════════════════════════════════╝")
+        
+        var purgedCanonicalCount = 0
+        var purgedHistoryRecords = 0
+        
+        for i in 0..<points.count {
+            let hadCanonical = points[i].canonicalPosition != nil
+            let historyCount = points[i].arPositionHistory.count
+            
+            if hadCanonical || historyCount > 0 {
+                print("   🗑️ \(String(points[i].id.uuidString.prefix(8))): ", terminator: "")
+                if hadCanonical {
+                    print("canonical ✓ ", terminator: "")
+                    purgedCanonicalCount += 1
+                }
+                if historyCount > 0 {
+                    print("history(\(historyCount)) ✓", terminator: "")
+                    purgedHistoryRecords += historyCount
+                }
+                print("")
+            }
+            
+            points[i].arPositionHistory = []
+            points[i].canonicalPosition = nil
+            points[i].canonicalConfidence = nil
+            points[i].canonicalSampleCount = 0
+        }
+        
+        save()
+        
+        print("")
+        print("╔══════════════════════════════════════════════════════════════════════════════╗")
+        print("║  ✅ PURGE COMPLETE                                                           ║")
+        print("╠══════════════════════════════════════════════════════════════════════════════╣")
+        print("║  MapPoints with canonical data cleared: \(String(purgedCanonicalCount).padding(toLength: 32, withPad: " ", startingAt: 0)) ║")
+        print("║  AR position history records purged: \(String(purgedHistoryRecords).padding(toLength: 35, withPad: " ", startingAt: 0)) ║")
+        print("║  Total MapPoints retained: \(String(points.count).padding(toLength: 45, withPad: " ", startingAt: 0)) ║")
+        print("╠══════════════════════════════════════════════════════════════════════════════╣")
+        print("║  RETAINED: IDs, roles, 2D coordinates, triangle topology                     ║")
+        print("║  PURGED: canonicalPosition, confidence, sampleCount, arPositionHistory       ║")
+        print("║                                                                              ║")
+        print("║  Ready for Zone Corner bilinear calibration.                                 ║")
+        print("╚══════════════════════════════════════════════════════════════════════════════╝")
+        print("")
+    }
+    
+    // MARK: - Photo Management
+    
+    /// Purge all photo assets for current location
+    func purgeAllPhotos() {
+        let location = PersistenceContext.shared.locationID
+        print("🗑️ PURGING ALL PHOTOS for location '\(location)'")
+        
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let mapPointsPath = documentsURL.appendingPathComponent("locations/\(location)/map-points")
+        
+        var deletedCount = 0
+        var failedCount = 0
+        
+        // Delete all .jpg files in map-points directory
+        if FileManager.default.fileExists(atPath: mapPointsPath.path) {
+            if let files = try? FileManager.default.contentsOfDirectory(at: mapPointsPath, includingPropertiesForKeys: nil) {
+                for fileURL in files where fileURL.pathExtension == "jpg" {
+                    do {
+                        try FileManager.default.removeItem(at: fileURL)
+                        deletedCount += 1
+                        print("🗑️ Deleted: \(fileURL.lastPathComponent)")
+                    } catch {
+                        failedCount += 1
+                        print("⚠️ Failed to delete \(fileURL.lastPathComponent): \(error)")
+                    }
+                }
+            }
+        } else {
+            print("⚠️ Map-points directory does not exist: \(mapPointsPath.path)")
+        }
+        
+        // Clear photoFilename from all MapPoints
+        for i in 0..<points.count {
+            points[i].photoFilename = nil
+            points[i].photoOutdated = false
+            points[i].photoCapturedAtPosition = nil
+        }
+        
+        // Save updated points
+        save()
+        
+        print("✅ Photo purge complete:")
+        print("   Deleted: \(deletedCount) files")
+        print("   Failed: \(failedCount) files")
+        print("   Cleared photo metadata from \(points.count) Map Points")
     }
 
     private func load() {
-        print("\nðŸ”„ MapPointStore.load() CALLED")
-        print("   Instance ID: \(String(instanceID.prefix(8)))...")
-        print("   Current locationID: \(ctx.locationID)")
-        
+        // Load map points from persistence
         if let dto: [MapPointDTO] = ctx.read(pointsKey, as: [MapPointDTO].self) {
-            
-            // DIAGNOSTIC: Print raw museum data if this is museum location
-            // Museum diagnostic removed - use external tools for detailed inspection
-            
-            self.points = dto.map { dtoItem in
-                MapPoint(
+            var needsSave = false
+            var loadedPoints = dto.map { dtoItem -> MapPoint in
+                // Load photo from disk if filename exists, otherwise use legacy data
+                var photoData: Data? = nil
+                if let filename = dtoItem.photoFilename {
+                    // Load from disk
+                    let fileManager = FileManager.default
+                    if let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
+                        let locationID = ctx.locationID
+                        let photoURL = documentsURL
+                            .appendingPathComponent("locations/\(locationID)/map-points")
+                            .appendingPathComponent(filename)
+                        
+                        photoData = try? Data(contentsOf: photoURL)
+                    }
+                } else {
+                    // Legacy: load from UserDefaults
+                    photoData = dtoItem.locationPhotoData
+                }
+                
+                // Reconstruct photoCapturedAtPosition from separate x/y fields
+                let capturedPosition: CGPoint? = {
+                    if let x = dtoItem.photoCapturedAtPositionX,
+                       let y = dtoItem.photoCapturedAtPositionY {
+                        return CGPoint(x: x, y: y)
+                    }
+                    return nil
+                }()
+                
+                // Reconstruct baked canonical position from array
+                let bakedPosition: SIMD3<Float>? = {
+                    if let arr = dtoItem.bakedCanonicalPositionArray, arr.count == 3 {
+                        return SIMD3<Float>(arr[0], arr[1], arr[2])
+                    }
+                    return nil
+                }()
+                
+                // Convert distortion vector array back to SIMD3
+                let distortionVector: SIMD3<Float>?
+                if let arr = dtoItem.consensusDistortionVectorArray, arr.count == 3 {
+                    distortionVector = SIMD3<Float>(arr[0], arr[1], arr[2])
+                } else {
+                    distortionVector = nil
+                }
+                
+                var point = MapPoint(
                     id: dtoItem.id,
                     mapPoint: CGPoint(x: dtoItem.x, y: dtoItem.y),
+                    name: dtoItem.name,
                     createdDate: dtoItem.createdDate,
-                    sessions: dtoItem.sessions
+                    sessions: dtoItem.sessions,
+                    roles: Set(dtoItem.roles ?? []),
+                    locationPhotoData: photoData,
+                    photoFilename: dtoItem.photoFilename,  // NEW
+                    triangleMemberships: dtoItem.triangleMemberships ?? [],
+                    isLocked: dtoItem.isLocked ?? true,  // Default to locked for backward compatibility
+                    arPositionHistory: dtoItem.arPositionHistory ?? [],
+                    // Baked canonical position (Milestone 5)
+                    canonicalPosition: bakedPosition,
+                    canonicalConfidence: dtoItem.bakedConfidence,
+                    canonicalSampleCount: dtoItem.bakedSampleCount ?? 0,
+                    consensusDistortionVector: distortionVector
                 )
+                
+                // Set photo tracking fields
+                point.photoOutdated = dtoItem.photoOutdated
+                point.photoCapturedAtPosition = capturedPosition
+                
+                // Migration: Mark photos without capture position as outdated
+                if (point.locationPhotoData != nil || point.photoFilename != nil) && capturedPosition == nil {
+                    if point.photoOutdated == nil {
+                        point.photoOutdated = true
+                        needsSave = true
+                        print("⚠️ Migration: Marked photo as outdated for MapPoint \(String(point.id.uuidString.prefix(8))) (no capture position)")
+                    }
+                }
+                if dtoItem.roles == nil || dtoItem.triangleMemberships == nil || dtoItem.isLocked == nil {
+                    needsSave = true
+                }
+                point.linkedARMarkerID = dtoItem.linkedARMarkerID
+                point.arMarkerID = dtoItem.arMarkerID
+                return point
             }
-            // Only log if there are points loaded
-            if !points.isEmpty {
-                print("ðŸ“‚ Loaded \(points.count) Map Point(s) with \(points.reduce(0) { $0 + $1.sessions.count }) sessions")
+            
+            // One-time migration: purge legacy AR position history (pre-rigid-transform data)
+            MapPointStore.purgeLegacyARPositionHistoryIfNeeded(from: &loadedPoints)
+            
+            self.points = loadedPoints
+            
+            // Summary log only
+            if needsSave {
+                print("📦 Migrated \(points.count) MapPoint(s) to include role metadata")
+                save()
             }
+            print("✅ MapPointStore: Reload complete - \(points.count) points loaded")
+            
+            // Diagnostic: Aggregate data summary
+            let totalRecords = points.reduce(0) { $0 + $1.arPositionHistory.count }
+            let uniqueSessions = Set(points.flatMap { $0.arPositionHistory.map { $0.sessionID } })
+            let pointsWithHistory = points.filter { !$0.arPositionHistory.isEmpty }.count
+            print("📊 [DATA_SUMMARY] \(points.count) MapPoints, \(pointsWithHistory) with history, \(totalRecords) total position records across \(uniqueSessions.count) sessions")
+            
+            // DIAGNOSTIC: Check if any points have distortion after load
+            let pointsWithDistortion = points.filter { $0.consensusDistortionVector != nil }
+            print("📖 [POST_LOAD_DIAG] Loaded \(points.count) points, \(pointsWithDistortion.count) have distortion vectors")
+            for point in pointsWithDistortion {
+                let d = point.consensusDistortionVector!
+                print("   📐 \(String(point.id.uuidString.prefix(8))): (\(String(format: "%.3f", d.x)), \(String(format: "%.3f", d.y)), \(String(format: "%.3f", d.z)))")
+            }
+            
+            // DEBUG: Show distortion vector summary after load
+            debugDistortionSummary()
         } else {
             self.points = []
+            print("✅ MapPointStore: No saved data found - starting fresh")
         }
+        
+        selectedPointID = nil
+        
+        // Load AR Markers
+        loadARMarkers()
+        
+        // AR markers are session-only; skip loading persisted marker data
+        // Load Anchor Packages
+        loadAnchorPackages()
         
         // REMOVED: No longer load activePointID from UserDefaults
         // User must explicitly select a MapPoint each session
         
+        // Load bake metadata
+        lastBakeTimestamp = UserDefaults.standard.object(forKey: bakeTimestampKey) as? Date
+        lastBakeSessionCount = UserDefaults.standard.integer(forKey: bakeSessionCountKey)
+        
+        if let bakeTime = lastBakeTimestamp {
+            print("📦 [BAKE_META] Last bake: \(bakeTime.formatted()), sessions: \(lastBakeSessionCount)")
+        } else {
+            print("📦 [BAKE_META] No previous bake found")
+        }
+        
         // Removed verbose logging - data loaded successfully
+    }
+    
+    private func loadARMarkers() {
+        print("🔍 DEBUG: loadARMarkers() called for location '\(ctx.locationID)'")
+        let markersKey = "ARMarkers_v1"
+        if let markersData = ctx.read(markersKey, as: Data.self) {
+            do {
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                let legacyMarkers = try decoder.decode([ARMarker].self, from: markersData)
+                arMarkers = []
+                let markerKey = "locations.\(ctx.locationID).ARMarkers_v1"
+                let markerSize = UserDefaults.standard.data(forKey: markerKey)?.count ?? 0
+                let markerKB = Double(markerSize) / 1024
+                print("📍 Legacy AR Markers in storage: \(legacyMarkers.count) (will not be loaded)")
+                print("   💾 Size: \(String(format: "%.2f KB", markerKB)) - can be purged with 'Purge Legacy AR Markers'")
+                print("   AR Markers are now created on-demand during AR sessions")
+            } catch {
+                arMarkers = []
+                print("⚠️ Failed to decode legacy AR Markers: \(error)")
+            }
+        } else {
+            arMarkers = []
+            print("📍 No persisted AR Markers found (ephemeral session-only mode)")
+        }
     }
     
     // MARK: - Session Management
@@ -385,6 +1290,44 @@ public final class MapPointStore: ObservableObject {
     /// Get total session count across all points
     public func totalSessionCount() -> Int {
         return points.reduce(0) { $0 + $1.sessions.count }
+    }
+    
+    /// Validates and assigns role to a MapPoint. Returns error message if validation fails.
+    func assignRole(_ role: MapPointRole, to pointID: UUID) -> String? {
+        if role == .directionalNorth {
+            if let existingNorth = points.first(where: { $0.roles.contains(.directionalNorth) && $0.id != pointID }) {
+                print("⚠️ North calibration already assigned to \(existingNorth.id)")
+                return "Another point is already designated as North"
+            }
+        }
+        
+        if role == .directionalSouth {
+            if let existingSouth = points.first(where: { $0.roles.contains(.directionalSouth) && $0.id != pointID }) {
+                print("⚠️ South calibration already assigned to \(existingSouth.id)")
+                return "Another point is already designated as South"
+            }
+        }
+        
+        guard let index = points.firstIndex(where: { $0.id == pointID }) else {
+            return "Map point not found"
+        }
+        
+        if !points[index].roles.contains(role) {
+            points[index].roles.insert(role)
+            objectWillChange.send()
+            save()
+        }
+        
+        return nil
+    }
+    
+    /// Removes a role from a MapPoint.
+    func removeRole(_ role: MapPointRole, from pointID: UUID) {
+        guard let index = points.firstIndex(where: { $0.id == pointID }) else { return }
+        if points[index].roles.remove(role) != nil {
+            objectWillChange.send()
+            save()
+        }
     }
     
     // MARK: - Diagnostics
@@ -566,8 +1509,899 @@ public final class MapPointStore: ObservableObject {
         print(String(repeating: "=", count: 80) + "\n")
     }
     
+    private func saveARMarkers() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        
+        do {
+            let data = try encoder.encode(arMarkers)
+            ctx.write("ARMarkers_v1", value: data)
+            print("💾 Saved \(arMarkers.count) AR Marker(s)")
+        } catch {
+            print("❌ Failed to save AR Markers: \(error)")
+        }
+    }
+    
+    func saveAnchorPackages() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        
+        do {
+            let data = try encoder.encode(anchorPackages)
+            ctx.write("AnchorPackages_v1", value: data)
+            print("💾 Saved \(anchorPackages.count) Anchor Package(s)")
+        } catch {
+            print("❌ Failed to save Anchor Packages: \(error)")
+        }
+    }
+    
+    private func loadAnchorPackages() {
+        let packagesKey = "AnchorPackages_v1"
+        if let packagesData = ctx.read(packagesKey, as: Data.self) {
+            do {
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                anchorPackages = try decoder.decode([AnchorPointPackage].self, from: packagesData)
+                print("📍 Loaded \(anchorPackages.count) Anchor Package(s) for location '\(ctx.locationID)'")
+            } catch {
+                print("⚠️ Failed to decode Anchor Packages: \(error)")
+                anchorPackages = []
+            }
+        } else {
+            anchorPackages = []
+            print("📍 No Anchor Packages found for location '\(ctx.locationID)'")
+        }
+    }
+    
+    func createAnchorPackage(mapPointID: UUID, patchID: UUID?, mapCoordinates: CGPoint, anchorPosition: simd_float3, anchorSessionTransform: simd_float4x4, spatialData: AnchorSpatialData) {
+        var package = AnchorPointPackage(
+            mapPointID: mapPointID,
+            patchID: patchID,
+            mapCoordinates: mapCoordinates,
+            anchorPosition: anchorPosition,
+            anchorSessionTransform: anchorSessionTransform,
+            visualDescription: nil
+        )
+        
+        // Update with captured spatial data
+        package.spatialData = spatialData
+        
+        anchorPackages.append(package)
+        saveAnchorPackages()
+        
+        print("✅ Created Anchor Package \(package.id) for MapPoint \(mapPointID)")
+        if let patchID {
+            print("   Linked Patch ID: \(patchID)")
+        } else {
+            print("   Linked Patch ID: none (legacy)")
+        }
+        print("   Feature points: \(spatialData.featureCloud.pointCount)")
+        print("   Planes: \(spatialData.planes.count)")
+        print("   Data size: \(spatialData.totalDataSize) bytes")
+    }
+    
+    func deleteAnchorPackage(_ packageID: UUID) {
+        guard let index = anchorPackages.firstIndex(where: { $0.id == packageID }) else {
+            print("⚠️ Anchor package \(packageID) not found")
+            return
+        }
+        
+        let package = anchorPackages[index]
+        anchorPackages.remove(at: index)
+        saveAnchorPackages()
+        
+        print("🗑️ Deleted Anchor Package \(packageID)")
+        print("   Was for MapPoint: \(package.mapPointID)")
+        print("   Remaining packages: \(anchorPackages.count)")
+    }
+    
+    func deleteAllAnchorPackagesForMapPoint(_ mapPointID: UUID) {
+        let beforeCount = anchorPackages.count
+        anchorPackages.removeAll { $0.mapPointID == mapPointID }
+        saveAnchorPackages()
+        
+        let deletedCount = beforeCount - anchorPackages.count
+        print("🗑️ Deleted \(deletedCount) Anchor Package(s) for MapPoint \(mapPointID)")
+    }
+    
+    func anchorPackages(forPatchID patchID: UUID) -> [AnchorPointPackage] {
+        let filtered = anchorPackages.filter { $0.patchID == patchID }
+        print("📍 Filtered \(filtered.count) Anchor Package(s) for patch \(patchID)")
+        return filtered
+    }
+    
+    // MARK: - AR Marker Management
+    
+    func createARMarker(linkedMapPointID: UUID, arPosition: simd_float3, mapCoordinates: CGPoint) {
+        let marker = ARMarker(
+            linkedMapPointID: linkedMapPointID,
+            arPosition: arPosition,
+            mapCoordinates: mapCoordinates
+        )
+        
+        arMarkers.append(marker)
+        
+        // Link the MapPoint to this marker
+        if let index = points.firstIndex(where: { $0.id == linkedMapPointID }) {
+            points[index].linkedARMarkerID = marker.id
+        }
+        
+        // saveARMarkers()  // AR Markers are session-only
+        // save()  // Skip persisting MapPoint for ephemeral markers
+        
+        print("✅ Created AR Marker \(marker.id) linked to MapPoint \(linkedMapPointID)")
+    }
+    
+    func deleteARMarker(_ markerID: UUID) {
+        guard let marker = arMarkers.first(where: { $0.id == markerID }) else {
+            print("⚠️ AR Marker \(markerID) not found")
+            return
+        }
+        
+        // Unlink from MapPoint
+        if let index = points.firstIndex(where: { $0.linkedARMarkerID == markerID }) {
+            points[index].linkedARMarkerID = nil
+        }
+        
+        // Remove marker
+        arMarkers.removeAll { $0.id == markerID }
+        
+        saveARMarkers()  // Still saves for manual cleanup of legacy markers
+        save()
+        
+        print("🗑️ Deleted legacy AR Marker: \(markerID)")
+        print("   (Manual cleanup - new markers are not persisted)")
+    }
+    
+    func getARMarker(for mapPointID: UUID) -> ARMarker? {
+        return arMarkers.first { $0.linkedMapPointID == mapPointID }
+    }
+    
+    func getAllARMarkersForLocation() -> [ARMarker] {
+        return arMarkers
+    }
+    
     deinit {
         print("ðŸ'¥ MapPointStore \(String(instanceID.prefix(8)))... deinitialized")
+    }
+    
+    // MARK: - Interpolation Mode
+
+    func startInterpolationMode(firstPointID: UUID) {
+        guard points.contains(where: { $0.id == firstPointID }) else {
+            print("❌ Cannot start interpolation: first point not found")
+            return
+        }
+        
+        isInterpolationMode = true
+        interpolationFirstPointID = firstPointID
+        interpolationSecondPointID = nil
+        
+        print("🔗 Interpolation mode started with point: \(firstPointID)")
+    }
+
+    func selectSecondPoint(secondPointID: UUID) {
+        guard isInterpolationMode else {
+            print("❌ Not in interpolation mode")
+            return
+        }
+        
+        guard points.contains(where: { $0.id == secondPointID }) else {
+            print("❌ Second point not found")
+            return
+        }
+        
+        guard secondPointID != interpolationFirstPointID else {
+            print("❌ Cannot select same point twice")
+            return
+        }
+        
+        interpolationSecondPointID = secondPointID
+        
+        print("🔗 Second point selected: \(secondPointID)")
+        print("✅ Ready for interpolation between \(interpolationFirstPointID!) and \(secondPointID)")
+    }
+
+    func cancelInterpolationMode() {
+        isInterpolationMode = false
+        interpolationFirstPointID = nil
+        interpolationSecondPointID = nil
+        
+        print("❌ Interpolation mode cancelled")
+    }
+
+    func canStartInterpolation() -> Bool {
+        return isInterpolationMode && 
+               interpolationFirstPointID != nil && 
+               interpolationSecondPointID != nil
+    }
+    
+    // MARK: - Photo Disk Storage Helpers
+    
+    /// Save photo to disk and update point with filename
+    func savePhotoToDisk(for pointID: UUID, photoData: Data) -> Bool {
+        guard let index = points.firstIndex(where: { $0.id == pointID }) else {
+            return false
+        }
+        
+        let fileManager = FileManager.default
+        guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return false
+        }
+        
+        let locationDir = documentsURL.appendingPathComponent("locations/\(ctx.locationID)/map-points")
+        
+        // Create directory if needed
+        try? fileManager.createDirectory(at: locationDir, withIntermediateDirectories: true)
+        
+        // Save with short UUID as filename
+        let filename = "\(String(pointID.uuidString.prefix(8))).jpg"
+        let fileURL = locationDir.appendingPathComponent(filename)
+        
+        do {
+            // Compress to JPEG
+            if let image = UIImage(data: photoData),
+               let jpegData = image.jpegData(compressionQuality: 0.8) {
+                try jpegData.write(to: fileURL)
+                
+                // Update point with filename and clear memory data
+                points[index].photoFilename = filename
+                points[index].locationPhotoData = nil  // Clear from memory
+                points[index].photoCapturedAtPosition = points[index].position  // Record capture position
+                points[index].photoOutdated = false  // Clear outdated flag when new photo is captured
+                
+                print("📸 Saved photo to disk: \(filename) (\(jpegData.count / 1024) KB)")
+                return true
+            }
+        } catch {
+            print("❌ Failed to save photo: \(error)")
+        }
+        
+        return false
+    }
+    
+    /// Load photo from disk for a point
+    func loadPhotoFromDisk(for pointID: UUID) -> Data? {
+        guard let point = points.first(where: { $0.id == pointID }),
+              let filename = point.photoFilename else {
+            return nil
+        }
+        
+        let fileManager = FileManager.default
+        guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        
+        let fileURL = documentsURL
+            .appendingPathComponent("locations/\(ctx.locationID)/map-points")
+            .appendingPathComponent(filename)
+        
+        return try? Data(contentsOf: fileURL)
+    }
+    
+    // MARK: - Legacy Data Migration
+    
+    /// One-time migration to purge legacy AR position history data
+    /// Legacy data was collected without session origin tracking, making it geometrically inconsistent
+    /// This runs once per installation, gated by UserDefaults flag
+    static func purgeLegacyARPositionHistoryIfNeeded(from points: inout [MapPoint]) {
+        let flagKey = "hasPurgedLegacyARPositionHistory"
+        
+        // Check if already run
+        guard !UserDefaults.standard.bool(forKey: flagKey) else {
+            print("🧹 [PURGE] Skipped - legacy AR position history already purged")
+            return
+        }
+        
+        print("🧹 [PURGE] Starting one-time legacy AR position history migration...")
+        
+        // Step 1: Archive existing data before deletion
+        var archiveData: [[String: Any]] = []
+        var totalRecords = 0
+        var affectedPoints = 0
+        
+        for point in points {
+            if !point.arPositionHistory.isEmpty {
+                affectedPoints += 1
+                totalRecords += point.arPositionHistory.count
+                
+                // Build archive entry for this MapPoint
+                let records: [[String: Any]] = point.arPositionHistory.map { record in
+                    [
+                        "id": record.id.uuidString,
+                        "sessionID": record.sessionID.uuidString,
+                        "timestamp": record.timestamp.timeIntervalSinceReferenceDate,
+                        "sourceType": record.sourceType.rawValue,
+                        "confidenceScore": record.confidenceScore,
+                        "position": [record.position.x, record.position.y, record.position.z],
+                        "distortionVector": record.distortionVector.map { [$0.x, $0.y, $0.z] } as Any
+                    ]
+                }
+                
+                archiveData.append([
+                    "mapPointID": point.id.uuidString,
+                    "mapPosition": ["x": point.position.x, "y": point.position.y],
+                    "recordCount": point.arPositionHistory.count,
+                    "records": records
+                ])
+            }
+        }
+        
+        // Step 2: Export archive to Documents directory
+        if !archiveData.isEmpty {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+            let timestamp = formatter.string(from: Date())
+            let filename = "TapResolver-LegacyPositionHistory-\(timestamp).json"
+            
+            if let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                let archiveURL = documentsURL.appendingPathComponent(filename)
+                
+                do {
+                    let jsonData = try JSONSerialization.data(withJSONObject: archiveData, options: .prettyPrinted)
+                    try jsonData.write(to: archiveURL)
+                    print("📦 [PURGE] Archived \(totalRecords) record(s) from \(affectedPoints) MapPoint(s)")
+                    print("   Archive path: \(archiveURL.path)")
+                } catch {
+                    print("⚠️ [PURGE] Failed to archive data: \(error.localizedDescription)")
+                    print("   Proceeding with purge anyway...")
+                }
+            }
+        }
+        
+        // Step 3: Purge position history from all MapPoints
+        for i in points.indices {
+            if !points[i].arPositionHistory.isEmpty {
+                points[i].arPositionHistory = []
+            }
+        }
+        
+        // Step 4: Set flag to prevent re-running
+        UserDefaults.standard.set(true, forKey: flagKey)
+        
+        print("✅ [PURGE] Migration complete!")
+        print("   Purged \(totalRecords) legacy AR position record(s)")
+        print("   Affected \(affectedPoints) MapPoint(s)")
+        print("   Ghost placement will use 2D map geometry until fresh data accumulates")
+    }
+    
+    // MARK: - Retrospective Bake-Down System (Milestone 5)
+    
+    /// Checks if baked positions need to be recalculated
+    /// Returns true if there's new position history since last bake
+    func checkBakeFreshness() -> Bool {
+        // Find the most recent position history timestamp
+        let latestHistoryTimestamp = points
+            .flatMap { $0.arPositionHistory }
+            .map { $0.timestamp }
+            .max()
+        
+        guard let latestHistory = latestHistoryTimestamp else {
+            print("📦 [BAKE_FRESH] No position history exists")
+            return false  // Nothing to bake
+        }
+        
+        guard let lastBake = lastBakeTimestamp else {
+            print("📦 [BAKE_FRESH] No previous bake — needs full bake")
+            return true  // Never baked, need to bake
+        }
+        
+        let needsRebake = latestHistory > lastBake
+        if needsRebake {
+            print("📦 [BAKE_FRESH] New data since last bake (\(latestHistory.formatted()) > \(lastBake.formatted()))")
+        } else {
+            print("📦 [BAKE_FRESH] Baked data is current")
+        }
+        
+        return needsRebake
+    }
+    
+    /// Bakes down ALL historical position data into canonical positions
+    /// This processes every session in the history, requiring no active AR session
+    ///
+    /// - Parameters:
+    ///   - mapSize: Size of the map image in pixels
+    ///   - metersPerPixel: Scale factor from MetricSquare calibration
+    /// - Returns: Number of MapPoints updated, or nil if bake failed
+    func bakeDownHistoricalData(mapSize: CGSize, metersPerPixel: Float) -> Int? {
+        let startTime = Date()
+        print("\n" + String(repeating: "=", count: 70))
+        print("🔥 [HISTORICAL_BAKE] Starting RETROSPECTIVE bake-down")
+        print("   This processes ALL historical sessions — no AR required")
+        print(String(repeating: "=", count: 70))
+        
+        // Create canonical frame (map-centered coordinate system)
+        let pixelsPerMeter = 1.0 / metersPerPixel
+        let canonicalOrigin = CGPoint(x: mapSize.width / 2, y: mapSize.height / 2)
+        let floorHeight: Float = -1.1  // Typical phone height
+        
+        print("📐 [HISTORICAL_BAKE] Canonical frame:")
+        print("   Map size: \(Int(mapSize.width)) × \(Int(mapSize.height)) pixels")
+        print("   Origin: (\(Int(canonicalOrigin.x)), \(Int(canonicalOrigin.y))) pixels (map center)")
+        print("   Scale: \(String(format: "%.1f", pixelsPerMeter)) pixels/meter")
+        print("   Floor height: \(floorHeight)m")
+        
+        // Step 1: Collect all unique session IDs from history
+        var sessionIDs = Set<UUID>()
+        for point in points {
+            for record in point.arPositionHistory {
+                sessionIDs.insert(record.sessionID)
+            }
+        }
+        
+        print("\n📊 [HISTORICAL_BAKE] Found \(sessionIDs.count) historical session(s) to process")
+        
+        if sessionIDs.isEmpty {
+            print("⚠️ [HISTORICAL_BAKE] No historical data to bake")
+            return nil
+        }
+        
+        // Step 2: Build index of positions by session
+        // sessionPositions[sessionID][mapPointID] = (arPosition, confidence)
+        var sessionPositions: [UUID: [UUID: (position: SIMD3<Float>, confidence: Float)]] = [:]
+        
+        for point in points {
+            for record in point.arPositionHistory {
+                if sessionPositions[record.sessionID] == nil {
+                    sessionPositions[record.sessionID] = [:]
+                }
+                // If multiple records from same session, keep highest confidence
+                if let existing = sessionPositions[record.sessionID]?[point.id] {
+                    if record.confidenceScore > existing.confidence {
+                        sessionPositions[record.sessionID]?[point.id] = (record.position, record.confidenceScore)
+                    }
+                } else {
+                    sessionPositions[record.sessionID]?[point.id] = (record.position, record.confidenceScore)
+                }
+            }
+        }
+        
+        // Step 3: For each session, compute transform and bake positions
+        var bakedPositionsAccumulator: [UUID: [(position: SIMD3<Float>, weight: Float)]] = [:]
+        var sessionsProcessed = 0
+        var sessionsSkipped = 0
+        
+        for sessionID in sessionIDs {
+            guard let positionsInSession = sessionPositions[sessionID] else { continue }
+            
+            let sessionPrefix = String(sessionID.uuidString.prefix(8))
+            print("\n🔄 [SESSION] Processing \(sessionPrefix) (\(positionsInSession.count) MapPoint(s))")
+            
+            // Need at least 2 MapPoints to compute transform
+            guard positionsInSession.count >= 2 else {
+                print("   ⏭️ Skipping — need 2+ MapPoints for transform, have \(positionsInSession.count)")
+                sessionsSkipped += 1
+                continue
+            }
+            
+            // Pick 2 reference MapPoints (use first two that have good confidence)
+            let sortedByConfidence = positionsInSession.sorted { $0.value.confidence > $1.value.confidence }
+            let ref1ID = sortedByConfidence[0].key
+            let ref2ID = sortedByConfidence[1].key
+            
+            guard let ref1MapPoint = points.first(where: { $0.id == ref1ID }),
+                  let ref2MapPoint = points.first(where: { $0.id == ref2ID }) else {
+                print("   ⚠️ Could not find reference MapPoints in store")
+                sessionsSkipped += 1
+                continue
+            }
+            
+            let ref1AR = sortedByConfidence[0].value.position
+            let ref2AR = sortedByConfidence[1].value.position
+            let ref1Map = ref1MapPoint.position
+            let ref2Map = ref2MapPoint.position
+            
+            print("   📍 Reference 1: \(String(ref1ID.uuidString.prefix(8))) map=(\(Int(ref1Map.x)), \(Int(ref1Map.y))) AR=(\(String(format: "%.2f", ref1AR.x)), \(String(format: "%.2f", ref1AR.y)), \(String(format: "%.2f", ref1AR.z)))")
+            print("   📍 Reference 2: \(String(ref2ID.uuidString.prefix(8))) map=(\(Int(ref2Map.x)), \(Int(ref2Map.y))) AR=(\(String(format: "%.2f", ref2AR.x)), \(String(format: "%.2f", ref2AR.y)), \(String(format: "%.2f", ref2AR.z)))")
+            
+            // Convert map positions to canonical 3D
+            let ref1Canonical = SIMD3<Float>(
+                Float(ref1Map.x - canonicalOrigin.x) / pixelsPerMeter,
+                floorHeight,
+                Float(ref1Map.y - canonicalOrigin.y) / pixelsPerMeter
+            )
+            let ref2Canonical = SIMD3<Float>(
+                Float(ref2Map.x - canonicalOrigin.x) / pixelsPerMeter,
+                floorHeight,
+                Float(ref2Map.y - canonicalOrigin.y) / pixelsPerMeter
+            )
+            
+            // Compute session→canonical transform
+            // Edge vectors in XZ plane
+            let canonicalEdge = SIMD2<Float>(ref2Canonical.x - ref1Canonical.x, ref2Canonical.z - ref1Canonical.z)
+            let sessionEdge = SIMD2<Float>(ref2AR.x - ref1AR.x, ref2AR.z - ref1AR.z)
+            
+            let canonicalLength = simd_length(canonicalEdge)
+            let sessionLength = simd_length(sessionEdge)
+            
+            guard canonicalLength > 0.001, sessionLength > 0.001 else {
+                print("   ⚠️ Degenerate edge — reference points too close")
+                sessionsSkipped += 1
+                continue
+            }
+            
+            // Scale: canonical meters per session meter
+            let scale = canonicalLength / sessionLength
+            
+            // Rotation: angle from session edge to canonical edge
+            let canonicalAngle = atan2(canonicalEdge.y, canonicalEdge.x)
+            let sessionAngle = atan2(sessionEdge.y, sessionEdge.x)
+            let rotation = canonicalAngle - sessionAngle
+            
+            // Translation: compute where session origin maps to in canonical space
+            let cosR = cos(rotation)
+            let sinR = sin(rotation)
+            let scaledRef1AR = ref1AR * scale
+            let rotatedRef1AR = SIMD3<Float>(
+                scaledRef1AR.x * cosR - scaledRef1AR.z * sinR,
+                scaledRef1AR.y,
+                scaledRef1AR.x * sinR + scaledRef1AR.z * cosR
+            )
+            let translation = ref1Canonical - rotatedRef1AR
+            
+            // Verify transform quality using second reference point
+            let scaledRef2AR = ref2AR * scale
+            let rotatedRef2AR = SIMD3<Float>(
+                scaledRef2AR.x * cosR - scaledRef2AR.z * sinR,
+                scaledRef2AR.y,
+                scaledRef2AR.x * sinR + scaledRef2AR.z * cosR
+            )
+            let transformedRef2 = rotatedRef2AR + translation
+            let verificationError = simd_distance(transformedRef2, ref2Canonical)
+            
+            print("   📐 Transform: scale=\(String(format: "%.4f", scale)) rot=\(String(format: "%.1f", rotation * 180 / .pi))° trans=(\(String(format: "%.2f", translation.x)), \(String(format: "%.2f", translation.z)))")
+            print("   ✅ Verification error: \(String(format: "%.3f", verificationError))m")
+            
+            if verificationError > 0.5 {
+                print("   ⚠️ High verification error — session may have scale drift, including with reduced weight")
+            }
+            
+            // Apply transform to all positions from this session
+            for (mapPointID, (arPosition, confidence)) in positionsInSession {
+                // Apply transform: scale, rotate, translate
+                let scaled = arPosition * scale
+                let rotated = SIMD3<Float>(
+                    scaled.x * cosR - scaled.z * sinR,
+                    scaled.y,
+                    scaled.x * sinR + scaled.z * cosR
+                )
+                let canonical = rotated + translation
+                
+                // Weight by confidence, reduced if verification error was high
+                let adjustedWeight = verificationError > 0.5 ? confidence * 0.5 : confidence
+                
+                if bakedPositionsAccumulator[mapPointID] == nil {
+                    bakedPositionsAccumulator[mapPointID] = []
+                }
+                bakedPositionsAccumulator[mapPointID]?.append((position: canonical, weight: adjustedWeight))
+            }
+            
+            sessionsProcessed += 1
+            print("   ✅ Transformed \(positionsInSession.count) position(s) to canonical frame")
+        }
+        
+        print("\n" + String(repeating: "-", count: 70))
+        print("📊 [HISTORICAL_BAKE] Session summary:")
+        print("   Processed: \(sessionsProcessed)")
+        print("   Skipped: \(sessionsSkipped)")
+        print(String(repeating: "-", count: 70))
+        
+        // Step 4: Compute weighted average for each MapPoint and update baked positions
+        var updatedCount = 0
+        
+        print("\n📦 [HISTORICAL_BAKE] Computing baked positions...")
+        
+        for (mapPointID, samples) in bakedPositionsAccumulator {
+            guard let index = points.firstIndex(where: { $0.id == mapPointID }) else {
+                continue
+            }
+            
+            // Weighted average
+            var weightedSum = SIMD3<Float>(0, 0, 0)
+            var totalWeight: Float = 0
+            
+            for sample in samples {
+                weightedSum += sample.position * sample.weight
+                totalWeight += sample.weight
+            }
+            
+            guard totalWeight > 0 else { continue }
+            
+            let bakedPosition = weightedSum / totalWeight
+            let avgConfidence = totalWeight / Float(samples.count)
+            
+            // Update MapPoint
+                points[index].canonicalPosition = bakedPosition
+                points[index].canonicalConfidence = avgConfidence
+                points[index].canonicalSampleCount = samples.count
+            
+            // Compute and store distortion vector
+            let mapPosition = points[index].position
+            let pixelsPerMeter = 1.0 / metersPerPixel
+            let canonicalOrigin = CGPoint(x: mapSize.width / 2, y: mapSize.height / 2)
+            let floorHeight: Float = -1.1
+            
+            let idealCanonical = SIMD3<Float>(
+                Float(mapPosition.x - canonicalOrigin.x) / pixelsPerMeter,
+                floorHeight,
+                Float(mapPosition.y - canonicalOrigin.y) / pixelsPerMeter
+            )
+            points[index].consensusDistortionVector = bakedPosition - idealCanonical
+            
+            print("   ✅ \(String(mapPointID.uuidString.prefix(8))): (\(String(format: "%.2f", bakedPosition.x)), \(String(format: "%.2f", bakedPosition.y)), \(String(format: "%.2f", bakedPosition.z))) [samples: \(samples.count), conf: \(String(format: "%.2f", avgConfidence))]")
+            
+            updatedCount += 1
+        }
+        
+        // Step 5: Update metadata and save
+        lastBakeTimestamp = Date()
+        lastBakeSessionCount = sessionsProcessed
+        save()
+        
+        // DEBUG: Trace MapPointStore after baking
+        print("📊 [BAKE_COMPLETE_DEBUG] MapPointStore state after baking:")
+        print("   Instance identity: \(ObjectIdentifier(self))")
+        let bakedCount = points.filter { $0.canonicalPosition != nil }.count
+        print("   Points with canonicalPosition: \(bakedCount)/\(points.count)")
+        
+        let duration = Date().timeIntervalSince(startTime) * 1000
+        
+        print("\n" + String(repeating: "=", count: 70))
+        print("🔥 [HISTORICAL_BAKE] Complete!")
+        print("   MapPoints updated: \(updatedCount)")
+        print("   Sessions processed: \(sessionsProcessed)")
+        print("   Duration: \(String(format: "%.1f", duration))ms")
+        print("   Bake timestamp: \(lastBakeTimestamp!.formatted())")
+        print(String(repeating: "=", count: 70) + "\n")
+        
+        return updatedCount
+    }
+    
+    /// Convenience method to trigger bake if data is stale
+    /// Call this on map load
+    ///
+    /// - Parameters:
+    ///   - mapSize: Size of the map image in pixels
+    ///   - metersPerPixel: Scale factor from MetricSquare calibration
+    /// - Returns: true if bake was performed, false if skipped
+    @discardableResult
+    func bakeIfNeeded(mapSize: CGSize, metersPerPixel: Float) -> Bool {
+        guard checkBakeFreshness() else {
+            return false
+        }
+        
+        let _ = bakeDownHistoricalData(mapSize: mapSize, metersPerPixel: metersPerPixel)
+        return true
+    }
+    
+    // MARK: - Baked Position Diagnostics
+    
+    /// Prints summary of baked canonical positions
+    func debugBakedPositionSummary() {
+        let pointsWithBaked = points.filter { $0.canonicalPosition != nil }
+        let pointsWithHistory = points.filter { !$0.arPositionHistory.isEmpty }
+        
+        print("\n" + String(repeating: "=", count: 60))
+        print("📦 [BAKED_POSITION] Summary")
+        print(String(repeating: "=", count: 60))
+        print("   Total MapPoints: \(points.count)")
+        print("   With position history: \(pointsWithHistory.count)")
+        print("   With baked canonical position: \(pointsWithBaked.count)")
+        
+        if !pointsWithBaked.isEmpty {
+            print("\n   Baked positions:")
+            for point in pointsWithBaked {
+                if let canonical = point.canonicalPosition,
+                   let confidence = point.canonicalConfidence {
+                    print("   • \(String(point.id.uuidString.prefix(8))): (\(String(format: "%.2f", canonical.x)), \(String(format: "%.2f", canonical.y)), \(String(format: "%.2f", canonical.z))) conf=\(String(format: "%.2f", confidence)) samples=\(point.canonicalSampleCount)")
+                }
+            }
+        }
+        print(String(repeating: "=", count: 60) + "\n")
+    }
+    
+    /// Debug function to display distortion vector summary
+    func debugDistortionSummary() {
+        print("\n" + String(repeating: "=", count: 60))
+        print("📐 [DISTORTION_SUMMARY] Consensus Distortion Vectors")
+        print(String(repeating: "=", count: 60))
+        
+        let pointsWithDistortion = points.filter { $0.consensusDistortionVector != nil }
+        
+        if pointsWithDistortion.isEmpty {
+            print("   No distortion vectors computed yet")
+        } else {
+            var totalMagnitude: Float = 0
+            var maxMagnitude: Float = 0
+            var maxMagnitudeID: UUID?
+            
+            for point in pointsWithDistortion {
+                guard let distortion = point.consensusDistortionVector else { continue }
+                let magnitude = simd_length(distortion)
+                totalMagnitude += magnitude
+                
+                if magnitude > maxMagnitude {
+                    maxMagnitude = magnitude
+                    maxMagnitudeID = point.id
+                }
+                
+                print("   \(String(point.id.uuidString.prefix(8))): (\(String(format: "%.3f", distortion.x)), \(String(format: "%.3f", distortion.y)), \(String(format: "%.3f", distortion.z)))m  |  \(String(format: "%.3f", magnitude))m")
+            }
+            
+            let avgMagnitude = totalMagnitude / Float(pointsWithDistortion.count)
+            print("")
+            print("   Points with distortion: \(pointsWithDistortion.count)")
+            print("   Average magnitude: \(String(format: "%.3f", avgMagnitude))m")
+            print("   Max magnitude: \(String(format: "%.3f", maxMagnitude))m at \(maxMagnitudeID.map { String($0.uuidString.prefix(8)) } ?? "?")")
+        }
+        
+        print(String(repeating: "=", count: 60) + "\n")
+    }
+    
+    // MARK: - Duplicate MapPoint Detection & Merge
+    
+    /// Represents a group of MapPoints that are suspiciously close together
+    public struct DuplicateGroup {
+        let points: [MapPoint]
+        let maxDistance: CGFloat
+        
+        /// The point with the most data (sessions + arPositionHistory)
+        var keeper: MapPoint {
+            points.max(by: { dataScore($0) < dataScore($1) }) ?? points[0]
+        }
+        
+        /// Points that should be merged into keeper
+        var duplicates: [MapPoint] {
+            points.filter { $0.id != keeper.id }
+        }
+        
+        private func dataScore(_ point: MapPoint) -> Int {
+            point.sessions.count + point.arPositionHistory.count
+        }
+    }
+    
+    /// Find MapPoints that are within `thresholdPixels` of each other
+    /// Returns groups of duplicates (empty if no duplicates found)
+    public func findDuplicateMapPoints(thresholdPixels: CGFloat = 3.0) -> [DuplicateGroup] {
+        var groups: [DuplicateGroup] = []
+        var processed: Set<UUID> = []
+        
+        for point in points {
+            guard !processed.contains(point.id) else { continue }
+            
+            // Find all points within threshold of this point
+            var cluster: [MapPoint] = [point]
+            var maxDist: CGFloat = 0
+            
+            for other in points {
+                guard other.id != point.id else { continue }
+                guard !processed.contains(other.id) else { continue }
+                
+                let dist = hypot(point.position.x - other.position.x,
+                               point.position.y - other.position.y)
+                
+                if dist <= thresholdPixels {
+                    cluster.append(other)
+                    maxDist = max(maxDist, dist)
+                }
+            }
+            
+            // Only create a group if there are duplicates
+            if cluster.count > 1 {
+                groups.append(DuplicateGroup(points: cluster, maxDistance: maxDist))
+                cluster.forEach { processed.insert($0.id) }
+            } else {
+                processed.insert(point.id)
+            }
+        }
+        
+        return groups
+    }
+    
+    /// Log duplicate groups for diagnostic purposes
+    public func logDuplicateMapPoints() {
+        let groups = findDuplicateMapPoints()
+        
+        if groups.isEmpty {
+            print("✅ [DUPLICATE_SCAN] No duplicate MapPoints found")
+            return
+        }
+        
+        print("⚠️ [DUPLICATE_SCAN] Found \(groups.count) duplicate group(s):")
+        
+        for (index, group) in groups.enumerated() {
+            print("   Group \(index + 1): \(group.points.count) points within \(String(format: "%.1f", group.maxDistance)) pixels")
+            print("   └─ Keeper: \(String(group.keeper.id.uuidString.prefix(8))) (\(group.keeper.sessions.count) sessions, \(group.keeper.arPositionHistory.count) AR records)")
+            
+            for dup in group.duplicates {
+                let triangleRefs = dup.triangleMemberships.map { String($0.uuidString.prefix(8)) }.joined(separator: ", ")
+                print("   └─ Duplicate: \(String(dup.id.uuidString.prefix(8))) (\(dup.sessions.count) sessions, \(dup.arPositionHistory.count) AR records) triangles: [\(triangleRefs)]")
+            }
+        }
+    }
+    
+    /// Safely merge duplicate MapPoints, updating all triangle references
+    /// Returns number of MapPoints removed
+    func mergeDuplicateMapPoints(triangleStore: TrianglePatchStore) -> Int {
+        let groups = findDuplicateMapPoints()
+        
+        if groups.isEmpty {
+            print("✅ [DUPLICATE_MERGE] No duplicates to merge")
+            return 0
+        }
+        
+        var removedCount = 0
+        
+        for group in groups {
+            let keeper = group.keeper
+            let keeperID = keeper.id
+            
+            guard let keeperIndex = points.firstIndex(where: { $0.id == keeperID }) else {
+                print("⚠️ [DUPLICATE_MERGE] Keeper \(String(keeperID.uuidString.prefix(8))) not found, skipping group")
+                continue
+            }
+            
+            for duplicate in group.duplicates {
+                let dupID = duplicate.id
+                
+                print("🔀 [DUPLICATE_MERGE] Merging \(String(dupID.uuidString.prefix(8))) into \(String(keeperID.uuidString.prefix(8)))")
+                
+                // 1. Transfer sessions
+                points[keeperIndex].sessions.append(contentsOf: duplicate.sessions)
+                
+                // 2. Transfer AR position history
+                points[keeperIndex].arPositionHistory.append(contentsOf: duplicate.arPositionHistory)
+                
+                // 3. Update triangle references (CRITICAL)
+                for (triIndex, triangle) in triangleStore.triangles.enumerated() {
+                    if triangle.vertexIDs.contains(dupID) {
+                        // Replace duplicate ID with keeper ID in vertex list
+                        var updatedVertexIDs = triangle.vertexIDs
+                        for (vIndex, vID) in updatedVertexIDs.enumerated() {
+                            if vID == dupID {
+                                updatedVertexIDs[vIndex] = keeperID
+                                print("   📐 Updated triangle \(String(triangle.id.uuidString.prefix(8))) vertex \(vIndex): \(String(dupID.uuidString.prefix(8))) → \(String(keeperID.uuidString.prefix(8)))")
+                            }
+                        }
+                        
+                        // Create updated triangle (vertexIDs is let, so we rebuild)
+                        triangleStore.triangles[triIndex] = TrianglePatch(
+                            id: triangle.id,
+                            vertexIDs: updatedVertexIDs,
+                            isCalibrated: triangle.isCalibrated,
+                            calibrationQuality: triangle.calibrationQuality,
+                            transform: triangle.transform,
+                            createdAt: triangle.createdAt,
+                            lastCalibratedAt: triangle.lastCalibratedAt,
+                            arMarkerIDs: triangle.arMarkerIDs,
+                            userPositionWhenCalibrated: triangle.userPositionWhenCalibrated,
+                            legMeasurements: triangle.legMeasurements,
+                            worldMapFilename: triangle.worldMapFilename,
+                            worldMapFilesByStrategy: triangle.worldMapFilesByStrategy,
+                            lastStartingVertexIndex: triangle.lastStartingVertexIndex
+                        )
+                        
+                        // Update keeper's triangle memberships if not already present
+                        if !points[keeperIndex].triangleMemberships.contains(triangle.id) {
+                            points[keeperIndex].triangleMemberships.append(triangle.id)
+                        }
+                    }
+                }
+                
+                // 4. Remove the duplicate MapPoint
+                points.removeAll { $0.id == dupID }
+                removedCount += 1
+            }
+        }
+        
+        // Save both stores
+        save()
+        triangleStore.save()
+        
+        print("✅ [DUPLICATE_MERGE] Merged \(removedCount) duplicate MapPoint(s)")
+        return removedCount
     }
     
 }

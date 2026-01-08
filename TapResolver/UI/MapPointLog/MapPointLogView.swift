@@ -17,6 +17,7 @@ import UniformTypeIdentifiers
 struct MapPointLogView: View {
     @EnvironmentObject private var hudPanels: HUDPanelsState
     @EnvironmentObject private var mapPointStore: MapPointStore
+    @EnvironmentObject private var mapTransform: MapTransformStore
     
     // Current drawer height as fraction of screen (0.0 to 0.5)
     @State private var drawerHeight: CGFloat = 0
@@ -264,6 +265,11 @@ struct MapPointLogView: View {
                     }
                     .padding(16)
                 }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { _ in mapTransform.isHUDInteracting = true }
+                        .onEnded { _ in mapTransform.isHUDInteracting = false }
+                )
                 .frame(width: gridWidth, alignment: isSessionListOpen ? .trailing : .center)
                 .animation(.easeInOut(duration: 0.35), value: isSessionListOpen)
             }

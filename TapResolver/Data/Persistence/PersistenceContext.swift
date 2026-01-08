@@ -24,25 +24,27 @@ final class PersistenceContext {
         let ud = UserDefaults.standard
         let fullKey = key(base)
         
-        // ADD LOGGING for MapPoints
-        if base.contains("MapPoints") {
-            print("🔍 PersistenceContext.read(\(base))")
-            print("   Full key: \(fullKey)")
-            print("   Current locationID: \(locationID)")
-        }
-        
         guard let data = ud.data(forKey: fullKey) else {
-            if base.contains("MapPoints") {
-                print("   ❌ No data found for key: \(fullKey)")
-            }
             return nil
         }
         
-        if base.contains("MapPoints") {
-            print("   ✅ Found data: \(data.count) bytes (\(String(format: "%.2f", Double(data.count) / 1024.0)) KB)")
+        guard let decoded = try? JSONDecoder().decode(T.self, from: data) else {
+            return nil
         }
         
-        return try? JSONDecoder().decode(T.self, from: data)
+        // Condensed log after successful decode
+        if let decodedItems = decoded as? [Any] {
+            print("📖 [DATA_LOAD] \(fullKey): \(decodedItems.count) items, \(data.count) bytes")
+        }
+        
+        return decoded
+    }
+    
+    /// Read raw data from UserDefaults for diagnostic purposes
+    /// Does NOT use namespacing - requires full key (e.g., "locations.home.MapPoints_v1")
+    func readRaw(key: String) -> Data? {
+        let ud = UserDefaults.standard
+        return ud.data(forKey: key)
     }
 
     // MARK: File paths (namespaced)

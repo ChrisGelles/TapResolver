@@ -26,31 +26,56 @@ struct MapPointDrawer: View {
 
             // List
             ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(mapPointStore.points.sorted(by: { $0.createdDate > $1.createdDate }), id: \.id) { point in
-                        MapPointListItem(
-                            point: point,
-                            coordinateText: mapPointStore.coordinateString(for: point),
-                            isActive: mapPointStore.isActive(point.id),
-                            onSelect: {
-                                print("📍 Map Point selected with ID: \(point.id.uuidString)")
-                                mapPointStore.toggleActive(id: point.id)
-                            },
-                            onDelete: {
-                                mapPointStore.removePoint(id: point.id)
-                            }
-                        )
-                        .frame(height: 44)
-                        .padding(.leading, 4)
+                ScrollViewReader { proxy in
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(mapPointStore.points.sorted(by: { $0.createdDate > $1.createdDate }), id: \.id) { point in
+                            MapPointListItem(
+                                point: point,
+                                coordinateText: mapPointStore.coordinateString(for: point),
+                                isActive: mapPointStore.selectedPointID == point.id,
+                                onSelect: {
+                                    // ✅ TOGGLE: If already selected, deselect
+                                    if mapPointStore.selectedPointID == point.id {
+                                        mapPointStore.selectedPointID = nil
+                                        print("🔘 Deselected MapPoint from drawer: \(point.id)")
+                                    } else {
+                                        print("📍 Map Point selected from drawer: \(point.id.uuidString)")
+                                        mapPointStore.selectedPointID = point.id
+                                        mapTransform.centerOnPoint(point.mapPoint, animated: true)
+                                    }
+                                },
+                                onDelete: {
+                                    mapPointStore.removePoint(id: point.id)
+                                }
+                            )
+                            .frame(height: 44)
+                            .padding(.leading, 4)
+                            .id(point.id)
+                        }
+                    }
+                    .padding(.top, topBarHeight + 6)
+                    .padding(.bottom, 8)
+                    .padding(.trailing, 6)
+                    .onChange(of: mapPointStore.selectedPointID) { newSelection in
+                        guard let selectedID = newSelection else { return }
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            proxy.scrollTo(selectedID, anchor: UnitPoint(x: 0.5, y: 0.2))
+                        }
                     }
                 }
-                .padding(.top, topBarHeight + 6)
-                .padding(.bottom, 8)
-                .padding(.trailing, 6)
             }
             .scrollIndicators(.hidden)
             .opacity(hud.isMapPointOpen ? 1 : 0)          // hide visuals when closed
             .allowsHitTesting(hud.isMapPointOpen)         // ignore touches when closed
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        mapTransform.isHUDInteracting = true
+                    }
+                    .onEnded { _ in
+                        mapTransform.isHUDInteracting = false
+                    }
+            )
 
             // Top bar
             HStack(spacing: 2) {
@@ -72,7 +97,6 @@ struct MapPointDrawer: View {
                 }
                 Button {
                     if hud.isMapPointOpen { 
-                        mapPointStore.deactivateAll()
                         hud.closeAll() 
                     } else { 
                         hud.openMapPoint()
@@ -179,6 +203,8 @@ struct MapPointListItem: View {
     let isActive: Bool
     var onSelect: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
+    
+    @EnvironmentObject private var mapPointStore: MapPointStore
 
     var body: some View {
         HStack(spacing: 2) {
@@ -198,18 +224,43 @@ struct MapPointListItem: View {
             .buttonStyle(.plain)
             .accessibilityLabel(isActive ? "Deactivate map point" : "Activate map point")
             
+            // AR Marker indicator flag
+            if point.linkedARMarkerID != nil {
+                Image(systemName: "flag.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.orange)
+            }
+            
             Spacer(minLength: 0)
 
-            // Delete button (red X)
-            Button(action: { onDelete?() }) {
-                Image(systemName: "xmark")
+            // 🔒 Lock toggle (ADD THIS ENTIRE BLOCK)
+            Button(action: {
+                mapPointStore.toggleLock(id: point.id)
+            }) {
+                Image(systemName: point.isLocked ? "lock.fill" : "lock.open")
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.red)
+                    .foregroundColor(point.isLocked ? .yellow : .primary)
                     .frame(width: 24, height: 24)
                     .background(.ultraThinMaterial, in: Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Delete map point")
+            .accessibilityLabel(point.isLocked ? "Unlock map point" : "Lock map point")
+            
+            // Delete button (red X) - only enabled when unlocked
+            Button(action: { 
+                guard !point.isLocked else { return }
+                onDelete?() 
+            }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(point.isLocked ? .gray : .red)
+                    .frame(width: 24, height: 24)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(point.isLocked)
+            .opacity(point.isLocked ? 0.5 : 1.0)
+            .accessibilityLabel(point.isLocked ? "Unlock to delete" : "Delete map point")
         }
         .padding(.horizontal, 0)                                    // ← row side padding
         .padding(.vertical, 6)                                      // ← row vertical padding
@@ -217,7 +268,6 @@ struct MapPointListItem: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.white.opacity(0.08))
         )
-        .contentShape(Rectangle())
         .frame(height: 44)                                          // ← row height (matches drawer)
     }
 }

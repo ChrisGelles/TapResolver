@@ -12,6 +12,9 @@ struct BeaconDrawer: View {
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var hud: HUDPanelsState
     @EnvironmentObject private var beaconLists: BeaconListsStore
+    
+    // Track which beacon is selected for Tx Power editing (for toggle behavior)
+    @State private var selectedBeaconForTxPower: String? = nil
 
     private let crosshairScreenOffset = CGPoint(x: 0, y: 0)
     private let collapsedWidth: CGFloat = 56
@@ -28,13 +31,25 @@ struct BeaconDrawer: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(beaconLists.beacons.sorted(), id: \.self) { name in
                         let locked = beaconDotStore.isLocked(name)
+                        let hasDot = beaconDotStore.dot(for: name) != nil
+                        let isSelectedForTxPower = selectedBeaconForTxPower == name
                         BeaconListItem(
                             beaconName: name,
                             isLocked: locked,
+                            hasDot: hasDot,
                             elevationText: beaconDotStore.displayElevationText(for: name),
                             txPowerText: txPowerDisplayText(for: name),
-                            isSelected: false,
+                            txPowerFreshnessColor: txPowerFreshnessColor(for: name),
+                            isSelected: isSelectedForTxPower,
                             onSelect: { _, color in
+                                // Center on dot if one exists
+                                if let dot = beaconDotStore.dot(for: name) {
+                                    mapTransform.centerOnPoint(dot.mapPoint, animated: true)
+                                }
+                                
+                                // Only toggle dot if unlocked (existing behavior)
+                                guard !locked else { return }
+                                
                                 guard mapTransform.mapSize != .zero else {
                                     print("⚠️ Beacon add ignored: mapTransform not ready (mapSize == .zero)")
                                     return
@@ -59,7 +74,18 @@ struct BeaconDrawer: View {
                                 beaconDotStore.startElevationEdit(for: name)
                             },
                             onSelectForTxPower: {
-                                NotificationCenter.default.post(name: .beaconSelectedForTxPower, object: name)
+                                // Toggle behavior: if already selected, deselect
+                                if isSelectedForTxPower {
+                                    NotificationCenter.default.post(name: .beaconSelectedForTxPower, object: nil)
+                                } else {
+                                    NotificationCenter.default.post(name: .beaconSelectedForTxPower, object: name)
+                                }
+                            },
+                            onCenterOnDot: {
+                                // Center map on this beacon's dot
+                                if let dot = beaconDotStore.dot(for: name) {
+                                    mapTransform.centerOnPoint(dot.mapPoint, animated: true)
+                                }
                             }
                         )
                         .frame(height: 44)
@@ -73,6 +99,15 @@ struct BeaconDrawer: View {
             .scrollIndicators(.hidden)
             .opacity(hud.isBeaconOpen ? 1 : 0)          // hide visuals when closed
             .allowsHitTesting(hud.isBeaconOpen)         // ignore touches when closed
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        mapTransform.isHUDInteracting = true
+                    }
+                    .onEnded { _ in
+                        mapTransform.isHUDInteracting = false
+                    }
+            )
 
             // Top bar
             HStack(spacing: 2) {
@@ -106,6 +141,17 @@ struct BeaconDrawer: View {
         .clipped()
         .contentShape(Rectangle())
         .animation(.easeInOut(duration: 0.25), value: hud.isBeaconOpen)
+        .onReceive(NotificationCenter.default.publisher(for: .beaconSelectedForTxPower)) { notification in
+            // Track selection locally for toggle behavior
+            selectedBeaconForTxPower = notification.object as? String
+        }
+        .onChange(of: hud.isBeaconOpen) { isOpen in
+            // Close Tx Power panel when Beacon Drawer closes
+            if !isOpen && selectedBeaconForTxPower != nil {
+                NotificationCenter.default.post(name: .beaconSelectedForTxPower, object: nil)
+                selectedBeaconForTxPower = nil
+            }
+        }
     }
 
     private var idealOpenHeight: CGFloat {
@@ -122,29 +168,45 @@ struct BeaconDrawer: View {
             return "Tx"
         }
     }
+    
+    private func txPowerFreshnessColor(for beaconID: String) -> Color {
+        return beaconDotStore.freshnessColor(for: beaconID)
+    }
 }
 
 struct BeaconListItem: View {
     let beaconName: String
     let isLocked: Bool
+    let hasDot: Bool
     let elevationText: String
     let txPowerText: String
+    let txPowerFreshnessColor: Color
     let isSelected: Bool
     var onSelect: ((CGPoint, Color) -> Void)? = nil
     var onToggleLock: (() -> Void)? = nil
     var onDemote: (() -> Void)? = nil
     var onEditElevation: (() -> Void)? = nil
     var onSelectForTxPower: (() -> Void)? = nil
+    var onCenterOnDot: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 2) {
 
             // Capsule button (dot + name) — disabled when locked
             HStack(spacing: 2) {
-                Circle()
-                    .fill(beaconColor(for: beaconName))
-                    .frame(width: 12, height: 12)                  // ← tweak dot size
-                    .padding(.leading, 6)
+                ZStack {
+                    Circle()
+                        .fill(beaconColor(for: beaconName))
+                        .frame(width: 12, height: 12)
+                    // Show checkmark if beacon has a dot placed on map
+                    if hasDot {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
+                .frame(width: 12, height: 12)                  // ← tweak dot size
+                .padding(.leading, 6)
                 Text(beaconName)
                     .font(.system(size: 10, weight: .medium, design: .monospaced)) // ← font
                     .foregroundColor(.primary)
@@ -162,10 +224,11 @@ struct BeaconListItem: View {
             .contentShape(Rectangle())
             .onTapGesture(coordinateSpace: .global) { globalPoint in
                 if isLocked {
-                    // When locked, select for Tx Power editing
+                    // When locked: center on dot AND toggle Tx Power editing
+                    onCenterOnDot?()
                     onSelectForTxPower?()
                 } else {
-                    // When unlocked, add/remove dot
+                    // When unlocked, add/remove dot (also centers if dot exists)
                     onSelect?(globalPoint, beaconColor(for: beaconName))
                 }
             }
@@ -186,17 +249,24 @@ struct BeaconListItem: View {
             .buttonStyle(.plain)
 
             // Tx Power "pill" (opens Tx Power selection)
+            // Background color indicates freshness: green=just read, yellow=1 session, orange=2, red=3+
             Button {
                 onSelectForTxPower?()
             } label: {
-                Text(txPowerText)
-                    .font(.system(size: 8, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 0)                        // ← pill H padding
-                    .padding(.vertical, 4)                          // ← pill V padding
-                    .background(isSelected ? Color.blue.opacity(0.7) : Color.black.opacity(0.5))
-                    .cornerRadius(4)
-                    .fixedSize(horizontal: true, vertical: true)
+                HStack(spacing: 2) {
+                    // Freshness indicator dot
+                    Circle()
+                        .fill(txPowerFreshnessColor)
+                        .frame(width: 6, height: 6)
+                    Text(txPowerText)
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white)
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 4)
+                .background(isSelected ? Color.blue.opacity(0.7) : Color.black.opacity(0.5))
+                .cornerRadius(4)
+                .fixedSize(horizontal: true, vertical: true)
             }
             .buttonStyle(.plain)
 

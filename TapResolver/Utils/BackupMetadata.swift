@@ -9,7 +9,7 @@ import Foundation
 
 /// Metadata for .tapmap backup files
 struct BackupMetadata: Codable {
-    let format: String              // "tapresolver.backup.v1"
+    let format: String              // "tapresolver.backup.v2" (v2 adds triangles, zones, morgue, compass)
     let exportedBy: String          // "TapResolver iOS v1.0.0"
     let exportDate: String          // ISO8601 timestamp
     let authorName: String          // Who created this backup

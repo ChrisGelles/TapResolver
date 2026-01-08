@@ -48,5 +48,9 @@
             </dict>
         </dict>
     </array>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>TapResolver uses Bluetooth to scan beacons and configure KBeacon devices</string>
+    <key>NSBluetoothPeripheralUsageDescription</key>
+    <string>TapResolver uses Bluetooth to scan beacons and configure KBeacon devices</string>
 </dict>
 </plist>

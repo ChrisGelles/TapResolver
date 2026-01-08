@@ -79,6 +79,9 @@ struct WizardContext {
 
 struct LocationMenuView: View {
     @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
+    @EnvironmentObject private var mapPointStore: MapPointStore
+    @EnvironmentObject private var backupExportOptions: BackupExportOptions
     @State private var locationSummaries: [LocationSummary] = []
     @State private var showingImportSheet = false
     @State private var showingPhotosPicker = false
@@ -92,6 +95,8 @@ struct LocationMenuView: View {
     @State private var showRestorePicker: Bool = false
     @State private var showRestoreConfirmation: Bool = false
     @State private var backupURL: URL?
+    @State private var showBackupShareSheet: Bool = false
+    @State private var showBackupMethodChoice: Bool = false
     
     // Import state
     @State private var showingImportPicker = false
@@ -107,6 +112,9 @@ struct LocationMenuView: View {
     @State private var locationToRename: String?
     @State private var showRenameDialog = false
     @State private var renameText = ""
+    
+    // AR Settings navigation
+    @State private var selectedLocationForAR: String?
 
     enum BackupMode {
         case none, selectForBackup, selectForRestore
@@ -130,70 +138,88 @@ struct LocationMenuView: View {
     ]
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     // Main content ScrollView
-                    ScrollView {
-                        LazyVGrid(columns: columns, alignment: .center, spacing: 12) {
+                ScrollView {
+                    LazyVGrid(columns: columns, alignment: .center, spacing: 12) {
 
-                            // --- Hard-coded chiclet: Home/Chris's House ---
+                        // --- Hard-coded chiclet: Home/Chris's House ---
                             SelectableAssetLocationTile(
-                                title: homeTitle,
+                            title: homeTitle,
                                 imageName: defaultThumbAsset,
                                 locationID: homeID,
                                 isInSelectionMode: backupMode != .none,
-                                isSelected: selectedLocationIDs.contains(homeID)
-                            ) {
+                                isSelected: selectedLocationIDs.contains(homeID),
+                                onTap: {
                                 if backupMode != .none {
                                     toggleSelection(homeID)
                                 } else {
-                                    seedIfNeeded(id: homeID,
-                                                 title: homeTitle,
-                                                 mapAsset: defaultMapAsset,
-                                                 thumbAsset: defaultThumbAsset)
-                                    locationManager.setCurrentLocation(homeID)
-                                    locationManager.showLocationMenu = false
+                            seedIfNeeded(id: homeID,
+                                         title: homeTitle,
+                                         mapAsset: defaultMapAsset,
+                                         thumbAsset: defaultThumbAsset)
+                            locationManager.setCurrentLocation(homeID)
+                            locationManager.showLocationMenu = false
                                 }
-                            }
+                                },
+                                onGearTap: {
+                                    // Set location context and show AR settings
+                                    PersistenceContext.shared.locationID = homeID
+                                    selectedLocationForAR = homeID
+                                }
+                        )
 
-                            // --- Hard-coded chiclet: Museum (8192×8192 asset) ---
+                        // --- Hard-coded chiclet: Museum (8192×8192 asset) ---
                             SelectableAssetLocationTile(
-                                title: museumTitle,
+                            title: museumTitle,
                                 imageName: museumThumbAsset,
                                 locationID: museumID,
                                 isInSelectionMode: backupMode != .none,
-                                isSelected: selectedLocationIDs.contains(museumID)
-                            ) {
+                                isSelected: selectedLocationIDs.contains(museumID),
+                                onTap: {
                                 if backupMode != .none {
                                     toggleSelection(museumID)
                                 } else {
-                                    seedIfNeeded(id: museumID,
-                                                 title: museumTitle,
-                                                 mapAsset: museumMapAsset,
-                                                 thumbAsset: museumThumbAsset)
-                                    locationManager.setCurrentLocation(museumID)
-                                    locationManager.showLocationMenu = false
+                            seedIfNeeded(id: museumID,
+                                         title: museumTitle,
+                                         mapAsset: museumMapAsset,
+                                         thumbAsset: museumThumbAsset)
+                            locationManager.setCurrentLocation(museumID)
+                            locationManager.showLocationMenu = false
                                 }
-                            }
+                                },
+                                onGearTap: {
+                                    // Set location context and show AR settings
+                                    PersistenceContext.shared.locationID = museumID
+                                    selectedLocationForAR = museumID
+                                }
+                        )
 
-                            // --- Dynamic locations from sandbox, excluding the two hard-coded IDs ---
-                            ForEach(locationSummaries.filter { $0.id != homeID && $0.id != museumID }) { summary in
+                        // --- Dynamic locations from sandbox, excluding the two hard-coded IDs ---
+                        ForEach(locationSummaries.filter { $0.id != homeID && $0.id != museumID }) { summary in
                                 SelectableLocationTileView(
                                     summary: summary,
                                     isInSelectionMode: backupMode != .none,
-                                    isSelected: selectedLocationIDs.contains(summary.id)
-                                ) {
+                                    isSelected: selectedLocationIDs.contains(summary.id),
+                                    onTap: {
                                     if backupMode != .none {
                                         toggleSelection(summary.id)
                                     } else {
                                         locationManager.setCurrentLocation(summary.id)
                                         locationManager.showLocationMenu = false
                                     }
-                                }
-                                .aspectRatio(1, contentMode: .fit)
+                                    },
+                                    onGearTap: {
+                                        // Set location context and show AR settings
+                                        PersistenceContext.shared.locationID = summary.id
+                                        selectedLocationForAR = summary.id
+                                    }
+                                )
+                                //.aspectRatio(1, contentMode: .fit)
                                 .contextMenu {
                                     if backupMode == .none {
                                         Button {
@@ -214,25 +240,35 @@ struct LocationMenuView: View {
                                         }
                                     }
                                 }
-                            }
-
-                            // --- Square "New Map" tile at the end of the grid ---
-                            if backupMode == .none {
-                                NewMapTileView()
-                                    .aspectRatio(1, contentMode: .fit)
-                                    .onTapGesture { showingImportSheet = true }
-                            }
                         }
-                        .padding(.top, 12)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 24)
+
+                        // --- Square "New Map" tile at the end of the grid ---
+                            if backupMode == .none {
+                        NewMapTileView()
+                                    //.aspectRatio(1, contentMode: .fit)
+                            .onTapGesture { showingImportSheet = true }
+                            }
                     }
-                    .refreshable {
-                        _ = LocationImportUtils.reconcileLocationsOnMenuOpen(
-                            seedDefaultIfEmpty: false,
-                            defaultAssetName: nil
-                        )
-                        locationSummaries = LocationImportUtils.listLocationSummaries()
+                    .padding(.top, 12)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 24)
+                }
+                .refreshable {
+                    _ = LocationImportUtils.reconcileLocationsOnMenuOpen(
+                        seedDefaultIfEmpty: false,
+                        defaultAssetName: nil
+                    )
+                    locationSummaries = LocationImportUtils.listLocationSummaries()
+                    }
+                    .sheet(isPresented: Binding(
+                        get: { selectedLocationForAR != nil },
+                        set: { if !$0 { selectedLocationForAR = nil } }
+                    )) {
+                        if let locationID = selectedLocationForAR {
+                            ARLocationToolsSheet(locationID: locationID)
+                                .environmentObject(arWorldMapStore)
+                                .environmentObject(mapPointStore)
+                        }
                     }
                     
                     // Backup/Restore controls at bottom
@@ -247,29 +283,25 @@ struct LocationMenuView: View {
                     }
                     .foregroundColor(.white)
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Options") {
-                        // Placeholder for future sort/filter options
-                    }
-                    .foregroundColor(.white.opacity(0.7))
-                }
             }
             .onAppear {
-                // Seed both hard-coded locations idempotently.
-                seedIfNeeded(id: homeID,
-                             title: homeTitle,
-                             mapAsset: defaultMapAsset,
-                             thumbAsset: defaultThumbAsset)
-                seedIfNeeded(id: museumID,
-                             title: museumTitle,
-                             mapAsset: museumMapAsset,
-                             thumbAsset: museumThumbAsset)
-                
-                // Ensure correct names are set
-                try? LocationImportUtils.renameLocation(id: homeID, newName: homeTitle)
-                try? LocationImportUtils.renameLocation(id: museumID, newName: museumTitle)
-
-                loadLocationSummaries()
+                DispatchQueue.main.async {
+                    // Seed both hard-coded locations idempotently.
+                    seedIfNeeded(id: homeID,
+                                 title: homeTitle,
+                                 mapAsset: defaultMapAsset,
+                                 thumbAsset: defaultThumbAsset)
+                    seedIfNeeded(id: museumID,
+                                 title: museumTitle,
+                                 mapAsset: museumMapAsset,
+                                 thumbAsset: museumThumbAsset)
+                    
+                    // Ensure correct names are set
+                    try? LocationImportUtils.renameLocation(id: homeID, newName: homeTitle)
+                    try? LocationImportUtils.renameLocation(id: museumID, newName: museumTitle)
+                    
+                    loadLocationSummaries()
+                }
             }
             .sheet(isPresented: $showingImportSheet) {
                 ImportSourceSheet(
@@ -301,11 +333,32 @@ struct LocationMenuView: View {
                 isPresented: $showBackupPicker,
                 document: backupURL.map { ZIPDocument(url: $0) },
                 contentType: UTType(filenameExtension: "tapmap") ?? .zip,
-                defaultFilename: backupURL?.lastPathComponent ?? "TapResolver_Backup.tapmap"
+                defaultFilename: backupExportOptions.fullFilename()
             ) { result in
                 if case .success(let url) = result {
                     print("✅ Backup saved to: \(url)")
                 }
+            }
+            .sheet(isPresented: $showBackupShareSheet) {
+                if let url = backupURL {
+                    ShareSheet(items: [url])
+                }
+            }
+            .alert("Export Backup", isPresented: $showBackupMethodChoice) {
+                TextField("Filename", text: $backupExportOptions.editableFilename)
+                Button("AirDrop / Share") {
+                    finalizeBackup(useShareSheet: true)
+                }
+                Button("Save to Files") {
+                    finalizeBackup(useShareSheet: false)
+                }
+                Button("Cancel", role: .cancel) {
+                    showBackupMethodChoice = false
+                    backupMode = .none
+                    selectedLocationIDs.removeAll()
+                }
+            } message: {
+                Text("Choose how to export your backup")
             }
             .fileImporter(
                 isPresented: $showRestorePicker,
@@ -407,11 +460,6 @@ struct LocationMenuView: View {
                     }
                     locationToRename = nil
                     renameText = ""
-                }
-            } message: {
-                if let locationID = locationToRename,
-                   let location = locationSummaries.first(where: { $0.id == locationID }) {
-                    Text("Enter a new name for '\(location.name)'")
                 }
             }
         }
@@ -583,18 +631,59 @@ struct LocationMenuView: View {
     }
 
     private func performBackup() {
+        // Get location names for filename generation
+        let selectedNames = locationSummaries
+            .filter { selectedLocationIDs.contains($0.id) }
+            .map { $0.name }
+        
+        // Generate default filename and set it as editable
+        let defaultName = backupExportOptions.generateDefaultFilename(locationNames: selectedNames)
+        backupExportOptions.editableFilename = defaultName
+        
         do {
             let zipURL = try UserDataBackup.backupLocations(
                 locationIDs: Array(selectedLocationIDs),
                 includeAssets: includeAssets
             )
             backupURL = zipURL
-            showBackupPicker = true
-            backupMode = .none
-            selectedLocationIDs.removeAll()
+            backupExportOptions.lastExportURL = zipURL
+            
+            // Show method choice (AirDrop vs Save to Files)
+            showBackupMethodChoice = true
         } catch {
             print("❌ Backup failed: \(error)")
         }
+    }
+    
+    private func finalizeBackup(useShareSheet: Bool) {
+        // Rename file to user's chosen filename before exporting (works for both ShareSheet and fileExporter)
+        if let originalURL = backupURL {
+            let tempDir = FileManager.default.temporaryDirectory
+            let newFilename = backupExportOptions.fullFilename()
+            let newURL = tempDir.appendingPathComponent(newFilename)
+            
+            // Remove existing file if present
+            try? FileManager.default.removeItem(at: newURL)
+            
+            // Rename the file
+            do {
+                try FileManager.default.moveItem(at: originalURL, to: newURL)
+                backupURL = newURL
+                backupExportOptions.lastExportURL = newURL
+                print("✅ Renamed backup file to: \(newFilename)")
+            } catch {
+                print("⚠️ Failed to rename backup file: \(error), using original name")
+            }
+        }
+        
+        if useShareSheet {
+            showBackupShareSheet = true
+        } else {
+            showBackupPicker = true
+        }
+        backupMode = .none
+        selectedLocationIDs.removeAll()
+        showBackupMethodChoice = false
     }
 
     private func performRestore(from url: URL) {
@@ -654,8 +743,8 @@ struct LocationMenuView: View {
             
             let metadata = try JSONDecoder().decode(BackupMetadata.self, from: metadataData)
             
-            // 4. Validate format
-            guard metadata.format == "tapresolver.backup.v1" else {
+            // 4. Validate format (accept v1 and v2)
+            guard metadata.format == "tapresolver.backup.v1" || metadata.format == "tapresolver.backup.v2" else {
                 throw NSError(domain: "ImportError", code: 3,
                              userInfo: [NSLocalizedDescriptionKey: "Unsupported format: \(metadata.format)"])
             }
@@ -1174,12 +1263,12 @@ private struct AssetLocationTile: View {
                             .clipped()
                     } else {
                         // Fallback to bundle asset while loading
-                        Image(imageName)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(maxWidth: .infinity)
-                            .aspectRatio(1, contentMode: .fit)
-                            .clipped()
+                    Image(imageName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipped()
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -1266,6 +1355,7 @@ private struct SelectableAssetLocationTile: View {
     let isInSelectionMode: Bool
     let isSelected: Bool
     let onTap: () -> Void
+    let onGearTap: () -> Void
     
     @State private var thumbnailImage: UIImage?
 
@@ -1289,7 +1379,28 @@ private struct SelectableAssetLocationTile: View {
                             .clipped()
                     }
                     
-                    if isInSelectionMode {
+                    // Gear icon overlay (top-right corner)
+                    if !isInSelectionMode {
+                        VStack {
+                            HStack {
+                                Spacer()
+                                Button(action: {
+                                    onGearTap()
+                                }) {
+                                    Image(systemName: "gearshape.fill")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .padding(8)
+                                        .background(Color.black.opacity(0.6))
+                                        .clipShape(Circle())
+                                        .shadow(color: .black.opacity(0.3), radius: 2)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(8)
+                            }
+                            Spacer()
+                        }
+                    } else if isInSelectionMode {
                         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                             .font(.title)
                             .foregroundColor(isSelected ? .blue : .white)
@@ -1336,17 +1447,21 @@ private struct SelectableLocationTileView: View {
     let isInSelectionMode: Bool
     let isSelected: Bool
     let onTap: () -> Void
+    let onGearTap: () -> Void
     
     @State private var thumbnailImage: UIImage?
     
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 ZStack(alignment: .topTrailing) {
                     if let image = thumbnailImage {
                         Image(uiImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(maxWidth: .infinity)
+                                .aspectRatio(1, contentMode: .fit)
+                                .clipped()
                     } else {
                         Rectangle()
                             .fill(Color.gray.opacity(0.3))
@@ -1357,7 +1472,28 @@ private struct SelectableLocationTileView: View {
                             )
                     }
                     
-                    if isInSelectionMode {
+                    // Gear icon overlay (top-right corner)
+                    if !isInSelectionMode {
+                        VStack {
+                            HStack {
+                                Spacer()
+                                Button(action: {
+                                    onGearTap()
+                                }) {
+                                    Image(systemName: "gearshape.fill")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .padding(8)
+                                        .background(Color.black.opacity(0.6))
+                                        .clipShape(Circle())
+                                        .shadow(color: .black.opacity(0.3), radius: 2)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(8)
+                            }
+                            Spacer()
+                        }
+                    } else if isInSelectionMode {
                         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                             .font(.title)
                             .foregroundColor(isSelected ? .blue : .white)
@@ -1365,24 +1501,22 @@ private struct SelectableLocationTileView: View {
                             .padding(8)
                     }
                 }
-                .frame(height: 120)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(isSelected ? Color.blue : Color.white, lineWidth: isSelected ? 3 : 2)
                 )
-                .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
-                
+                .shadow(radius: 4, y: 2)
+
                 Text(summary.name)
                     .font(.headline)
-                    .fontWeight(.semibold)
                     .foregroundColor(.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 
-                Text(formatDate(summary.updatedISO))
+                /*Text(formatDate(summary.updatedISO))
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.7))
+                    .foregroundColor(.white.opacity(0.7))*/
             }
         }
         .buttonStyle(.plain)
@@ -1975,6 +2109,92 @@ struct ResultRowView: View {
         case .skip: return "Skipped"
         case .importAsNew: return "Imported as new"
         case .replace: return "Replaced existing"
+        }
+    }
+}
+
+private struct ARLocationToolsSheet: View {
+    let locationID: String
+    
+    @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
+    @EnvironmentObject private var mapPointStore: MapPointStore
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var beaconPassword: String = ""
+    @State private var showPassword: Bool = false
+    @State private var passwordSaved: Bool = false
+    
+    var body: some View {
+        NavigationStack {
+            List {
+                // MARK: - Beacon Configuration
+                Section {
+                    HStack {
+                        if showPassword {
+                            TextField("16 hex characters", text: $beaconPassword)
+                                .font(.system(.body, design: .monospaced))
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+                        } else {
+                            SecureField("16 hex characters", text: $beaconPassword)
+                                .font(.system(.body, design: .monospaced))
+                        }
+                        
+                        Button {
+                            showPassword.toggle()
+                        } label: {
+                            Image(systemName: showPassword ? "eye.slash" : "eye")
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
+                    Button {
+                        BeaconPasswordStore.shared.setPassword(beaconPassword, for: locationID)
+                        passwordSaved = true
+                        
+                        // Brief feedback
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            passwordSaved = false
+                        }
+                    } label: {
+                        HStack {
+                            Text(passwordSaved ? "Saved!" : "Save Password")
+                            if passwordSaved {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                            }
+                        }
+                    }
+                    .disabled(beaconPassword.isEmpty)
+                } header: {
+                    Text("Beacon Password")
+                } footer: {
+                    Text("Password used to connect to KBeacon devices at this location. All beacons at this location should share the same password.")
+                }
+                
+                // MARK: - Info Section
+                Section {
+                    Text("Survey tools are available within AR view after selecting a MapPoint.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Location Settings")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear {
+                // Load existing password
+                if let existing = BeaconPasswordStore.shared.getPassword(for: locationID) {
+                    beaconPassword = existing
+                }
+            }
         }
     }
 }

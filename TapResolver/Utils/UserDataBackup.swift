@@ -29,7 +29,7 @@ enum UserDataBackup {
             .replacingOccurrences(of: "T", with: "_")
             .prefix(19) // YYYY-MM-DD_HHmmss
         
-        let zipFileName = "TapResolver_Backup_\(timestamp).tapmap"
+        let zipFileName = "TapResolver_Backup_\(timestamp).tapmap"  // Temp name, final name set by user
         let tempDir = FileManager.default.temporaryDirectory
         let zipURL = tempDir.appendingPathComponent(zipFileName)
         
@@ -135,15 +135,16 @@ enum UserDataBackup {
         })
         print("   ✓ UserDefaults: \(userDefaultsData.count) keys")
         
-        // 2. Backup dots.json
+        // 2. Backup dots.json (legacy support) - V2 data is in UserDefaults
         let dotsFile = locationDir.appendingPathComponent("dots.json")
         if FileManager.default.fileExists(atPath: dotsFile.path) {
             let dotsData = try Data(contentsOf: dotsFile)
             try archive.addEntry(with: "\(locationID)/dots.json", type: .file, uncompressedSize: UInt32(dotsData.count), provider: { position, size in
                 return dotsData.subdata(in: position..<position+size)
             })
-            print("   ✓ dots.json")
+            print("   ✓ dots.json (legacy)")
         }
+        // Note: BeaconDots_v2 is backed up via UserDefaults keys above
         
         // 3. Backup location.json
         let locationFile = locationDir.appendingPathComponent("location.json")
@@ -180,6 +181,34 @@ enum UserDataBackup {
         } else {
             print("   ⏭️ Skipping assets (user chose not to include)")
         }
+        
+        // 5. Backup map-points photos (reference photos stored on disk)
+        let mapPointsDir = locationDir.appendingPathComponent("map-points", isDirectory: true)
+        if FileManager.default.fileExists(atPath: mapPointsDir.path) {
+            do {
+                let photoFiles = try FileManager.default.contentsOfDirectory(at: mapPointsDir, includingPropertiesForKeys: nil)
+                let imageFiles = photoFiles.filter { ["jpg", "jpeg", "png"].contains($0.pathExtension.lowercased()) }
+                
+                if !imageFiles.isEmpty {
+                    print("   📷 Found \(imageFiles.count) reference photo(s) in map-points directory:")
+                    for photoFile in imageFiles {
+                        let fileName = photoFile.lastPathComponent
+                        let fileSize = (try? FileManager.default.attributesOfItem(atPath: photoFile.path)[.size] as? Int64) ?? 0
+                        let fileSizeKB = Double(fileSize) / 1024.0
+                        
+                        print("      • \(fileName) (\(String(format: "%.1f", fileSizeKB)) KB)")
+                        
+                        let photoData = try Data(contentsOf: photoFile)
+                        try archive.addEntry(with: "\(locationID)/map-points/\(fileName)", type: .file, uncompressedSize: UInt32(photoData.count), provider: { position, size in
+                            return photoData.subdata(in: position..<position+size)
+                        })
+                    }
+                    print("   ✓ Backed up \(imageFiles.count) reference photo(s)")
+                }
+            } catch {
+                print("   ⚠️ Error backing up map-points: \(error.localizedDescription)")
+            }
+        }
     }
     
     private static func backupUserDefaults(locationID: String) throws -> [String: Any] {
@@ -188,16 +217,34 @@ enum UserDataBackup {
         
         var data: [String: Any] = [:]
         
-        // Keys to backup
+        // Keys to backup (standard namespaced keys)
         let keys = [
+            // Map data
             "MapPoints_v1",
+            "ActivePointID",
+            
+            // Triangle calibration
+            "triangles_v1",
+            
+            // Beacon configuration
             "BeaconLocks_v1",
             "BeaconElevations_v1",
             "BeaconTxPower_v1",
             "advertisingIntervals",
-            "ActivePointID",
+            "BeaconDots_v2",
+            
+            // Beacon lists (whitelist + morgue)
+            "BeaconLists_v1",
+            "BeaconLists_beacons_v1",
+            "beaconLists.morgue.v1",
+            
+            // Metric calibration
             "MetricSquares_v1",
-            "BeaconLists_v1"
+            
+            // Compass calibration
+            "mapMetrics.northOffsetDeg.v1",
+            "mapMetrics.facingFineTuneDeg.v1",
+            "mapMetrics.mapBaseOrientation.v1"
         ]
         
         for key in keys {
@@ -210,6 +257,13 @@ enum UserDataBackup {
                     data[key] = value
                 }
             }
+        }
+        
+        // SPECIAL CASE: Zones use non-standard key format "zones_<locationID>"
+        let zoneKey = "zones_\(locationID)"
+        if let zoneData = ud.data(forKey: zoneKey) {
+            data["zones_v1"] = ["__data_base64": zoneData.base64EncodedString()]
+            print("   ✓ Backed up zones: \(zoneData.count) bytes")
         }
         
         return data
@@ -231,6 +285,11 @@ enum UserDataBackup {
             let prefix = "locations.\(locationID)."
             
             for (key, value) in dict {
+                // Skip zones_v1 here - handle separately below
+                if key == "zones_v1" {
+                    continue
+                }
+                
                 // Convert Base64 strings back to Data objects
                 if let dataDict = value as? [String: String],
                    let base64String = dataDict["__data_base64"],
@@ -238,6 +297,17 @@ enum UserDataBackup {
                     ud.set(restoredData, forKey: prefix + key)
                 } else {
                     ud.set(value, forKey: prefix + key)
+                }
+            }
+            
+            // SPECIAL CASE: Restore zones to non-standard key format
+            if let zoneValue = dict["zones_v1"] {
+                let zoneKey = "zones_\(locationID)"
+                if let base64Dict = zoneValue as? [String: String],
+                   let base64String = base64Dict["__data_base64"],
+                   let zoneData = Data(base64Encoded: base64String) {
+                    ud.set(zoneData, forKey: zoneKey)
+                    print("   ✓ Restored zones: \(zoneData.count) bytes")
                 }
             }
             
@@ -270,6 +340,18 @@ enum UserDataBackup {
             try? FileManager.default.removeItem(at: targetAssetsDir) // Clear old assets
             try FileManager.default.copyItem(at: assetsDir, to: targetAssetsDir)
             print("   ✓ assets folder")
+        }
+        
+        // 5. Restore map-points photos
+        let mapPointsDir = extractedDir.appendingPathComponent("map-points")
+        if FileManager.default.fileExists(atPath: mapPointsDir.path) {
+            let targetMapPointsDir = targetLocationDir.appendingPathComponent("map-points", isDirectory: true)
+            try? FileManager.default.removeItem(at: targetMapPointsDir) // Clear old photos
+            try FileManager.default.copyItem(at: mapPointsDir, to: targetMapPointsDir)
+            
+            // Count restored photos for logging
+            let photoCount = (try? FileManager.default.contentsOfDirectory(at: targetMapPointsDir, includingPropertiesForKeys: nil))?.count ?? 0
+            print("   ✓ map-points folder (\(photoCount) photo(s))")
         }
     }
     
@@ -317,7 +399,7 @@ enum UserDataBackup {
         }
         
         let metadata = BackupMetadata(
-            format: "tapresolver.backup.v1",
+            format: "tapresolver.backup.v2",
             exportedBy: "TapResolver iOS v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")",
             exportDate: ISO8601DateFormatter().string(from: Date()),
             authorName: AppSettings.authorName,

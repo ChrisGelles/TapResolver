@@ -7,10 +7,14 @@
 
 import SwiftUI
 import Combine
+import Foundation
+import kbeaconlib2
 
 // MARK: - Notification Extensions
 extension Notification.Name {
     static let beaconSelectedForTxPower = Notification.Name("beaconSelectedForTxPower")
+    static let sliderInteractionBegan = Notification.Name("sliderInteractionBegan")
+    static let sliderInteractionEnded = Notification.Name("sliderInteractionEnded")
 }
 
 // MARK: - Color extension for hex support
@@ -38,15 +42,22 @@ struct HUDContainer: View {
     @EnvironmentObject private var scanUtility: MapPointScanUtility
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var beaconState: BeaconStateManager
+    @EnvironmentObject private var triangleStore: TrianglePatchStore
+    @EnvironmentObject private var zoneStore: ZoneStore
+    @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
+    @EnvironmentObject private var surveySelectionCoordinator: SurveySelectionCoordinator
+    @EnvironmentObject private var svgExportOptions: SVGExportOptions
     @StateObject private var beaconLogger = SimpleBeaconLogger()
+    @StateObject private var relocalizationCoordinator: RelocalizationCoordinator
 
     @State private var sliderValue: Double = 10.0 // Default to 10 seconds
-    @State private var showARCalibration = false
     @State private var showMetricSquareAR = false
+    @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
 
     @State private var selectedBeaconForTxPower: String? = nil
     @State private var showScanQuality = true  // Temporary: always show for testing
     @State private var activeIntervalEdit: (beaconID: String, text: String)? = nil
+    @State private var showRelocalizationDebug = false  // Debug UI toggle
 
     var body: some View {
         baseContent
@@ -59,15 +70,54 @@ struct HUDContainer: View {
                 hud.isCalibratingNorth = false
             }
             .onReceive(NotificationCenter.default.publisher(for: .beaconSelectedForTxPower)) { notification in
-                if let beaconID = notification.object as? String {
-                    selectedBeaconForTxPower = beaconID
-                }
+                // Handle both selection (String) and deselection (nil)
+                selectedBeaconForTxPower = notification.object as? String
             }
+            .onReceive(NotificationCenter.default.publisher(for: .sliderInteractionBegan)) { _ in
+                mapTransform.isHUDInteracting = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .sliderInteractionEnded)) { _ in
+                mapTransform.isHUDInteracting = false
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("LaunchSwathSurveyAR"))) { notification in
+                guard let userInfo = notification.userInfo,
+                      let triangleIDs = userInfo["selectedTriangleIDs"] as? [UUID],
+                      let anchorIDs = userInfo["suggestedAnchorIDs"] as? [UUID] else {
+                    print("⚠️ [HUD] LaunchSwathSurveyAR missing data")
+                    return
+                }
+                print("🚀 [HUD] Launching AR for Swath Survey")
+                print("   Triangles: \(triangleIDs.count)")
+                print("   Suggested anchors: \(anchorIDs.count)")
+                
+                arViewLaunchContext.launchSwathSurvey(
+                    triangleIDs: triangleIDs,
+                    suggestedAnchorIDs: anchorIDs
+                )
+            }
+            // AR view launch is now handled via ARViewLaunchContext
+            // Removed notification handler - using direct method call instead
             .overlay(alignment: .topLeading) { topLeftButtons }
+            .overlay(alignment: .topLeading) { rolePanelOverlay }
             .overlay { txPowerOverlay }
             .overlay { keypadOverlay }
             .overlay { arViewOverlay }
+            .overlay(alignment: .top) { interpolationModeBanner }
+            .overlay { triangleCreationInstructions }
+            .overlay { zoneCreationInstructions }
+            .overlay(alignment: .bottomTrailing) { relocalizationDebugOverlay }
+            .onAppear {
+                // Update coordinator to use actual ARWorldMapStore
+                relocalizationCoordinator.updateARStore(arWorldMapStore)
+            }
         }
+        
+    init() {
+        // Initialize relocalization coordinator with temporary store
+        // Will be updated to use actual store in onAppear
+        let tempARStore = ARWorldMapStore()
+        _relocalizationCoordinator = StateObject(wrappedValue: RelocalizationCoordinator(arStore: tempARStore))
+    }
     
     // MARK: - View Composition Helpers
         
@@ -86,16 +136,84 @@ struct HUDContainer: View {
                         BeaconDrawer()
                         MorgueDrawer()
                         MapPointDrawer()
-                        MapPointLogButton()
+                        ZoneDrawer()
+                        // SVG Export button
+                        Button {
+                            hud.toggleSVGExport()
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(.white)
+                                .frame(width: 40, height: 40)
+                                .background(Circle().fill(Color.purple.opacity(0.7)))
+                        }
+                        .padding(.top, 8)
+                        if FeatureFlags.showMapPointLogPanel {
+                            MapPointLogButton() //This log panel is a good example for the Debug/Settings panel I'd like to see.
+                        }
                         ResetMapButton()
-                        BluetoothScanButton()
                         RSSIMeterButton()
-                        FacingToggleButton()
+                        DebugSettingsButton() // Opens Debug/Settings Panel with moved buttons
+                        // MARK: - Initial Diagnostic Buttons (Hidden - can be restored if needed)
+                        /*
+                        UserDefaultsDiagnosticButton()
+                        MapPointsInspectionButton()
+                        PhotoMigrationPlanButton()
+                        MapPointStructureButton()
+                        PhotoManagerButton()
+                        PurgePhotosButton()
+                        */
+                        // MARK: - Triangle Diagnostic Buttons (Hidden - can be restored if needed)
+                        /*
+                        TriangleInspectionButton()      // 🔺 Inspect Triangle Data
+                        TriangleValidationButton()      // ✓🔺 Validate Triangle Vertex IDs
+                        DeleteMalformedTrianglesButton() // 🗑️🔺 Delete Malformed Triangles
+                        */
+                        // MARK: - AR Marker Diagnostic Buttons (Hidden - can be restored if needed)
+                        /*
+                        MarkerInspectionButton()        // 🧠📍 Inspect AR Markers
+                        MarkerDeletionButton()          // 🗑️📍 Delete All AR Markers
+                        */
                     }
+            }
+            Spacer()
+            
+            // Survey selection mode bar
+            if surveySelectionCoordinator.state == .selectingTriangles {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 20) {
+                        Button {
+                            surveySelectionCoordinator.cancelSelection()
+                        } label: {
+                            Text("CANCEL")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 12)
+                                .background(Color.red.opacity(0.9))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        
+                        Button {
+                            surveySelectionCoordinator.confirmSelectionAndBeginAnchoring()
+                        } label: {
+                            Text("BEGIN (\(surveySelectionCoordinator.selectedCount))")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 12)
+                                .background(Color.green.opacity(0.9))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .disabled(surveySelectionCoordinator.selectedCount == 0)
+                        .opacity(surveySelectionCoordinator.selectedCount == 0 ? 0.5 : 1.0)
+                    }
+                    .padding(.bottom, 50)
                 }
-                Spacer()
-                
-                if hud.isMapPointOpen {
+            }
+            
+            if hud.isMapPointOpen {
                     VStack(spacing: 8) {
                         if showScanQuality {
                             ScanQualityDisplayView(
@@ -124,9 +242,25 @@ struct HUDContainer: View {
                 }
                 .zIndex(200)
             }
+            
+            if hud.isDebugSettingsOpen {
+                VStack {
+                    Spacer()
+                    DebugSettingsPanel(showRelocalizationDebug: $showRelocalizationDebug)
+                        .transition(.move(edge: .bottom))
+                }
+                .zIndex(200)
+            }
         }
         .zIndex(100)
         .animation(.easeInOut(duration: 0.3), value: hud.isMapPointLogOpen)
+        .animation(.easeInOut(duration: 0.3), value: hud.isDebugSettingsOpen)
+        .sheet(isPresented: $hud.isSVGExportOpen) {
+            SVGExportPanel(isPresented: $hud.isSVGExportOpen)
+        }
+        .sheet(isPresented: $hud.isBeaconSettingsOpen) {
+            BeaconSettingsPanel(isPresented: $hud.isBeaconSettingsOpen)
+        }
     }
 
     @ViewBuilder
@@ -192,28 +326,168 @@ struct HUDContainer: View {
                     print("🔍 DEBUG: Total points in store = \(mapPointStore.points.count)")
                 }
             
-            if mapPointStore.activePointID != nil {
-                let _ = print()
-                
-                Button(action: {
-                    print("Launching AR View Tools")
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        showARCalibration = true
-                    }
-                }) {
-                    Image(systemName: "cube.fill")
-                        .font(.system(size: 24, weight: .semibold))
+            // AR View button (always visible)
+            Button(action: {
+                print("📱 HUDContainer: Launching generic AR view — FROM HUD")
+                arViewLaunchContext.launchGeneric()
+            }) {
+                Image(systemName: "cube.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 56, height: 56)
+                    .background(
+                        Circle()
+                            .fill(Color.blue.opacity(0.9))
+                            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                    )
+            }
+            .buttonStyle(.plain)
+            .transition(.move(edge: .leading).combined(with: .opacity))
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
+            
+            // Triangle creation button
+            if !triangleStore.isCreatingTriangle {
+                Button {
+                    triangleStore.startCreatingTriangle()
+                } label: {
+                    Image(systemName: "triangle")
+                        .font(.system(size: 20, weight: .semibold))
                         .foregroundColor(.white)
-                        .frame(width: 56, height: 56)
-                        .background(
-                            Circle()
-                                .fill(Color.blue.opacity(0.9))
-                                .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
-                        )
+                        .frame(width: 48, height: 48)
+                        .background(Color.blue.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .buttonStyle(.plain)
-                .transition(.move(edge: .leading).combined(with: .opacity))
-                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
+                .padding(.top, 80)
+            } else {
+                // Cancel button during creation
+                Button {
+                    triangleStore.cancelCreatingTriangle()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 48, height: 48)
+                        .background(Color.red.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .padding(.top, 80)
+            }
+            
+            // MARK: - Zone Creation Button
+            // UNIFICATION CANDIDATE: This button pattern mirrors the triangle creation button above.
+            // Consider extracting a reusable CreationModeButton component.
+            
+            if !zoneStore.isCreatingZone {
+                Button {
+                    zoneStore.startCreatingZone()
+                } label: {
+                    Image(systemName: "square.dashed")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 48, height: 48)
+                        .background(Color.orange.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .padding(.top, 8)
+            } else {
+                // Cancel button during zone creation
+                Button {
+                    zoneStore.cancelCreatingZone()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 48, height: 48)
+                        .background(Color.red.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .padding(.top, 8)
+            }
+            
+            // Zone Corner Calibration button
+            if surveySelectionCoordinator.state == .idle && !triangleStore.isCreatingTriangle {
+                Button {
+                    // Prefer selected zone, fall back to single zone
+                    let targetZone: Zone?
+                    
+                    if let selectedID = zoneStore.selectedZoneID,
+                       let selected = zoneStore.zone(withID: selectedID) {
+                        targetZone = selected
+                    } else if zoneStore.zones.count == 1 {
+                        targetZone = zoneStore.zones[0]
+                    } else if zoneStore.zones.isEmpty {
+                        print("⚠️ [HUD] No zones defined. Create a zone first using the Zone Creator button.")
+                        targetZone = nil
+                    } else {
+                        print("⚠️ [HUD] Multiple zones exist. Select one from the Zone Drawer first.")
+                        targetZone = nil
+                    }
+                    
+                    guard let zone = targetZone else { return }
+                    
+                    guard zone.cornerIDs.count == 4 else {
+                        print("⚠️ [HUD] Zone '\(zone.name)' has \(zone.cornerIDs.count) corners, need 4")
+                        return
+                    }
+                    
+                    // Compute rotated starting index
+                    let lastIndex = zone.lastStartingCornerIndex ?? -1
+                    let newStartIndex = (lastIndex + 1) % 4
+                    
+                    // Rotate corner array so newStartIndex becomes position 0
+                    var rotatedCorners = zone.cornerIDs
+                    for i in 0..<4 {
+                        rotatedCorners[i] = zone.cornerIDs[(newStartIndex + i) % 4]
+                    }
+                    
+                    print("🔄 [HUD] Rotating start point for '\(zone.name)':")
+                    print("   Last starting index: \(zone.lastStartingCornerIndex.map { String($0) } ?? "nil (first run)")")
+                    print("   New starting index: \(newStartIndex)")
+                    print("   Rotated order: \(rotatedCorners.map { String($0.uuidString.prefix(8)) })")
+                    
+                    print("🏁 [HUD] Launching Zone Corner Calibration for '\(zone.name)'")
+                    arViewLaunchContext.launchZoneCornerCalibration(
+                        zoneCornerIDs: rotatedCorners,
+                        zoneID: zone.id,
+                        startingCornerIndex: newStartIndex
+                    )
+                } label: {
+                    Image(systemName: "rectangle.dashed")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 48, height: 48)
+                        .background(Color.purple.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            
+            // MARK: - Connection Button (Hidden - preserving for future use)
+            if false {  // ✅ Set to true to re-enable
+                // Interpolation mode button (appears when one point selected)
+                if let selectedID = mapPointStore.activePointID,
+                   !mapPointStore.isInterpolationMode,
+                   mapPointStore.interpolationFirstPointID == nil {
+                    
+                    Button(action: {
+                        mapPointStore.startInterpolationMode(firstPointID: selectedID)
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "line.3.horizontal.circle")
+                                .font(.system(size: 24))
+                                .foregroundColor(.orange)
+                            
+                            Text("Connect")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.orange)
+                        }
+                        .frame(width: 60, height: 60)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                    }
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.activePointID)
+                }
             }
             
             // AR Calibration button for Metric Square (only when square active)
@@ -265,6 +539,34 @@ struct HUDContainer: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         }
     }
+    
+    @ViewBuilder
+    private var relocalizationDebugOverlay: some View {
+        if showRelocalizationDebug {
+            RelocalizationDebugView(coordinator: relocalizationCoordinator, isPresented: $showRelocalizationDebug)
+                .frame(maxWidth: 350, maxHeight: 500)
+                .padding()
+        }
+    }
+
+    @ViewBuilder
+    private var rolePanelOverlay: some View {
+        if let selectedID = mapPointStore.selectedPointID {
+            VStack {
+                HStack {
+                    MapPointRolePanel(pointID: selectedID)
+                        .environmentObject(mapPointStore)
+                        .padding(.leading, 2)
+                        .padding(.top, 166)  // ✅ CHANGED: Position where Connection button was
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                    
+                    Spacer()
+                }
+                Spacer()
+            }
+            .animation(.easeInOut(duration: 0.3), value: mapPointStore.selectedPointID)
+        }
+    }
 
     @ViewBuilder
     private var keypadOverlay: some View {
@@ -312,13 +614,8 @@ struct HUDContainer: View {
 
     @ViewBuilder
     private var arViewOverlay: some View {
-        if showARCalibration, let activeID = mapPointStore.activePointID {
-            ARCalibrationView(
-                isPresented: $showARCalibration,
-                mapPointID: activeID
-            )
-            .allowsHitTesting(true)
-        }
+        // AR View is now presented via ContentView's fullScreenCover
+        // No overlay needed here anymore
         
         if showMetricSquareAR, let activeID = metricSquares.activeSquareID {
             MetricSquareARView(
@@ -326,6 +623,98 @@ struct HUDContainer: View {
                 squareID: activeID
             )
             .allowsHitTesting(true)
+        }
+    }
+    
+    @ViewBuilder
+    private var triangleCreationInstructions: some View {
+        Group {
+            if triangleStore.isCreatingTriangle {
+                VStack {
+                    HStack {
+                        Text("Tap \(3 - triangleStore.creationVertices.count) Triangle Edge point(s)")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding(12)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(8)
+                        
+                        Spacer()
+                    }
+                    .padding(.leading, 80)
+                    .padding(.top, 120)
+                    
+                    Spacer()
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var zoneCreationInstructions: some View {
+        // MARK: - Zone Creation Instructions
+        // UNIFICATION CANDIDATE: This banner mirrors triangleCreationInstructions.
+        // Consider extracting a shared CreationInstructionsBanner component.
+        
+        Group {
+            if zoneStore.isCreatingZone {
+                VStack {
+                    HStack {
+                        Text("Tap \(4 - zoneStore.creationCorners.count) Zone Corner point(s)")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.orange.opacity(0.85))
+                            .cornerRadius(8)
+                        
+                        Spacer()
+                    }
+                    .padding(.leading, 80)
+                    .padding(.top, 120)
+                    
+                    Spacer()
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var interpolationModeBanner: some View {
+        if mapPointStore.isInterpolationMode && !arViewLaunchContext.isPresented {
+            VStack(spacing: 0) {
+                // Push banner down below status bar
+                Color.clear
+                    .frame(height: 60)
+                
+                HStack {
+                    Image(systemName: "link.circle.fill")
+                        .font(.system(size: 16))
+                    
+                    Text(mapPointStore.interpolationSecondPointID == nil 
+                         ? "Select second Map Point" 
+                         : "Ready to interpolate")
+                        .font(.system(size: 14, weight: .semibold))
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        mapPointStore.cancelInterpolationMode()
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color.orange)
+                .foregroundColor(.white)
+                
+                Spacer()
+            }
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mapPointStore.isInterpolationMode)
         }
     }
     
@@ -467,7 +856,7 @@ struct HUDContainer: View {
             scanUtility: scanUtility
         )
     }
-
+    
 }
 
 
@@ -512,6 +901,26 @@ private struct MapPointLogButton: View {
         }
         .shadow(radius: 4)
         .accessibilityLabel("Open Map Point Log")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+private struct DebugSettingsButton: View {
+    @EnvironmentObject private var hudPanels: HUDPanelsState
+    
+    var body: some View {
+        Button {
+            hudPanels.toggleDebugSettings()
+        } label: {
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Circle().fill(Color.gray.opacity(0.8)))
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("Open Debug Settings")
         .buttonStyle(.plain)
         .allowsHitTesting(true)
     }
@@ -622,6 +1031,16 @@ struct CustomSlider: UIViewRepresentable {
             action: #selector(Coordinator.valueChanged(_:)),
             for: .valueChanged
         )
+        slider.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.touchBegan),
+            for: .touchDown
+        )
+        slider.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.touchEnded),
+            for: [.touchUpInside, .touchUpOutside, .touchCancel]
+        )
         return slider
     }
     
@@ -641,6 +1060,14 @@ struct CustomSlider: UIViewRepresentable {
         
         init(_ parent: CustomSlider) {
             self.parent = parent
+        }
+        
+        @objc func touchBegan() {
+            NotificationCenter.default.post(name: .sliderInteractionBegan, object: nil)
+        }
+        
+        @objc func touchEnded() {
+            NotificationCenter.default.post(name: .sliderInteractionEnded, object: nil)
         }
         
         @objc func valueChanged(_ sender: UISlider) {
@@ -791,6 +1218,1976 @@ private struct FacingToggleButton: View {
         .buttonStyle(.plain)
         .allowsHitTesting(true)
     }
+}
+
+// MARK: - Relocalization Debug Toggle Button
+
+private struct MapPointDiagnosticButton: View {
+    var body: some View {
+        Button(action: {
+            Task {
+                await MapPointDebugTool.runDiagnostic()
+            }
+        }) {
+            Image(systemName: "magnifyingglass.circle.fill")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.orange.opacity(0.9), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("Map Point Diagnostic")
+        .buttonStyle(.plain)
+    }
+}
+
+private struct RelocalizationDebugToggleButton: View {
+    @Binding var showDebug: Bool
+    
+    var body: some View {
+        Button {
+            showDebug.toggle()
+        } label: {
+            Image(systemName: showDebug ? "location.magnifyingglass.fill" : "location.magnifyingglass")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.primary)
+                .padding(10)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .accessibilityLabel("Toggle relocalization debug")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - Debug Settings Panel
+
+private struct DebugSettingsPanel: View {
+    @EnvironmentObject private var hudPanels: HUDPanelsState
+    @EnvironmentObject private var mapPointStore: MapPointStore
+    @EnvironmentObject private var triangleStore: TrianglePatchStore
+    @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var mapTransform: MapTransformStore
+    @EnvironmentObject private var btScanner: BluetoothScanner
+    @EnvironmentObject private var surveyPointStore: SurveyPointStore
+    @EnvironmentObject private var beaconLists: BeaconListsStore
+    @EnvironmentObject private var beaconDotStore: BeaconDotStore
+    
+    @Binding var showRelocalizationDebug: Bool
+    @State private var showingSoftResetAlert = false
+    @State private var showingPurgePhotosAlert = false
+    @State private var showOrphanPurgeConfirmation = false
+    @State private var showOrphanPurgeResult = false
+    @State private var showingPurgeARHistoryAlert = false
+    @State private var showingFullResetAlert = false
+    @State private var orphanPurgeResultMessage = ""
+    @State private var showingPurgeCanonicalAlert = false
+    @State private var canonicalPurgeResultMessage = ""
+    @State private var showCanonicalPurgeResult = false
+    @State private var showingPurgeTrianglePatchAlert = false
+    @State private var trianglePatchPurgeResultMessage = ""
+    @State private var showTrianglePatchPurgeResult = false
+    @State private var showingLogShare = false
+    @State private var showingStorageAuditShare = false
+    @State private var storageAuditURL: URL? = nil
+    @StateObject private var kbeaconManager = KBeaconConnectionManager()
+    @State private var isBeaconScanning = false
+    @State private var showMapSVGSheet = false
+    @State private var mapSVGURL: URL? = nil
+    
+    var body: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                // Header with close button
+                HStack {
+                    Text("Debug & Settings")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Button {
+                        hudPanels.toggleDebugSettings()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 24))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                .background(Color.black.opacity(0.8))
+                
+                // Grid of buttons
+                ScrollView {
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12)
+                    ], spacing: 16) {
+                        // Facing Toggle Button
+                        Button {
+                            hudPanels.showFacingOverlay.toggle()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "location.north.fill")
+                                    .font(.system(size: 24))
+                                Text("Facing")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Relocalization Debug Toggle
+                        Button {
+                            showRelocalizationDebug.toggle()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: showRelocalizationDebug ? "location.magnifyingglass.fill" : "location.magnifyingglass")
+                                    .font(.system(size: 24))
+                                Text("Reloc Debug")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Survey Thread Trace Toggle
+                        Button {
+                            hudPanels.toggleSurveyThreadTrace()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: hudPanels.surveyThreadTraceEnabled ? "ant.circle.fill" : "ant.circle")
+                                    .font(.system(size: 24))
+                                Text("Survey Trace")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(hudPanels.surveyThreadTraceEnabled ? .green : .primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // BLE Scanning Toggle
+                        Button {
+                            if btScanner.isScanning {
+                                btScanner.stopContinuous()
+                            } else {
+                                btScanner.startContinuous()
+                            }
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "dot.radiowaves.left.and.right")
+                                    .font(.system(size: 24))
+                                Text("BLE Scan")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(btScanner.isScanning ? .green : .gray)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Purge Diagnostic Button (Eye)
+                        Button {
+                            showPurgeDiagnostic()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "eye.fill")
+                                    .font(.system(size: 24))
+                                Text("Diagnostic")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Soft Reset Button (Red X)
+                        Button {
+                            showingSoftResetAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 24))
+                                Text("Soft Reset")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Purge AR Position History Button
+                        Button {
+                            showingPurgeARHistoryAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "trash.circle")
+                                    .font(.system(size: 24))
+                                Text("Purge AR History")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Purge Canonical Positions Button
+                        Button {
+                            showingPurgeCanonicalAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "mappin.slash")
+                                    .font(.system(size: 24))
+                                Text("Purge Canonical")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Full Reset Button (Soft Reset + Purge History)
+                        Button {
+                            showingFullResetAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "arrow.counterclockwise.circle.fill")
+                                    .font(.system(size: 24))
+                                Text("Full Reset")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Photo Purge Button
+                        Button {
+                            showingPurgePhotosAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 24))
+                                Text("Purge Photos")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Orphan Triangle Purge Button
+                        Button(role: .destructive) {
+                            showOrphanPurgeConfirmation = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "trash.slash")
+                                    .font(.system(size: 24))
+                                Text("Purge Orphaned Triangles")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // MARK: - User Position Tracking Toggles
+                        
+                        // Follow User in PiP Toggle
+                        Button {
+                            AppSettings.followUserInPiP.toggle()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: AppSettings.followUserInPiP ? "location.fill" : "location")
+                                    .font(.system(size: 24))
+                                Text("PiP Follow")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(AppSettings.followUserInPiP ? .green : .gray)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Follow User in Main Map Toggle
+                        Button {
+                            AppSettings.followUserInMainMap.toggle()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: AppSettings.followUserInMainMap ? "map.fill" : "map")
+                                    .font(.system(size: 24))
+                                Text("Map Follow")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(AppSettings.followUserInMainMap ? .green : .gray)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // MARK: - Feature Flags
+                        
+                        // Show Map Point Log Panel Toggle
+                        Button {
+                            FeatureFlags.showMapPointLogPanel.toggle()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: FeatureFlags.showMapPointLogPanel ? "list.bullet.rectangle.fill" : "list.bullet.rectangle")
+                                    .font(.system(size: 24))
+                                Text("Map Log Panel")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(FeatureFlags.showMapPointLogPanel ? .green : .gray)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Export Console Log Button
+                        Button {
+                            showingLogShare = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "doc.text")
+                                    .font(.system(size: 24))
+                                Text("Export Log")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .sheet(isPresented: $showingLogShare) {
+                            ShareSheet(items: [FileLogger.shared.exportFileURL])
+                        }
+                        
+                        // Clear Console Log Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            FileLogger.shared.clearLog()
+                            print("Internal Log Cleared")
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 24))
+                                Text("Clear Log")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Storage Audit Export Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            let currentLoc = PersistenceContext.shared.locationID
+                            if let url = UserDefaultsDiagnostics.exportStorageAudit(
+                                locationID: currentLoc,
+                                mapPointStore: mapPointStore
+                            ) {
+                                storageAuditURL = url
+                                showingStorageAuditShare = true
+                            }
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "doc.badge.gearshape")
+                                    .font(.system(size: 24))
+                                Text("Storage Audit")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .sheet(isPresented: $showingStorageAuditShare) {
+                            if let url = storageAuditURL {
+                                ShareSheet(items: [url])
+                            }
+                        }
+                        
+                        // Raw UserDefaults Export Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            if let url = UserDefaultsDiagnostics.exportRawUserDefaults() {
+                                storageAuditURL = url
+                                showingStorageAuditShare = true
+                            }
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "externaldrive")
+                                    .font(.system(size: 24))
+                                Text("Raw Export")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.purple)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Purge Survey Data Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            surveyPointStore.purgeAll()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 24))
+                                Text("Purge Surveys")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // MARK: - MapPoint Maintenance
+                        
+                        // Scan for Duplicates Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            mapPointStore.logDuplicateMapPoints()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: 24))
+                                Text("Scan Duplicates")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Merge Duplicates Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            let removed = mapPointStore.mergeDuplicateMapPoints(triangleStore: triangleStore)
+                            if removed > 0 {
+                                // Trigger UI refresh if needed
+                            }
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "arrow.triangle.merge")
+                                    .font(.system(size: 24))
+                                Text("Merge Duplicates")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Batch Clear Morgue History
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            let cleared = beaconLists.clearAllMorgueHistory()
+                            let purged = beaconLists.purgeEphemeralMorgueItems()
+                            print("🧹 Morgue cleanup: cleared history from \(cleared) items, purged \(purged) ephemeral items")
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "trash.slash")
+                                    .font(.system(size: 24))
+                                Text("Clear Morgue History")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // === ONE-TIME CLEANUP UTILITY ===
+                        // Uncomment to run, then comment out again after use
+                        
+                        // Preview Cleanup (Dry Run)
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            _ = UserDefaultsCleanup.preview()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "eye.trianglebadge.exclamationmark")
+                                    .font(.system(size: 24))
+                                Text("Preview Cleanup")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Execute Cleanup (DESTRUCTIVE)
+                        Button {
+                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                            let result = UserDefaultsCleanup.execute()
+                            print("🧹 Cleanup result: \(result.summary)")
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "trash.circle.fill")
+                                    .font(.system(size: 24))
+                                Text("Run Cleanup")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // MARK: - KBeacon Inspector
+                        
+                        // Beacon Report Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            runBeaconReport()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: isBeaconScanning ? "antenna.radiowaves.left.and.right.circle.fill" : "antenna.radiowaves.left.and.right")
+                                    .font(.system(size: 24))
+                                Text("Beacon Report")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(isBeaconScanning ? .green : .blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Beacon Settings Button
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            hudPanels.isBeaconSettingsOpen = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "antenna.radiowaves.left.and.right.circle")
+                                    .font(.system(size: 24))
+                                Text("Beacon Settings")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.purple)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Export MapPoints SVG
+                        Button {
+                            exportMapPointsSVG()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "map")
+                                    .font(.system(size: 24))
+                                Text("Export Map SVG")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // MARK: - Zone Corner Migration
+                        
+                        // Purge Triangle Patch Era Data (for Zone Corner migration)
+                        Button(role: .destructive) {
+                            showingPurgeTrianglePatchAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "arrow.triangle.2.circlepath.circle")
+                                    .font(.system(size: 24))
+                                Text("Purge Rigid Body Data")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // MARK: - Data Recovery
+                        
+                        // Diagnose Beacon Dots Button
+                        Button {
+                            diagnoseBeaconDots()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "magnifyingglass.circle")
+                                    .font(.system(size: 24))
+                                Text("Diagnose Dots")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Recover Beacon Dots Button
+                        Button {
+                            recoverBeaconDotsFromUserDefaults()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "arrow.counterclockwise.circle.fill")
+                                    .font(.system(size: 24))
+                                Text("Recover Dots")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Dump V2 Data Button
+                        Button {
+                            dumpV2Data()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "doc.text.magnifyingglass")
+                                    .font(.system(size: 24))
+                                Text("Dump V2 Data")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.cyan)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Force V2 Re-Migration Button
+                        Button {
+                            forceV2Remigration()
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 24))
+                                Text("Force V2 Re-Migration")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // === END ONE-TIME CLEANUP UTILITY ===
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 20)
+                }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { _ in mapTransform.isHUDInteracting = true }
+                        .onEnded { _ in mapTransform.isHUDInteracting = false }
+                )
+                .background(Color.black.opacity(0.7))
+            }
+            .frame(height: min(geometry.size.height * 0.5, 400))
+            .frame(maxWidth: .infinity)
+            .background(Color.black.opacity(0.9))
+            .cornerRadius(16, corners: [.topLeft, .topRight])
+            .shadow(color: .black.opacity(0.2), radius: 10, y: -5)
+            .frame(maxHeight: .infinity, alignment: .bottom)
+            .ignoresSafeArea(edges: .bottom)
+        }
+        .alert("Soft Reset Calibration?", isPresented: $showingSoftResetAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Reset", role: .destructive) {
+                performSoftReset()
+            }
+        } message: {
+            let location = PersistenceContext.shared.locationID
+            Text("This will clear all calibration data for '\(location)' location.\n\nTriangle mesh structure will be preserved.\nOther locations (museum, etc.) will NOT be affected.")
+        }
+        .alert("Purge All Photos?", isPresented: $showingPurgePhotosAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Purge Photos", role: .destructive) {
+                mapPointStore.purgeAllPhotos()
+            }
+        } message: {
+            let location = locationManager.currentLocationID
+            Text("This will delete all \(mapPointStore.points.count) photo assets for location '\(location)'. This cannot be undone.")
+        }
+        .alert("Purge AR Position History?", isPresented: $showingPurgeARHistoryAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Purge History", role: .destructive) {
+                mapPointStore.purgeARPositionHistory()
+            }
+        } message: {
+            let location = locationManager.currentLocationID ?? "unknown"
+            let totalRecords = mapPointStore.points.reduce(0) { $0 + $1.arPositionHistory.count }
+            Text("This will purge all \(totalRecords) AR position record(s) from \(mapPointStore.points.count) MapPoint(s) for location '\(location)'.\n\n2D map coordinates and triangle structure will be preserved.\nConsensus positions will be reset.")
+        }
+        .alert("Full Reset (Calibration + History)?", isPresented: $showingFullResetAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Full Reset", role: .destructive) {
+                // First do soft reset
+                performSoftReset()
+                // Then purge position history
+                mapPointStore.purgeARPositionHistory()
+                print("🔄 Full Reset Complete: Calibration data cleared + AR history purged")
+            }
+        } message: {
+            let location = locationManager.currentLocationID ?? "unknown"
+            Text("This will:\n1. Clear all calibration data (Soft Reset)\n2. Purge all AR position history\n\nFor location '\(location)'.\n\n2D map coordinates and triangle structure will be preserved.\nThis cannot be undone.")
+        }
+        .alert("Purge Orphaned Triangles?", isPresented: $showOrphanPurgeConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Purge", role: .destructive) {
+                let validIDs = Set(mapPointStore.points.map { $0.id })
+                let removed = triangleStore.purgeOrphanedTriangles(validMapPointIDs: validIDs)
+                orphanPurgeResultMessage = removed > 0 
+                    ? "Removed \(removed) orphaned triangle(s)" 
+                    : "No orphaned triangles found"
+                showOrphanPurgeResult = true
+            }
+        } message: {
+            Text("This will delete triangles that reference MapPoints which no longer exist. This cannot be undone.")
+        }
+        .alert("Purge Complete", isPresented: $showOrphanPurgeResult) {
+            Button("OK") { }
+        } message: {
+            Text(orphanPurgeResultMessage)
+        }
+        .alert("Purge All Canonical Positions?", isPresented: $showingPurgeCanonicalAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Purge All", role: .destructive) {
+                let cleared = mapPointStore.purgeAllCanonicalPositions()
+                canonicalPurgeResultMessage = cleared > 0
+                    ? "Cleared canonical data from \(cleared) MapPoint(s).\n\nGhost markers will now use barycentric interpolation until new calibration sessions rebuild the canonical positions."
+                    : "No canonical position data found to purge."
+                showCanonicalPurgeResult = true
+            }
+        } message: {
+            let withCanonical = mapPointStore.points.filter { $0.canonicalPosition != nil }.count
+            Text("This will clear baked canonical positions from \(withCanonical) MapPoint(s) for location '\(PersistenceContext.shared.locationID)'.\n\nGhost marker predictions will fall back to barycentric interpolation until new data is collected.\n\nThis cannot be undone.")
+        }
+        .alert("Canonical Purge Complete", isPresented: $showCanonicalPurgeResult) {
+            Button("OK") { }
+        } message: {
+            Text(canonicalPurgeResultMessage)
+        }
+        .alert("Purge Triangle Patch Era Data?", isPresented: $showingPurgeTrianglePatchAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Purge All", role: .destructive) {
+                let withCanonical = mapPointStore.points.filter { $0.canonicalPosition != nil }.count
+                let totalHistory = mapPointStore.points.reduce(0) { $0 + $1.arPositionHistory.count }
+                mapPointStore.purgeTrianglePatchPositionData()
+                trianglePatchPurgeResultMessage = """
+                    Purged Triangle Patch era data:
+                    • \(withCanonical) canonical positions cleared
+                    • \(totalHistory) history records removed
+                    
+                    Zone Corner bilinear calibration is now ready.
+                    """
+                showTrianglePatchPurgeResult = true
+            }
+        } message: {
+            let withCanonical = mapPointStore.points.filter { $0.canonicalPosition != nil }.count
+            let totalHistory = mapPointStore.points.reduce(0) { $0 + $1.arPositionHistory.count }
+            Text("""
+                This will permanently delete ALL position data from the Triangle Patch / Rigid Body era:
+                
+                • \(withCanonical) canonical position(s)
+                • \(totalHistory) AR history record(s)
+                
+                Required before Zone Corner bilinear calibration.
+                
+                2D coordinates and triangle topology will be preserved.
+                This cannot be undone.
+                """)
+        }
+        .alert("Purge Complete", isPresented: $showTrianglePatchPurgeResult) {
+            Button("OK") { }
+        } message: {
+            Text(trianglePatchPurgeResultMessage)
+        }
+        .sheet(isPresented: $showMapSVGSheet) {
+            if let url = mapSVGURL {
+                ShareSheet(items: [url])
+            }
+        }
+    }
+    
+    private func showPurgeDiagnostic() {
+        let currentLocation = PersistenceContext.shared.locationID
+        
+        print("================================================================================")
+        print("👁️ PURGE DIAGNOSTIC - LOCATION ISOLATION CHECK")
+        print("================================================================================")
+        print("📍 Current Location: '\(currentLocation)'")
+        print("")
+        print("🗑️ WILL AFFECT:")
+        print("   ✓ Triangles: /Documents/locations/\(currentLocation)/dots.json")
+        print("   ✓ ARWorldMaps: /Documents/locations/\(currentLocation)/ARSpatial/")
+        print("   ✓ Triangle count: \(triangleStore.triangles.count)")
+        
+        let calibratedCount = triangleStore.triangles.filter { $0.isCalibrated }.count
+        let totalMarkers = triangleStore.triangles.reduce(0) { $0 + $1.arMarkerIDs.count }
+        
+        print("   ✓ Calibrated triangles: \(calibratedCount)")
+        print("   ✓ Total AR markers: \(totalMarkers)")
+        print("")
+        print("🛡️ WILL NOT AFFECT:")
+        
+        // List other locations
+        let locationsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("locations")
+        
+        if let locationDirs = try? FileManager.default.contentsOfDirectory(atPath: locationsURL.path) {
+            for dir in locationDirs where dir != currentLocation {
+                print("   ✓ Location '\(dir)' - UNTOUCHED")
+            }
+        }
+        
+        print("")
+        print("🎯 ACTION:")
+        print("   Soft reset will clear calibration data but keep triangle mesh structure")
+        print("   All triangles will be marked uncalibrated (isCalibrated = false)")
+        print("   AR marker associations will be cleared (arMarkerIDs = [])")
+        print("   Triangle vertices and mesh connectivity preserved")
+        print("================================================================================")
+    }
+    
+    private func runBeaconReport() {
+        let locationID = locationManager.currentLocationID
+        
+        print("")
+        print("================================================================================")
+        print("📡 KBEACON REPORT — Location: '\(locationID)'")
+        print("================================================================================")
+        
+        if isBeaconScanning {
+            // Stop scanning and run full report
+            kbeaconManager.stopScanning()
+            isBeaconScanning = false
+            
+            print("🛑 Scanning stopped")
+            print("")
+            
+            let beacons = kbeaconManager.discoveredBeacons
+            
+            if beacons.isEmpty {
+                print("📋 No KBeacons found")
+                print("================================================================================")
+                return
+            }
+            
+            print("📋 DISCOVERED: \(beacons.count) beacon(s)")
+            print("--------------------------------------------------------------------------------")
+            
+            // Check for password
+            guard let password = BeaconPasswordStore.shared.getPassword(for: locationID) else {
+                print("")
+                print("⚠️  No password stored for location '\(locationID)'")
+                print("   Go to Location Settings (gear icon) to set the beacon password.")
+                print("")
+                print("📋 SCAN-ONLY RESULTS (no connection):")
+                for beacon in beacons {
+                    let name = beacon.name ?? "Unknown"
+                    let rssi = beacon.rssi
+                    let rssiStr = (rssi != 0 && rssi > -128 && rssi < 0) ? "\(rssi) dBm" : "N/A"
+                    print("   📡 \(name) — RSSI: \(rssiStr)")
+                }
+                print("================================================================================")
+                return
+            }
+            
+            print("🔐 Password found, connecting to each beacon...")
+            print("")
+            print("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+            print("┃ BEACON CONFIGURATIONS                                                       ┃")
+            print("┃ (SDK verbose logging below is internal noise — ignore it)                   ┃")
+            print("┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+            
+            // Connect to each beacon sequentially
+            connectAndReportSequentially(beacons: Array(beacons), password: password, index: 0)
+            
+        } else {
+            // Start scanning
+            print("🔍 Starting KBeacon scan...")
+            print("   Tap 'Beacon Report' again to stop and read configurations.")
+            print("")
+            
+            kbeaconManager.startScanning()
+            isBeaconScanning = true
+        }
+    }
+    
+    private func connectAndReportSequentially(beacons: [KBeacon], password: String, index: Int) {
+        // Base case: all beacons processed
+        guard index < beacons.count else {
+            print("")
+            print("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+            print("┃ ✅ BEACON REPORT COMPLETE — \(beacons.count) beacon(s)                              ┃")
+            print("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+            print("")
+            return
+        }
+        
+        let beacon = beacons[index]
+        let name = beacon.name ?? "Unknown"
+        
+        kbeaconManager.connect(to: beacon, password: password) { [self] success, message in
+            if success {
+                // Read configuration
+                if let config = kbeaconManager.readConfiguration(from: beacon) {
+                    let mac = beacon.mac
+                    let macDisplay = mac ?? "Unknown"
+                    let batteryStr = config.batteryPercent > 0 ? "\(config.batteryPercent)%" : "Unknown"
+                    let model = config.model
+                    let firmware = config.firmwareVersion
+                    let modelDisplay = model ?? "Unknown"
+                    let firmwareDisplay = firmware ?? "Unknown"
+                    
+                    // Update BeaconDotStore with fresh config
+                    beaconDotStore.updateFromDeviceConfig(
+                        beaconName: name,
+                        txPower: config.txPower,
+                        intervalMs: config.intervalMs,
+                        mac: mac,
+                        model: model,
+                        firmware: firmware
+                    )
+                    
+                    // Single clean output line per beacon
+                    print("")
+                    print("┃ 📡 [\(index + 1)/\(beacons.count)] \(name)")
+                    print("┃    MAC: \(macDisplay)")
+                    print("┃    TX: \(config.txPower) dBm | Interval: \(Int(config.intervalMs)) ms | Battery: \(batteryStr)")
+                    print("┃    Model: \(modelDisplay) | Firmware: \(firmwareDisplay)")
+                    print("┃    ✅ Stored to BeaconList")
+                } else {
+                    print("")
+                    print("┃ ⚠️ [\(index + 1)/\(beacons.count)] \(name) — Connected but failed to read config")
+                }
+                
+                kbeaconManager.disconnect(from: beacon)
+                
+            } else {
+                print("")
+                print("┃ ❌ [\(index + 1)/\(beacons.count)] \(name) — \(message)")
+            }
+            
+            // Process next beacon after a brief delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.connectAndReportSequentially(beacons: beacons, password: password, index: index + 1)
+            }
+        }
+    }
+    
+    private func performSoftReset() {
+        let currentLocation = PersistenceContext.shared.locationID
+        
+        print("================================================================================")
+        print("🗑️ SOFT RESET - CLEARING CALIBRATION DATA")
+        print("================================================================================")
+        print("📍 Target Location: '\(currentLocation)'")
+        print("")
+        
+        let beforeCount = triangleStore.triangles.filter { $0.isCalibrated }.count
+        let beforeMarkers = triangleStore.triangles.reduce(0) { $0 + $1.arMarkerIDs.count }
+        
+        print("📊 Before reset:")
+        print("   Calibrated triangles: \(beforeCount)")
+        print("   Total AR markers: \(beforeMarkers)")
+        print("")
+        
+        // Clear calibration data for all triangles
+        for i in 0..<triangleStore.triangles.count {
+            triangleStore.triangles[i].isCalibrated = false
+            triangleStore.triangles[i].arMarkerIDs = []
+            triangleStore.triangles[i].calibrationQuality = 0.0
+            triangleStore.triangles[i].legMeasurements = []
+            triangleStore.triangles[i].worldMapFilename = nil
+            triangleStore.triangles[i].worldMapFilesByStrategy = [:]
+            triangleStore.triangles[i].transform = nil
+            triangleStore.triangles[i].lastCalibratedAt = nil
+            triangleStore.triangles[i].userPositionWhenCalibrated = nil
+        }
+        
+        // Save changes
+        triangleStore.save()
+        
+        print("✅ Cleared calibration data:")
+        print("   - Set isCalibrated = false for all triangles")
+        print("   - Cleared arMarkerIDs arrays")
+        print("   - Reset calibrationQuality to 0.0")
+        print("   - Cleared legMeasurements")
+        print("   - Cleared ARWorldMap filenames")
+        print("   - Cleared transform data")
+        print("   - Cleared lastCalibratedAt")
+        print("   - Cleared userPositionWhenCalibrated")
+        print("")
+        print("✅ Preserved:")
+        print("   - Triangle vertices (\(triangleStore.triangles.reduce(0) { $0 + $1.vertexIDs.count }) total)")
+        print("   - Mesh connectivity")
+        print("   - Triangle structure (\(triangleStore.triangles.count) triangles)")
+        print("")
+        
+        // Delete ARWorldMap files for this location
+        let arSpatialURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("locations")
+            .appendingPathComponent(currentLocation)
+            .appendingPathComponent("ARSpatial")
+        
+        if FileManager.default.fileExists(atPath: arSpatialURL.path) {
+            do {
+                try FileManager.default.removeItem(at: arSpatialURL)
+                print("🗑️ Deleted ARWorldMap files at: \(arSpatialURL.path)")
+            } catch {
+                print("⚠️ Failed to delete ARWorldMap files: \(error)")
+            }
+        }
+        
+        print("")
+        print("🛡️ Other locations UNTOUCHED:")
+        
+        // Verify other locations still exist
+        let locationsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("locations")
+        
+        if let locationDirs = try? FileManager.default.contentsOfDirectory(atPath: locationsURL.path) {
+            for dir in locationDirs where dir != currentLocation {
+                let dotsPath = locationsURL.appendingPathComponent(dir).appendingPathComponent("dots.json").path
+                if FileManager.default.fileExists(atPath: dotsPath) {
+                    print("   ✓ Location '\(dir)' - VERIFIED INTACT")
+                }
+            }
+        }
+        
+        print("================================================================================")
+        print("✅ Soft reset complete for location '\(currentLocation)'")
+        print("================================================================================")
+    }
+    
+    private func exportMapPointsSVG() {
+        let locationID = locationManager.currentLocationID
+        
+        // Load map image
+        let mapImage: UIImage?
+        if let image = LocationImportUtils.loadDisplayImage(locationID: locationID) {
+            mapImage = image
+        } else {
+            // Fallback to bundled assets
+            let assetName: String
+            switch locationID {
+            case "home":
+                assetName = "myFirstFloor_v03-metric"
+            case "museum":
+                assetName = "MuseumMap-8k"
+            default:
+                assetName = ""
+            }
+            mapImage = assetName.isEmpty ? nil : UIImage(named: assetName)
+        }
+        
+        guard let image = mapImage else {
+            print("⚠️ [SVG_EXPORT] No map image")
+            return
+        }
+        
+        let mapWidth = Int(image.size.width)
+        let mapHeight = Int(image.size.height)
+        let locationName = locationID ?? "unknown"
+        
+        let pointData: [(id: UUID, position: CGPoint, isLocked: Bool, hasCanonical: Bool)] = mapPointStore.points.map { point in
+            (id: point.id, position: point.mapPoint, isLocked: point.isLocked, hasCanonical: point.canonicalPosition != nil)
+        }
+        
+        guard !pointData.isEmpty else {
+            print("⚠️ [SVG_EXPORT] No MapPoints")
+            return
+        }
+        
+        let svgContent = SVGExporter.generateMapPointsSVG(
+            mapPoints: pointData,
+            mapWidth: mapWidth,
+            mapHeight: mapHeight,
+            locationName: locationName
+        )
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd-HHmm"
+        let timestamp = dateFormatter.string(from: Date())
+        let filename = "\(locationName)-mappoints-\(timestamp).svg"
+        
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try svgContent.write(to: tempURL, atomically: true, encoding: .utf8)
+            print("✅ [SVG_EXPORT] Exported \(pointData.count) MapPoints to \(filename)")
+            mapSVGURL = tempURL
+            showMapSVGSheet = true
+        } catch {
+            print("❌ [SVG_EXPORT] Failed: \(error)")
+        }
+    }
+    
+    // MARK: - Beacon Dot Recovery
+    
+    private func diagnoseBeaconDots() {
+        let locationID = PersistenceContext.shared.locationID
+        let ctx = PersistenceContext.shared
+        let ud = UserDefaults.standard
+        
+        print("\n" + String(repeating: "=", count: 70))
+        print("🔍 COMPREHENSIVE BEACON DOT DIAGNOSTIC")
+        print(String(repeating: "=", count: 70))
+        print("Location: \(locationID)")
+        print("Time: \(ISO8601DateFormatter().string(from: Date()))")
+        
+        // MARK: - 1. Check dots.json file
+        print("\n📄 DOTS.JSON FILE:")
+        let dotsFile = ctx.locationDir.appendingPathComponent("dots.json")
+        print("   Path: \(dotsFile.path)")
+        
+        var fileDotsCount = 0
+        var fileBeaconIDs: Set<String> = []
+        
+        if FileManager.default.fileExists(atPath: dotsFile.path) {
+            if let data = try? Data(contentsOf: dotsFile) {
+                print("   ✓ Exists, size: \(data.count) bytes")
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                    fileDotsCount = json.count
+                    print("   ✓ Contains \(json.count) dots:")
+                    for dot in json {
+                        if let beaconID = dot["beaconID"] as? String {
+                            fileBeaconIDs.insert(beaconID)
+                            let x = dot["x"] as? Double ?? 0
+                            let y = dot["y"] as? Double ?? 0
+                            let elev = dot["elevation"] as? Double ?? 0
+                            let tx = dot["txPower"] as? Int
+                            print("      • \(beaconID): (\(String(format: "%.0f", x)), \(String(format: "%.0f", y))) elev=\(String(format: "%.2f", elev))m tx=\(tx.map { "\($0)dBm" } ?? "nil")")
+                        }
+                    }
+                } else {
+                    print("   ⚠️ File exists but failed to parse as JSON")
+                }
+            } else {
+                print("   ⚠️ File exists but failed to read")
+            }
+        } else {
+            print("   ❌ FILE DOES NOT EXIST")
+        }
+        
+        // MARK: - 2. Check UserDefaults BeaconDots_v1 (fallback)
+        print("\n📦 USERDEFAULTS BeaconDots_v1 (fallback):")
+        let dotsKey = "locations.\(locationID).BeaconDots_v1"
+        
+        var udDotsCount = 0
+        var udBeaconIDs: Set<String> = []
+        
+        if let data = ud.data(forKey: dotsKey) {
+            print("   ✓ Exists, size: \(data.count) bytes")
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                udDotsCount = json.count
+                print("   ✓ Contains \(json.count) dots:")
+                for dot in json {
+                    if let beaconID = dot["beaconID"] as? String {
+                        udBeaconIDs.insert(beaconID)
+                        let x = dot["x"] as? Double ?? 0
+                        let y = dot["y"] as? Double ?? 0
+                        let elev = dot["elevation"] as? Double ?? 0
+                        print("      • \(beaconID): (\(String(format: "%.0f", x)), \(String(format: "%.0f", y))) elev=\(String(format: "%.2f", elev))m")
+                    }
+                }
+            }
+        } else {
+            print("   ❌ NO DATA at key: \(dotsKey)")
+        }
+        
+        // MARK: - 3. Check Locks
+        print("\n🔒 USERDEFAULTS BeaconLocks_v1:")
+        let locksKey = "locations.\(locationID).BeaconLocks_v1"
+        if let data = ud.data(forKey: locksKey) {
+            print("   ✓ Exists, size: \(data.count) bytes")
+            if let wrapper = try? JSONDecoder().decode([String: [String: Bool]].self, from: data),
+               let locks = wrapper["locks"] {
+                let lockedCount = locks.filter { $0.value }.count
+                print("   ✓ \(locks.count) entries, \(lockedCount) locked:")
+                for (beaconID, isLocked) in locks.sorted(by: { $0.key < $1.key }) {
+                    print("      • \(beaconID): \(isLocked ? "🔒 LOCKED" : "🔓 unlocked")")
+                }
+            } else if let locks = try? JSONDecoder().decode([String: Bool].self, from: data) {
+                // Alternative format without wrapper
+                let lockedCount = locks.filter { $0.value }.count
+                print("   ✓ \(locks.count) entries, \(lockedCount) locked")
+            } else {
+                print("   ⚠️ Failed to decode locks")
+            }
+        } else {
+            print("   ❌ NO DATA at key: \(locksKey)")
+        }
+        
+        // MARK: - 4. Check Elevations
+        print("\n📏 USERDEFAULTS BeaconElevations_v1:")
+        let elevKey = "locations.\(locationID).BeaconElevations_v1"
+        if let data = ud.data(forKey: elevKey) {
+            print("   ✓ Exists, size: \(data.count) bytes")
+            if let elevations = try? JSONDecoder().decode([String: Double].self, from: data) {
+                print("   ✓ \(elevations.count) entries:")
+                for (beaconID, elev) in elevations.sorted(by: { $0.key < $1.key }) {
+                    print("      • \(beaconID): \(String(format: "%.2f", elev))m")
+                }
+            } else {
+                print("   ⚠️ Failed to decode elevations")
+            }
+        } else {
+            print("   ❌ NO DATA at key: \(elevKey)")
+        }
+        
+        // MARK: - 5. Check TxPower
+        print("\n📡 USERDEFAULTS BeaconTxPower_v1:")
+        let txKey = "locations.\(locationID).BeaconTxPower_v1"
+        if let data = ud.data(forKey: txKey) {
+            print("   ✓ Exists, size: \(data.count) bytes")
+            if let txPower = try? JSONDecoder().decode([String: Int].self, from: data) {
+                print("   ✓ \(txPower.count) entries:")
+                for (beaconID, tx) in txPower.sorted(by: { $0.key < $1.key }) {
+                    print("      • \(beaconID): \(tx) dBm")
+                }
+            } else {
+                print("   ⚠️ Failed to decode txPower")
+            }
+        } else {
+            print("   ❌ NO DATA at key: \(txKey)")
+        }
+        
+        // MARK: - 6. Check Advertising Intervals
+        print("\n⏱️ USERDEFAULTS advertisingIntervals:")
+        let intervalKey = "locations.\(locationID).advertisingIntervals"
+        if let data = ud.data(forKey: intervalKey) {
+            print("   ✓ Exists, size: \(data.count) bytes")
+            if let intervals = try? JSONDecoder().decode([String: Double].self, from: data) {
+                print("   ✓ \(intervals.count) entries:")
+                for (beaconID, interval) in intervals.sorted(by: { $0.key < $1.key }) {
+                    print("      • \(beaconID): \(Int(interval))ms")
+                }
+            }
+        } else {
+            print("   ❌ NO DATA at key: \(intervalKey)")
+        }
+        
+        // MARK: - 7. Comparison
+        print("\n" + String(repeating: "-", count: 70))
+        print("📊 COMPARISON:")
+        print("   dots.json:    \(fileDotsCount) dots")
+        print("   UserDefaults: \(udDotsCount) dots")
+        
+        let missingInFile = udBeaconIDs.subtracting(fileBeaconIDs)
+        let missingInUD = fileBeaconIDs.subtracting(udBeaconIDs)
+        
+        if !missingInFile.isEmpty {
+            print("\n   ⚠️ In UserDefaults but NOT in dots.json:")
+            for id in missingInFile.sorted() {
+                print("      • \(id)")
+            }
+        }
+        
+        if !missingInUD.isEmpty {
+            print("\n   ⚠️ In dots.json but NOT in UserDefaults:")
+            for id in missingInUD.sorted() {
+                print("      • \(id)")
+            }
+        }
+        
+        if missingInFile.isEmpty && missingInUD.isEmpty && fileDotsCount == udDotsCount {
+            print("\n   ✅ File and UserDefaults are in sync")
+        }
+        
+        print("\n" + String(repeating: "=", count: 70) + "\n")
+    }
+    
+    private func recoverBeaconDotsFromUserDefaults() {
+        let locationID = PersistenceContext.shared.locationID
+        let ctx = PersistenceContext.shared
+        let ud = UserDefaults.standard
+        
+        print("\n" + String(repeating: "=", count: 70))
+        print("🔧 FULL BEACON DOT RECOVERY FROM USERDEFAULTS")
+        print(String(repeating: "=", count: 70))
+        print("Location: \(locationID)")
+        
+        var recoveredItems: [String] = []
+        var failedItems: [String] = []
+        
+        // MARK: - 1. Recover dots.json from BeaconDots_v1
+        let dotsKey = "locations.\(locationID).BeaconDots_v1"
+        if let data = ud.data(forKey: dotsKey) {
+            let dotsFile = ctx.locationDir.appendingPathComponent("dots.json")
+            do {
+                try FileManager.default.createDirectory(at: ctx.locationDir, withIntermediateDirectories: true)
+                try data.write(to: dotsFile)
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                    recoveredItems.append("dots.json (\(json.count) dots)")
+                    print("✓ Recovered dots.json with \(json.count) dots")
+                } else {
+                    recoveredItems.append("dots.json (raw data)")
+                    print("✓ Recovered dots.json (could not count)")
+                }
+            } catch {
+                failedItems.append("dots.json: \(error.localizedDescription)")
+                print("❌ Failed to write dots.json: \(error)")
+            }
+        } else {
+            failedItems.append("dots.json: No source data in UserDefaults")
+            print("⚠️ No BeaconDots_v1 data to recover")
+        }
+        
+        // MARK: - 2. Verify Locks exist (already in UserDefaults, just report)
+        let locksKey = "locations.\(locationID).BeaconLocks_v1"
+        if let data = ud.data(forKey: locksKey) {
+            if let wrapper = try? JSONDecoder().decode([String: [String: Bool]].self, from: data),
+               let locks = wrapper["locks"] {
+                let lockedCount = locks.filter { $0.value }.count
+                print("✓ Locks key exists: \(locks.count) entries, \(lockedCount) locked")
+                recoveredItems.append("locks (\(lockedCount) locked)")
+            } else {
+                print("✓ Locks key exists but format unclear")
+            }
+        } else {
+            print("⚠️ No locks data found")
+        }
+        
+        // MARK: - 3. Verify Elevations exist
+        let elevKey = "locations.\(locationID).BeaconElevations_v1"
+        if let data = ud.data(forKey: elevKey) {
+            if let elevations = try? JSONDecoder().decode([String: Double].self, from: data) {
+                print("✓ Elevations key exists: \(elevations.count) entries")
+                recoveredItems.append("elevations (\(elevations.count))")
+            }
+        } else {
+            print("⚠️ No elevations data found")
+        }
+        
+        // MARK: - 4. Verify TxPower exist
+        let txKey = "locations.\(locationID).BeaconTxPower_v1"
+        if let data = ud.data(forKey: txKey) {
+            if let txPower = try? JSONDecoder().decode([String: Int].self, from: data) {
+                print("✓ TxPower key exists: \(txPower.count) entries")
+                recoveredItems.append("txPower (\(txPower.count))")
+            }
+        } else {
+            print("⚠️ No txPower data found")
+        }
+        
+        // MARK: - 5. Verify Intervals exist
+        let intervalKey = "locations.\(locationID).advertisingIntervals"
+        if let data = ud.data(forKey: intervalKey) {
+            if let intervals = try? JSONDecoder().decode([String: Double].self, from: data) {
+                print("✓ Intervals key exists: \(intervals.count) entries")
+                recoveredItems.append("intervals (\(intervals.count))")
+            }
+        } else {
+            print("⚠️ No intervals data found")
+        }
+        
+        // MARK: - 6. Trigger full reload
+        print("\n📢 Posting locationDidChange to trigger full reload...")
+        NotificationCenter.default.post(name: .locationDidChange, object: nil)
+        
+        // MARK: - Summary
+        print("\n" + String(repeating: "-", count: 70))
+        print("📊 RECOVERY SUMMARY:")
+        if !recoveredItems.isEmpty {
+            print("   ✅ Recovered/Verified:")
+            for item in recoveredItems {
+                print("      • \(item)")
+            }
+        }
+        if !failedItems.isEmpty {
+            print("   ❌ Failed:")
+            for item in failedItems {
+                print("      • \(item)")
+            }
+        }
+        print("\n⚠️  NOTE: Elevations, TxPower, Locks, Intervals are stored in")
+        print("   separate UserDefaults keys. If dots are missing those values,")
+        print("   the source data may be incomplete or was never saved.")
+        print("\n   The dots.json file only stores positions + elevation + txPower")
+        print("   that were present AT THE TIME the dot was last saved.")
+        print(String(repeating: "=", count: 70) + "\n")
+    }
+    
+    private func dumpV2Data() {
+        let locationID = PersistenceContext.shared.locationID
+        let ud = UserDefaults.standard
+        let v2Key = "locations.\(locationID).BeaconDots_v2"
+        
+        print("\n" + String(repeating: "=", count: 70))
+        print("📦 V2 DATA DUMP")
+        print(String(repeating: "=", count: 70))
+        print("Location: \(locationID)")
+        print("Key: \(v2Key)")
+        
+        guard let data = ud.data(forKey: v2Key) else {
+            print("❌ NO V2 DATA FOUND")
+            return
+        }
+        
+        print("✓ Size: \(data.count) bytes")
+        
+        // Decode and print each dot's full data
+        struct V2Dot: Codable {
+            let beaconID: String
+            var x: Double
+            var y: Double
+            var elevation: Double
+            var txPower: Int?
+            var advertisingInterval: Double?
+            var isLocked: Bool
+            var macAddress: String?
+            var model: String?
+            var firmware: String?
+            var lastConfigReadSession: Int?
+        }
+        
+        do {
+            let v2Dots = try JSONDecoder().decode([V2Dot].self, from: data)
+            print("✓ Contains \(v2Dots.count) dots:\n")
+            
+            for dot in v2Dots.sorted(by: { $0.beaconID < $1.beaconID }) {
+                print("   \(dot.beaconID):")
+                print("      Position: (\(String(format: "%.0f", dot.x)), \(String(format: "%.0f", dot.y)))")
+                print("      Elevation: \(String(format: "%.2f", dot.elevation))m")
+                print("      TxPower: \(dot.txPower.map { "\($0) dBm" } ?? "nil")")
+                print("      Interval: \(dot.advertisingInterval.map { "\(Int($0))ms" } ?? "nil")")
+                print("      Locked: \(dot.isLocked)")
+                if let mac = dot.macAddress { print("      MAC: \(mac)") }
+                if let model = dot.model { print("      Model: \(model)") }
+                if let firmware = dot.firmware { print("      Firmware: \(firmware)") }
+                if let session = dot.lastConfigReadSession { print("      LastRead: Session #\(session)") }
+                print("")
+            }
+        } catch {
+            print("❌ Failed to decode: \(error)")
+        }
+        
+        print(String(repeating: "=", count: 70) + "\n")
+    }
+    
+    private func forceV2Remigration() {
+        let locationID = PersistenceContext.shared.locationID
+        let ctx = PersistenceContext.shared
+        let ud = UserDefaults.standard
+        
+        print("\n" + String(repeating: "=", count: 70))
+        print("🔄 RECOVERING LEGACY DATA TO V2 FOR: \(locationID)")
+        print(String(repeating: "=", count: 70))
+        
+        // 1. Try to read from dots.json file first
+        let dotsFile = ctx.locationDir.appendingPathComponent("dots.json")
+        var recoveredDots: [(beaconID: String, x: Double, y: Double, elevation: Double, txPower: Int?)] = []
+        
+        if let data = try? Data(contentsOf: dotsFile),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            print("📄 Found dots.json with \(json.count) dots")
+            for dot in json {
+                if let beaconID = dot["beaconID"] as? String,
+                   let x = dot["x"] as? Double,
+                   let y = dot["y"] as? Double {
+                    let elevation = dot["elevation"] as? Double ?? 0.75
+                    let txPower = dot["txPower"] as? Int
+                    recoveredDots.append((beaconID, x, y, elevation, txPower))
+                    print("   ✓ \(beaconID): (\(Int(x)), \(Int(y))) elev=\(String(format: "%.2f", elevation))m")
+                }
+            }
+        } else {
+            print("📄 No dots.json found, trying UserDefaults fallback...")
+            
+            // 2. Fall back to BeaconDots_v1 in UserDefaults
+            let fallbackKey = "locations.\(locationID).BeaconDots_v1"
+            if let data = ud.data(forKey: fallbackKey),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                print("📦 Found BeaconDots_v1 with \(json.count) dots")
+                for dot in json {
+                    if let beaconID = dot["beaconID"] as? String,
+                       let x = dot["x"] as? Double,
+                       let y = dot["y"] as? Double {
+                        let elevation = dot["elevation"] as? Double ?? 0.75
+                        let txPower = dot["txPower"] as? Int
+                        recoveredDots.append((beaconID, x, y, elevation, txPower))
+                        print("   ✓ \(beaconID): (\(Int(x)), \(Int(y))) elev=\(String(format: "%.2f", elevation))m")
+                    }
+                }
+            }
+        }
+        
+        guard !recoveredDots.isEmpty else {
+            print("❌ NO LEGACY DATA FOUND TO RECOVER")
+            print(String(repeating: "=", count: 70) + "\n")
+            return
+        }
+        
+        // 3. Also try to recover locks from BeaconLocks_v1
+        var locksMap: [String: Bool] = [:]
+        let locksKey = "locations.\(locationID).BeaconLocks_v1"
+        if let data = ud.data(forKey: locksKey) {
+            // Try wrapped format first
+            if let wrapper = try? JSONDecoder().decode([String: [String: Bool]].self, from: data),
+               let locks = wrapper["locks"] {
+                locksMap = locks
+                print("🔒 Recovered \(locks.count) lock entries")
+            } else if let locks = try? JSONDecoder().decode([String: Bool].self, from: data) {
+                locksMap = locks
+                print("🔒 Recovered \(locks.count) lock entries")
+            }
+        }
+        
+        // 4. Also try to recover elevations from BeaconElevations_v1 (may have newer values)
+        var elevationsMap: [String: Double] = [:]
+        let elevKey = "locations.\(locationID).BeaconElevations_v1"
+        if let data = ud.data(forKey: elevKey),
+           let elevations = try? JSONDecoder().decode([String: Double].self, from: data) {
+            elevationsMap = elevations
+            print("📏 Recovered \(elevations.count) elevation entries from separate key")
+        }
+        
+        // 5. Build V2 structure
+        struct V2Dot: Codable {
+            let beaconID: String
+            var x: Double
+            var y: Double
+            var elevation: Double
+            var txPower: Int?
+            var advertisingInterval: Double?
+            var isLocked: Bool
+            var macAddress: String?
+            var model: String?
+            var firmware: String?
+            var lastConfigReadSession: Int?
+        }
+        
+        var v2Dots: [V2Dot] = []
+        for dot in recoveredDots {
+            // Use elevation from separate key if available, otherwise from dots.json
+            let finalElevation = elevationsMap[dot.beaconID] ?? dot.elevation
+            let isLocked = locksMap[dot.beaconID] ?? false
+            
+            let v2 = V2Dot(
+                beaconID: dot.beaconID,
+                x: dot.x,
+                y: dot.y,
+                elevation: finalElevation,
+                txPower: dot.txPower,
+                advertisingInterval: nil,
+                isLocked: isLocked,
+                macAddress: nil,
+                model: nil,
+                firmware: nil,
+                lastConfigReadSession: nil
+            )
+            v2Dots.append(v2)
+        }
+        
+        // 6. Write to V2 key
+        let v2Key = "locations.\(locationID).BeaconDots_v2"
+        do {
+            let data = try JSONEncoder().encode(v2Dots)
+            ud.set(data, forKey: v2Key)
+            print("\n💾 SAVED \(v2Dots.count) DOTS TO V2")
+            print("   Key: \(v2Key)")
+            print("   Size: \(data.count) bytes")
+        } catch {
+            print("❌ Failed to encode V2: \(error)")
+            return
+        }
+        
+        // 7. Trigger reload
+        print("\n📢 Posting locationDidChange to reload...")
+        NotificationCenter.default.post(name: .locationDidChange, object: nil)
+        
+        print(String(repeating: "=", count: 70) + "\n")
+    }
+}
+
+// MARK: - UserDefaults Diagnostic Button
+
+private struct UserDefaultsDiagnosticButton: View {
+    @EnvironmentObject private var locationManager: LocationManager
+    
+    var body: some View {
+        Button {
+            UserDefaultsDiagnostics.printInventory()
+            _ = UserDefaultsDiagnostics.identifyHeavyData()
+        } label: {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.purple.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("UserDefaults Diagnostic")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - MapPoints Inspection Button
+
+private struct MapPointsInspectionButton: View {
+    @EnvironmentObject private var locationManager: LocationManager
+    
+    var body: some View {
+        Button {
+            let currentLoc = PersistenceContext.shared.locationID
+            UserDefaultsDiagnostics.inspectMapPointStructure(locationID: currentLoc)
+        } label: {
+            Text("🔬")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.orange.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("Inspect MapPoints")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - Photo Migration Plan Button
+
+private struct PhotoMigrationPlanButton: View {
+    var body: some View {
+        Button {
+            UserDefaultsDiagnostics.generatePhotoMigrationPlan()
+        } label: {
+            Text("📋")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.blue.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("Photo Migration Plan")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - MapPoint Structure Button
+
+private struct MapPointStructureButton: View {
+    @EnvironmentObject private var locationManager: LocationManager
+    
+    var body: some View {
+        Button {
+            let currentLoc = PersistenceContext.shared.locationID
+            UserDefaultsDiagnostics.inspectMapPointStructure(locationID: currentLoc)
+        } label: {
+            Text("🔍")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.green.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("MapPoint Structure")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - Photo Manager Button
+
+private struct PhotoManagerButton: View {
+    var body: some View {
+        Button {
+            let currentLoc = PersistenceContext.shared.locationID
+            UserDefaultsDiagnostics.launchPhotoManager(locationID: currentLoc)
+        } label: {
+            Text("📸")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.purple.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("Manage Photos")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - Purge Photos Button
+
+// MARK: - Debug Button Component (Future-Proof)
+private struct DebugButton: View {
+    var icon: String
+    var color: Color
+    var action: () -> Void
+    var accessibility: String
+    
+    var body: some View {
+        Button(action: action) {
+            Text(icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(color.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel(accessibility)
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - Triangle Inspection Button
+private struct TriangleInspectionButton: View {
+    @EnvironmentObject private var locationManager: LocationManager
+    
+    var body: some View {
+        DebugButton(
+            icon: "🔺",
+            color: .purple,
+            action: {
+                let currentLoc = PersistenceContext.shared.locationID
+                UserDefaultsDiagnostics.inspectTriangles(locationID: currentLoc)
+                // TODO: Pipe results into user-visible HUD or log overlay for faster dev loop
+            },
+            accessibility: "Inspect Triangle Data"
+        )
+    }
+}
+
+// MARK: - Triangle Validation Button
+private struct TriangleValidationButton: View {
+    @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var mapPointStore: MapPointStore
+    
+    var body: some View {
+        DebugButton(
+            icon: "✓🔺",
+            color: .purple,
+            action: {
+                // Fail-safe: Check if MapPoints are loaded
+                guard !mapPointStore.points.isEmpty else {
+                    print("⚠️ Map Points not yet loaded — validation aborted.")
+                    print("   Current MapPoint count: \(mapPointStore.points.count)")
+                    return
+                }
+                
+                let currentLoc = PersistenceContext.shared.locationID
+                UserDefaultsDiagnostics.validateTriangleVertices(locationID: currentLoc, mapPointStore: mapPointStore)
+                // TODO: Pipe results into user-visible HUD or log overlay for faster dev loop
+            },
+            accessibility: "Validate Triangle Vertex IDs"
+        )
+    }
+}
+
+// MARK: - Delete Malformed Triangles Button
+private struct DeleteMalformedTrianglesButton: View {
+    @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var mapPointStore: MapPointStore
+    @State private var showConfirmation = false
+    @State private var showResultAlert = false
+    @State private var deletionResult: (deletedCount: Int, remainingCount: Int)? = nil
+    
+    var body: some View {
+        DebugButton(
+            icon: "🗑️🔺",
+            color: .red,
+            action: {
+                // Fail-safe: Check if MapPoints are loaded
+                guard !mapPointStore.points.isEmpty else {
+                    print("⚠️ Map Points not yet loaded — deletion aborted.")
+                    print("   Current MapPoint count: \(mapPointStore.points.count)")
+                    return
+                }
+                
+                showConfirmation = true
+            },
+            accessibility: "Delete Malformed Triangles"
+        )
+        .alert("Delete Malformed Triangles?", isPresented: $showConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                performDeletion()
+            }
+        } message: {
+            Text("This will permanently delete all triangles with invalid vertex IDs (referencing non-existent MapPoints). This action cannot be undone.")
+        }
+        .alert("Deletion Complete", isPresented: $showResultAlert) {
+            Button("OK") {
+                deletionResult = nil
+            }
+        } message: {
+            if let result = deletionResult {
+                if result.deletedCount > 0 {
+                    Text("Deleted \(result.deletedCount) malformed triangle(s).\n\(result.remainingCount) valid triangle(s) remaining.")
+                } else {
+                    Text("No malformed triangles found. All triangles are valid.")
+                }
+            } else {
+                Text("Deletion completed.")
+            }
+        }
+    }
+    
+    private func performDeletion() {
+        let currentLoc = PersistenceContext.shared.locationID
+        let result = UserDefaultsDiagnostics.deleteMalformedTriangles(
+            locationID: currentLoc,
+            mapPointStore: mapPointStore
+        )
+        
+        // Show result alert
+        deletionResult = result
+        showResultAlert = true
+        
+        // Reload triangles in TrianglePatchStore if needed
+        // Note: TrianglePatchStore will reload on next access, but we could post a notification here
+        NotificationCenter.default.post(name: NSNotification.Name("TrianglesUpdated"), object: nil)
+        
+        print("✅ Deletion complete: \(result.deletedCount) deleted, \(result.remainingCount) remaining")
+    }
+}
+
+// MARK: - AR Marker Diagnostic Buttons
+
+private struct MarkerInspectionButton: View {
+    @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
+    
+    var body: some View {
+        DebugButton(
+            icon: "🧠📍",
+            color: .orange,
+            action: {
+                arWorldMapStore.inspectMarkers()
+                // TODO: Pipe results into user-visible HUD or log overlay for faster dev loop
+            },
+            accessibility: "Inspect AR Markers"
+        )
+    }
+}
+
+private struct MarkerDeletionButton: View {
+    @EnvironmentObject private var arWorldMapStore: ARWorldMapStore
+    @State private var showConfirmation = false
+    
+    var body: some View {
+        DebugButton(
+            icon: "🗑️📍",
+            color: .red,
+            action: {
+                showConfirmation = true
+            },
+            accessibility: "Delete All AR Markers"
+        )
+        .alert("Delete All AR Markers?", isPresented: $showConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                arWorldMapStore.deleteAllMarkers()
+            }
+        } message: {
+            Text("This will permanently delete all persisted AR marker metadata files for the current location. This action cannot be undone and will not affect active ARKit anchors.")
+        }
+    }
+}
+
+private struct PurgePhotosButton: View {
+    var body: some View {
+        Button {
+            // Manual purge for photos already on disk
+            let locationID = PersistenceContext.shared.locationID
+            let savedIDs = ["E49BCB0F", "86EB7B89", "CD8E90BB", "A59BC2FB", 
+                            "58BA635B", "90EA7A4A", "3E185BD1", "B9714AA0", "9E947C28"]
+            UserDefaultsDiagnostics.purgePhotosFromUserDefaults(
+                locationID: locationID,
+                confirmedFilesSaved: savedIDs
+            )
+        } label: {
+            Text("🗑️")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.red.opacity(0.8), in: Circle())
+        }
+        .shadow(radius: 4)
+        .accessibilityLabel("Purge Photos from UD")
+        .buttonStyle(.plain)
+        .allowsHitTesting(true)
+    }
+}
+
+// MARK: - UserDefaults Cleanup Function (callable from Xcode console)
+
+// Call this from Xcode console during debugging:
+// expr -l Swift -- cleanupUserDefaults()
+func cleanupUserDefaults() {
+    print("🧹 Starting UserDefaults cleanup...")
+    
+    // First, show what we have
+    UserDefaultsDiagnostics.printInventory()
+    
+    // Identify heavy keys
+    let heavyKeys = UserDefaultsDiagnostics.identifyHeavyData()
+    
+    // Dry run first
+    print("\n🔍 Performing DRY RUN...")
+    UserDefaultsDiagnostics.removeKeys(Array(heavyKeys.keys), dryRun: true)
+    
+    // Uncomment the line below to actually delete:
+    // UserDefaultsDiagnostics.removeKeys(Array(heavyKeys.keys), dryRun: false)
 }
 
 // MARK: - Export Bundle Type

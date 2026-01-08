@@ -69,17 +69,22 @@ public struct BeaconOverlayDots: View {
             // 🚫 Disable dragging when locked
             .allowsHitTesting(!locked)
             .gesture(
-                DragGesture(minimumDistance: 6)
+                DragGesture(minimumDistance: 6, coordinateSpace: .global)
                     .onChanged { value in
+                        guard !mapTransform.isPinching else { return }
                         guard !locked else { return }
-                        if startPoint == nil { startPoint = dot.mapPoint }
+                        if startPoint == nil {
+                            startPoint = dot.mapPoint
+                            mapTransform.isOverlayDragging = true
+                        }
                         let dMap = mapTransform.screenTranslationToMap(value.translation)
                         let base = startPoint ?? dot.mapPoint
-                        let newPoint = CGPoint(x: base.x + dMap.x, y: base.y + dMap.y)
+                        let newPoint = CGPoint(x: base.x + dMap.width, y: base.y + dMap.height)
                         store.updateDot(id: dot.id, to: newPoint)
                     }
                     .onEnded { _ in
                         startPoint = nil
+                        mapTransform.isOverlayDragging = false
                     }
             )
         }

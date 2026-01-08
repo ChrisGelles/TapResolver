@@ -1,0 +1,36 @@
+# SwiftLint Configuration for TapResolver
+
+# Disabled rules (too strict for current codebase)
+disabled_rules:
+  - trailing_whitespace  # Can be noisy
+  - line_length          # Allow longer lines for readability
+
+# Opt-in rules (good practices)
+opt_in_rules:
+  - empty_count
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - overridden_super_call
+  - prohibited_super_call
+  - redundant_nil_coalescing
+  - redundant_type_annotation
+  - single_test_class
+  - unneeded_parentheses_in_closure_argument
+
+# File-level exclusions
+excluded:
+  - Pods
+  - build
+  - TapResolver.xcworkspace
+  - TapResolver.xcodeproj
+
+# Custom rules
+force_cast: warning
+force_try: warning
+function_body_length:
+  warning: 100
+  error: 200
+type_body_length:
+  warning: 300
+  error: 500
+

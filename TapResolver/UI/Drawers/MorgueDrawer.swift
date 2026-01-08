@@ -8,6 +8,7 @@ import SwiftUI
 struct MorgueDrawer: View {
     @EnvironmentObject private var hud: HUDPanelsState
     @EnvironmentObject private var beaconLists: BeaconListsStore
+    @EnvironmentObject private var mapTransform: MapTransformStore
 
     private let collapsedWidth: CGFloat = 56
     private let expandedWidth: CGFloat = 180
@@ -23,10 +24,17 @@ struct MorgueDrawer: View {
             // List (gray items) — smart sorted: beacon-pattern alphabetical, others newest first
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(beaconLists.sortedMorgue, id: \.self) { name in
-                        MorgueListItem(name: name) {
-                            beaconLists.promoteToBeacons(name)
-                        }
+                    ForEach(beaconLists.sortedMorgue) { item in
+                        MorgueListItem(
+                            name: item.displayName,
+                            hasHistory: item.hasHistory,
+                            onPromote: {
+                                beaconLists.promoteToBeacons(item.displayName)
+                            },
+                            onClearHistory: {
+                                beaconLists.clearHistory(for: item.displayName)
+                            }
+                        )
                         .frame(height: rowHeight)
                         .padding(.leading, 8)
                     }
@@ -36,6 +44,15 @@ struct MorgueDrawer: View {
                 .padding(.trailing, 6)
             }
             .scrollIndicators(.hidden)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        mapTransform.isHUDInteracting = true
+                    }
+                    .onEnded { _ in
+                        mapTransform.isHUDInteracting = false
+                    }
+            )
 
             // Header
             HStack(spacing: 2) {
@@ -77,20 +94,41 @@ struct MorgueDrawer: View {
 
 private struct MorgueListItem: View {
     let name: String
+    let hasHistory: Bool
     var onPromote: () -> Void
+    var onClearHistory: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(Color.gray.opacity(0.9))
-                .frame(width: 12, height: 12)
-
+        HStack(spacing: 6) {
+            // Dot indicator - yellow star if has history, gray dot if ephemeral
+            if hasHistory {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 10))
+                    .foregroundColor(.yellow)
+                    .frame(width: 12, height: 12)
+            } else {
+                Circle()
+                    .fill(Color.gray.opacity(0.5))
+                    .frame(width: 8, height: 8)
+            }
             Text(name)
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundColor(.primary)
-
+                .lineLimit(1)
             Spacer(minLength: 0)
-
+            
+            // Clear history button (red X) - only shown for items with history
+            if hasHistory {
+                Button(action: onClearHistory) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.red)
+                        .frame(width: 20, height: 20)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear history (make ephemeral)")
+            }
             // Promote button (green arrow up)
             Button(action: onPromote) {
                 Image(systemName: "arrow.up")
@@ -106,7 +144,7 @@ private struct MorgueListItem: View {
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.gray.opacity(0.2))
+                .fill(hasHistory ? Color.yellow.opacity(0.1) : Color.gray.opacity(0.2))
         )
         .contentShape(Rectangle())
     }

@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Select Xcode version
+        run: sudo xcode-select -switch /Applications/Xcode_15.0.app/Contents/Developer
+      
+      - name: Install CocoaPods dependencies
+        run: |
+          pod install
+      
+      - name: Build
+        run: |
+          xcodebuild -workspace TapResolver.xcworkspace \
+            -scheme TapResolver \
+            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            clean build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO
+      
+      - name: SwiftLint
+        run: |
+          if which swiftlint >/dev/null; then
+            swiftlint lint
+          else
+            echo "SwiftLint not installed, skipping..."
+          fi
+

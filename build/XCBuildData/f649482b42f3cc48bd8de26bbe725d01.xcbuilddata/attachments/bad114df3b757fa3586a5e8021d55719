@@ -1,0 +1,120 @@
+{
+  "" : {
+    "const-values" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/ZIPFoundation-master.swiftconstvalues",
+    "dependencies" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/ZIPFoundation-master.d",
+    "diagnostics" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/ZIPFoundation-master.dia",
+    "emit-module-dependencies" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/ZIPFoundation-master-emit-module.d",
+    "emit-module-diagnostics" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/ZIPFoundation-master-emit-module.dia",
+    "swift-dependencies" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/ZIPFoundation-master.swiftdeps"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Archive+BackingConfiguration.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+BackingConfiguration.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+BackingConfiguration.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+BackingConfiguration.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Archive+Deprecated.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Deprecated.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Deprecated.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Deprecated.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Archive+Helpers.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Helpers.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Helpers.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Helpers.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Archive+MemoryFile.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+MemoryFile.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+MemoryFile.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+MemoryFile.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Archive+Progress.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Progress.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Progress.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Progress.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Archive+Reading.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Reading.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Reading.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Reading.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Archive+ReadingDeprecated.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+ReadingDeprecated.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+ReadingDeprecated.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+ReadingDeprecated.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Archive+Writing.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Writing.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Writing.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+Writing.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Archive+WritingDeprecated.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+WritingDeprecated.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+WritingDeprecated.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+WritingDeprecated.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Archive+ZIP64.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+ZIP64.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+ZIP64.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive+ZIP64.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Archive.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Archive.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Data+Compression.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Data+Compression.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Data+Compression.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Data+Compression.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Data+CompressionDeprecated.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Data+CompressionDeprecated.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Data+CompressionDeprecated.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Data+CompressionDeprecated.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Data+Serialization.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Data+Serialization.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Data+Serialization.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Data+Serialization.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Date+ZIP.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Date+ZIP.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Date+ZIP.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Date+ZIP.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Entry+Serialization.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Entry+Serialization.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Entry+Serialization.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Entry+Serialization.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Entry+ZIP64.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Entry+ZIP64.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Entry+ZIP64.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Entry+ZIP64.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/Entry.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Entry.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Entry.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/Entry.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/FileManager+ZIP.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/FileManager+ZIP.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/FileManager+ZIP.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/FileManager+ZIP.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/FileManager+ZIPDeprecated.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/FileManager+ZIPDeprecated.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/FileManager+ZIPDeprecated.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/FileManager+ZIPDeprecated.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/Sources/ZIPFoundation/URL+ZIP.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/URL+ZIP.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/URL+ZIP.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/URL+ZIP.o"
+  },
+  "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/DerivedSources/resource_bundle_accessor.swift" : {
+    "index-unit-output-path" : "/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/resource_bundle_accessor.o",
+    "llvm-bc" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/resource_bundle_accessor.bc",
+    "object" : "/Users/cgelles/Library/Developer/Xcode/DerivedData/TapResolver-cohrbxhrwjefrbdyxwifqkpwouet/SourcePackages/checkouts/ZIPFoundation/build/ZIPFoundation.build/Release-iphoneos/ZIPFoundation.build/Objects-normal/arm64/resource_bundle_accessor.o"
+  }
+}
