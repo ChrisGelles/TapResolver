@@ -39,6 +39,10 @@ struct BeaconSettingsPanel: View {
     @State private var showProgress: Bool = false
     @State private var configurationResults: [BeaconConfigResult] = []
     
+    // Confirmation dialog state
+    @State private var showSaveConfirmation: Bool = false
+    @State private var pendingChangeCount: Int = 0
+    
     private let txPowerOptions: [Int] = [8, 4, 0, -4, -8, -12, -16, -20, -40]
 
     /// Dots filtered to only beacons in the current location's whitelist
@@ -87,6 +91,14 @@ struct BeaconSettingsPanel: View {
                 let elevation = beaconDotStore.getElevation(for: dot.beaconID)
                 pendingElevations[dot.beaconID] = String(format: "%g", elevation)
             }
+        }
+        .alert("Save Elevation Values?", isPresented: $showSaveConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Save") {
+                saveElevationValues()
+            }
+        } message: {
+            Text("This will update \(pendingChangeCount) elevation value\(pendingChangeCount == 1 ? "" : "s").")
         }
     }
     
@@ -184,7 +196,7 @@ struct BeaconSettingsPanel: View {
             // Top row: Save Values + Push to Hardware
             HStack(spacing: 12) {
                 Button {
-                    saveElevationValues()
+                    confirmSaveElevationValues()
                 } label: {
                     Text("Save Values")
                         .font(.system(size: 14, weight: .semibold))
@@ -241,6 +253,28 @@ struct BeaconSettingsPanel: View {
     }
     
     // MARK: - Configuration Logic
+    
+    private func confirmSaveElevationValues() {
+        // Count how many values have actually changed
+        var changeCount = 0
+        
+        for (beaconID, elevationString) in pendingElevations {
+            if let elevation = Double(elevationString) {
+                let currentElevation = beaconDotStore.getElevation(for: beaconID)
+                if abs(elevation - currentElevation) > 0.001 {
+                    changeCount += 1
+                }
+            }
+        }
+        
+        if changeCount == 0 {
+            print("ℹ️ [BeaconSettings] No elevation changes to save")
+            return
+        }
+        
+        pendingChangeCount = changeCount
+        showSaveConfirmation = true
+    }
     
     private func saveElevationValues() {
         var savedCount = 0
