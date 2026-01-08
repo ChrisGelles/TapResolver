@@ -14,6 +14,7 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 import kbeaconlib2
 
 struct BeaconSettingsPanel: View {
@@ -46,6 +47,11 @@ struct BeaconSettingsPanel: View {
     // Export state
     @State private var exportFileURL: URL? = nil
     @State private var showShareSheet: Bool = false
+    
+    // Import state
+    @State private var showFilePicker: Bool = false
+    @State private var showImportOptions: Bool = false
+    @State private var pendingImportData: BeaconExportData? = nil
     
     private let txPowerOptions: [Int] = [8, 4, 0, -4, -8, -12, -16, -20, -40]
 
@@ -104,6 +110,35 @@ struct BeaconSettingsPanel: View {
         .sheet(isPresented: $showShareSheet) {
             if let url = exportFileURL {
                 ShareSheet(items: [url])
+            }
+        }
+        .fileImporter(
+            isPresented: $showFilePicker,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            handleFileImport(result)
+        }
+        .confirmationDialog(
+            "Import Options",
+            isPresented: $showImportOptions,
+            titleVisibility: .visible
+        ) {
+            Button("Update Existing Only") {
+                performImport(mode: .updateOnly)
+            }
+            Button("Merge (Update + Add New)") {
+                performImport(mode: .merge)
+            }
+            Button("Replace All", role: .destructive) {
+                performImport(mode: .replaceAll)
+            }
+            Button("Cancel", role: .cancel) {
+                pendingImportData = nil
+            }
+        } message: {
+            if let data = pendingImportData {
+                Text("File contains \(data.beacons.count) beacon(s) from '\(data.locationID)'")
             }
         }
         .alert("Save Elevation Values?", isPresented: $showSaveConfirmation) {
@@ -289,14 +324,14 @@ struct BeaconSettingsPanel: View {
                 }
                 
                 Button {
-                    // Import - Phase 2d-ii
+                    showFilePicker = true
                 } label: {
                     Label("Import Beacons", systemImage: "square.and.arrow.down")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .background(Color.indigo.opacity(0.6))
+                        .background(Color.indigo)
                         .cornerRadius(8)
                 }
             }
@@ -379,6 +414,124 @@ struct BeaconSettingsPanel: View {
             print("📤 [BeaconSettings] Exported \(exportItems.count) beacons to \(filename)")
         } catch {
             print("❌ [BeaconSettings] Failed to write export file: \(error)")
+        }
+    }
+    
+    // MARK: - Import Logic
+    
+    private enum ImportMode {
+        case updateOnly   // Only update beacons that already exist
+        case merge        // Update existing + add new
+        case replaceAll   // Clear and replace all
+    }
+    
+    private func handleFileImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else {
+                print("❌ [BeaconSettings] No file selected")
+                return
+            }
+            
+            // Need to access security-scoped resource
+            guard url.startAccessingSecurityScopedResource() else {
+                print("❌ [BeaconSettings] Cannot access file")
+                return
+            }
+            defer { url.stopAccessingSecurityScopedResource() }
+            
+            do {
+                let data = try Data(contentsOf: url)
+                let decoded = try JSONDecoder().decode(BeaconExportData.self, from: data)
+                
+                print("📥 [BeaconSettings] Parsed \(decoded.beacons.count) beacons from '\(decoded.locationID)'")
+                
+                pendingImportData = decoded
+                showImportOptions = true
+                
+            } catch {
+                print("❌ [BeaconSettings] Failed to parse import file: \(error)")
+            }
+            
+        case .failure(let error):
+            print("❌ [BeaconSettings] File picker error: \(error)")
+        }
+    }
+    
+    private func performImport(mode: ImportMode) {
+        guard let importData = pendingImportData else { return }
+        
+        let currentBeaconIDs = Set(beaconDotStore.dots.map { $0.beaconID })
+        var updatedCount = 0
+        var addedCount = 0
+        
+        switch mode {
+        case .updateOnly:
+            // Only update beacons that already exist
+            for item in importData.beacons where currentBeaconIDs.contains(item.beaconID) {
+                applyImportItem(item)
+                updatedCount += 1
+            }
+            print("📥 [BeaconSettings] Updated \(updatedCount) existing beacon(s)")
+            
+        case .merge:
+            // Update existing + add new
+            for item in importData.beacons {
+                if currentBeaconIDs.contains(item.beaconID) {
+                    applyImportItem(item)
+                    updatedCount += 1
+                } else {
+                    addImportItem(item)
+                    addedCount += 1
+                }
+            }
+            print("📥 [BeaconSettings] Updated \(updatedCount), added \(addedCount) beacon(s)")
+            
+        case .replaceAll:
+            // Clear current location's dots and import all
+            beaconDotStore.clear()
+            for item in importData.beacons {
+                addImportItem(item)
+                addedCount += 1
+            }
+            print("📥 [BeaconSettings] Replaced all with \(addedCount) beacon(s)")
+        }
+        
+        // Refresh pending elevations to reflect imported values
+        for dot in filteredDots {
+            let elevation = beaconDotStore.getElevation(for: dot.beaconID)
+            pendingElevations[dot.beaconID] = String(format: "%g", elevation)
+        }
+        
+        pendingImportData = nil
+    }
+    
+    private func applyImportItem(_ item: BeaconExportItem) {
+        // Update existing dot's properties
+        beaconDotStore.setElevation(for: item.beaconID, elevation: item.elevation)
+        if let tx = item.txPower {
+            beaconDotStore.setTxPower(for: item.beaconID, dbm: tx)
+        }
+        if let interval = item.advertisingInterval {
+            beaconDotStore.setAdvertisingInterval(for: item.beaconID, ms: interval)
+        }
+        // Position update
+        beaconDotStore.updateDot(for: item.beaconID, newMapPoint: CGPoint(x: item.x, y: item.y))
+    }
+    
+    private func addImportItem(_ item: BeaconExportItem) {
+        // Create new dot via toggleDot, then update all properties
+        let point = CGPoint(x: item.x, y: item.y)
+        let color = BeaconDotStore.BeaconDotV2(beaconID: item.beaconID, x: item.x, y: item.y).color
+        beaconDotStore.toggleDot(for: item.beaconID, mapPoint: point, color: color)
+        
+        // Apply additional properties
+        beaconDotStore.setElevation(for: item.beaconID, elevation: item.elevation)
+        if let tx = item.txPower {
+            beaconDotStore.setTxPower(for: item.beaconID, dbm: tx)
+        }
+        if let interval = item.advertisingInterval {
+            beaconDotStore.setAdvertisingInterval(for: item.beaconID, ms: interval)
         }
     }
     
