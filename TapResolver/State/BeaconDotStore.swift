@@ -25,18 +25,11 @@ public struct ActiveElevationEdit: Identifiable {
 // MARK: - Store of dots (map-local positions) + Locks + Persistence
 public final class BeaconDotStore: ObservableObject {
     private let ctx = PersistenceContext.shared
-    public struct Dot: Identifiable {
-        public let id = UUID()
-        public let beaconID: String     // one dot per beacon
-        public let color: Color
-        public var mapPoint: CGPoint    // map-local (untransformed) coords
-        public var elevation: Double = 0.75  // elevation in meters, default 0.75
-    }
-
     // MARK: - V2 Persistence Model (Single Source of Truth)
 
-    /// Consolidated beacon dot storage - replaces dots.json and all separate metadata keys
-    public struct BeaconDotV2: Codable {
+    /// Consolidated beacon dot storage - single source of truth
+    public struct BeaconDotV2: Codable, Identifiable {
+        public var id: String { beaconID }  // Identifiable conformance
         public let beaconID: String
         public var x: Double
         public var y: Double
@@ -62,26 +55,25 @@ public final class BeaconDotStore: ObservableObject {
             self.firmware = nil
             self.lastConfigReadSession = nil
         }
+        
+        /// Computed map point for UI compatibility
+        public var mapPoint: CGPoint {
+            get { CGPoint(x: x, y: y) }
+            set { x = newValue.x; y = newValue.y }
+        }
+        
+        /// Computed color based on beaconID hash
+        public var color: Color {
+            let hash = beaconID.hash
+            let hue = Double(abs(hash % 360)) / 360.0
+            return Color(hue: hue, saturation: 0.7, brightness: 0.8)
+        }
     }
 
-    @Published public private(set) var dots: [Dot] = []
-    // beaconID -> locked?
-    @Published private(set) var locked: [String: Bool] = [:]
-    // beaconID -> elevation
-    @Published private(set) var elevations: [String: Double] = [:]
-    // beaconID -> txPower dBm
-    @Published var txPowerByID: [String: Int] = [:]
-    // beaconID -> advertising interval in milliseconds
-    @Published private(set) var advertisingIntervalByID: [String: Double] = [:]
+    /// Single source of truth - all beacon data lives here
+    @Published public private(set) var dots: [BeaconDotV2] = []
+
     private let defaultAdvertisingInterval: Double = 100.0  // BC04P default
-    // beaconID -> MAC address
-    @Published private(set) var macAddressByID: [String: String] = [:]
-    // beaconID -> session number when config was last read from device
-    @Published private(set) var lastConfigReadSession: [String: Int] = [:]
-    // beaconID -> model string
-    @Published private(set) var modelByID: [String: String] = [:]
-    // beaconID -> firmware version
-    @Published private(set) var firmwareByID: [String: String] = [:]
     
     // Current session number (incremented on each app launch)
     private static let sessionNumberKey = "BeaconConfigSessionNumber"
@@ -93,16 +85,20 @@ public final class BeaconDotStore: ObservableObject {
     private let dotsV2Key = "BeaconDots_v2"  // Single source of truth
 
     public init() {
+        let locationID = ctx.locationID
+        print("🏗️ [BeaconDotStore] INIT")
+        print("   📍 Initial location: \(locationID)")
+        
         incrementSessionNumber()
         
-        if loadV2() {
+        if load() {
             print("📊 [BeaconDotStore] Loaded from V2 storage")
         } else {
             print("📊 [BeaconDotStore] No V2 data found - starting fresh")
         }
     }
 
-    public func dot(for beaconID: String) -> Dot? {
+    public func dot(for beaconID: String) -> BeaconDotV2? {
         dots.first { $0.beaconID == beaconID }
     }
 
@@ -111,50 +107,53 @@ public final class BeaconDotStore: ObservableObject {
     /// - If not, add at `mapPoint` with `color`.
     public func toggleDot(for beaconID: String, mapPoint: CGPoint, color: Color) {
         if let idx = dots.firstIndex(where: { $0.beaconID == beaconID }) {
+            // Remove existing dot
             dots.remove(at: idx)
-            saveV2()
-            print("Removed dot for \(beaconID)")
         } else {
-            dots.append(Dot(beaconID: beaconID, color: color, mapPoint: mapPoint))
-            saveV2()
-            print("Added dot for \(beaconID) @ map (\(Int(mapPoint.x)), \(Int(mapPoint.y)))")
+            // Add new dot
+            let dot = BeaconDotV2(beaconID: beaconID, x: mapPoint.x, y: mapPoint.y)
+            dots.append(dot)
         }
+        save()
     }
 
     /// Update a dot's map-local position (used while dragging).
-    public func updateDot(id: UUID, to newPoint: CGPoint) {
-        if let idx = dots.firstIndex(where: { $0.id == id }) {
-            dots[idx].mapPoint = newPoint
-            saveV2()
+    public func updateDot(for beaconID: String, newMapPoint: CGPoint) {
+        if let idx = dots.firstIndex(where: { $0.beaconID == beaconID }) {
+            dots[idx].x = newMapPoint.x
+            dots[idx].y = newMapPoint.y
+            save()
         }
     }
 
     public func clear() {
         dots.removeAll()
-        saveV2()
+        save()
     }
     
     /// Clear dots for unlocked beacons only (preserves locked beacons)
     public func clearUnlockedDots() {
-        dots.removeAll { !isLocked($0.beaconID) }
-        saveV2()
+        dots.removeAll { !$0.isLocked }
+        save()
     }
     
     /// Get only the locked beacon dots
-    public func lockedDots() -> [Dot] {
-        return dots.filter { isLocked($0.beaconID) }
+    public func lockedDots() -> [BeaconDotV2] {
+        return dots.filter { $0.isLocked }
     }
     
     
     // MARK: - Elevation API
     
     public func setElevation(for beaconID: String, elevation: Double) {
-        elevations[beaconID] = elevation
-        saveV2()
+        if let idx = dots.firstIndex(where: { $0.beaconID == beaconID }) {
+            dots[idx].elevation = elevation
+            save()
+        }
     }
     
     public func getElevation(for beaconID: String) -> Double {
-        return elevations[beaconID] ?? 0.75
+        return dots.first { $0.beaconID == beaconID }?.elevation ?? 0.75
     }
     
     public func startElevationEdit(for beaconID: String) {
@@ -178,32 +177,27 @@ public final class BeaconDotStore: ObservableObject {
     // MARK: - Tx Power API
     
     public func setTxPower(for beaconID: String, dbm: Int?) {
-        if let v = dbm {
-            txPowerByID[beaconID] = v
-        } else {
-            txPowerByID.removeValue(forKey: beaconID)
+        if let idx = dots.firstIndex(where: { $0.beaconID == beaconID }) {
+            dots[idx].txPower = dbm
+            save()
         }
-        saveV2()
     }
     
     public func getTxPower(for beaconID: String) -> Int? {
-        return txPowerByID[beaconID]
+        return dots.first { $0.beaconID == beaconID }?.txPower
     }
     
     // MARK: - Advertising Interval API
     
     public func setAdvertisingInterval(for beaconID: String, ms: Double?) {
-        if let v = ms {
-            advertisingIntervalByID[beaconID] = v
-        } else {
-            advertisingIntervalByID.removeValue(forKey: beaconID)
+        if let idx = dots.firstIndex(where: { $0.beaconID == beaconID }) {
+            dots[idx].advertisingInterval = ms
+            save()
         }
-        saveV2()
     }
     
     public func getAdvertisingInterval(for beaconID: String) -> Double {
-        let result = advertisingIntervalByID[beaconID] ?? defaultAdvertisingInterval
-        return result
+        return dots.first { $0.beaconID == beaconID }?.advertisingInterval ?? defaultAdvertisingInterval
     }
     
     public func displayAdvertisingInterval(for beaconID: String) -> String {
@@ -231,173 +225,104 @@ public final class BeaconDotStore: ObservableObject {
     
     /// Public flush+reload for location switching
     public func clearAndReloadForActiveLocation() {
-        // Hard flush (no save) to avoid bleed
+        let locationID = ctx.locationID
+        print("🔄 [BeaconDotStore] clearAndReloadForActiveLocation() called")
+        print("   📍 Target location: \(locationID)")
+        print("   📊 Dots before clear: \(dots.count)")
+        
+        // Clear in-memory state
         dots.removeAll()
-        locked.removeAll()
-        elevations.removeAll()
-        txPowerByID.removeAll()
-        advertisingIntervalByID.removeAll()
-        macAddressByID.removeAll()
-        lastConfigReadSession.removeAll()
-        modelByID.removeAll()
-        firmwareByID.removeAll()
-
-        // Load from V2 only
-        if loadV2() {
+        
+        // Load from V2
+        if load() {
             print("📊 [BeaconDotStore] Reloaded from V2 storage")
         } else {
             print("📊 [BeaconDotStore] No V2 data for this location")
         }
         
+        print("   📊 Dots after reload: \(dots.count)")
         objectWillChange.send()
     }
     
     /// Get the beacon IDs that are currently locked
     public func lockedBeaconIDs() -> [String] {
-        locked.keys.filter { locked[$0] == true }
+        dots.filter { $0.isLocked }.map(\.beaconID)
     }
     
     /// Remove dots that don't have a corresponding beacon in the active beacon list
-    /// Also cleans up orphaned metadata (locks, elevations, txPower, advertising intervals)
-    /// Returns the count of removed dots
-    @discardableResult
-    public func removeOrphanedDots(validBeaconNames: [String]? = nil) -> Int {
-        let validNames: [String]
-        if let names = validBeaconNames {
-            validNames = names
-        } else {
-            validNames = BeaconDotRegistry.sharedBeaconNames?() ?? []
-        }
-        
-        // If we can't get the beacon list, don't remove anything
-        guard !validNames.isEmpty else {
+    public func removeOrphanedDots() {
+        guard let beaconNames = BeaconDotRegistry.sharedBeaconNames?() else {
             print("⚠️ [BeaconDotStore] Cannot reconcile - no beacon names available")
-            return 0
+            return
         }
         
-        let orphanedDots = dots.filter { !validNames.contains($0.beaconID) }
+        let validSet = Set(beaconNames)
+        let orphaned = dots.filter { !validSet.contains($0.beaconID) }
         
-        guard !orphanedDots.isEmpty else { return 0 }
+        guard !orphaned.isEmpty else { return }
         
-        print("🧹 [BeaconDotStore] Found \(orphanedDots.count) orphaned dot(s):")
-        for dot in orphanedDots {
-            print("   - \(dot.beaconID) @ (\(Int(dot.mapPoint.x)), \(Int(dot.mapPoint.y)))")
+        print("🧹 [BeaconDotStore] Found \(orphaned.count) orphaned dot(s):")
+        for dot in orphaned {
+            print("   - \(dot.beaconID) @ (\(Int(dot.x)), \(Int(dot.y)))")
         }
         
-        // Remove the dots
-        let orphanedIDs = Set(orphanedDots.map { $0.beaconID })
-        dots.removeAll { orphanedIDs.contains($0.beaconID) }
+        dots.removeAll { !validSet.contains($0.beaconID) }
+        save()
         
-        // Clean up orphaned metadata
-        for beaconID in orphanedIDs {
-            locked.removeValue(forKey: beaconID)
-            elevations.removeValue(forKey: beaconID)
-            txPowerByID.removeValue(forKey: beaconID)
-            advertisingIntervalByID.removeValue(forKey: beaconID)
-            macAddressByID.removeValue(forKey: beaconID)
-            lastConfigReadSession.removeValue(forKey: beaconID)
-            modelByID.removeValue(forKey: beaconID)
-            firmwareByID.removeValue(forKey: beaconID)
-        }
-        
-        // Save changes
-        saveV2()
-        
-        print("🧹 [BeaconDotStore] Removed \(orphanedDots.count) orphaned dot(s) and their metadata")
-        
-        return orphanedDots.count
+        print("🧹 [BeaconDotStore] Removed \(orphaned.count) orphaned dot(s)")
     }
 
     // MARK: - Lock API
 
     public func isLocked(_ beaconID: String) -> Bool {
-        locked[beaconID] ?? false
+        dots.first { $0.beaconID == beaconID }?.isLocked ?? false
     }
 
     public func toggleLock(_ beaconID: String) {
-        let newVal = !(locked[beaconID] ?? false)
-        locked[beaconID] = newVal
-        saveV2()
+        if let idx = dots.firstIndex(where: { $0.beaconID == beaconID }) {
+            dots[idx].isLocked.toggle()
+            save()
+        }
     }
 
     // MARK: - V2 Consolidated Persistence
 
-    /// Save all beacon dot data to single UserDefaults key
-    private func saveV2() {
-        let v2Dots: [BeaconDotV2] = dots.map { dot in
-            var v2 = BeaconDotV2(
-                beaconID: dot.beaconID,
-                x: dot.mapPoint.x,
-                y: dot.mapPoint.y,
-                elevation: elevations[dot.beaconID] ?? dot.elevation
-            )
-            v2.txPower = txPowerByID[dot.beaconID]
-            v2.advertisingInterval = advertisingIntervalByID[dot.beaconID]
-            v2.isLocked = locked[dot.beaconID] ?? false
-            v2.macAddress = macAddressByID[dot.beaconID]
-            v2.model = modelByID[dot.beaconID]
-            v2.firmware = firmwareByID[dot.beaconID]
-            v2.lastConfigReadSession = lastConfigReadSession[dot.beaconID]
-            return v2
+    private func save() {
+        let locationID = ctx.locationID
+        let fullKey = "locations.\(locationID).\(dotsV2Key)"
+        
+        // Diagnostic: Log what we're about to save
+        print("💾 [BeaconDotStore] SAVE to '\(fullKey)'")
+        print("   📍 Location: \(locationID)")
+        print("   📊 Dot count: \(dots.count)")
+        if !dots.isEmpty {
+            let sample = dots.prefix(3).map { "\($0.beaconID): elev=\($0.elevation)" }.joined(separator: ", ")
+            print("   📋 Sample: \(sample)\(dots.count > 3 ? "..." : "")")
         }
         
-        ctx.write(dotsV2Key, value: v2Dots)
-        print("💾 [BeaconDotStore] Saved \(v2Dots.count) dots to \(dotsV2Key)")
+        ctx.write(dotsV2Key, value: dots)
     }
 
-    /// Load all beacon dot data from single UserDefaults key
-    /// Returns true if V2 data was found, false if migration needed
-    private func loadV2() -> Bool {
-        guard let v2Dots: [BeaconDotV2] = ctx.read(dotsV2Key, as: [BeaconDotV2].self), !v2Dots.isEmpty else {
+    private func load() -> Bool {
+        let locationID = ctx.locationID
+        let fullKey = "locations.\(locationID).\(dotsV2Key)"
+        
+        print("📂 [BeaconDotStore] LOAD from '\(fullKey)'")
+        print("   📍 Location: \(locationID)")
+        
+        guard let loaded: [BeaconDotV2] = ctx.read(dotsV2Key, as: [BeaconDotV2].self), !loaded.isEmpty else {
+            print("   ❌ No data found or empty")
             return false
         }
         
-        // Clear existing in-memory state
-        dots.removeAll()
-        locked.removeAll()
-        elevations.removeAll()
-        txPowerByID.removeAll()
-        advertisingIntervalByID.removeAll()
-        macAddressByID.removeAll()
-        lastConfigReadSession.removeAll()
-        modelByID.removeAll()
-        firmwareByID.removeAll()
+        dots = loaded
         
-        // Populate from V2 data
-        dots = v2Dots.map { v2 in
-            var dot = Dot(beaconID: v2.beaconID,
-                          color: beaconColor(for: v2.beaconID),
-                          mapPoint: CGPoint(x: v2.x, y: v2.y))
-            dot.elevation = v2.elevation
-            return dot
-        }
-
-        // CRITICAL: Populate side tables from V2 data
-        // The UI reads from these dictionaries, not from dot.elevation
-        for v2 in v2Dots {
-            elevations[v2.beaconID] = v2.elevation
-            locked[v2.beaconID] = v2.isLocked
-            if let tx = v2.txPower {
-                txPowerByID[v2.beaconID] = tx
-            }
-            if let interval = v2.advertisingInterval {
-                advertisingIntervalByID[v2.beaconID] = interval
-            }
-            if let mac = v2.macAddress {
-                macAddressByID[v2.beaconID] = mac
-            }
-            if let model = v2.model {
-                modelByID[v2.beaconID] = model
-            }
-            if let firmware = v2.firmware {
-                firmwareByID[v2.beaconID] = firmware
-            }
-            if let session = v2.lastConfigReadSession {
-                lastConfigReadSession[v2.beaconID] = session
-            }
+        // Diagnostic: Log what we loaded
+        print("   ✅ Loaded \(dots.count) dots")
+        for dot in dots {
+            print("      - \(dot.beaconID): pos=(\(Int(dot.x)),\(Int(dot.y))) elev=\(dot.elevation) tx=\(dot.txPower ?? -999) interval=\(dot.advertisingInterval ?? -1)")
         }
         
-        print("📂 [BeaconDotStore] Loaded \(dots.count) dots from \(dotsV2Key)")
         return true
     }
     
@@ -423,34 +348,29 @@ public final class BeaconDotStore: ObservableObject {
         model: String?,
         firmware: String?
     ) {
-        // Update TX Power
-        txPowerByID[beaconName] = txPower
+        guard let idx = dots.firstIndex(where: { $0.beaconID == beaconName }) else {
+            print("⚠️ [BeaconDotStore] Cannot update config for unknown beacon: \(beaconName)")
+            return
+        }
         
-        // Update Interval
-        advertisingIntervalByID[beaconName] = Double(intervalMs)
+        dots[idx].txPower = txPower
+        dots[idx].advertisingInterval = Double(intervalMs)
         
-        // Update MAC
         if let mac = mac, !mac.isEmpty {
-            macAddressByID[beaconName] = mac
+            dots[idx].macAddress = mac
         }
-        
-        // Update Model
         if let model = model {
-            modelByID[beaconName] = model
+            dots[idx].model = model
         }
-        
-        // Update Firmware
         if let firmware = firmware {
-            firmwareByID[beaconName] = firmware
+            dots[idx].firmware = firmware
         }
         
-        // Mark as read this session
-        lastConfigReadSession[beaconName] = currentSessionNumber
+        dots[idx].lastConfigReadSession = currentSessionNumber
         
-        // Single save for all updates
-        saveV2()
+        save()
         
-        print("📊 [BeaconDotStore] Updated \(beaconName): TX=\(txPower)dBm, Interval=\(Int(intervalMs))ms, Session=\(currentSessionNumber)")
+        print("✅ [BeaconDotStore] Updated config for \(beaconName): tx=\(txPower)dBm, interval=\(intervalMs)ms")
     }
     
     // MARK: - Freshness API
@@ -458,34 +378,29 @@ public final class BeaconDotStore: ObservableObject {
     /// Returns how many sessions ago this beacon's config was read
     /// Returns nil if never read from device
     public func sessionsSinceLastRead(for beaconID: String) -> Int? {
-        guard let lastSession = lastConfigReadSession[beaconID] else { return nil }
+        guard let dot = dots.first(where: { $0.beaconID == beaconID }),
+              let lastSession = dot.lastConfigReadSession else { return nil }
         return currentSessionNumber - lastSession
     }
     
     /// Returns a color indicating freshness of beacon config data
-    /// Green = just read, Yellow = 1 session ago, Orange = 2, Red = 3+, Dark Red = 10+
+    /// Green = just read, Yellow = 1 session ago, Orange = 2, Red = 3+
     public func freshnessColor(for beaconID: String) -> Color {
-        guard let sessionsDelta = sessionsSinceLastRead(for: beaconID) else {
-            return Color.gray.opacity(0.5) // Never read from device
+        guard let dot = dots.first(where: { $0.beaconID == beaconID }),
+              let readSession = dot.lastConfigReadSession else {
+            return .gray  // Never read
         }
         
-        switch sessionsDelta {
+        let age = currentSessionNumber - readSession
+        switch age {
         case 0:
-            return Color.green
+            return .green   // Read this session
         case 1:
-            return Color.yellow
+            return .yellow  // Read last session
         case 2:
-            return Color.orange
-        case 3...9:
-            return Color.red
-        default: // 10+
-            return Color(red: 0.5, green: 0, blue: 0) // Dark red
+            return .orange  // Read 2 sessions ago
+        default:
+            return .red     // Read 3+ sessions ago
         }
-    }
-    
-    private func beaconColor(for beaconID: String) -> Color {
-        let hash = beaconID.hash
-        let hue = Double(abs(hash % 360)) / 360.0
-        return Color(hue: hue, saturation: 0.7, brightness: 0.8)
     }
 }

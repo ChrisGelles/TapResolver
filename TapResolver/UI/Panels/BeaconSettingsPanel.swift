@@ -111,8 +111,14 @@ struct BeaconSettingsPanel: View {
     
     private var beaconSelectionList: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Diagnostic: Show what location we think we're editing
+            Text("Location: \(PersistenceContext.shared.locationID)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.orange)
+                .padding(.horizontal)
+            
             HStack {
-                Text("Select Beacons")
+                Text("Select Beacons (\(beaconDotStore.dots.count))")
                     .font(.system(size: 14, weight: .semibold))
                 Spacer()
                 Button(selectedBeaconIDs.count == beaconDotStore.dots.count ? "Deselect All" : "Select All") {
