@@ -32,6 +32,9 @@ struct BeaconSettingsPanel: View {
     // Beacon selection
     @State private var selectedBeaconIDs: Set<String> = []
     
+    // Pending elevation edits (not saved until "Save Values" pressed)
+    @State private var pendingElevations: [String: String] = [:]
+    
     // Progress state
     @State private var showProgress: Bool = false
     @State private var configurationResults: [BeaconConfigResult] = []
@@ -77,6 +80,13 @@ struct BeaconSettingsPanel: View {
                     showProgress = false
                 }
             )
+        }
+        .onAppear {
+            // Initialize pending elevations from current stored values
+            for dot in filteredDots {
+                let elevation = beaconDotStore.getElevation(for: dot.beaconID)
+                pendingElevations[dot.beaconID] = String(format: "%g", elevation)
+            }
         }
     }
     
@@ -146,6 +156,10 @@ struct BeaconSettingsPanel: View {
                         BeaconSelectionRow(
                             beaconID: dot.beaconID,
                             isSelected: selectedBeaconIDs.contains(dot.beaconID),
+                            elevationText: Binding(
+                                get: { pendingElevations[dot.beaconID] ?? "0.75" },
+                                set: { pendingElevations[dot.beaconID] = $0 }
+                            ),
                             currentTxPower: beaconDotStore.getTxPower(for: dot.beaconID),
                             currentInterval: beaconDotStore.getAdvertisingInterval(for: dot.beaconID),
                             onToggle: {
@@ -359,39 +373,57 @@ struct BeaconConfigResult: Identifiable {
 struct BeaconSelectionRow: View {
     let beaconID: String
     let isSelected: Bool
+    @Binding var elevationText: String
     let currentTxPower: Int?
     let currentInterval: Double
     let onToggle: () -> Void
     
     var body: some View {
-        Button(action: onToggle) {
-            HStack {
+        HStack(spacing: 8) {
+            // Checkbox
+            Button(action: onToggle) {
                 Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                     .foregroundColor(isSelected ? .blue : .gray)
-                
-                Text(beaconID)
-                    .font(.system(size: 14))
-                    .foregroundColor(.primary)
-                
-                Spacer()
-                
-                // Current values
-                VStack(alignment: .trailing, spacing: 2) {
-                    if let txPower = currentTxPower {
-                        Text("\(txPower) dBm")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.secondary)
-                    }
-                    Text("\(Int(currentInterval)) ms")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.secondary)
-                }
+                    .frame(width: 24)
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 12)
-            .background(isSelected ? Color.blue.opacity(0.1) : Color.clear)
-            .cornerRadius(8)
+            .buttonStyle(.plain)
+            
+            // Beacon name
+            Text(beaconID)
+                .font(.system(size: 12))
+                .foregroundColor(.primary)
+                .frame(minWidth: 100, alignment: .leading)
+                .lineLimit(1)
+            
+            // Elevation input
+            HStack(spacing: 2) {
+                TextField("0.75", text: $elevationText)
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11, design: .monospaced))
+                    .frame(width: 50)
+                Text("m")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            // TX Power column
+            Text(currentTxPower != nil ? "\(currentTxPower!)dBm" : "—")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(width: 50, alignment: .trailing)
+            
+            // Interval column
+            Text("\(Int(currentInterval))ms")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(width: 50, alignment: .trailing)
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .background(isSelected ? Color.blue.opacity(0.1) : Color.clear)
+        .cornerRadius(6)
     }
 }

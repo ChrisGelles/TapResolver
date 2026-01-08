@@ -1891,6 +1891,27 @@ private struct DebugSettingsPanel: View {
                         }
                         .buttonStyle(.plain)
                         
+                        // Clean Orphaned Dots Button
+                        Button {
+                            let beforeCount = beaconDotStore.dots.count
+                            beaconDotStore.removeOrphanedDots()
+                            let afterCount = beaconDotStore.dots.count
+                            let removed = beforeCount - afterCount
+                            print("🧹 [DEBUG] Orphan cleanup: \(beforeCount) → \(afterCount) (\(removed) removed)")
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "trash.circle")
+                                    .font(.system(size: 24))
+                                Text("Clean Orphaned Dots")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
                         // Dump V2 Data Button
                         Button {
                             dumpV2Data()
