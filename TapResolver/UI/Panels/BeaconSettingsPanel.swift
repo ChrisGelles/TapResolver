@@ -43,6 +43,10 @@ struct BeaconSettingsPanel: View {
     @State private var showSaveConfirmation: Bool = false
     @State private var pendingChangeCount: Int = 0
     
+    // Export state
+    @State private var exportFileURL: URL? = nil
+    @State private var showShareSheet: Bool = false
+    
     private let txPowerOptions: [Int] = [8, 4, 0, -4, -8, -12, -16, -20, -40]
 
     /// Dots filtered to only beacons in the current location's whitelist
@@ -66,6 +70,11 @@ struct BeaconSettingsPanel: View {
                 
                 // Action buttons
                 actionButtons
+                
+                Divider()
+                
+                // Import/Export section
+                importExportSection
             }
             .navigationTitle("Beacon Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -90,6 +99,11 @@ struct BeaconSettingsPanel: View {
             for dot in filteredDots {
                 let elevation = beaconDotStore.getElevation(for: dot.beaconID)
                 pendingElevations[dot.beaconID] = String(format: "%g", elevation)
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let url = exportFileURL {
+                ShareSheet(items: [url])
             }
         }
         .alert("Save Elevation Values?", isPresented: $showSaveConfirmation) {
@@ -252,6 +266,44 @@ struct BeaconSettingsPanel: View {
         .padding()
     }
     
+    // MARK: - Import/Export Section
+    
+    private var importExportSection: some View {
+        VStack(spacing: 8) {
+            Text("Import / Export")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+            HStack(spacing: 12) {
+                Button {
+                    exportBeacons()
+                } label: {
+                    Label("Export Beacons", systemImage: "square.and.arrow.up")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.indigo)
+                        .cornerRadius(8)
+                }
+                
+                Button {
+                    // Import - Phase 2d-ii
+                } label: {
+                    Label("Import Beacons", systemImage: "square.and.arrow.down")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.indigo.opacity(0.6))
+                        .cornerRadius(8)
+                }
+            }
+        }
+        .padding()
+    }
+    
     // MARK: - Configuration Logic
     
     private func confirmSaveElevationValues() {
@@ -274,6 +326,60 @@ struct BeaconSettingsPanel: View {
         
         pendingChangeCount = changeCount
         showSaveConfirmation = true
+    }
+    
+    private func exportBeacons() {
+        let locationID = PersistenceContext.shared.locationID
+        
+        // Build export items from filtered dots only
+        let exportItems: [BeaconExportItem] = filteredDots.map { dot in
+            BeaconExportItem(
+                beaconID: dot.beaconID,
+                x: dot.x,
+                y: dot.y,
+                elevation: dot.elevation,
+                txPower: dot.txPower,
+                advertisingInterval: dot.advertisingInterval,
+                lastConfigChange: dot.lastConfigChange
+            )
+        }
+        
+        // ISO 8601 timestamp
+        let formatter = ISO8601DateFormatter()
+        let exportedAt = formatter.string(from: Date())
+        
+        let exportData = BeaconExportData(
+            locationID: locationID,
+            exportedAt: exportedAt,
+            beacons: exportItems
+        )
+        
+        // Encode to JSON
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        
+        guard let jsonData = try? encoder.encode(exportData) else {
+            print("❌ [BeaconSettings] Failed to encode export data")
+            return
+        }
+        
+        // Generate filename: museum-beacons-20260108-1305.json
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd-HHmm"
+        let timestamp = dateFormatter.string(from: Date())
+        let filename = "\(locationID)-beacons-\(timestamp).json"
+        
+        // Write to temp file
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        
+        do {
+            try jsonData.write(to: tempURL)
+            exportFileURL = tempURL
+            showShareSheet = true
+            print("📤 [BeaconSettings] Exported \(exportItems.count) beacons to \(filename)")
+        } catch {
+            print("❌ [BeaconSettings] Failed to write export file: \(error)")
+        }
     }
     
     private func saveElevationValues() {
@@ -605,4 +711,22 @@ struct BeaconSelectionRow: View {
         .background(isSelected ? Color.blue.opacity(0.1) : Color.clear)
         .cornerRadius(6)
     }
+}
+
+// MARK: - Export Data Structures
+
+struct BeaconExportData: Codable {
+    let locationID: String
+    let exportedAt: String
+    let beacons: [BeaconExportItem]
+}
+
+struct BeaconExportItem: Codable {
+    let beaconID: String
+    let x: Double
+    let y: Double
+    let elevation: Double
+    let txPower: Int?
+    let advertisingInterval: Double?
+    let lastConfigChange: BeaconDotStore.ConfigChangeInfo?
 }
