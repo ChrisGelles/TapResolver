@@ -180,36 +180,181 @@ struct BeaconSettingsPanel: View {
     // MARK: - Action Buttons
     
     private var actionButtons: some View {
-        HStack(spacing: 16) {
-            Button {
-                startConfiguration()
-            } label: {
-                Text("Confirm")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(selectedBeaconIDs.isEmpty ? Color.gray : Color.blue)
-                    .cornerRadius(10)
+        VStack(spacing: 12) {
+            // Top row: Save Values + Push to Hardware
+            HStack(spacing: 12) {
+                Button {
+                    saveElevationValues()
+                } label: {
+                    Text("Save Values")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.green)
+                        .cornerRadius(8)
+                }
+                
+                Button {
+                    startConfiguration()
+                } label: {
+                    Text("Push to Hardware")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(selectedBeaconIDs.isEmpty ? Color.gray : Color.blue)
+                        .cornerRadius(8)
+                }
+                .disabled(selectedBeaconIDs.isEmpty)
             }
-            .disabled(selectedBeaconIDs.isEmpty)
             
-            Button {
-                isPresented = false
-            } label: {
-                Text("Cancel")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.primary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(10)
+            // Bottom row: Read from Hardware + Cancel
+            HStack(spacing: 12) {
+                Button {
+                    readFromHardware()
+                } label: {
+                    Text("Read from Hardware")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(selectedBeaconIDs.isEmpty ? Color.gray : Color.orange)
+                        .cornerRadius(8)
+                }
+                .disabled(selectedBeaconIDs.isEmpty)
+                
+                Button {
+                    isPresented = false
+                } label: {
+                    Text("Cancel")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.gray.opacity(0.2))
+                        .cornerRadius(8)
+                }
             }
         }
         .padding()
     }
     
     // MARK: - Configuration Logic
+    
+    private func saveElevationValues() {
+        var savedCount = 0
+        
+        for (beaconID, elevationString) in pendingElevations {
+            if let elevation = Double(elevationString) {
+                let currentElevation = beaconDotStore.getElevation(for: beaconID)
+                if abs(elevation - currentElevation) > 0.001 {
+                    beaconDotStore.setElevation(for: beaconID, elevation: elevation)
+                    savedCount += 1
+                }
+            }
+        }
+        
+        print("💾 [BeaconSettings] Saved \(savedCount) elevation value(s)")
+    }
+    
+    private func readFromHardware() {
+        guard !selectedBeaconIDs.isEmpty else { return }
+        
+        // Get password for current location
+        let locationID = PersistenceContext.shared.locationID
+        guard let password = BeaconPasswordStore.shared.getPassword(for: locationID) else {
+            print("⚠️ [BeaconSettings] No password stored for location '\(locationID)'")
+            return
+        }
+        
+        // Initialize results for all selected beacons
+        configurationResults = selectedBeaconIDs.sorted().map { beaconID in
+            BeaconConfigResult(beaconID: beaconID, status: .waiting)
+        }
+        
+        showProgress = true
+        
+        // Start scanning for beacons
+        kbeaconManager.startScanning()
+        
+        // Wait for scan results, then process
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [self] in
+            kbeaconManager.stopScanning()
+            
+            let discoveredBeacons = kbeaconManager.discoveredBeacons
+            print("📡 [BeaconSettings] Found \(discoveredBeacons.count) beacon(s) for read")
+            
+            // Match selected beacons to discovered devices
+            var matchedBeacons: [(beaconID: String, device: KBeacon)] = []
+            for beaconID in selectedBeaconIDs.sorted() {
+                if let device = discoveredBeacons.first(where: { $0.name == beaconID }) {
+                    matchedBeacons.append((beaconID: beaconID, device: device))
+                } else {
+                    updateResult(for: beaconID, status: .failed, error: "Not found in scan")
+                }
+            }
+            
+            // Process matched beacons sequentially
+            readSequentially(beacons: matchedBeacons, password: password, index: 0)
+        }
+    }
+    
+    private func readSequentially(
+        beacons: [(beaconID: String, device: KBeacon)],
+        password: String,
+        index: Int
+    ) {
+        // Base case: all beacons processed
+        guard index < beacons.count else {
+            print("✅ [BeaconSettings] Read complete - \(beacons.count) beacon(s)")
+            return
+        }
+        
+        let (beaconID, device) = beacons[index]
+        
+        // Helper to process next beacon
+        func processNext() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.readSequentially(beacons: beacons, password: password, index: index + 1)
+            }
+        }
+        
+        // Update status: connecting
+        updateResult(for: beaconID, status: .connecting)
+        
+        kbeaconManager.connect(to: device, password: password) { [self] success, message in
+            guard success else {
+                updateResult(for: beaconID, status: .failed, error: message)
+                processNext()
+                return
+            }
+            
+            // Update status: reading (reuse verifying status)
+            updateResult(for: beaconID, status: .verifying)
+            
+            // Read configuration
+            if let config = kbeaconManager.readConfiguration(from: device) {
+                // Update BeaconDotStore with read values
+                beaconDotStore.updateFromDeviceConfig(
+                    beaconName: beaconID,
+                    txPower: config.txPower,
+                    intervalMs: config.intervalMs,
+                    mac: device.mac,
+                    model: config.model,
+                    firmware: config.firmwareVersion
+                )
+                
+                updateResult(for: beaconID, status: .complete)
+                print("📖 [BeaconSettings] Read \(beaconID): TX=\(config.txPower)dBm, Interval=\(Int(config.intervalMs))ms")
+            } else {
+                updateResult(for: beaconID, status: .failed, error: "Failed to read configuration")
+            }
+            
+            kbeaconManager.disconnect(from: device)
+            processNext()
+        }
+    }
     
     private func startConfiguration() {
         guard !selectedBeaconIDs.isEmpty else { return }
