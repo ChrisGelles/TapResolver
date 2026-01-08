@@ -2723,17 +2723,136 @@ private struct DebugSettingsPanel: View {
     
     private func forceV2Remigration() {
         let locationID = PersistenceContext.shared.locationID
+        let ctx = PersistenceContext.shared
+        let ud = UserDefaults.standard
+        
+        print("\n" + String(repeating: "=", count: 70))
+        print("🔄 RECOVERING LEGACY DATA TO V2 FOR: \(locationID)")
+        print(String(repeating: "=", count: 70))
+        
+        // 1. Try to read from dots.json file first
+        let dotsFile = ctx.locationDir.appendingPathComponent("dots.json")
+        var recoveredDots: [(beaconID: String, x: Double, y: Double, elevation: Double, txPower: Int?)] = []
+        
+        if let data = try? Data(contentsOf: dotsFile),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            print("📄 Found dots.json with \(json.count) dots")
+            for dot in json {
+                if let beaconID = dot["beaconID"] as? String,
+                   let x = dot["x"] as? Double,
+                   let y = dot["y"] as? Double {
+                    let elevation = dot["elevation"] as? Double ?? 0.75
+                    let txPower = dot["txPower"] as? Int
+                    recoveredDots.append((beaconID, x, y, elevation, txPower))
+                    print("   ✓ \(beaconID): (\(Int(x)), \(Int(y))) elev=\(String(format: "%.2f", elevation))m")
+                }
+            }
+        } else {
+            print("📄 No dots.json found, trying UserDefaults fallback...")
+            
+            // 2. Fall back to BeaconDots_v1 in UserDefaults
+            let fallbackKey = "locations.\(locationID).BeaconDots_v1"
+            if let data = ud.data(forKey: fallbackKey),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                print("📦 Found BeaconDots_v1 with \(json.count) dots")
+                for dot in json {
+                    if let beaconID = dot["beaconID"] as? String,
+                       let x = dot["x"] as? Double,
+                       let y = dot["y"] as? Double {
+                        let elevation = dot["elevation"] as? Double ?? 0.75
+                        let txPower = dot["txPower"] as? Int
+                        recoveredDots.append((beaconID, x, y, elevation, txPower))
+                        print("   ✓ \(beaconID): (\(Int(x)), \(Int(y))) elev=\(String(format: "%.2f", elevation))m")
+                    }
+                }
+            }
+        }
+        
+        guard !recoveredDots.isEmpty else {
+            print("❌ NO LEGACY DATA FOUND TO RECOVER")
+            print(String(repeating: "=", count: 70) + "\n")
+            return
+        }
+        
+        // 3. Also try to recover locks from BeaconLocks_v1
+        var locksMap: [String: Bool] = [:]
+        let locksKey = "locations.\(locationID).BeaconLocks_v1"
+        if let data = ud.data(forKey: locksKey) {
+            // Try wrapped format first
+            if let wrapper = try? JSONDecoder().decode([String: [String: Bool]].self, from: data),
+               let locks = wrapper["locks"] {
+                locksMap = locks
+                print("🔒 Recovered \(locks.count) lock entries")
+            } else if let locks = try? JSONDecoder().decode([String: Bool].self, from: data) {
+                locksMap = locks
+                print("🔒 Recovered \(locks.count) lock entries")
+            }
+        }
+        
+        // 4. Also try to recover elevations from BeaconElevations_v1 (may have newer values)
+        var elevationsMap: [String: Double] = [:]
+        let elevKey = "locations.\(locationID).BeaconElevations_v1"
+        if let data = ud.data(forKey: elevKey),
+           let elevations = try? JSONDecoder().decode([String: Double].self, from: data) {
+            elevationsMap = elevations
+            print("📏 Recovered \(elevations.count) elevation entries from separate key")
+        }
+        
+        // 5. Build V2 structure
+        struct V2Dot: Codable {
+            let beaconID: String
+            var x: Double
+            var y: Double
+            var elevation: Double
+            var txPower: Int?
+            var advertisingInterval: Double?
+            var isLocked: Bool
+            var macAddress: String?
+            var model: String?
+            var firmware: String?
+            var lastConfigReadSession: Int?
+        }
+        
+        var v2Dots: [V2Dot] = []
+        for dot in recoveredDots {
+            // Use elevation from separate key if available, otherwise from dots.json
+            let finalElevation = elevationsMap[dot.beaconID] ?? dot.elevation
+            let isLocked = locksMap[dot.beaconID] ?? false
+            
+            let v2 = V2Dot(
+                beaconID: dot.beaconID,
+                x: dot.x,
+                y: dot.y,
+                elevation: finalElevation,
+                txPower: dot.txPower,
+                advertisingInterval: nil,
+                isLocked: isLocked,
+                macAddress: nil,
+                model: nil,
+                firmware: nil,
+                lastConfigReadSession: nil
+            )
+            v2Dots.append(v2)
+        }
+        
+        // 6. Write to V2 key
         let v2Key = "locations.\(locationID).BeaconDots_v2"
+        do {
+            let data = try JSONEncoder().encode(v2Dots)
+            ud.set(data, forKey: v2Key)
+            print("\n💾 SAVED \(v2Dots.count) DOTS TO V2")
+            print("   Key: \(v2Key)")
+            print("   Size: \(data.count) bytes")
+        } catch {
+            print("❌ Failed to encode V2: \(error)")
+            return
+        }
         
-        print("\n🔄 Forcing V2 re-migration for \(locationID)...")
-        
-        // Delete existing V2 data
-        UserDefaults.standard.removeObject(forKey: v2Key)
-        print("   ✓ Deleted existing V2 data")
-        
-        // Trigger reload which will re-migrate
+        // 7. Trigger reload
+        print("\n📢 Posting locationDidChange to reload...")
         NotificationCenter.default.post(name: .locationDidChange, object: nil)
-        print("   ✓ Posted locationDidChange to trigger re-migration")
+        
+        print(String(repeating: "=", count: 70) + "\n")
     }
 }
 
