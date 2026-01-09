@@ -251,7 +251,17 @@ struct SVGExportPanel: View {
                 doc.setBackgroundImage(mapImage)
             }
             
-            // Phase 2: Add calibration mesh layers
+            // Add triangles layer (below mesh)
+            if exportOptions.includeTriangles {
+                self.addTrianglesLayer(to: doc, triangles: triangles, points: points)
+            }
+            
+            // Add zones layer (below mesh)
+            if exportOptions.includeZones {
+                self.addZonesLayer(to: doc, zones: zones, points: points)
+            }
+            
+            // Phase 2: Add calibration mesh layers (mappoints on top)
             if exportOptions.includeCalibrationMesh {
                 self.addCalibrationMeshLayers(to: doc, mapSize: mapImage.size, points: points, pixelsPerMeter: pixelsPerMeter)
             }
@@ -259,16 +269,6 @@ struct SVGExportPanel: View {
             // Phase 3: Add RSSI heatmap layers
             if exportOptions.includeRSSIHeatmap {
                 self.addRSSIHeatmapLayers(to: doc, mapSize: mapImage.size, surveyPoints: surveyPoints, beaconDots: beaconDots, pixelsPerMeter: pixelsPerMeter)
-            }
-            
-            // Add triangles layer
-            if exportOptions.includeTriangles {
-                self.addTrianglesLayer(to: doc, triangles: triangles, points: points)
-            }
-            
-            // Add zones layer
-            if exportOptions.includeZones {
-                self.addZonesLayer(to: doc, zones: zones, points: points)
             }
             
             // Write to file
@@ -621,19 +621,27 @@ struct SVGExportPanel: View {
     private func addTrianglesLayer(to doc: SVGDocument, triangles: [TrianglePatch], points: [MapPointStore.MapPoint]) {
         guard !triangles.isEmpty else { return }
         
-        // Color palette for triangles (semi-transparent fills)
-        let colors = [
-            "rgba(255,100,100,0.3)",  // Red
-            "rgba(100,255,100,0.3)",  // Green
-            "rgba(100,100,255,0.3)",  // Blue
-            "rgba(255,255,100,0.3)",  // Yellow
-            "rgba(255,100,255,0.3)",  // Magenta
-            "rgba(100,255,255,0.3)",  // Cyan
+        // Color palette for triangles (hex colors)
+        let fillColors = [
+            "ff6464",  // Red
+            "64ff64",  // Green
+            "6464ff",  // Blue
+            "ffff64",  // Yellow
+            "ff64ff",  // Magenta
+            "64ffff",  // Cyan
         ]
+        
+        // Register CSS classes for each triangle
+        for (index, triangle) in triangles.enumerated() {
+            let triID = String(triangle.id.uuidString.prefix(8))
+            let fillHex = fillColors[index % fillColors.count]
+            let css = "fill: #\(fillHex); fill-opacity: 0.30; stroke: #000000; stroke-opacity: 0.60; stroke-width: 2;"
+            doc.registerStyle(className: "triangle-\(triID)", css: css)
+        }
         
         var content = ""
         
-        for (index, triangle) in triangles.enumerated() {
+        for triangle in triangles {
             // Get vertex positions
             var vertexPositions: [CGPoint] = []
             for vertexID in triangle.vertexIDs {
@@ -644,18 +652,11 @@ struct SVGExportPanel: View {
             
             guard vertexPositions.count == 3 else { continue }
             
-            let fillColor = colors[index % colors.count]
-            let strokeColor = "rgba(0,0,0,0.6)"
             let triID = String(triangle.id.uuidString.prefix(8))
             
-            // Draw triangle polygon
+            // Draw triangle polygon with CSS class
             let pointsStr = vertexPositions.map { "\(String(format: "%.1f", $0.x)),\(String(format: "%.1f", $0.y))" }.joined(separator: " ")
-            content += "    <polygon id=\"tri-\(triID)\" points=\"\(pointsStr)\" fill=\"\(fillColor)\" stroke=\"\(strokeColor)\" stroke-width=\"2\"/>\n"
-            
-            // Add vertex markers
-            for (vIdx, pos) in vertexPositions.enumerated() {
-                content += "    <circle cx=\"\(String(format: "%.1f", pos.x))\" cy=\"\(String(format: "%.1f", pos.y))\" r=\"6\" fill=\"\(strokeColor)\"/>\n"
-            }
+            content += "    <polygon id=\"tri-\(triID)\" class=\"triangle-\(triID)\" points=\"\(pointsStr)\"/>\n"
         }
         
         doc.addLayer(id: "triangles", content: content)
@@ -666,6 +667,17 @@ struct SVGExportPanel: View {
     
     private func addZonesLayer(to doc: SVGDocument, zones: [Zone], points: [MapPointStore.MapPoint]) {
         guard !zones.isEmpty else { return }
+        
+        // Register CSS classes for zones
+        for zone in zones {
+            let zoneID = String(zone.id.uuidString.prefix(8))
+            let quadCss = "fill: none; stroke: #ffa500; stroke-opacity: 0.90; stroke-width: 3; stroke-dasharray: 10,5;"
+            let cornerCss = "fill: #ffa500; stroke: #000000; stroke-width: 1;"
+            let labelCss = "fill: #ffa500; font-family: sans-serif; font-size: 14px;"
+            doc.registerStyle(className: "zone-quad-\(zoneID)", css: quadCss)
+            doc.registerStyle(className: "zone-corner-\(zoneID)", css: cornerCss)
+            doc.registerStyle(className: "zone-label-\(zoneID)", css: labelCss)
+        }
         
         var content = ""
         
@@ -681,22 +693,21 @@ struct SVGExportPanel: View {
             guard cornerPositions.count == 4 else { continue }
             
             let zoneID = String(zone.id.uuidString.prefix(8))
-            let strokeColor = "rgba(255,165,0,0.9)"  // Orange
             
-            // Draw zone quadrilateral (dashed outline, no fill)
+            // Draw zone quadrilateral with CSS class
             let pointsStr = cornerPositions.map { "\(String(format: "%.1f", $0.x)),\(String(format: "%.1f", $0.y))" }.joined(separator: " ")
-            content += "    <polygon id=\"zone-\(zoneID)\" points=\"\(pointsStr)\" fill=\"none\" stroke=\"\(strokeColor)\" stroke-width=\"3\" stroke-dasharray=\"10,5\"/>\n"
+            content += "    <polygon id=\"zone-\(zoneID)\" class=\"zone-quad-\(zoneID)\" points=\"\(pointsStr)\"/>\n"
             
-            // Add corner markers (squares)
+            // Add corner markers (squares) with CSS class
             for (cIdx, pos) in cornerPositions.enumerated() {
                 let size: CGFloat = 10
-                content += "    <rect x=\"\(String(format: "%.1f", pos.x - size/2))\" y=\"\(String(format: "%.1f", pos.y - size/2))\" width=\"\(size)\" height=\"\(size)\" fill=\"\(strokeColor)\" stroke=\"black\" stroke-width=\"1\"/>\n"
+                content += "    <rect id=\"zone-\(zoneID)-corner-\(cIdx)\" class=\"zone-corner-\(zoneID)\" x=\"\(String(format: "%.1f", pos.x - size/2))\" y=\"\(String(format: "%.1f", pos.y - size/2))\" width=\"\(size)\" height=\"\(size)\"/>\n"
             }
             
-            // Add zone name label at centroid
+            // Add zone name label at centroid with CSS class
             let centroidX = cornerPositions.reduce(0) { $0 + $1.x } / 4
             let centroidY = cornerPositions.reduce(0) { $0 + $1.y } / 4
-            content += "    <text x=\"\(String(format: "%.1f", centroidX))\" y=\"\(String(format: "%.1f", centroidY))\" font-family=\"sans-serif\" font-size=\"14\" fill=\"\(strokeColor)\" text-anchor=\"middle\" dominant-baseline=\"middle\">\(zone.name)</text>\n"
+            content += "    <text id=\"zone-\(zoneID)-label\" class=\"zone-label-\(zoneID)\" x=\"\(String(format: "%.1f", centroidX))\" y=\"\(String(format: "%.1f", centroidY))\" text-anchor=\"middle\" dominant-baseline=\"middle\">\(zone.name)</text>\n"
         }
         
         doc.addLayer(id: "zones", content: content)
