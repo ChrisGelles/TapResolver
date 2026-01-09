@@ -17,6 +17,8 @@ struct SVGExportPanel: View {
     @EnvironmentObject private var surveyExportOptions: SurveyExportOptions
     @EnvironmentObject private var beaconListsStore: BeaconListsStore
     @EnvironmentObject private var mapTransform: MapTransformStore
+    @EnvironmentObject private var triangleStore: TrianglePatchStore
+    @EnvironmentObject private var zoneStore: ZoneStore
 
     
     @Binding var isPresented: Bool
@@ -74,6 +76,8 @@ struct SVGExportPanel: View {
                     Toggle("Map Background", isOn: $exportOptions.includeMapBackground)
                     Toggle("Calibration Mesh", isOn: $exportOptions.includeCalibrationMesh)
                     Toggle("RSSI Heatmap", isOn: $exportOptions.includeRSSIHeatmap)
+                    Toggle("Triangles", isOn: $exportOptions.includeTriangles)
+                    Toggle("Zones", isOn: $exportOptions.includeZones)
                 }
                 
                 // MARK: - Preview Info
@@ -116,6 +120,24 @@ struct SVGExportPanel: View {
                         }
                     }
                     
+                    if exportOptions.includeTriangles {
+                        HStack {
+                            Text("Triangles")
+                            Spacer()
+                            Text("\(triangleStore.triangles.count)")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if exportOptions.includeZones {
+                        HStack {
+                            Text("Zones")
+                            Spacer()
+                            Text("\(zoneStore.zones.count)")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
                     HStack {
                         Text("Filename")
                         Spacer()
@@ -142,6 +164,7 @@ struct SVGExportPanel: View {
                             Spacer()
                         }
                     }
+                    .buttonStyle(.plain)
                     .disabled(exportOptions.isExporting)
                 }
                 
@@ -204,6 +227,8 @@ struct SVGExportPanel: View {
         let surveyPoints = Array(surveyPointStore.surveyPoints.values)
         let beaconDots = beaconDotStore.dots
         let pixelsPerMeter = getPixelsPerMeter()
+        let triangles = triangleStore.triangles
+        let zones = zoneStore.zones
         
         // Run export on background thread
         DispatchQueue.global(qos: .userInitiated).async {
@@ -234,6 +259,16 @@ struct SVGExportPanel: View {
             // Phase 3: Add RSSI heatmap layers
             if exportOptions.includeRSSIHeatmap {
                 self.addRSSIHeatmapLayers(to: doc, mapSize: mapImage.size, surveyPoints: surveyPoints, beaconDots: beaconDots, pixelsPerMeter: pixelsPerMeter)
+            }
+            
+            // Add triangles layer
+            if exportOptions.includeTriangles {
+                self.addTrianglesLayer(to: doc, triangles: triangles, points: points)
+            }
+            
+            // Add zones layer
+            if exportOptions.includeZones {
+                self.addZonesLayer(to: doc, zones: zones, points: points)
             }
             
             // Write to file
@@ -579,6 +614,93 @@ struct SVGExportPanel: View {
             .map { Character($0) }
             .map { String($0) }
             .joined()
+    }
+    
+    // MARK: - Triangle Layer
+    
+    private func addTrianglesLayer(to doc: SVGDocument, triangles: [TrianglePatch], points: [MapPointStore.MapPoint]) {
+        guard !triangles.isEmpty else { return }
+        
+        // Color palette for triangles (semi-transparent fills)
+        let colors = [
+            "rgba(255,100,100,0.3)",  // Red
+            "rgba(100,255,100,0.3)",  // Green
+            "rgba(100,100,255,0.3)",  // Blue
+            "rgba(255,255,100,0.3)",  // Yellow
+            "rgba(255,100,255,0.3)",  // Magenta
+            "rgba(100,255,255,0.3)",  // Cyan
+        ]
+        
+        var content = ""
+        
+        for (index, triangle) in triangles.enumerated() {
+            // Get vertex positions
+            var vertexPositions: [CGPoint] = []
+            for vertexID in triangle.vertexIDs {
+                if let point = points.first(where: { $0.id == vertexID }) {
+                    vertexPositions.append(point.mapPoint)
+                }
+            }
+            
+            guard vertexPositions.count == 3 else { continue }
+            
+            let fillColor = colors[index % colors.count]
+            let strokeColor = "rgba(0,0,0,0.6)"
+            let triID = String(triangle.id.uuidString.prefix(8))
+            
+            // Draw triangle polygon
+            let pointsStr = vertexPositions.map { "\(String(format: "%.1f", $0.x)),\(String(format: "%.1f", $0.y))" }.joined(separator: " ")
+            content += "    <polygon id=\"tri-\(triID)\" points=\"\(pointsStr)\" fill=\"\(fillColor)\" stroke=\"\(strokeColor)\" stroke-width=\"2\"/>\n"
+            
+            // Add vertex markers
+            for (vIdx, pos) in vertexPositions.enumerated() {
+                content += "    <circle cx=\"\(String(format: "%.1f", pos.x))\" cy=\"\(String(format: "%.1f", pos.y))\" r=\"6\" fill=\"\(strokeColor)\"/>\n"
+            }
+        }
+        
+        doc.addLayer(id: "triangles", content: content)
+        print("📐 [SVGExport] Added triangles layer with \(triangles.count) triangle(s)")
+    }
+    
+    // MARK: - Zones Layer
+    
+    private func addZonesLayer(to doc: SVGDocument, zones: [Zone], points: [MapPointStore.MapPoint]) {
+        guard !zones.isEmpty else { return }
+        
+        var content = ""
+        
+        for zone in zones {
+            // Get corner positions
+            var cornerPositions: [CGPoint] = []
+            for cornerID in zone.cornerIDs {
+                if let point = points.first(where: { $0.id == cornerID }) {
+                    cornerPositions.append(point.mapPoint)
+                }
+            }
+            
+            guard cornerPositions.count == 4 else { continue }
+            
+            let zoneID = String(zone.id.uuidString.prefix(8))
+            let strokeColor = "rgba(255,165,0,0.9)"  // Orange
+            
+            // Draw zone quadrilateral (dashed outline, no fill)
+            let pointsStr = cornerPositions.map { "\(String(format: "%.1f", $0.x)),\(String(format: "%.1f", $0.y))" }.joined(separator: " ")
+            content += "    <polygon id=\"zone-\(zoneID)\" points=\"\(pointsStr)\" fill=\"none\" stroke=\"\(strokeColor)\" stroke-width=\"3\" stroke-dasharray=\"10,5\"/>\n"
+            
+            // Add corner markers (squares)
+            for (cIdx, pos) in cornerPositions.enumerated() {
+                let size: CGFloat = 10
+                content += "    <rect x=\"\(String(format: "%.1f", pos.x - size/2))\" y=\"\(String(format: "%.1f", pos.y - size/2))\" width=\"\(size)\" height=\"\(size)\" fill=\"\(strokeColor)\" stroke=\"black\" stroke-width=\"1\"/>\n"
+            }
+            
+            // Add zone name label at centroid
+            let centroidX = cornerPositions.reduce(0) { $0 + $1.x } / 4
+            let centroidY = cornerPositions.reduce(0) { $0 + $1.y } / 4
+            content += "    <text x=\"\(String(format: "%.1f", centroidX))\" y=\"\(String(format: "%.1f", centroidY))\" font-family=\"sans-serif\" font-size=\"14\" fill=\"\(strokeColor)\" text-anchor=\"middle\" dominant-baseline=\"middle\">\(zone.name)</text>\n"
+        }
+        
+        doc.addLayer(id: "zones", content: content)
+        print("🔷 [SVGExport] Added zones layer with \(zones.count) zone(s)")
     }
     
     /// Get pixels per meter from MetricSquareStore (prefers locked squares)

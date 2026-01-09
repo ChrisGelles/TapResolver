@@ -15,6 +15,8 @@ class SVGExportOptions: ObservableObject {
     @Published var includeMapBackground: Bool = true
     @Published var includeCalibrationMesh: Bool = false  // Phase 2
     @Published var includeRSSIHeatmap: Bool = false      // Phase 3
+    @Published var includeTriangles: Bool = false
+    @Published var includeZones: Bool = false
     
     // Future options (Phase 2+)
     // @Published var includeCompassVectors: Bool = false
