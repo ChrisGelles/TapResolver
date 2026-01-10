@@ -137,6 +137,114 @@ struct LocationMenuView: View {
         GridItem(.flexible(), spacing: 12)
     ]
 
+    // MARK: - Extracted Views (Compiler Complexity Fix)
+
+    @ViewBuilder
+    private var locationGrid: some View {
+        LazyVGrid(columns: columns, alignment: .center, spacing: 12) {
+
+            // --- Hard-coded chiclet: Home/Chris's House ---
+            SelectableAssetLocationTile(
+                title: homeTitle,
+                imageName: defaultThumbAsset,
+                locationID: homeID,
+                isInSelectionMode: backupMode != .none,
+                isSelected: selectedLocationIDs.contains(homeID),
+                onTap: {
+                    if backupMode != .none {
+                        toggleSelection(homeID)
+                    } else {
+                        seedIfNeeded(id: homeID,
+                                     title: homeTitle,
+                                     mapAsset: defaultMapAsset,
+                                     thumbAsset: defaultThumbAsset)
+                        locationManager.setCurrentLocation(homeID)
+                        locationManager.showLocationMenu = false
+                    }
+                },
+                onGearTap: {
+                    PersistenceContext.shared.locationID = homeID
+                    selectedLocationForAR = homeID
+                }
+            )
+
+            // --- Hard-coded chiclet: Museum (8192×8192 asset) ---
+            SelectableAssetLocationTile(
+                title: museumTitle,
+                imageName: museumThumbAsset,
+                locationID: museumID,
+                isInSelectionMode: backupMode != .none,
+                isSelected: selectedLocationIDs.contains(museumID),
+                onTap: {
+                    if backupMode != .none {
+                        toggleSelection(museumID)
+                    } else {
+                        seedIfNeeded(id: museumID,
+                                     title: museumTitle,
+                                     mapAsset: museumMapAsset,
+                                     thumbAsset: museumThumbAsset)
+                        locationManager.setCurrentLocation(museumID)
+                        locationManager.showLocationMenu = false
+                    }
+                },
+                onGearTap: {
+                    PersistenceContext.shared.locationID = museumID
+                    selectedLocationForAR = museumID
+                }
+            )
+
+            // --- Dynamic locations from sandbox ---
+            ForEach(locationSummaries.filter { $0.id != homeID && $0.id != museumID }) { summary in
+                SelectableLocationTileView(
+                    summary: summary,
+                    isInSelectionMode: backupMode != .none,
+                    isSelected: selectedLocationIDs.contains(summary.id),
+                    onTap: {
+                        if backupMode != .none {
+                            toggleSelection(summary.id)
+                        } else {
+                            locationManager.setCurrentLocation(summary.id)
+                            locationManager.showLocationMenu = false
+                        }
+                    },
+                    onGearTap: {
+                        PersistenceContext.shared.locationID = summary.id
+                        selectedLocationForAR = summary.id
+                    }
+                )
+                .contextMenu {
+                    if backupMode == .none {
+                        Button {
+                            if let location = locationSummaries.first(where: { $0.id == summary.id }) {
+                                locationToRename = summary.id
+                                renameText = location.name
+                                showRenameDialog = true
+                            }
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+                        
+                        Button(role: .destructive) {
+                            locationToDelete = summary.id
+                            showDeleteConfirmation = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+
+            // --- Square "New Map" tile at the end of the grid ---
+            if backupMode == .none {
+                NewMapTileView()
+                    .onTapGesture { showingImportSheet = true }
+            }
+        }
+        .padding(.top, 12)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 24)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -144,115 +252,9 @@ struct LocationMenuView: View {
 
                 VStack(spacing: 0) {
                     // Main content ScrollView
-                ScrollView {
-                    LazyVGrid(columns: columns, alignment: .center, spacing: 12) {
-
-                        // --- Hard-coded chiclet: Home/Chris's House ---
-                            SelectableAssetLocationTile(
-                            title: homeTitle,
-                                imageName: defaultThumbAsset,
-                                locationID: homeID,
-                                isInSelectionMode: backupMode != .none,
-                                isSelected: selectedLocationIDs.contains(homeID),
-                                onTap: {
-                                if backupMode != .none {
-                                    toggleSelection(homeID)
-                                } else {
-                            seedIfNeeded(id: homeID,
-                                         title: homeTitle,
-                                         mapAsset: defaultMapAsset,
-                                         thumbAsset: defaultThumbAsset)
-                            locationManager.setCurrentLocation(homeID)
-                            locationManager.showLocationMenu = false
-                                }
-                                },
-                                onGearTap: {
-                                    // Set location context and show AR settings
-                                    PersistenceContext.shared.locationID = homeID
-                                    selectedLocationForAR = homeID
-                                }
-                        )
-
-                        // --- Hard-coded chiclet: Museum (8192×8192 asset) ---
-                            SelectableAssetLocationTile(
-                            title: museumTitle,
-                                imageName: museumThumbAsset,
-                                locationID: museumID,
-                                isInSelectionMode: backupMode != .none,
-                                isSelected: selectedLocationIDs.contains(museumID),
-                                onTap: {
-                                if backupMode != .none {
-                                    toggleSelection(museumID)
-                                } else {
-                            seedIfNeeded(id: museumID,
-                                         title: museumTitle,
-                                         mapAsset: museumMapAsset,
-                                         thumbAsset: museumThumbAsset)
-                            locationManager.setCurrentLocation(museumID)
-                            locationManager.showLocationMenu = false
-                                }
-                                },
-                                onGearTap: {
-                                    // Set location context and show AR settings
-                                    PersistenceContext.shared.locationID = museumID
-                                    selectedLocationForAR = museumID
-                                }
-                        )
-
-                        // --- Dynamic locations from sandbox, excluding the two hard-coded IDs ---
-                        ForEach(locationSummaries.filter { $0.id != homeID && $0.id != museumID }) { summary in
-                                SelectableLocationTileView(
-                                    summary: summary,
-                                    isInSelectionMode: backupMode != .none,
-                                    isSelected: selectedLocationIDs.contains(summary.id),
-                                    onTap: {
-                                    if backupMode != .none {
-                                        toggleSelection(summary.id)
-                                    } else {
-                                        locationManager.setCurrentLocation(summary.id)
-                                        locationManager.showLocationMenu = false
-                                    }
-                                    },
-                                    onGearTap: {
-                                        // Set location context and show AR settings
-                                        PersistenceContext.shared.locationID = summary.id
-                                        selectedLocationForAR = summary.id
-                                    }
-                                )
-                                //.aspectRatio(1, contentMode: .fit)
-                                .contextMenu {
-                                    if backupMode == .none {
-                                        Button {
-                                            if let location = locationSummaries.first(where: { $0.id == summary.id }) {
-                                                locationToRename = summary.id
-                                                renameText = location.name
-                                                showRenameDialog = true
-                                            }
-                                        } label: {
-                                            Label("Rename", systemImage: "pencil")
-                                        }
-                                        
-                                        Button(role: .destructive) {
-                                            locationToDelete = summary.id
-                                            showDeleteConfirmation = true
-                                        } label: {
-                                            Label("Delete", systemImage: "trash")
-                                        }
-                                    }
-                                }
-                        }
-
-                        // --- Square "New Map" tile at the end of the grid ---
-                            if backupMode == .none {
-                        NewMapTileView()
-                                    //.aspectRatio(1, contentMode: .fit)
-                            .onTapGesture { showingImportSheet = true }
-                            }
+                    ScrollView {
+                        locationGrid
                     }
-                    .padding(.top, 12)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 24)
-                }
                 .refreshable {
                     _ = LocationImportUtils.reconcileLocationsOnMenuOpen(
                         seedDefaultIfEmpty: false,
