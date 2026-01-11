@@ -177,11 +177,20 @@ struct SVGExportPanel: View {
                 // MARK: - Import Section
                 Section("Import") {
                     Button {
+                        print("🔘 [SVGExportPanel] Import button tapped")
                         showingImportFilePicker = true
                     } label: {
                         Label("Import Zones from SVG", systemImage: "square.and.arrow.down")
                     }
+                    .buttonStyle(.plain)
                     .disabled(pixelsPerMeter == nil)
+                    .onAppear {
+                        print("🔍 [SVGExportPanel] pixelsPerMeter = \(String(describing: pixelsPerMeter))")
+                        print("🔍 [SVGExportPanel] metricSquareStore.squares.count = \(metricSquareStore.squares.count)")
+                        if let square = metricSquareStore.squares.first {
+                            print("🔍 [SVGExportPanel] First square: side=\(square.side), meters=\(square.meters)")
+                        }
+                    }
                     
                     if pixelsPerMeter == nil {
                         Text("MetricSquare calibration required for import")
