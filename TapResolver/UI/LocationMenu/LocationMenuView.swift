@@ -246,6 +246,8 @@ struct LocationMenuView: View {
     }
 
     var body: some View {
+        let _ = print("⏱️ [LOCATION_MENU] body EVALUATING")
+        
         NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()

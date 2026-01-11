@@ -24,6 +24,8 @@ struct ContentView: View {
     @EnvironmentObject private var surveySelectionCoordinator: SurveySelectionCoordinator
 
     var body: some View {
+        let _ = print("⏱️ [CONTENT_VIEW] body EVALUATING — showLocationMenu=\(locationManager.showLocationMenu)")
+        
         Group {
             if locationManager.showLocationMenu {
                 LocationMenuView()
@@ -32,8 +34,10 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            print("⏱️ [CONTENT_VIEW] onAppear STARTED")
             transformProcessor.bind(to: mapTransform)
             transformProcessor.passThrough = true   // keep UX identical for now
+            print("⏱️ [CONTENT_VIEW] onAppear COMPLETE")
         }
         // Unified AR View presentation (single location)
         .fullScreenCover(isPresented: Binding(

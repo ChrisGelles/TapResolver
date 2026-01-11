@@ -31,8 +31,14 @@ struct AppBootstrap: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onAppear {
+                let bootstrapStart = CFAbsoluteTimeGetCurrent()
+                print("⏱️ [BOOTSTRAP] AppBootstrap.onAppear STARTED")
+                
                 // Prevent double running on scene activations
-                guard !Self.hasBootstrapped else { return }
+                guard !Self.hasBootstrapped else {
+                    print("⏱️ [BOOTSTRAP] Skipping — already bootstrapped")
+                    return
+                }
                 Self.hasBootstrapped = true
 
                 createLocationStubIfNeeded()
@@ -58,6 +64,9 @@ struct AppBootstrap: ViewModifier {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     scanner.startContinuous()
                 }
+                
+                let bootstrapEnd = CFAbsoluteTimeGetCurrent()
+                print("⏱️ [BOOTSTRAP] AppBootstrap.onAppear COMPLETE — \(String(format: "%.1f", (bootstrapEnd - bootstrapStart) * 1000))ms")
             }
     }
     

@@ -56,6 +56,9 @@ struct TapResolverApp: App {
     @State private var showAuthorNamePrompt = AppSettings.needsAuthorName
     
     init() {
+        let initStart = CFAbsoluteTimeGetCurrent()
+        print("⏱️ [APP_INIT] TapResolverApp.init() STARTED")
+        
         // Print app launch timestamp (once per app launch)
         if !Self.hasLoggedLaunchTime {
             let formatter = DateFormatter()
@@ -74,11 +77,21 @@ struct TapResolverApp: App {
         
         // Initialize coordinator without stores - configure() called in onAppear
         _arCalibrationCoordinator = StateObject(wrappedValue: ARCalibrationCoordinator())
+        
+        let initEnd = CFAbsoluteTimeGetCurrent()
+        print("⏱️ [APP_INIT] TapResolverApp.init() COMPLETE — \(String(format: "%.1f", (initEnd - initStart) * 1000))ms")
     }
 
     var body: some Scene {
-        WindowGroup {
+        let bodyStart = CFAbsoluteTimeGetCurrent()
+        print("⏱️ [APP_BODY] TapResolverApp.body EVALUATING")
+        
+        return WindowGroup {
             ContentView()
+                .onAppear {
+                    let bodyAppear = CFAbsoluteTimeGetCurrent()
+                    print("⏱️ [APP_BODY] ContentView.onAppear — \(String(format: "%.1f", (bodyAppear - bodyStart) * 1000))ms since body eval")
+                }
                 // Inject all environment objects at the app level
                 .environmentObject(mapTransform)
                 .environmentObject(beaconDotStore)
@@ -103,6 +116,9 @@ struct TapResolverApp: App {
                 .environmentObject(backupExportOptions)
                 .environmentObject(surveyExportOptions)
                 .onAppear {
+                    let configStart = CFAbsoluteTimeGetCurrent()
+                    print("⏱️ [APP_CONFIG] onAppear configure block STARTED")
+                    
                     // Configure coordinator with actual store instances
                     arCalibrationCoordinator.configure(
                         arStore: arWorldMapStore,
@@ -139,6 +155,9 @@ struct TapResolverApp: App {
                     
                     // METADATA MIGRATION: Add new fields to existing locations
                     migrateLegacyLocations()
+                    
+                    let configEnd = CFAbsoluteTimeGetCurrent()
+                    print("⏱️ [APP_CONFIG] onAppear configure block COMPLETE — \(String(format: "%.1f", (configEnd - configStart) * 1000))ms")
                 }
                 .appBootstrap(
                     scanner: btScanner,

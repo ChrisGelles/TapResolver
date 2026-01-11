@@ -153,6 +153,27 @@ public final class MapPointStore: ObservableObject {
     // Track whether initial load has completed (prevents duplicate loads from race condition)
     private var hasCompletedInitialLoad: Bool = false
     
+    // Track which location was loaded to skip redundant reloads
+    private var lastLoadedLocationID: String? = nil
+    
+    // MARK: - Timing Diagnostics
+    private var loadStartTime: CFAbsoluteTime = 0
+    private var lastCheckpoint: CFAbsoluteTime = 0
+    
+    private func markTime(_ label: String) {
+        let now = CFAbsoluteTimeGetCurrent()
+        let delta = (now - lastCheckpoint) * 1000  // ms
+        let total = (now - loadStartTime) * 1000
+        print("⏱️ [\(String(format: "%7.1f", total))ms] \(label) (+\(String(format: "%.1f", delta))ms)")
+        lastCheckpoint = now
+    }
+    
+    private func startTiming(_ label: String) {
+        loadStartTime = CFAbsoluteTimeGetCurrent()
+        lastCheckpoint = loadStartTime
+        print("⏱️ [    0.0ms] \(label) — TIMING START")
+    }
+    
     // MARK: - Bake-Down Freshness Tracking (Milestone 5)
     
     /// Timestamp of last successful bake-down operation
@@ -508,6 +529,7 @@ public final class MapPointStore: ObservableObject {
     }
     
     public func clearAndReloadForActiveLocation() {
+        startTiming("clearAndReloadForActiveLocation()")
         print("🔄 MapPointStore: Starting reload for location '\(ctx.locationID)'")
         
         // Mark that we've done an initial load (prevents race with delayed init)
@@ -515,14 +537,17 @@ public final class MapPointStore: ObservableObject {
         
         // Set flag to prevent saves during reload
         isReloading = true
+        markTime("flags set")
         
         // Clear in-memory data
         points.removeAll()
         activePointID = nil
         selectedPointID = nil
+        markTime("memory cleared")
         
         // Load fresh data for current location
         load()
+        markTime("load() returned")
         
         // Re-enable saves
         isReloading = false
@@ -531,8 +556,10 @@ public final class MapPointStore: ObservableObject {
         
         // Notify that map points have reloaded - trigger session index rebuild
         NotificationCenter.default.post(name: .mapPointsDidReload, object: nil)
+        markTime("notification posted")
         
         print("✅ MapPointStore: Reload complete - \(points.count) points loaded")
+        markTime("clearAndReloadForActiveLocation() COMPLETE")
     }
     
     /// Explicitly clear all map points for the current location
@@ -566,7 +593,9 @@ public final class MapPointStore: ObservableObject {
     private let activePointKey = "MapPointsActive_v1"
 
     public init() {
+        startTiming("MapPointStore.init()")
         print("🧱 MapPointStore init — ID: \(String(instanceID.prefix(8)))...")
+        markTime("init started")
         
         // Delay load() until locationID is set to avoid race condition
         Task {
@@ -574,16 +603,19 @@ public final class MapPointStore: ObservableObject {
             try? await Task.sleep(nanoseconds: 300_000_000)  // 0.3 sec
             await MainActor.run { [weak self] in
                 guard let self = self else { return }
+                self.startTiming("delayed init load")
                 // Skip if location change already triggered a load
                 if self.hasCompletedInitialLoad {
                     print("🔄 MapPointStore: Skipping delayed init (already loaded via notification)")
                     return
                 }
-                print("🔄 MapPointStore: Initial load for location '\(ctx.locationID)'")
+                print("🔄 MapPointStore: Initial load for location '\(self.ctx.locationID)'")
                 self.load()
                 self.hasCompletedInitialLoad = true
+                self.markTime("delayed init load COMPLETE")
             }
         }
+        markTime("Task scheduled")
         
         // Listen for scan session saves
         scanSessionCancellable = NotificationCenter.default.publisher(for: .scanSessionSaved)
@@ -606,13 +638,25 @@ public final class MapPointStore: ObservableObject {
         ) { [weak self] _ in
             // Defer reload to avoid "Publishing changes from within view updates"
             DispatchQueue.main.async {
-                print("📍 MapPointStore: Location changed, reloading...")
-                self?.reloadForActiveLocation()
+                guard let self = self else { return }
+                
+                // Skip if we already loaded this location
+                let newLocationID = self.ctx.locationID
+                if self.lastLoadedLocationID == newLocationID {
+                    print("📍 MapPointStore: Skipping reload — already loaded '\(newLocationID)'")
+                    return
+                }
+                
+                self.startTiming("locationDidChange handler")
+                print("📍 MapPointStore: Location changed to '\(newLocationID)', reloading...")
+                self.reloadForActiveLocation()
+                self.markTime("locationDidChange handler COMPLETE")
                 
                 // AR markers are now session-only; skip reloading persisted markers
                 // self?.loadARMarkers()
             }
         }
+        markTime("init() observers registered")
     }
 
     /// Add a new map point at the specified coordinates
@@ -1103,8 +1147,12 @@ public final class MapPointStore: ObservableObject {
     }
 
     private func load() {
+        startTiming("load()")
+        
         // Load map points from persistence
+        markTime("about to call ctx.read()")
         if let dto: [MapPointDTO] = ctx.read(pointsKey, as: [MapPointDTO].self) {
+            markTime("ctx.read() complete — \(dto.count) DTOs, starting map transform")
             var needsSave = false
             var loadedPoints = dto.map { dtoItem -> MapPoint in
                 // Load photo from disk if filename exists, otherwise use legacy data
@@ -1188,16 +1236,21 @@ public final class MapPointStore: ObservableObject {
                 point.arMarkerID = dtoItem.arMarkerID
                 return point
             }
+            markTime("DTO→MapPoint mapping complete — \(loadedPoints.count) points")
             
             // One-time migration: purge legacy AR position history (pre-rigid-transform data)
             MapPointStore.purgeLegacyARPositionHistoryIfNeeded(from: &loadedPoints)
+            markTime("purgeLegacyARPositionHistoryIfNeeded complete")
             
             self.points = loadedPoints
+            markTime("self.points assigned")
             
             // Summary log only
             if needsSave {
                 print("📦 Migrated \(points.count) MapPoint(s) to include role metadata")
+                markTime("about to save() for migration")
                 save()
+                markTime("save() complete")
             }
             print("✅ MapPointStore: Reload complete - \(points.count) points loaded")
             
@@ -1224,13 +1277,18 @@ public final class MapPointStore: ObservableObject {
         }
         
         selectedPointID = nil
+        markTime("selectedPointID cleared")
         
         // Load AR Markers
+        markTime("about to call loadARMarkers()")
         loadARMarkers()
+        markTime("loadARMarkers() complete")
         
         // AR markers are session-only; skip loading persisted marker data
         // Load Anchor Packages
+        markTime("about to call loadAnchorPackages()")
         loadAnchorPackages()
+        markTime("loadAnchorPackages() complete")
         
         // REMOVED: No longer load activePointID from UserDefaults
         // User must explicitly select a MapPoint each session
@@ -1244,6 +1302,10 @@ public final class MapPointStore: ObservableObject {
         } else {
             print("📦 [BAKE_META] No previous bake found")
         }
+        
+        // Record which location we just loaded
+        lastLoadedLocationID = ctx.locationID
+        markTime("load() COMPLETE")
         
         // Removed verbose logging - data loaded successfully
     }
