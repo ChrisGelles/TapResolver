@@ -1330,6 +1330,74 @@ public final class MapPointStore: ObservableObject {
         }
     }
     
+    // MARK: - Point Resolution (SVG Import Support)
+    
+    /// Find an existing MapPoint within the threshold distance of a given position
+    /// - Parameters:
+    ///   - position: The query position in map pixel coordinates
+    ///   - thresholdPixels: Maximum distance in pixels to consider a match
+    /// - Returns: The nearest MapPoint within threshold, or nil if none found
+    public func findNear(position: CGPoint, thresholdPixels: CGFloat) -> MapPoint? {
+        var nearestPoint: MapPoint? = nil
+        var nearestDistance: CGFloat = thresholdPixels
+        
+        for point in points {
+            let dx = point.position.x - position.x
+            let dy = point.position.y - position.y
+            let distance = sqrt(dx * dx + dy * dy)
+            
+            if distance < nearestDistance {
+                nearestDistance = distance
+                nearestPoint = point
+            }
+        }
+        
+        return nearestPoint
+    }
+    
+    /// Create a new MapPoint at the specified position with given roles
+    /// - Parameters:
+    ///   - position: Map pixel coordinates for the new point
+    ///   - roles: Set of roles to assign (e.g., [.zoneCorner])
+    ///   - name: Optional name for the point
+    /// - Returns: The created MapPoint
+    @discardableResult
+    public func createPoint(
+        at position: CGPoint,
+        roles: Set<MapPointRole>,
+        name: String? = nil
+    ) -> MapPoint {
+        let newPoint = MapPoint(
+            mapPoint: position,
+            name: name,
+            roles: roles,
+            isLocked: true
+        )
+        
+        points.append(newPoint)
+        save()
+        
+        print("✅ [MapPointStore] Created point \(String(newPoint.id.uuidString.prefix(8))) at (\(Int(position.x)), \(Int(position.y))) with roles: \(roles)")
+        return newPoint
+    }
+    
+    /// Add a role to an existing MapPoint
+    /// - Parameters:
+    ///   - role: The role to add
+    ///   - pointID: The MapPoint's UUID
+    public func addRole(_ role: MapPointRole, to pointID: UUID) {
+        guard let index = points.firstIndex(where: { $0.id == pointID }) else {
+            print("⚠️ [MapPointStore] Cannot add role: point \(String(pointID.uuidString.prefix(8))) not found")
+            return
+        }
+        
+        if !points[index].roles.contains(role) {
+            points[index].roles.insert(role)
+            save()
+            print("➕ [MapPointStore] Added role .\(role.rawValue) to point \(String(pointID.uuidString.prefix(8)))")
+        }
+    }
+    
     // MARK: - Diagnostics
 
     /// Diagnostic function to check what's actually stored in UserDefaults

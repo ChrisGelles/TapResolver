@@ -19,6 +19,7 @@ struct SVGExportPanel: View {
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var triangleStore: TrianglePatchStore
     @EnvironmentObject private var zoneStore: ZoneStore
+    @EnvironmentObject private var zoneGroupStore: ZoneGroupStore
 
     
     @Binding var isPresented: Bool
@@ -30,6 +31,11 @@ struct SVGExportPanel: View {
     @State private var showInitialsPrompt = false
     @State private var tempInitials: String = ""
     @State private var showJSONDocumentPicker = false
+    
+    // MARK: - Import State
+    @State private var showingImportFilePicker = false
+    @State private var importResult: SVGImportResult?
+    @State private var showingImportResult = false
     
     var body: some View {
         NavigationView {
@@ -168,6 +174,22 @@ struct SVGExportPanel: View {
                     .disabled(exportOptions.isExporting)
                 }
                 
+                // MARK: - Import Section
+                Section("Import") {
+                    Button {
+                        showingImportFilePicker = true
+                    } label: {
+                        Label("Import Zones from SVG", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(pixelsPerMeter == nil)
+                    
+                    if pixelsPerMeter == nil {
+                        Text("MetricSquare calibration required for import")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
             }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 0)
@@ -191,6 +213,24 @@ struct SVGExportPanel: View {
         .sheet(isPresented: $showShareSheet) {
             if let url = exportedFileURL {
                 ShareSheet(items: [url])
+            }
+        }
+        .fileImporter(
+            isPresented: $showingImportFilePicker,
+            allowedContentTypes: [.svg],
+            allowsMultipleSelection: false
+        ) { result in
+            handleImportResult(result)
+        }
+        .alert("Import Complete", isPresented: $showingImportResult) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if let result = importResult {
+                if result.success {
+                    Text("Created \(result.groupsCreated) groups, \(result.zonesCreated) zones.\n\(result.mapPointsCreated) new MapPoints, \(result.mapPointsReused) reused.")
+                } else {
+                    Text("Import failed:\n\(result.errors.joined(separator: "\n"))")
+                }
             }
         }
         .alert("Enter Your Initials", isPresented: $showInitialsPrompt) {
@@ -723,6 +763,48 @@ struct SVGExportPanel: View {
         
         let pixelsPerMeter = CGFloat(square.side) / CGFloat(square.meters)
         return pixelsPerMeter > 0 ? pixelsPerMeter : nil
+    }
+    
+    /// Pixels per meter computed property for import
+    private var pixelsPerMeter: Float? {
+        guard let square = metricSquareStore.squares.first else { return nil }
+        return Float(square.side) / Float(square.meters)
+    }
+    
+    // MARK: - Import Handler
+    
+    private func handleImportResult(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            
+            guard let ppm = pixelsPerMeter else {
+                print("⚠️ [SVGExportPanel] Cannot import: no MetricSquare calibration")
+                return
+            }
+            
+            let importer = SVGImporter(
+                mapPointStore: mapPointStore,
+                zoneStore: zoneStore,
+                zoneGroupStore: zoneGroupStore,
+                pixelsPerMeter: CGFloat(ppm)
+            )
+            
+            importResult = importer.importZones(from: url)
+            showingImportResult = true
+            
+        case .failure(let error):
+            print("❌ [SVGExportPanel] File picker error: \(error)")
+            importResult = SVGImportResult(
+                groupsCreated: 0,
+                zonesCreated: 0,
+                mapPointsCreated: 0,
+                mapPointsReused: 0,
+                errors: ["File selection failed: \(error.localizedDescription)"],
+                warnings: []
+            )
+            showingImportResult = true
+        }
     }
 }
 
