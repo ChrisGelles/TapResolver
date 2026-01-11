@@ -193,7 +193,7 @@ struct ZoneListItem: View {
             HStack(spacing: 2) {
                 Image(systemName: "triangle")
                     .font(.system(size: 9))
-                Text("\(zone.triangleIDs.count)")
+                Text("\(zone.memberTriangleIDs.count)")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
             }
             .foregroundColor(.secondary)

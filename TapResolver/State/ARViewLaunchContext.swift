@@ -29,7 +29,7 @@ final class ARViewLaunchContext: ObservableObject {
     @Published var zoneCornerIDs: [UUID] = []
     
     /// The Zone ID being calibrated (for saving starting index after completion)
-    @Published var activeZoneID: UUID?
+    @Published var activeZoneID: String?
     
     /// The starting corner index used for this calibration session
     @Published var zoneStartingCornerIndex: Int?
@@ -78,7 +78,7 @@ final class ARViewLaunchContext: ObservableObject {
     ///   - zoneCornerIDs: Corner IDs in rotated order (first element = first corner to place)
     ///   - zoneID: The Zone entity ID (for saving starting index after completion)
     ///   - startingCornerIndex: Which corner index (0-3) this session starts with
-    func launchZoneCornerCalibration(zoneCornerIDs: [UUID], zoneID: UUID, startingCornerIndex: Int) {
+    func launchZoneCornerCalibration(zoneCornerIDs: [UUID], zoneID: String, startingCornerIndex: Int) {
         DispatchQueue.main.async {
             self.zoneCornerIDs = zoneCornerIDs
             self.activeZoneID = zoneID

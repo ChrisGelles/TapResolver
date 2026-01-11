@@ -103,7 +103,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     @Published var calibrationState: CalibrationState = .idle
     
     /// Zone ID for the current calibration session (for saving starting index)
-    private var activeZoneID: UUID?
+    private var activeZoneID: String?
     
     /// Starting corner index for the current session
     private var currentStartingCornerIndex: Int?
@@ -515,7 +515,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Starts Zone Corner calibration mode with dynamic vertex count
     /// Unlike triangle calibration (3 vertices) or swath anchoring (3 anchors),
     /// this accepts any number >= 2 of Zone Corner MapPoints.
-    func startZoneCornerCalibration(zoneCornerIDs: [UUID], zoneID: UUID? = nil, startingCornerIndex: Int? = nil) {
+    func startZoneCornerCalibration(zoneCornerIDs: [UUID], zoneID: String? = nil, startingCornerIndex: Int? = nil) {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss.SSS"
         print("🚀 [ZONE_CORNER] startZoneCornerCalibration() BEGIN: \(formatter.string(from: Date()))")

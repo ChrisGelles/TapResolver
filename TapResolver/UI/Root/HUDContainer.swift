@@ -425,8 +425,8 @@ struct HUDContainer: View {
                     
                     guard let zone = targetZone else { return }
                     
-                    guard zone.cornerIDs.count == 4 else {
-                        print("⚠️ [HUD] Zone '\(zone.name)' has \(zone.cornerIDs.count) corners, need 4")
+                    guard zone.cornerMapPointIDs.count == 4 else {
+                        print("⚠️ [HUD] Zone '\(zone.name)' has \(zone.cornerMapPointIDs.count) corners, need 4")
                         return
                     }
                     
@@ -435,19 +435,26 @@ struct HUDContainer: View {
                     let newStartIndex = (lastIndex + 1) % 4
                     
                     // Rotate corner array so newStartIndex becomes position 0
-                    var rotatedCorners = zone.cornerIDs
+                    var rotatedCorners = zone.cornerMapPointIDs
                     for i in 0..<4 {
-                        rotatedCorners[i] = zone.cornerIDs[(newStartIndex + i) % 4]
+                        rotatedCorners[i] = zone.cornerMapPointIDs[(newStartIndex + i) % 4]
                     }
                     
                     print("🔄 [HUD] Rotating start point for '\(zone.name)':")
                     print("   Last starting index: \(zone.lastStartingCornerIndex.map { String($0) } ?? "nil (first run)")")
                     print("   New starting index: \(newStartIndex)")
-                    print("   Rotated order: \(rotatedCorners.map { String($0.uuidString.prefix(8)) })")
+                    print("   Rotated order: \(rotatedCorners.map { String($0.prefix(8)) })")
+                    
+                    // Convert String IDs back to UUIDs for AR calibration system
+                    let cornerUUIDs = rotatedCorners.compactMap { UUID(uuidString: $0) }
+                    guard cornerUUIDs.count == 4 else {
+                        print("⚠️ [HUD] Failed to convert corner IDs to UUIDs")
+                        return
+                    }
                     
                     print("🏁 [HUD] Launching Zone Corner Calibration for '\(zone.name)'")
                     arViewLaunchContext.launchZoneCornerCalibration(
-                        zoneCornerIDs: rotatedCorners,
+                        zoneCornerIDs: cornerUUIDs,
                         zoneID: zone.id,
                         startingCornerIndex: newStartIndex
                     )

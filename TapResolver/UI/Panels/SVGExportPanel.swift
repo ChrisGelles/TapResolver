@@ -670,7 +670,7 @@ struct SVGExportPanel: View {
         
         // Register CSS classes for zones
         for zone in zones {
-            let zoneID = String(zone.id.uuidString.prefix(8))
+            let zoneID = String(zone.id.prefix(8))
             let quadCss = "fill: none; stroke: #ffa500; stroke-opacity: 0.90; stroke-width: 3; stroke-dasharray: 10,5;"
             let cornerCss = "fill: #ffa500; stroke: #000000; stroke-width: 1;"
             let labelCss = "fill: #ffa500; font-family: sans-serif; font-size: 14px;"
@@ -684,15 +684,15 @@ struct SVGExportPanel: View {
         for zone in zones {
             // Get corner positions
             var cornerPositions: [CGPoint] = []
-            for cornerID in zone.cornerIDs {
-                if let point = points.first(where: { $0.id == cornerID }) {
+            for cornerID in zone.cornerMapPointIDs {
+                if let point = points.first(where: { $0.id.uuidString == cornerID }) {
                     cornerPositions.append(point.mapPoint)
                 }
             }
             
             guard cornerPositions.count == 4 else { continue }
             
-            let zoneID = String(zone.id.uuidString.prefix(8))
+            let zoneID = String(zone.id.prefix(8))
             
             // Draw zone quadrilateral with CSS class
             let pointsStr = cornerPositions.map { "\(String(format: "%.1f", $0.x)),\(String(format: "%.1f", $0.y))" }.joined(separator: " ")

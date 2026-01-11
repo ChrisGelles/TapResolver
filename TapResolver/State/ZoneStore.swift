@@ -14,7 +14,7 @@ public class ZoneStore: ObservableObject {
     @Published public var zones: [Zone] = []
     
     /// Currently selected zone for calibration (nil = none selected)
-    @Published public var selectedZoneID: UUID?
+    @Published public var selectedZoneID: String?
     
     // MARK: - Zone Creation State
     // UNIFICATION CANDIDATE: These properties mirror TrianglePatchStore.isCreatingTriangle 
@@ -23,8 +23,8 @@ public class ZoneStore: ObservableObject {
     /// Flag indicating zone creation mode is active
     @Published public var isCreatingZone: Bool = false
     
-    /// Corners selected so far during zone creation (0-4 UUIDs)
-    @Published public var creationCorners: [UUID] = []
+    /// Corners selected so far during zone creation (0-4 MapPoint ID strings)
+    @Published public var creationCorners: [String] = []
     
     /// Counter for auto-generating zone names
     private var zoneNameCounter: Int = 1
@@ -33,8 +33,14 @@ public class ZoneStore: ObservableObject {
     private weak var mapPointStore: MapPointStore?
     private weak var triangleStore: TrianglePatchStore?
     
-    /// Location-scoped UserDefaults key
+    /// Location-scoped UserDefaults key (v2 format)
     private var userDefaultsKey: String {
+        let locationID = PersistenceContext.shared.locationID
+        return "Zones_v2_\(locationID)"
+    }
+    
+    /// Legacy v1 key for migration check
+    private var legacyUserDefaultsKey: String {
         let locationID = PersistenceContext.shared.locationID
         return "zones_\(locationID)"
     }
@@ -57,36 +63,46 @@ public class ZoneStore: ObservableObject {
     
     /// Create a new zone with the given corners
     /// - Parameters:
-    ///   - name: Optional name (auto-generates "Zone N" if nil)
-    ///   - cornerIDs: Array of 4 MapPoint UUIDs in CCW order
+    ///   - id: Optional ID (auto-generates UUID string if nil)
+    ///   - displayName: Optional name (auto-generates "Zone N" if nil)
+    ///   - cornerMapPointIDs: Array of 4 MapPoint ID strings in CCW order
+    ///   - groupID: Optional group membership
     /// - Returns: The created Zone
     @discardableResult
-    public func createZone(name: String? = nil, cornerIDs: [UUID]) -> Zone {
-        let zoneName = name ?? "Zone \(zoneNameCounter)"
+    public func createZone(
+        id: String? = nil,
+        displayName: String? = nil,
+        cornerMapPointIDs: [String],
+        groupID: String? = nil
+    ) -> Zone {
+        let zoneID = id ?? UUID().uuidString
+        let zoneName = displayName ?? "Zone \(zoneNameCounter)"
         zoneNameCounter += 1
         
         var zone = Zone(
-            name: zoneName,
-            cornerIDs: cornerIDs
+            id: zoneID,
+            displayName: zoneName,
+            cornerMapPointIDs: cornerMapPointIDs,
+            groupID: groupID
         )
         
         // Compute initial triangle membership
-        zone.triangleIDs = computeTriangleMembership(for: zone)
+        zone.memberTriangleIDs = computeTriangleMembership(for: zone)
         
         zones.append(zone)
         save()
         
-        print("✅ [ZoneStore] Created zone '\(zoneName)' with \(cornerIDs.count) corners, \(zone.triangleIDs.count) triangles")
+        print("✅ [ZoneStore] Created zone '\(zoneName)' with \(cornerMapPointIDs.count) corners, \(zone.memberTriangleIDs.count) triangles")
         return zone
     }
     
     /// Delete a zone by ID
-    public func deleteZone(_ id: UUID) {
+    public func deleteZone(_ id: String) {
         guard let index = zones.firstIndex(where: { $0.id == id }) else {
-            print("⚠️ [ZoneStore] Cannot delete: zone \(String(id.uuidString.prefix(8))) not found")
+            print("⚠️ [ZoneStore] Cannot delete: zone \(String(id.prefix(8))) not found")
             return
         }
-        let name = zones[index].name
+        let name = zones[index].displayName
         zones.remove(at: index)
         save()
         print("🗑️ [ZoneStore] Deleted zone '\(name)'")
@@ -95,7 +111,7 @@ public class ZoneStore: ObservableObject {
     /// Update an existing zone
     public func updateZone(_ zone: Zone) {
         guard let index = zones.firstIndex(where: { $0.id == zone.id }) else {
-            print("⚠️ [ZoneStore] Cannot update: zone \(String(zone.id.uuidString.prefix(8))) not found")
+            print("⚠️ [ZoneStore] Cannot update: zone \(String(zone.id.prefix(8))) not found")
             return
         }
         
@@ -103,41 +119,41 @@ public class ZoneStore: ObservableObject {
         updatedZone.modifiedAt = Date()
         
         // Recompute triangle membership if corners changed
-        if zones[index].cornerIDs != zone.cornerIDs {
-            updatedZone.triangleIDs = computeTriangleMembership(for: updatedZone)
-            print("🔄 [ZoneStore] Recomputed triangle membership: \(updatedZone.triangleIDs.count) triangles")
+        if zones[index].cornerMapPointIDs != zone.cornerMapPointIDs {
+            updatedZone.memberTriangleIDs = computeTriangleMembership(for: updatedZone)
+            print("🔄 [ZoneStore] Recomputed triangle membership: \(updatedZone.memberTriangleIDs.count) triangles")
         }
         
         zones[index] = updatedZone
         save()
-        print("✅ [ZoneStore] Updated zone '\(updatedZone.name)'")
+        print("✅ [ZoneStore] Updated zone '\(updatedZone.displayName)'")
     }
     
     /// Update only the lastStartingCornerIndex for a zone
-    public func updateLastStartingCornerIndex(zoneID: UUID, index: Int) {
+    public func updateLastStartingCornerIndex(zoneID: String, index: Int) {
         guard let zoneIndex = zones.firstIndex(where: { $0.id == zoneID }) else {
-            print("⚠️ [ZoneStore] Cannot update starting index: zone \(String(zoneID.uuidString.prefix(8))) not found")
+            print("⚠️ [ZoneStore] Cannot update starting index: zone \(String(zoneID.prefix(8))) not found")
             return
         }
         
         zones[zoneIndex].lastStartingCornerIndex = index
         zones[zoneIndex].modifiedAt = Date()
         save()
-        print("🔄 [ZoneStore] Updated lastStartingCornerIndex to \(index) for zone '\(zones[zoneIndex].name)'")
+        print("🔄 [ZoneStore] Updated lastStartingCornerIndex to \(index) for zone '\(zones[zoneIndex].displayName)'")
     }
     
     /// Select a zone for calibration
-    func selectZone(_ zoneID: UUID?) {
+    func selectZone(_ zoneID: String?) {
         selectedZoneID = zoneID
         if let id = zoneID, let zone = zone(withID: id) {
-            print("🔷 [ZoneStore] Selected zone: '\(zone.name)'")
+            print("🔷 [ZoneStore] Selected zone: '\(zone.displayName)'")
         } else {
             print("🔷 [ZoneStore] Deselected zone")
         }
     }
     
     /// Toggle the lock state of a zone
-    func toggleLock(zoneID: UUID) {
+    func toggleLock(zoneID: String) {
         guard let index = zones.firstIndex(where: { $0.id == zoneID }) else {
             print("⚠️ [ZoneStore] Cannot toggle lock: zone not found")
             return
@@ -146,17 +162,17 @@ public class ZoneStore: ObservableObject {
         zones[index].isLocked.toggle()
         zones[index].modifiedAt = Date()
         save()
-        print("🔒 [ZoneStore] Zone '\(zones[index].name)' \(zones[index].isLocked ? "locked" : "unlocked")")
+        print("🔒 [ZoneStore] Zone '\(zones[index].displayName)' \(zones[index].isLocked ? "locked" : "unlocked")")
     }
     
     /// Rename a zone
-    func renameZone(zoneID: UUID, newName: String) {
+    func renameZone(zoneID: String, newName: String) {
         guard let index = zones.firstIndex(where: { $0.id == zoneID }) else {
             print("⚠️ [ZoneStore] Cannot rename: zone not found")
             return
         }
         
-        let oldName = zones[index].name
+        let oldName = zones[index].displayName
         let trimmedName = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         
         guard !trimmedName.isEmpty else {
@@ -164,7 +180,7 @@ public class ZoneStore: ObservableObject {
             return
         }
         
-        zones[index].name = trimmedName
+        zones[index].displayName = trimmedName
         zones[index].modifiedAt = Date()
         save()
         print("✏️ [ZoneStore] Renamed zone '\(oldName)' → '\(trimmedName)'")
@@ -173,33 +189,33 @@ public class ZoneStore: ObservableObject {
     // MARK: - Queries
     
     /// Find zone by ID
-    public func zone(withID id: UUID) -> Zone? {
+    public func zone(withID id: String) -> Zone? {
         zones.first { $0.id == id }
     }
     
     /// Find all zones containing a specific corner MapPoint
-    public func zones(containingCorner mapPointID: UUID) -> [Zone] {
-        zones.filter { $0.cornerIDs.contains(mapPointID) }
+    public func zones(containingCorner mapPointID: String) -> [Zone] {
+        zones.filter { $0.cornerMapPointIDs.contains(mapPointID) }
     }
     
     /// Find all zones containing a specific triangle
-    public func zones(containingTriangle triangleID: UUID) -> [Zone] {
-        zones.filter { $0.triangleIDs.contains(triangleID) }
+    public func zones(containingTriangle triangleID: String) -> [Zone] {
+        zones.filter { $0.memberTriangleIDs.contains(triangleID) }
     }
     
     // MARK: - Triangle Membership
     
     /// Recompute triangle membership for a specific zone
-    public func recomputeTriangleMembership(for zoneID: UUID) {
+    public func recomputeTriangleMembership(for zoneID: String) {
         guard let index = zones.firstIndex(where: { $0.id == zoneID }) else {
-            print("⚠️ [ZoneStore] Cannot recompute: zone \(String(zoneID.uuidString.prefix(8))) not found")
+            print("⚠️ [ZoneStore] Cannot recompute: zone \(String(zoneID.prefix(8))) not found")
             return
         }
         
-        zones[index].triangleIDs = computeTriangleMembership(for: zones[index])
+        zones[index].memberTriangleIDs = computeTriangleMembership(for: zones[index])
         zones[index].modifiedAt = Date()
         save()
-        print("🔄 [ZoneStore] Recomputed membership for '\(zones[index].name)': \(zones[index].triangleIDs.count) triangles")
+        print("🔄 [ZoneStore] Recomputed membership for '\(zones[index].displayName)': \(zones[index].memberTriangleIDs.count) triangles")
     }
     
     /// Recompute triangle membership for all zones
@@ -208,7 +224,7 @@ public class ZoneStore: ObservableObject {
         print("🔄 [ZoneStore] Recomputing triangle membership for all \(zones.count) zones...")
         
         for index in zones.indices {
-            zones[index].triangleIDs = computeTriangleMembership(for: zones[index])
+            zones[index].memberTriangleIDs = computeTriangleMembership(for: zones[index])
             zones[index].modifiedAt = Date()
         }
         
@@ -219,21 +235,22 @@ public class ZoneStore: ObservableObject {
     /// Compute which triangles have any area inside the zone
     /// Algorithm: Triangle is member if any vertex inside zone, any zone corner inside triangle,
     /// or any edge intersection occurs
-    private func computeTriangleMembership(for zone: Zone) -> [UUID] {
+    private func computeTriangleMembership(for zone: Zone) -> [String] {
         guard let mapPointStore = mapPointStore,
               let triangleStore = triangleStore else {
             print("⚠️ [ZoneStore] Cannot compute membership: missing dependencies")
             return []
         }
         
-        guard zone.cornerIDs.count == 4 else {
-            print("⚠️ [ZoneStore] Cannot compute membership: zone has \(zone.cornerIDs.count) corners, need 4")
+        guard zone.cornerMapPointIDs.count == 4 else {
+            print("⚠️ [ZoneStore] Cannot compute membership: zone has \(zone.cornerMapPointIDs.count) corners, need 4")
             return []
         }
         
         // Get zone corner positions in 2D
-        let zoneCorners: [CGPoint] = zone.cornerIDs.compactMap { cornerID in
-            mapPointStore.points.first { $0.id == cornerID }?.mapPoint
+        let zoneCorners: [CGPoint] = zone.cornerMapPointIDs.compactMap { cornerIDString in
+            guard let cornerID = UUID(uuidString: cornerIDString) else { return nil }
+            return mapPointStore.points.first { $0.id == cornerID }?.mapPoint
         }
         
         guard zoneCorners.count == 4 else {
@@ -256,7 +273,7 @@ public class ZoneStore: ObservableObject {
             }
         }
         
-        return memberTriangleIDs
+        return memberTriangleIDs.map { $0.uuidString }
     }
     
     // MARK: - Geometry Helpers
@@ -370,6 +387,12 @@ public class ZoneStore: ObservableObject {
     
     /// Load zones from UserDefaults
     public func load() {
+        // Check for and remove legacy v1 data
+        if UserDefaults.standard.data(forKey: legacyUserDefaultsKey) != nil {
+            UserDefaults.standard.removeObject(forKey: legacyUserDefaultsKey)
+            print("🗑️ [ZoneStore] Deleted legacy v1 zones (fresh start for v2)")
+        }
+        
         guard let data = UserDefaults.standard.data(forKey: userDefaultsKey) else {
             print("📂 [ZoneStore] No saved zones found for key '\(userDefaultsKey)'")
             zones = []
@@ -379,7 +402,7 @@ public class ZoneStore: ObservableObject {
         
         do {
             let dtos = try JSONDecoder().decode([ZoneDTO].self, from: data)
-            zones = dtos.compactMap { $0.toZone() }
+            zones = dtos.map { $0.toZone() }
             updateNameCounter()
             print("📂 [ZoneStore] Loaded \(zones.count) zones from UserDefaults")
         } catch {
@@ -395,7 +418,7 @@ public class ZoneStore: ObservableObject {
         var maxNumber = 0
         
         for zone in zones {
-            if let match = zone.name.firstMatch(of: pattern),
+            if let match = zone.displayName.firstMatch(of: pattern),
                let number = Int(match.1) {
                 maxNumber = max(maxNumber, number)
             }
@@ -444,27 +467,29 @@ public class ZoneStore: ObservableObject {
     /// UNIFICATION CANDIDATE: Mirrors TrianglePatchStore.addCreationVertex(_:mapPointStore:)
     @discardableResult
     func addCreationCorner(_ pointID: UUID, mapPointStore: MapPointStore) -> Bool {
+        let pointIDString = pointID.uuidString
+        
         // Validate point exists
         guard let point = mapPointStore.points.first(where: { $0.id == pointID }) else {
-            print("⚠️ [ZoneStore] Cannot add corner: MapPoint \(String(pointID.uuidString.prefix(8))) not found")
+            print("⚠️ [ZoneStore] Cannot add corner: MapPoint \(String(pointIDString.prefix(8))) not found")
             return false
         }
         
         // Validate role (must be zoneCorner)
         guard point.roles.contains(.zoneCorner) else {
-            print("⚠️ [ZoneStore] Cannot add corner: MapPoint \(String(pointID.uuidString.prefix(8))) is not a Zone Corner")
+            print("⚠️ [ZoneStore] Cannot add corner: MapPoint \(String(pointIDString.prefix(8))) is not a Zone Corner")
             return false
         }
         
         // Validate not already selected
-        guard !creationCorners.contains(pointID) else {
-            print("⚠️ [ZoneStore] Cannot add corner: MapPoint \(String(pointID.uuidString.prefix(8))) already selected")
+        guard !creationCorners.contains(pointIDString) else {
+            print("⚠️ [ZoneStore] Cannot add corner: MapPoint \(String(pointIDString.prefix(8))) already selected")
             return false
         }
         
         // Add corner
-        creationCorners.append(pointID)
-        print("🔷 [ZoneStore] Added corner \(creationCorners.count)/4: \(String(pointID.uuidString.prefix(8)))")
+        creationCorners.append(pointIDString)
+        print("🔷 [ZoneStore] Added corner \(creationCorners.count)/4: \(String(pointIDString.prefix(8)))")
         
         // Auto-finish when 4 corners selected
         if creationCorners.count == 4 {
@@ -485,8 +510,9 @@ public class ZoneStore: ObservableObject {
         }
         
         // Get corner positions for validation
-        let cornerPositions: [CGPoint] = creationCorners.compactMap { cornerID in
-            mapPointStore.points.first { $0.id == cornerID }?.mapPoint
+        let cornerPositions: [CGPoint] = creationCorners.compactMap { cornerIDString in
+            guard let cornerID = UUID(uuidString: cornerIDString) else { return nil }
+            return mapPointStore.points.first { $0.id == cornerID }?.mapPoint
         }
         
         guard cornerPositions.count == 4 else {
@@ -505,8 +531,8 @@ public class ZoneStore: ObservableObject {
         }
         
         // Create the zone
-        let zone = createZone(cornerIDs: creationCorners)
-        print("✅ [ZoneStore] Created zone '\(zone.name)' with \(zone.triangleIDs.count) member triangles")
+        let zone = createZone(cornerMapPointIDs: creationCorners)
+        print("✅ [ZoneStore] Created zone '\(zone.displayName)' with \(zone.memberTriangleIDs.count) member triangles")
         
         // Reset creation state
         isCreatingZone = false
