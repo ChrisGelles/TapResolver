@@ -150,6 +150,9 @@ public final class MapPointStore: ObservableObject {
     // CRITICAL: Prevent data loss during reload operations
     internal var isReloading: Bool = false
     
+    // Track whether initial load has completed (prevents duplicate loads from race condition)
+    private var hasCompletedInitialLoad: Bool = false
+    
     // MARK: - Bake-Down Freshness Tracking (Milestone 5)
     
     /// Timestamp of last successful bake-down operation
@@ -507,6 +510,9 @@ public final class MapPointStore: ObservableObject {
     public func clearAndReloadForActiveLocation() {
         print("🔄 MapPointStore: Starting reload for location '\(ctx.locationID)'")
         
+        // Mark that we've done an initial load (prevents race with delayed init)
+        hasCompletedInitialLoad = true
+        
         // Set flag to prevent saves during reload
         isReloading = true
         
@@ -568,8 +574,14 @@ public final class MapPointStore: ObservableObject {
             try? await Task.sleep(nanoseconds: 300_000_000)  // 0.3 sec
             await MainActor.run { [weak self] in
                 guard let self = self else { return }
+                // Skip if location change already triggered a load
+                if self.hasCompletedInitialLoad {
+                    print("🔄 MapPointStore: Skipping delayed init (already loaded via notification)")
+                    return
+                }
                 print("🔄 MapPointStore: Initial load for location '\(ctx.locationID)'")
                 self.load()
+                self.hasCompletedInitialLoad = true
             }
         }
         
@@ -1195,16 +1207,17 @@ public final class MapPointStore: ObservableObject {
             let pointsWithHistory = points.filter { !$0.arPositionHistory.isEmpty }.count
             print("📊 [DATA_SUMMARY] \(points.count) MapPoints, \(pointsWithHistory) with history, \(totalRecords) total position records across \(uniqueSessions.count) sessions")
             
-            // DIAGNOSTIC: Check if any points have distortion after load
+            // DIAGNOSTIC: Check if any points have distortion after load (summary only)
             let pointsWithDistortion = points.filter { $0.consensusDistortionVector != nil }
             print("📖 [POST_LOAD_DIAG] Loaded \(points.count) points, \(pointsWithDistortion.count) have distortion vectors")
-            for point in pointsWithDistortion {
-                let d = point.consensusDistortionVector!
-                print("   📐 \(String(point.id.uuidString.prefix(8))): (\(String(format: "%.3f", d.x)), \(String(format: "%.3f", d.y)), \(String(format: "%.3f", d.z)))")
-            }
             
-            // DEBUG: Show distortion vector summary after load
-            debugDistortionSummary()
+            // Verbose per-point logging disabled for performance
+            // To re-enable, uncomment the following:
+            // for point in pointsWithDistortion {
+            //     let d = point.consensusDistortionVector!
+            //     print("   📐 \(String(point.id.uuidString.prefix(8))): (\(String(format: "%.3f", d.x)), \(String(format: "%.3f", d.y)), \(String(format: "%.3f", d.z)))")
+            // }
+            // debugDistortionSummary()
         } else {
             self.points = []
             print("✅ MapPointStore: No saved data found - starting fresh")
