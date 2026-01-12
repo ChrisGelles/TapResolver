@@ -19,6 +19,7 @@ struct MapNavigationView: View {
     @EnvironmentObject private var trianglePatchStore: TrianglePatchStore
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
     @EnvironmentObject private var zoneStore: ZoneStore
+    @EnvironmentObject private var zoneGroupStore: ZoneGroupStore
     
     @State private var mapUIImage: UIImage?
     @State private var overlaysReady = false
@@ -185,6 +186,7 @@ struct MapNavigationView: View {
         mapPointStore.reloadForActiveLocation()
         trianglePatchStore.load()  // Reload triangles for new location
         zoneStore.reloadForActiveLocation()  // Reload zones for new location
+        zoneGroupStore.reloadForActiveLocation()  // Reload zone groups (colors) for new location
 
         // 5) Trigger bake-down if historical data has changed
         if let mapImage = mapUIImage {

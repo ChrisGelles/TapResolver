@@ -311,7 +311,7 @@ public class ZoneSVGParser: NSObject, XMLParserDelegate {
             var color = String(css[colorRange])
             
             // Expand 3-digit hex to 6-digit
-            if color.count == 4 {
+            if color.count == 4 && color.hasPrefix("#") {
                 let r = color[color.index(color.startIndex, offsetBy: 1)]
                 let g = color[color.index(color.startIndex, offsetBy: 2)]
                 let b = color[color.index(color.startIndex, offsetBy: 3)]

@@ -498,8 +498,10 @@ struct BeaconSettingsPanel: View {
             print("📥 [BeaconSettings] Updated \(updatedCount), added \(addedCount) beacon(s)")
             
         case .replaceAll:
-            // Clear current location's dots and import all
+            // Clear current location's dots and beacon list, then import all
             beaconDotStore.clear()
+            beaconListsStore.beacons.removeAll()
+            // Note: save() will be called by promoteToBeacons() when items are added
             for item in importData.beacons {
                 addImportItem(item)
                 addedCount += 1
@@ -534,6 +536,9 @@ struct BeaconSettingsPanel: View {
         let point = CGPoint(x: item.x, y: item.y)
         let color = BeaconDotStore.BeaconDotV2(beaconID: item.beaconID, x: item.x, y: item.y).color
         beaconDotStore.toggleDot(for: item.beaconID, mapPoint: point, color: color)
+        
+        // Add to beacon list so it appears in BeaconDrawer
+        beaconListsStore.promoteToBeacons(item.beaconID)
         
         // Apply additional properties
         beaconDotStore.setElevation(for: item.beaconID, elevation: item.elevation)
