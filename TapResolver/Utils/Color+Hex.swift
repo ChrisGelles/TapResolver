@@ -38,4 +38,9 @@ extension Color {
         
         return String(format: "#%02X%02X%02X", ri, gi, bi)
     }
+    
+    /// Convert Color to hex string (e.g., "#FF5733")
+    func toHex() -> String {
+        return hexString
+    }
 }

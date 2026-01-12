@@ -385,6 +385,8 @@ struct BeaconSettingsPanel: View {
                 elevation: dot.elevation,
                 txPower: dot.txPower,
                 advertisingInterval: dot.advertisingInterval,
+                isLocked: beaconDotStore.isLocked(dot.beaconID),
+                dotColorHex: dot.color.toHex(),
                 lastConfigChange: dot.lastConfigChange
             )
         }
@@ -534,7 +536,14 @@ struct BeaconSettingsPanel: View {
     private func addImportItem(_ item: BeaconExportItem) {
         // Create new dot via toggleDot, then update all properties
         let point = CGPoint(x: item.x, y: item.y)
-        let color = BeaconDotStore.BeaconDotV2(beaconID: item.beaconID, x: item.x, y: item.y).color
+        
+        // Use imported color if available, otherwise fall back to computed color
+        let color: Color
+        if let hexString = item.dotColorHex, let importedColor = Color(hex: hexString) {
+            color = importedColor
+        } else {
+            color = BeaconDotStore.BeaconDotV2(beaconID: item.beaconID, x: item.x, y: item.y).color
+        }
         beaconDotStore.toggleDot(for: item.beaconID, mapPoint: point, color: color)
         
         // Add to beacon list so it appears in BeaconDrawer
@@ -547,6 +556,12 @@ struct BeaconSettingsPanel: View {
         }
         if let interval = item.advertisingInterval {
             beaconDotStore.setAdvertisingInterval(for: item.beaconID, ms: interval)
+        }
+        
+        // Apply lock state (default to true if not specified for backward compatibility)
+        let shouldLock = item.isLocked ?? true
+        if shouldLock {
+            beaconDotStore.lock(item.beaconID)
         }
     }
     
@@ -896,5 +911,7 @@ struct BeaconExportItem: Codable {
     let elevation: Double
     let txPower: Int?
     let advertisingInterval: Double?
+    let isLocked: Bool?
+    let dotColorHex: String?
     let lastConfigChange: BeaconDotStore.ConfigChangeInfo?
 }

@@ -330,6 +330,13 @@ public final class BeaconDotStore: ObservableObject {
             save()
         }
     }
+    
+    public func lock(_ beaconID: String) {
+        if let idx = dots.firstIndex(where: { $0.beaconID == beaconID }) {
+            dots[idx].isLocked = true
+            save()
+        }
+    }
 
     // MARK: - V2 Consolidated Persistence
 
