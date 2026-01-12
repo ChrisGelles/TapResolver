@@ -16,6 +16,9 @@ public class ZoneStore: ObservableObject {
     /// Currently selected zone for calibration (nil = none selected)
     @Published public var selectedZoneID: String?
     
+    /// Visibility toggle for zone overlays
+    @Published public var zonesVisible: Bool = true
+    
     // MARK: - Zone Creation State
     // UNIFICATION CANDIDATE: These properties mirror TrianglePatchStore.isCreatingTriangle 
     // and TrianglePatchStore.creationVertices. Consider extracting a shared CreationModeCoordinator.
@@ -432,6 +435,16 @@ public class ZoneStore: ObservableObject {
         zones = []
         zoneNameCounter = 1
         print("🗑️ [ZoneStore] Cleared all zones")
+    }
+    
+    /// Purge all zones from memory AND UserDefaults (destructive)
+    public func purgeAll() {
+        let count = zones.count
+        zones = []
+        zoneNameCounter = 1
+        selectedZoneID = nil
+        UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+        print("🗑️ [ZoneStore] Purged \(count) zones from memory and UserDefaults")
     }
     
     /// Reload for active location (call when location changes)

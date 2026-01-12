@@ -1279,6 +1279,8 @@ private struct DebugSettingsPanel: View {
     @EnvironmentObject private var surveyPointStore: SurveyPointStore
     @EnvironmentObject private var beaconLists: BeaconListsStore
     @EnvironmentObject private var beaconDotStore: BeaconDotStore
+    @EnvironmentObject private var zoneStore: ZoneStore
+    @EnvironmentObject private var zoneGroupStore: ZoneGroupStore
     
     @Binding var showRelocalizationDebug: Bool
     @State private var showingSoftResetAlert = false
@@ -1301,6 +1303,7 @@ private struct DebugSettingsPanel: View {
     @State private var isBeaconScanning = false
     @State private var showMapSVGSheet = false
     @State private var mapSVGURL: URL? = nil
+    @State private var showingPurgeZonesAlert = false
     
     var body: some View {
         GeometryReader { geometry in
@@ -1447,6 +1450,23 @@ private struct DebugSettingsPanel: View {
                                 Image(systemName: "trash.circle")
                                     .font(.system(size: 24))
                                 Text("Purge AR History")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Purge Zones Button
+                        Button {
+                            showingPurgeZonesAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "square.slash")
+                                    .font(.system(size: 24))
+                                Text("Purge Zones")
                                     .font(.system(size: 12, weight: .medium))
                             }
                             .foregroundColor(.orange)
@@ -2000,6 +2020,15 @@ private struct DebugSettingsPanel: View {
             let location = locationManager.currentLocationID ?? "unknown"
             let totalRecords = mapPointStore.points.reduce(0) { $0 + $1.arPositionHistory.count }
             Text("This will purge all \(totalRecords) AR position record(s) from \(mapPointStore.points.count) MapPoint(s) for location '\(location)'.\n\n2D map coordinates and triangle structure will be preserved.\nConsensus positions will be reset.")
+        }
+        .alert("Purge All Zones?", isPresented: $showingPurgeZonesAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Purge", role: .destructive) {
+                zoneGroupStore.purgeAll()
+                zoneStore.purgeAll()
+            }
+        } message: {
+            Text("This will delete all zones and zone groups. This cannot be undone.")
         }
         .alert("Full Reset (Calibration + History)?", isPresented: $showingFullResetAlert) {
             Button("Cancel", role: .cancel) { }

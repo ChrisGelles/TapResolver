@@ -164,6 +164,14 @@ public class ZoneGroupStore: ObservableObject {
         print("🗑️ [ZoneGroupStore] Cleared all groups")
     }
     
+    /// Purge all zone groups from memory AND UserDefaults (destructive)
+    public func purgeAll() {
+        let count = groups.count
+        groups = []
+        UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+        print("🗑️ [ZoneGroupStore] Purged \(count) zone groups from memory and UserDefaults")
+    }
+    
     /// Reload for active location (call when location changes)
     public func reloadForActiveLocation() {
         load()
