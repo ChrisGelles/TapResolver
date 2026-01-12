@@ -13,6 +13,7 @@ struct ZoneDrawer: View {
     @EnvironmentObject private var zoneStore: ZoneStore
     @EnvironmentObject private var zoneGroupStore: ZoneGroupStore
     @EnvironmentObject private var mapTransform: MapTransformStore
+    @EnvironmentObject private var mapPointStore: MapPointStore
     
     // Track which groups are expanded
     @State private var expandedGroupIDs: Set<String> = []
@@ -47,6 +48,36 @@ struct ZoneDrawer: View {
     /// Get zones belonging to a specific group
     private func zonesInGroup(_ groupID: String) -> [Zone] {
         zoneStore.zones.filter { $0.groupID == groupID }
+    }
+    
+    /// Get corner positions for a zone
+    private func cornerPositions(for zone: Zone) -> [CGPoint] {
+        zone.cornerMapPointIDs.compactMap { cornerIDString in
+            guard let cornerID = UUID(uuidString: cornerIDString),
+                  let point = mapPointStore.points.first(where: { $0.id == cornerID }) else {
+                return nil
+            }
+            return point.mapPoint
+        }
+    }
+    
+    /// Get all corner positions for a zone group
+    private func cornerPositions(forGroup groupID: String) -> [CGPoint] {
+        zonesInGroup(groupID).flatMap { cornerPositions(for: $0) }
+    }
+    
+    /// Frame the map to show a zone with margin
+    private func frameZone(_ zone: Zone) {
+        let corners = cornerPositions(for: zone)
+        guard !corners.isEmpty else { return }
+        mapTransform.frameToFitPoints(corners, padding: 80, animated: true)
+    }
+    
+    /// Frame the map to show all zones in a group with margin
+    private func frameZoneGroup(_ groupID: String) {
+        let allCorners = cornerPositions(forGroup: groupID)
+        guard !allCorners.isEmpty else { return }
+        mapTransform.frameToFitPoints(allCorners, padding: 60, animated: true)
     }
     
     private var currentWidth: CGFloat {
@@ -158,6 +189,7 @@ struct ZoneDrawer: View {
                                 zoneGroupStore.selectedGroupID = nil
                             } else {
                                 zoneGroupStore.selectedGroupID = group.id
+                                frameZoneGroup(group.id)
                             }
                         }
                     )
@@ -173,6 +205,7 @@ struct ZoneDrawer: View {
                                         zoneStore.selectZone(nil)
                                     } else {
                                         zoneStore.selectZone(zone.id)
+                                        frameZone(zone)
                                     }
                                 },
                                 onDelete: {
@@ -215,6 +248,7 @@ struct ZoneDrawer: View {
                                     zoneStore.selectZone(nil)
                                 } else {
                                     zoneStore.selectZone(zone.id)
+                                    frameZone(zone)
                                 }
                             },
                             onDelete: {
@@ -410,6 +444,7 @@ struct ZoneGroupHeader: View {
         .environmentObject(ZoneStore())
         .environmentObject(ZoneGroupStore())
         .environmentObject(MapTransformStore())
+        .environmentObject(MapPointStore())
         .preferredColorScheme(.dark)
 }
 
