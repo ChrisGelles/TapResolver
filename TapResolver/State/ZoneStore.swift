@@ -29,6 +29,9 @@ public class ZoneStore: ObservableObject {
     /// Corners selected so far during zone creation (0-4 MapPoint ID strings)
     @Published public var creationCorners: [String] = []
     
+    /// Corners awaiting group assignment (non-nil triggers group picker sheet)
+    @Published public var pendingZoneCorners: [String]? = nil
+    
     /// Counter for auto-generating zone names
     private var zoneNameCounter: Int = 1
     
@@ -537,19 +540,51 @@ public class ZoneStore: ObservableObject {
         // Validate quad is not self-intersecting
         if isQuadSelfIntersecting(cornerPositions) {
             print("⚠️ [ZoneStore] Cannot finish: quad is self-intersecting. Select corners in CCW order.")
-            // Don't cancel - let user try again by removing last corner (future improvement)
-            // For now, cancel and they can restart
             cancelCreatingZone()
             return
         }
         
-        // Create the zone
-        let zone = createZone(cornerMapPointIDs: creationCorners)
-        print("✅ [ZoneStore] Created zone '\(zone.displayName)' with \(zone.memberTriangleIDs.count) member triangles")
-        
-        // Reset creation state
+        // Store corners and trigger group picker (don't create zone yet)
+        pendingZoneCorners = creationCorners
         isCreatingZone = false
         creationCorners = []
+        print("🔷 [ZoneStore] Zone corners validated, awaiting group selection")
+    }
+    
+    /// Complete zone creation with selected group
+    /// - Parameters:
+    ///   - groupID: Optional group ID (nil = ungrouped)
+    ///   - zoneGroupStore: Reference to add zone to group
+    /// - Returns: The created Zone, or nil if no pending corners
+    @discardableResult
+    public func completeZoneCreation(groupID: String?, zoneGroupStore: ZoneGroupStore) -> Zone? {
+        guard let corners = pendingZoneCorners else {
+            print("⚠️ [ZoneStore] No pending zone to complete")
+            return nil
+        }
+        
+        // Create the zone with group assignment
+        let zone = createZone(cornerMapPointIDs: corners, groupID: groupID)
+        
+        // Add to group if specified
+        if let groupID = groupID {
+            zoneGroupStore.addZone(zone.id, toGroup: groupID)
+        }
+        
+        print("✅ [ZoneStore] Completed zone '\(zone.displayName)' in group: \(groupID ?? "ungrouped")")
+        
+        // Clear pending state
+        pendingZoneCorners = nil
+        
+        return zone
+    }
+    
+    /// Cancel pending zone creation without creating
+    public func cancelPendingZone() {
+        if pendingZoneCorners != nil {
+            print("🔷 [ZoneStore] Cancelled pending zone creation")
+            pendingZoneCorners = nil
+        }
     }
     
     /// Check if a quadrilateral is self-intersecting

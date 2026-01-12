@@ -11,19 +11,42 @@ import SwiftUI
 struct ZoneDrawer: View {
     @EnvironmentObject private var hud: HUDPanelsState
     @EnvironmentObject private var zoneStore: ZoneStore
+    @EnvironmentObject private var zoneGroupStore: ZoneGroupStore
     @EnvironmentObject private var mapTransform: MapTransformStore
+    
+    // Track which groups are expanded
+    @State private var expandedGroupIDs: Set<String> = []
     
     // MARK: - Layout Constants
     private let collapsedWidth: CGFloat = 56
-    private let expandedWidth: CGFloat = 180
+    private let expandedWidth: CGFloat = 220
     private let topBarHeight: CGFloat = 48
     private let drawerMaxHeight: CGFloat = 240
     private let rowHeight: CGFloat = 44
     private let rowSpacing: CGFloat = 6
     
     private var idealOpenHeight: CGFloat {
-        let contentHeight = CGFloat(zoneStore.zones.count) * (rowHeight + rowSpacing)
+        // Count group headers + expanded zones + ungrouped zones
+        let groupHeaderCount = zoneGroupStore.groups.count
+        let expandedZoneCount = expandedGroupIDs.reduce(0) { count, groupID in
+            count + (zoneGroupStore.group(withID: groupID)?.zoneIDs.count ?? 0)
+        }
+        let ungroupedCount = ungroupedZones.count
+        let hasUngroupedHeader = ungroupedCount > 0 ? 1 : 0
+        
+        let totalRows = groupHeaderCount + expandedZoneCount + ungroupedCount + hasUngroupedHeader
+        let contentHeight = CGFloat(totalRows) * (rowHeight + rowSpacing)
         return topBarHeight + contentHeight + 12
+    }
+    
+    /// Zones that don't belong to any group
+    private var ungroupedZones: [Zone] {
+        zoneStore.zones.filter { $0.groupID == nil }
+    }
+    
+    /// Get zones belonging to a specific group
+    private func zonesInGroup(_ groupID: String) -> [Zone] {
+        zoneStore.zones.filter { $0.groupID == groupID }
     }
     
     private var currentWidth: CGFloat {
@@ -59,6 +82,17 @@ struct ZoneDrawer: View {
     private var topBar: some View {
         HStack(spacing: 8) {
             if hud.isZoneOpen {
+                // Visibility toggle
+                Button {
+                    zoneStore.zonesVisible.toggle()
+                } label: {
+                    Image(systemName: zoneStore.zonesVisible ? "eye.fill" : "eye.slash")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(zoneStore.zonesVisible ? .green : .secondary)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                
                 Text("Zones")
                     .font(.headline)
                     .foregroundColor(.primary)
@@ -102,27 +136,98 @@ struct ZoneDrawer: View {
     private var zoneList: some View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: rowSpacing) {
-                ForEach(zoneStore.zones) { zone in
-                    ZoneListItem(
-                        zone: zone,
-                        isSelected: zoneStore.selectedZoneID == zone.id,
-                        onSelect: {
-                            if zoneStore.selectedZoneID == zone.id {
-                                zoneStore.selectZone(nil)
-                            } else {
-                                zoneStore.selectZone(zone.id)
+                // Zone Groups with their child zones
+                ForEach(zoneGroupStore.groups) { group in
+                    // Group header
+                    ZoneGroupHeader(
+                        group: group,
+                        zoneCount: zonesInGroup(group.id).count,
+                        isExpanded: expandedGroupIDs.contains(group.id),
+                        isSelected: zoneGroupStore.selectedGroupID == group.id,
+                        onToggleExpand: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                if expandedGroupIDs.contains(group.id) {
+                                    expandedGroupIDs.remove(group.id)
+                                } else {
+                                    expandedGroupIDs.insert(group.id)
+                                }
                             }
                         },
-                        onDelete: {
-                            zoneStore.deleteZone(zone.id)
-                        },
-                        onToggleLock: {
-                            zoneStore.toggleLock(zoneID: zone.id)
-                        },
-                        onRename: { newName in
-                            zoneStore.renameZone(zoneID: zone.id, newName: newName)
+                        onSelect: {
+                            if zoneGroupStore.selectedGroupID == group.id {
+                                zoneGroupStore.selectedGroupID = nil
+                            } else {
+                                zoneGroupStore.selectedGroupID = group.id
+                            }
                         }
                     )
+                    
+                    // Child zones (when expanded)
+                    if expandedGroupIDs.contains(group.id) {
+                        ForEach(zonesInGroup(group.id)) { zone in
+                            ZoneListItem(
+                                zone: zone,
+                                isSelected: zoneStore.selectedZoneID == zone.id,
+                                onSelect: {
+                                    if zoneStore.selectedZoneID == zone.id {
+                                        zoneStore.selectZone(nil)
+                                    } else {
+                                        zoneStore.selectZone(zone.id)
+                                    }
+                                },
+                                onDelete: {
+                                    zoneStore.deleteZone(zone.id)
+                                },
+                                onToggleLock: {
+                                    zoneStore.toggleLock(zoneID: zone.id)
+                                },
+                                onRename: { newName in
+                                    zoneStore.renameZone(zoneID: zone.id, newName: newName)
+                                }
+                            )
+                            .padding(.leading, 16) // Indent child zones
+                        }
+                    }
+                }
+                
+                // Ungrouped zones section
+                if !ungroupedZones.isEmpty {
+                    // Ungrouped header
+                    HStack {
+                        Text("Ungrouped")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(ungroupedZones.count)")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .padding(.top, 8)
+                    
+                    ForEach(ungroupedZones) { zone in
+                        ZoneListItem(
+                            zone: zone,
+                            isSelected: zoneStore.selectedZoneID == zone.id,
+                            onSelect: {
+                                if zoneStore.selectedZoneID == zone.id {
+                                    zoneStore.selectZone(nil)
+                                } else {
+                                    zoneStore.selectZone(zone.id)
+                                }
+                            },
+                            onDelete: {
+                                zoneStore.deleteZone(zone.id)
+                            },
+                            onToggleLock: {
+                                zoneStore.toggleLock(zoneID: zone.id)
+                            },
+                            onRename: { newName in
+                                zoneStore.renameZone(zoneID: zone.id, newName: newName)
+                            }
+                        )
+                    }
                 }
             }
             .padding(.horizontal, 8)
@@ -236,12 +341,75 @@ struct ZoneListItem: View {
     }
 }
 
+// MARK: - Zone Group Header
+
+struct ZoneGroupHeader: View {
+    let group: ZoneGroup
+    let zoneCount: Int
+    let isExpanded: Bool
+    let isSelected: Bool
+    let onToggleExpand: () -> Void
+    let onSelect: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            // Expand/collapse chevron
+            Button(action: onToggleExpand) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.secondary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            
+            // Color indicator
+            Circle()
+                .fill(group.color)
+                .frame(width: 12, height: 12)
+            
+            // Group name (tap to select)
+            Text(group.displayName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+                .onTapGesture {
+                    onSelect()
+                }
+            
+            Spacer()
+            
+            // Zone count badge
+            Text("\(zoneCount)")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(group.color.opacity(0.8))
+                .cornerRadius(6)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .frame(height: 44)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isSelected ? group.color.opacity(0.3) : Color.white.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isSelected ? group.color : Color.clear, lineWidth: 2)
+        )
+    }
+}
+
 // MARK: - Preview
 
 #Preview {
     ZoneDrawer()
         .environmentObject(HUDPanelsState())
         .environmentObject(ZoneStore())
+        .environmentObject(ZoneGroupStore())
+        .environmentObject(MapTransformStore())
         .preferredColorScheme(.dark)
 }
 

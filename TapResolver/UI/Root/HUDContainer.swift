@@ -261,6 +261,15 @@ struct HUDContainer: View {
         .sheet(isPresented: $hud.isBeaconSettingsOpen) {
             BeaconSettingsPanel(isPresented: $hud.isBeaconSettingsOpen)
         }
+        .sheet(isPresented: Binding(
+            get: { zoneStore.pendingZoneCorners != nil },
+            set: { if !$0 { zoneStore.cancelPendingZone() } }
+        )) {
+            ZoneGroupPickerSheet(isPresented: Binding(
+                get: { zoneStore.pendingZoneCorners != nil },
+                set: { if !$0 { zoneStore.cancelPendingZone() } }
+            ))
+        }
     }
 
     @ViewBuilder
