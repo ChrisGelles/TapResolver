@@ -229,7 +229,24 @@ struct SVGExportPanel: View {
             allowedContentTypes: [.svg],
             allowsMultipleSelection: false
         ) { result in
-            handleImportResult(result)
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                
+                // Start security-scoped access
+                guard url.startAccessingSecurityScopedResource() else {
+                    print("❌ [SVGImport] Failed to access security-scoped resource")
+                    return
+                }
+                
+                // Ensure we stop access when done
+                defer { url.stopAccessingSecurityScopedResource() }
+                
+                handleImportResult(from: url)
+                
+            case .failure(let error):
+                print("❌ [SVGImport] File picker error: \(error.localizedDescription)")
+            }
         }
         .alert("Import Complete", isPresented: $showingImportResult) {
             Button("OK", role: .cancel) {}
@@ -782,38 +799,21 @@ struct SVGExportPanel: View {
     
     // MARK: - Import Handler
     
-    private func handleImportResult(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            
-            guard let ppm = pixelsPerMeter else {
-                print("⚠️ [SVGExportPanel] Cannot import: no MetricSquare calibration")
-                return
-            }
-            
-            let importer = SVGImporter(
-                mapPointStore: mapPointStore,
-                zoneStore: zoneStore,
-                zoneGroupStore: zoneGroupStore,
-                pixelsPerMeter: CGFloat(ppm)
-            )
-            
-            importResult = importer.importZones(from: url)
-            showingImportResult = true
-            
-        case .failure(let error):
-            print("❌ [SVGExportPanel] File picker error: \(error)")
-            importResult = SVGImportResult(
-                groupsCreated: 0,
-                zonesCreated: 0,
-                mapPointsCreated: 0,
-                mapPointsReused: 0,
-                errors: ["File selection failed: \(error.localizedDescription)"],
-                warnings: []
-            )
-            showingImportResult = true
+    private func handleImportResult(from url: URL) {
+        guard let ppm = pixelsPerMeter else {
+            print("⚠️ [SVGExportPanel] Cannot import: no MetricSquare calibration")
+            return
         }
+        
+        let importer = SVGImporter(
+            mapPointStore: mapPointStore,
+            zoneStore: zoneStore,
+            zoneGroupStore: zoneGroupStore,
+            pixelsPerMeter: CGFloat(ppm)
+        )
+        
+        importResult = importer.importZones(from: url)
+        showingImportResult = true
     }
 }
 

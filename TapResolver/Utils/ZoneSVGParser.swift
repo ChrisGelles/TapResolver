@@ -191,7 +191,17 @@ public class ZoneSVGParser: NSObject, XMLParserDelegate {
         }
         
         // Parse points
-        let corners = parsePoints(pointsStr)
+        var corners = parsePoints(pointsStr)
+        
+        // SVG polygons often close by repeating the first point — strip it
+        if corners.count > 1 {
+            let first = corners.first!
+            let last = corners.last!
+            let epsilon: CGFloat = 0.1  // tolerance for floating point comparison
+            if abs(first.x - last.x) < epsilon && abs(first.y - last.y) < epsilon {
+                corners.removeLast()
+            }
+        }
         
         guard corners.count >= 3 else {
             errors.append("Polygon '\(id)' has fewer than 3 points")
