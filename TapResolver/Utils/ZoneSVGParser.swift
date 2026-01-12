@@ -79,6 +79,40 @@ public class ZoneSVGParser: NSObject, XMLParserDelegate {
         // Convert groups dictionary to array
         var groupsArray = Array(groups.values)
         
+        // Update group colors from CSS (must happen AFTER groups are parsed)
+        for i in groupsArray.indices {
+            let groupID = groupsArray[i].id
+            
+            // Strategy 1: Try direct match from group ID
+            let baseName = groupID.replacingOccurrences(of: "-zones", with: "")
+            if let color = cssStyles[baseName] ?? cssStyles[baseName.lowercased()] {
+                groupsArray[i] = RawZoneGroup(
+                    id: groupsArray[i].id,
+                    displayName: groupsArray[i].displayName,
+                    colorHex: color,
+                    zoneIDs: groupsArray[i].zoneIDs
+                )
+                print("🎨 [ZoneSVGParser] Group '\(groupID)' color from group name: \(color)")
+                continue
+            }
+            
+            // Strategy 2: Use cssClass from first zone in this group
+            if let firstZone = zones.first(where: { $0.groupID == groupID }),
+               let cssClass = firstZone.cssClass,
+               let color = cssStyles[cssClass] ?? cssStyles[cssClass.lowercased()] {
+                groupsArray[i] = RawZoneGroup(
+                    id: groupsArray[i].id,
+                    displayName: groupsArray[i].displayName,
+                    colorHex: color,
+                    zoneIDs: groupsArray[i].zoneIDs
+                )
+                print("🎨 [ZoneSVGParser] Group '\(groupID)' color from zone class '\(cssClass)': \(color)")
+                continue
+            }
+            
+            print("⚠️ [ZoneSVGParser] Group '\(groupID)' no CSS match found")
+        }
+        
         // Populate zone IDs in each group
         for i in groupsArray.indices {
             let groupID = groupsArray[i].id
@@ -258,7 +292,7 @@ public class ZoneSVGParser: NSObject, XMLParserDelegate {
         // Pattern: .className { fill: #hexcolor; ... }
         // Also handle: .className{fill:#hexcolor}
         
-        let pattern = #"\.([a-zA-Z0-9_-]+)\s*\{[^}]*fill:\s*(#[a-fA-F0-9]{6}|#[a-fA-F0-9]{3})"#
+        let pattern = #"\.([a-zA-Z0-9_-]+)\s*\{[^}]*fill:\s*(#[a-fA-F0-9]{6}|#[a-fA-F0-9]{3}|[a-zA-Z]+)"#
         
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
             return
@@ -284,25 +318,33 @@ public class ZoneSVGParser: NSObject, XMLParserDelegate {
                 color = "#\(r)\(r)\(g)\(g)\(b)\(b)"
             }
             
+            // Convert named colors to hex
+            if !color.hasPrefix("#") {
+                let namedColors: [String: String] = [
+                    "blue": "#0000FF",
+                    "red": "#FF0000",
+                    "green": "#008000",
+                    "yellow": "#FFFF00",
+                    "orange": "#FFA500",
+                    "purple": "#800080",
+                    "cyan": "#00FFFF",
+                    "magenta": "#FF00FF",
+                    "white": "#FFFFFF",
+                    "black": "#000000",
+                    "gray": "#808080",
+                    "grey": "#808080"
+                ]
+                if let hex = namedColors[color.lowercased()] {
+                    print("🎨 [ZoneSVGParser] Converted named color '\(color)' → \(hex)")
+                    color = hex
+                } else {
+                    print("⚠️ [ZoneSVGParser] Unknown named color '\(color)', skipping")
+                    continue
+                }
+            }
+            
             cssStyles[className] = color.uppercased()
             print("🎨 [ZoneSVGParser] CSS style: .\(className) → \(color)")
-        }
-        
-        // Update group colors based on CSS
-        for (groupID, group) in groups {
-            // Try to find matching CSS class
-            // Group ID "evolvingLife-zones" might have class "evolvinglife" or "evolvingLife"
-            let baseName = groupID.replacingOccurrences(of: "-zones", with: "")
-            
-            if let color = cssStyles[baseName] ?? cssStyles[baseName.lowercased()] {
-                groups[groupID] = RawZoneGroup(
-                    id: group.id,
-                    displayName: group.displayName,
-                    colorHex: color,
-                    zoneIDs: group.zoneIDs
-                )
-                print("🎨 [ZoneSVGParser] Group '\(groupID)' color: \(color)")
-            }
         }
     }
 }

@@ -13,22 +13,22 @@ struct ZoneOverlay: View {
     @EnvironmentObject private var mapPointStore: MapPointStore
     
     var body: some View {
-        // Explicit dependencies to trigger Canvas redraw
+        // Explicit dependencies to trigger redraw
         let _ = zoneStore.zones.count
         let _ = zoneStore.zonesVisible
         let _ = mapPointStore.points.count
         
-        return Canvas { context, size in
-            guard zoneStore.zonesVisible else { return }
-            
-            for zone in zoneStore.zones {
-                drawZone(zone, in: context)
+        ZStack {
+            if zoneStore.zonesVisible {
+                ForEach(zoneStore.zones) { zone in
+                    zonePath(for: zone)
+                        .fill(zoneColor(for: zone).opacity(0.2))
+                }
             }
         }
     }
     
-    private func drawZone(_ zone: Zone, in context: GraphicsContext) {
-        // Get corner positions from MapPoints
+    private func zonePath(for zone: Zone) -> Path {
         let corners: [CGPoint] = zone.cornerMapPointIDs.compactMap { cornerID in
             guard let uuid = UUID(uuidString: cornerID),
                   let mapPoint = mapPointStore.points.first(where: { $0.id == uuid }) else {
@@ -37,10 +37,8 @@ struct ZoneOverlay: View {
             return mapPoint.mapPoint
         }
         
-        // Need exactly 4 corners to draw
-        guard corners.count == 4 else { return }
+        guard corners.count == 4 else { return Path() }
         
-        // Build the path
         var path = Path()
         path.move(to: corners[0])
         path.addLine(to: corners[1])
@@ -48,11 +46,7 @@ struct ZoneOverlay: View {
         path.addLine(to: corners[3])
         path.closeSubpath()
         
-        // Get color from zone's group, fallback to gray
-        let fillColor = zoneColor(for: zone).opacity(0.2)
-        
-        // Draw filled polygon
-        context.fill(path, with: .color(fillColor))
+        return path
     }
     
     private func zoneColor(for zone: Zone) -> Color {
