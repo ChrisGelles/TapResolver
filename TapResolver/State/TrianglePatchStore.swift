@@ -138,6 +138,29 @@ class TrianglePatchStore: ObservableObject {
         print("🗑️ Deleted triangle \(triangleID)")
     }
     
+    /// Delete all triangles
+    func purgeAll(mapPointStore: MapPointStore? = nil) {
+        let count = triangles.count
+        
+        // Optionally clean up MapPoint memberships
+        if let mapPointStore = mapPointStore {
+            for triangle in triangles {
+                for vertexID in triangle.vertexIDs {
+                    if let pointIndex = mapPointStore.points.firstIndex(where: { $0.id == vertexID }) {
+                        mapPointStore.points[pointIndex].triangleMemberships.removeAll { $0 == triangle.id }
+                    }
+                }
+            }
+            mapPointStore.save()
+        }
+        
+        triangles.removeAll()
+        selectedTriangleID = nil
+        save()
+        
+        print("🗑️ [TrianglePatchStore] Purged all \(count) triangles")
+    }
+    
     // MARK: - Validation Helpers
     
     private func getVertexPositions(_ vertexIDs: [UUID], mapPointStore: MapPointStore) -> [CGPoint]? {

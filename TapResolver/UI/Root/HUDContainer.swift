@@ -1313,6 +1313,7 @@ private struct DebugSettingsPanel: View {
     @State private var showMapSVGSheet = false
     @State private var mapSVGURL: URL? = nil
     @State private var showingPurgeZonesAlert = false
+    @State private var showingPurgeTrianglesAlert = false
     
     var body: some View {
         GeometryReader { geometry in
@@ -1476,6 +1477,23 @@ private struct DebugSettingsPanel: View {
                                 Image(systemName: "square.slash")
                                     .font(.system(size: 24))
                                 Text("Purge Zones")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // Purge Triangles Button
+                        Button {
+                            showingPurgeTrianglesAlert = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "triangle.slash")
+                                    .font(.system(size: 24))
+                                Text("Purge Triangles")
                                     .font(.system(size: 12, weight: .medium))
                             }
                             .foregroundColor(.orange)
@@ -2038,6 +2056,16 @@ private struct DebugSettingsPanel: View {
             }
         } message: {
             Text("This will delete all zones and zone groups. This cannot be undone.")
+        }
+        .alert("Purge All Triangles?", isPresented: $showingPurgeTrianglesAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Purge", role: .destructive) {
+                triangleStore.purgeAll(mapPointStore: mapPointStore)
+                // Also recompute zone membership since triangles are gone
+                zoneStore.recomputeAllTriangleMembership()
+            }
+        } message: {
+            Text("This will delete all triangles. Zone membership will be cleared. This cannot be undone.")
         }
         .alert("Full Reset (Calibration + History)?", isPresented: $showingFullResetAlert) {
             Button("Cancel", role: .cancel) { }
