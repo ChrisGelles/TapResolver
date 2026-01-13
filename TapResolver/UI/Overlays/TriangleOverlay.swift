@@ -12,46 +12,35 @@ struct TriangleOverlay: View {
     @EnvironmentObject private var triangleStore: TrianglePatchStore
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var surveySelectionCoordinator: SurveySelectionCoordinator
+    @EnvironmentObject private var zoneStore: ZoneStore
     
     private let surveySelectionColor = Color(red: 0.05, green: 0.1, blue: 0.78)
     
     var body: some View {
-        ZStack {
+        let triangles: [TrianglePatch] = triangleStore.triangles
+        
+        return ZStack {
             // Unselected triangles (rendered first, below)
-            ForEach(triangleStore.triangles) { triangle in
+            ForEach(triangles, id: \.id) { (triangle: TrianglePatch) in
                 // Skip if this triangle is selected via normal selection (render it separately on top)
                 if triangleStore.selectedTriangleID != triangle.id,
                    let positions = getVertexPositions(triangle.vertexIDs) {
                     
-                    // Determine fill based on survey selection state
-                    let isSurveySelected = surveySelectionCoordinator.isTriangleSelected(triangle.id)
-                    let inSurveyMode = surveySelectionCoordinator.state == .selectingTriangles
-                    
-                    let fillColor: Color = {
-                        if inSurveyMode && isSurveySelected {
-                            return surveySelectionColor.opacity(0.5)
-                        } else {
-                            return triangle.statusColor.opacity(0.15)
-                        }
-                    }()
-                    
-                    let strokeColor: Color = {
-                        if inSurveyMode && isSurveySelected {
-                            return surveySelectionColor
-                        } else {
-                            return triangle.statusColor
-                        }
-                    }()
+                    let appearance = triangleAppearance(for: triangle)
                     
                     TriangleShape(vertices: positions)
-                        .fill(fillColor)
+                        .fill(appearance.fill)
                         .overlay(
                             TriangleShape(vertices: positions)
-                                .stroke(strokeColor, lineWidth: inSurveyMode && isSurveySelected ? 2.5 : 1.5)
+                                .stroke(appearance.stroke, lineWidth: appearance.strokeWidth)
                         )
                         .contentShape(TriangleShape(vertices: positions))
                         .onTapGesture {
-                            if surveySelectionCoordinator.state == .selectingTriangles {
+                            if zoneStore.isEditingTriangleMembership {
+                                // Zone membership edit mode: toggle membership
+                                zoneStore.togglePendingMembership(triangleID: triangle.id.uuidString)
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            } else if surveySelectionCoordinator.state == .selectingTriangles {
                                 // Survey mode: toggle selection
                                 surveySelectionCoordinator.toggleTriangleSelection(triangle.id)
                                 print("📐 Toggled survey selection: \(triangle.id)")
@@ -141,6 +130,27 @@ struct TriangleOverlay: View {
             positions.append(point.mapPoint)
         }
         return positions.isEmpty ? nil : positions
+    }
+    
+    private func triangleAppearance(for triangle: TrianglePatch) -> (fill: Color, stroke: Color, strokeWidth: CGFloat) {
+        if zoneStore.isEditingTriangleMembership {
+            let isMember = zoneStore.pendingMemberTriangleIDs.contains(triangle.id.uuidString)
+            if isMember {
+                let zoneColor = zoneStore.editingZoneColor ?? .blue
+                return (zoneColor.opacity(0.4), zoneColor, 2.5)
+            } else {
+                return (Color.gray.opacity(0.1), Color.gray.opacity(0.5), 1.0)
+            }
+        } else {
+            let isSurveySelected = surveySelectionCoordinator.isTriangleSelected(triangle.id)
+            let inSurveyMode = surveySelectionCoordinator.state == .selectingTriangles
+            
+            if inSurveyMode && isSurveySelected {
+                return (surveySelectionColor.opacity(0.5), surveySelectionColor, 2.5)
+            } else {
+                return (triangle.statusColor.opacity(0.15), triangle.statusColor, 1.5)
+            }
+        }
     }
 }
 

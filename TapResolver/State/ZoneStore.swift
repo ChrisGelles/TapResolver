@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import CoreGraphics
+import SwiftUI
 
 /// Manages Zone entities with persistence and triangle membership computation
 public class ZoneStore: ObservableObject {
@@ -18,6 +19,10 @@ public class ZoneStore: ObservableObject {
     
     /// Visibility toggle for zone overlays
     @Published public var zonesVisible: Bool = true
+    
+    // MARK: - Triangle Membership Editing
+    @Published public var editingTriangleMembershipForZoneID: String? = nil
+    @Published public var pendingMemberTriangleIDs: Set<String> = []
     
     // MARK: - Zone Creation State
     // UNIFICATION CANDIDATE: These properties mirror TrianglePatchStore.isCreatingTriangle 
@@ -38,6 +43,7 @@ public class ZoneStore: ObservableObject {
     /// Dependencies for triangle membership computation
     private weak var mapPointStore: MapPointStore?
     private weak var triangleStore: TrianglePatchStore?
+    private weak var zoneGroupStore: ZoneGroupStore?
     
     /// Location-scoped UserDefaults key (v2 format)
     private var userDefaultsKey: String {
@@ -59,9 +65,10 @@ public class ZoneStore: ObservableObject {
     
     /// Configure store with dependencies needed for triangle membership computation
     /// Call this after MapPointStore and TrianglePatchStore are initialized
-    func configure(mapPointStore: MapPointStore, triangleStore: TrianglePatchStore) {
+    func configure(mapPointStore: MapPointStore, triangleStore: TrianglePatchStore, zoneGroupStore: ZoneGroupStore? = nil) {
         self.mapPointStore = mapPointStore
         self.triangleStore = triangleStore
+        self.zoneGroupStore = zoneGroupStore
         print("✅ [ZoneStore] Configured with MapPointStore and TriangleStore dependencies")
     }
     
@@ -604,6 +611,85 @@ public class ZoneStore: ObservableObject {
         }
         
         return false
+    }
+    
+    // MARK: - Triangle Membership Editing Helpers
+    
+    /// Whether triangle membership editing is active
+    public var isEditingTriangleMembership: Bool {
+        editingTriangleMembershipForZoneID != nil
+    }
+    
+    /// The zone currently being edited, if any
+    public var editingZone: Zone? {
+        guard let zoneID = editingTriangleMembershipForZoneID else { return nil }
+        return zone(withID: zoneID)
+    }
+    
+    /// Color of the zone currently being edited (from its group)
+    public var editingZoneColor: Color? {
+        guard let zone = editingZone,
+              let groupID = zone.groupID,
+              let group = zoneGroupStore?.group(withID: groupID) else {
+            return .blue  // Default if no group
+        }
+        return group.color
+    }
+    
+    /// Begin editing triangle membership for a zone
+    public func beginEditingTriangleMembership(for zoneID: String) {
+        guard let zone = zone(withID: zoneID) else {
+            print("⚠️ [ZoneStore] Cannot edit membership: zone \(zoneID) not found")
+            return
+        }
+        
+        editingTriangleMembershipForZoneID = zoneID
+        pendingMemberTriangleIDs = Set(zone.memberTriangleIDs)
+        
+        print("📐 [ZoneStore] Began editing triangle membership for '\(zone.displayName)' (\(pendingMemberTriangleIDs.count) current members)")
+    }
+    
+    /// Toggle a triangle's membership in the pending set
+    public func togglePendingMembership(triangleID: String) {
+        if pendingMemberTriangleIDs.contains(triangleID) {
+            pendingMemberTriangleIDs.remove(triangleID)
+            print("📐 [ZoneStore] Removed triangle \(String(triangleID.prefix(8))) from pending membership")
+        } else {
+            pendingMemberTriangleIDs.insert(triangleID)
+            print("📐 [ZoneStore] Added triangle \(String(triangleID.prefix(8))) to pending membership")
+        }
+    }
+    
+    /// Accept pending changes and update the zone
+    public func acceptTriangleMembershipEdits() {
+        guard let zoneID = editingTriangleMembershipForZoneID,
+              let index = zones.firstIndex(where: { $0.id == zoneID }) else {
+            print("⚠️ [ZoneStore] Cannot accept edits: no zone being edited")
+            cancelTriangleMembershipEdits()
+            return
+        }
+        
+        let previousCount = zones[index].memberTriangleIDs.count
+        zones[index].memberTriangleIDs = Array(pendingMemberTriangleIDs)
+        zones[index].modifiedAt = Date()
+        save()
+        
+        let newCount = zones[index].memberTriangleIDs.count
+        print("✅ [ZoneStore] Accepted membership edits for '\(zones[index].displayName)': \(previousCount) → \(newCount) triangles")
+        
+        editingTriangleMembershipForZoneID = nil
+        pendingMemberTriangleIDs = []
+    }
+    
+    /// Cancel editing and discard pending changes
+    public func cancelTriangleMembershipEdits() {
+        if let zoneID = editingTriangleMembershipForZoneID,
+           let zone = zone(withID: zoneID) {
+            print("🚫 [ZoneStore] Cancelled membership edits for '\(zone.displayName)'")
+        }
+        
+        editingTriangleMembershipForZoneID = nil
+        pendingMemberTriangleIDs = []
     }
 }
 
