@@ -643,6 +643,12 @@ public class ZoneStore: ObservableObject {
             return
         }
         
+        // Cancel any existing edit first (discards unsaved changes)
+        if editingTriangleMembershipForZoneID != nil && editingTriangleMembershipForZoneID != zoneID {
+            print("📐 [ZoneStore] Cancelling previous edit to start new one")
+            cancelTriangleMembershipEdits()
+        }
+        
         editingTriangleMembershipForZoneID = zoneID
         pendingMemberTriangleIDs = Set(zone.memberTriangleIDs)
         

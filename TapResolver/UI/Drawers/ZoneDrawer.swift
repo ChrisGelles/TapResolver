@@ -106,6 +106,10 @@ struct ZoneDrawer: View {
         }
         .frame(width: currentWidth, height: currentHeight)
         .animation(.easeInOut(duration: 0.25), value: hud.isZoneOpen)
+        .onDisappear {
+            // Cancel any active triangle membership editing when drawer closes
+            zoneStore.cancelTriangleMembershipEdits()
+        }
     }
     
     // MARK: - Top Bar
@@ -201,6 +205,7 @@ struct ZoneDrawer: View {
                                 zone: zone,
                                 isSelected: zoneStore.selectedZoneID == zone.id,
                                 onSelect: {
+                                    zoneStore.cancelTriangleMembershipEdits()
                                     if zoneStore.selectedZoneID == zone.id {
                                         zoneStore.selectZone(nil)
                                     } else {
@@ -244,6 +249,7 @@ struct ZoneDrawer: View {
                             zone: zone,
                             isSelected: zoneStore.selectedZoneID == zone.id,
                             onSelect: {
+                                zoneStore.cancelTriangleMembershipEdits()
                                 if zoneStore.selectedZoneID == zone.id {
                                     zoneStore.selectZone(nil)
                                 } else {
@@ -289,6 +295,8 @@ struct ZoneListItem: View {
     let onToggleLock: () -> Void
     let onRename: (String) -> Void
     
+    @EnvironmentObject private var zoneStore: ZoneStore
+    
     @State private var showDeleteConfirmation = false
     @State private var showRenameDialog = false
     @State private var newName = ""
@@ -328,14 +336,24 @@ struct ZoneListItem: View {
             
             Spacer()
             
-            // Triangle count
-            HStack(spacing: 2) {
-                Image(systemName: "triangle")
-                    .font(.system(size: 9))
-                Text("\(zone.memberTriangleIDs.count)")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+            // Triangle count - tappable to edit membership
+            Button(action: {
+                zoneStore.beginEditingTriangleMembership(for: zone.id)
+                // Optionally close the drawer
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "triangle.fill")
+                        .font(.caption)
+                    Text("\(zone.memberTriangleIDs.count)")
+                        .font(.caption)
+                }
+                .foregroundColor(.orange)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.orange.opacity(0.15))
+                .cornerRadius(4)
             }
-            .foregroundColor(.secondary)
+            .buttonStyle(.plain)
             
             // Lock toggle
             Button(action: onToggleLock) {
