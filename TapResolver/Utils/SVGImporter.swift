@@ -22,6 +22,17 @@ public struct SVGImportResult {
     }
 }
 
+/// Result of triangle SVG import
+struct TriangleSVGImportResult {
+    let trianglesCreated: Int
+    let trianglesSkipped: Int
+    let mapPointsCreated: Int
+    let mapPointsReused: Int
+    let zonesUpdated: Int
+    let errors: [String]
+    let warnings: [String]
+}
+
 /// Orchestrates SVG zone import
 public class SVGImporter {
     
@@ -186,5 +197,125 @@ public class SVGImporter {
                 warnings: []
             )
         }
+    }
+    
+    /// Import triangles from SVG data
+    /// - Parameters:
+    ///   - data: SVG file data
+    ///   - triangleStore: Store to add triangles to
+    ///   - mapPointStore: Store for vertex MapPoints
+    ///   - zoneStore: Store to update triangle membership
+    ///   - pixelsPerMeter: Conversion factor from MetricSquare
+    /// - Returns: Import result with statistics
+    func importTriangles(
+        from data: Data,
+        triangleStore: TrianglePatchStore,
+        mapPointStore: MapPointStore,
+        zoneStore: ZoneStore,
+        pixelsPerMeter: Float
+    ) -> TriangleSVGImportResult {
+        
+        // Step 1: Parse SVG
+        print("📐 [SVGImporter] importTriangles called, data size: \(data.count) bytes")
+        let parser = TriangleSVGParser()
+        let parseResult = parser.parse(data: data)
+        
+        if !parseResult.errors.isEmpty {
+            return TriangleSVGImportResult(
+                trianglesCreated: 0,
+                trianglesSkipped: 0,
+                mapPointsCreated: 0,
+                mapPointsReused: 0,
+                zonesUpdated: 0,
+                errors: parseResult.errors,
+                warnings: parseResult.warnings
+            )
+        }
+        
+        // Step 2: Setup MapPoint resolver
+        let resolver = MapPointResolver(
+            mapPointStore: mapPointStore,
+            thresholdMeters: 0.5,
+            pixelsPerMeter: CGFloat(pixelsPerMeter)
+        )
+        
+        var trianglesCreated = 0
+        var trianglesSkipped = 0
+        var warnings = parseResult.warnings
+        
+        // Step 3: Create triangles
+        for rawTriangle in parseResult.triangles {
+            // Resolve vertices to MapPoints
+            var vertexIDs: [UUID] = []
+            for vertex in rawTriangle.vertices {
+                let resolved = resolver.resolve(vertex, roles: [.triangleEdge])
+                vertexIDs.append(resolved)
+            }
+            
+            // Check for collinearity
+            if areCollinear(rawTriangle.vertices[0], rawTriangle.vertices[1], rawTriangle.vertices[2]) {
+                warnings.append("Skipped collinear triangle at (\(Int(rawTriangle.vertices[0].x)), \(Int(rawTriangle.vertices[0].y)))")
+                trianglesSkipped += 1
+                continue
+            }
+            
+            // Check for overlap with existing triangles
+            if triangleStore.hasInteriorOverlap(with: vertexIDs, mapPointStore: mapPointStore) {
+                warnings.append("Skipped overlapping triangle at (\(Int(rawTriangle.vertices[0].x)), \(Int(rawTriangle.vertices[0].y)))")
+                trianglesSkipped += 1
+                continue
+            }
+            
+            // Create triangle
+            let triangle = TrianglePatch(vertexIDs: vertexIDs)
+            triangleStore.triangles.append(triangle)
+            
+            // Update MapPoint memberships
+            for vertexID in vertexIDs {
+                if let index = mapPointStore.points.firstIndex(where: { $0.id == vertexID }) {
+                    if !mapPointStore.points[index].triangleMemberships.contains(triangle.id) {
+                        mapPointStore.points[index].triangleMemberships.append(triangle.id)
+                    }
+                }
+            }
+            
+            trianglesCreated += 1
+        }
+        
+        // Step 4: Commit MapPoints
+        let resolvedCountBeforeCommit = resolver.resolvedCount
+        let mapPointsCreated = resolver.commit()
+        let mapPointsReused = resolvedCountBeforeCommit - mapPointsCreated
+        mapPointStore.save()
+        triangleStore.save()
+        
+        // Step 5: Recompute zone membership
+        let zoneCountBefore = zoneStore.zones.map { $0.memberTriangleIDs.count }
+        zoneStore.recomputeAllTriangleMembership()
+        let zoneCountAfter = zoneStore.zones.map { $0.memberTriangleIDs.count }
+        
+        let zonesUpdated = zip(zoneCountBefore, zoneCountAfter).filter { $0 != $1 }.count
+        
+        print("📐 [SVGImporter] Imported \(trianglesCreated) triangles, skipped \(trianglesSkipped)")
+        print("📐 [SVGImporter] MapPoints: \(mapPointsCreated) created, \(mapPointsReused) reused")
+        print("📐 [SVGImporter] Zones updated: \(zonesUpdated)")
+        
+        return TriangleSVGImportResult(
+            trianglesCreated: trianglesCreated,
+            trianglesSkipped: trianglesSkipped,
+            mapPointsCreated: mapPointsCreated,
+            mapPointsReused: mapPointsReused,
+            zonesUpdated: zonesUpdated,
+            errors: [],
+            warnings: warnings
+        )
+    }
+    
+    // MARK: - Geometry Helpers
+    
+    private func areCollinear(_ p1: CGPoint, _ p2: CGPoint, _ p3: CGPoint) -> Bool {
+        // Cross product of vectors (p2-p1) and (p3-p1)
+        let cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x)
+        return abs(cross) < 1.0  // Threshold for floating point comparison
     }
 }

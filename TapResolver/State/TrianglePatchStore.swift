@@ -160,7 +160,7 @@ class TrianglePatchStore: ObservableObject {
     
     // MARK: - Geometric Overlap Detection
     
-    private func hasInteriorOverlap(with newVertices: [UUID], mapPointStore: MapPointStore) -> Bool {
+    func hasInteriorOverlap(with newVertices: [UUID], mapPointStore: MapPointStore) -> Bool {
         guard let newPositions = getVertexPositions(newVertices, mapPointStore: mapPointStore),
               newPositions.count == 3 else {
             print("❌ Cannot get positions for new vertices")
