@@ -1344,6 +1344,16 @@ final class ARCalibrationCoordinator: ObservableObject {
             // All corners placed - set up bilinear projection and plant ghosts
             print("✅ [ZONE_CORNER] All \(totalCorners) corners placed")
             
+            // Mark zone as planted for wavefront propagation
+            if let zoneID = activeZoneID, totalCorners == 4 {
+                markZoneAsPlanted(zoneID)
+                
+                // Log neighbor count for wavefront (neighbor spawning comes in C4)
+                if let zone = safeZoneStore?.zone(withID: zoneID) {
+                    print("🌊 [WAVEFRONT] Zone '\(zone.displayName)' planted — \(zone.neighborZoneIDs.count) neighbors ready for prediction")
+                }
+            }
+            
             // Save the starting corner index to Zone for rotation tracking
             if let zoneID = activeZoneID,
                let startingIndex = currentStartingCornerIndex {
