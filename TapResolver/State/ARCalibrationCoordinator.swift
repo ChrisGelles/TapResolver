@@ -152,6 +152,16 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Maps marker ID (UUID string) to MapPoint ID for drift detection
     var sessionMarkerToMapPoint: [String: UUID] = [:]
     
+    // MARK: - Wavefront Zone Calibration State (Session-Scoped)
+    
+    /// Zones that have been fully planted (all 4 corners confirmed) in this AR session
+    /// Resets when AR session ends
+    private(set) var plantedZoneIDs: Set<String> = []
+    
+    /// Callback triggered when a zone becomes fully planted
+    /// Used to spawn neighbor corner predictions
+    var onZonePlanted: ((String) -> Void)?
+    
     // MARK: - Session Transform
     
     /// Represents the rigid body transform from an AR session's coordinate frame to the canonical frame
@@ -1438,6 +1448,35 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Check if a MapPoint is one of the zone corner vertices
     func isZoneCorner(mapPointID: UUID) -> Bool {
         return triangleVertices.contains(mapPointID)
+    }
+    
+    // MARK: - Zone Planting Management
+    
+    /// Mark a zone as fully planted (all 4 corners confirmed)
+    /// - Parameter zoneID: The zone that was just planted
+    func markZoneAsPlanted(_ zoneID: String) {
+        guard !plantedZoneIDs.contains(zoneID) else {
+            print("📐 [ARCalibrationCoordinator] Zone \(String(zoneID.prefix(8))) already planted")
+            return
+        }
+        
+        plantedZoneIDs.insert(zoneID)
+        print("✅ [ARCalibrationCoordinator] Zone planted: \(String(zoneID.prefix(8))) (total planted: \(plantedZoneIDs.count))")
+        
+        // Trigger wavefront propagation
+        onZonePlanted?(zoneID)
+    }
+    
+    /// Check if a zone has been planted in this session
+    func isZonePlanted(_ zoneID: String) -> Bool {
+        return plantedZoneIDs.contains(zoneID)
+    }
+    
+    /// Reset planted zone tracking (called on session start/end)
+    func resetPlantedZones() {
+        let count = plantedZoneIDs.count
+        plantedZoneIDs.removeAll()
+        print("🔄 [ARCalibrationCoordinator] Reset planted zones (was \(count))")
     }
     
     /// Register a fill point marker in Zone Corner mode (non-corner ghost confirmation)
@@ -3856,6 +3895,9 @@ final class ARCalibrationCoordinator: ObservableObject {
     }
     
     func reset() {
+        // Reset planted zone tracking
+        resetPlantedZones()
+        
         // Clear any existing survey markers and calibration markers
         if let coordinator = ARViewContainer.Coordinator.current {
             coordinator.clearSurveyMarkers()
