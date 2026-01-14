@@ -1489,6 +1489,68 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("🔄 [ARCalibrationCoordinator] Reset planted zones (was \(count))")
     }
     
+    // MARK: - Neighbor Corner Prediction
+    
+    /// Predicts AR positions for a neighbor zone's corners using the planted zone's bilinear projection
+    /// - Parameters:
+    ///   - neighborZone: The zone whose corners we want to predict
+    ///   - plantedZoneID: The zone that was just planted (provides the projection basis)
+    /// - Returns: Array of (mapPointID, predictedARPosition) tuples, or nil if projection fails
+    func predictNeighborCornerPositions(
+        neighborZone: Zone,
+        plantedZoneID: String
+    ) -> [(mapPointID: String, arPosition: simd_float3)]? {
+        
+        guard let zoneStore = safeZoneStore,
+              let plantedZone = zoneStore.zone(withID: plantedZoneID) else {
+            print("⚠️ [WAVEFRONT] Cannot predict: missing stores or planted zone")
+            return nil
+        }
+        
+        // Get planted zone's corner correspondences (map → AR)
+        var plantedMapCorners: [CGPoint] = []
+        var plantedARCorners: [simd_float3] = []
+        
+        for cornerID in plantedZone.cornerMapPointIDs {
+            guard let mapPoint = safeMapStore.points.first(where: { $0.id.uuidString == cornerID }) else {
+                print("⚠️ [WAVEFRONT] Planted zone corner \(String(cornerID.prefix(8))) not found in MapPointStore")
+                return nil
+            }
+            
+            // Get the AR position for this corner (from mapPointARPositions we stored during placement)
+            guard let arPosition = mapPointARPositions[mapPoint.id] else {
+                print("⚠️ [WAVEFRONT] No AR position for planted corner \(String(cornerID.prefix(8)))")
+                return nil
+            }
+            
+            plantedMapCorners.append(mapPoint.mapPoint)
+            plantedARCorners.append(arPosition)
+        }
+        
+        // Create bilinear projection from planted zone
+        guard let projection = BilinearProjection(mapCorners: plantedMapCorners, arCorners: plantedARCorners) else {
+            print("⚠️ [WAVEFRONT] Failed to create bilinear projection")
+            return nil
+        }
+        
+        // Project each neighbor corner
+        var predictions: [(mapPointID: String, arPosition: simd_float3)] = []
+        
+        for cornerID in neighborZone.cornerMapPointIDs {
+            guard let mapPoint = safeMapStore.points.first(where: { $0.id.uuidString == cornerID }) else {
+                print("⚠️ [WAVEFRONT] Neighbor corner \(String(cornerID.prefix(8))) not found")
+                continue
+            }
+            
+            let predictedAR = projection.project(mapPoint.mapPoint)
+            predictions.append((mapPointID: cornerID, arPosition: predictedAR))
+            
+            print("📍 [WAVEFRONT] Predicted corner \(String(cornerID.prefix(8))): map(\(Int(mapPoint.mapPoint.x)), \(Int(mapPoint.mapPoint.y))) → AR(\(String(format: "%.2f", predictedAR.x)), \(String(format: "%.2f", predictedAR.y)), \(String(format: "%.2f", predictedAR.z)))")
+        }
+        
+        return predictions.isEmpty ? nil : predictions
+    }
+    
     /// Register a fill point marker in Zone Corner mode (non-corner ghost confirmation)
     /// This registers the marker→MapPoint mapping without the corner-specific validation
     func registerFillPointMarker(markerID: UUID, mapPointID: UUID, position: simd_float3, originalGhostPosition: simd_float3? = nil) {
