@@ -69,6 +69,16 @@ public class ZoneStore: ObservableObject {
         self.mapPointStore = mapPointStore
         self.triangleStore = triangleStore
         self.zoneGroupStore = zoneGroupStore
+        
+        // Listen for Zone Drawer open events to recompute neighbor relationships
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("ZoneDrawerOpened"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.recomputeAllNeighborRelationships()
+        }
+        
         print("✅ [ZoneStore] Configured with MapPointStore and TriangleStore dependencies")
     }
     
@@ -287,6 +297,31 @@ public class ZoneStore: ObservableObject {
         }
         
         return memberTriangleIDs.map { $0.uuidString }
+    }
+    
+    // MARK: - Zone Geometry Helpers
+    
+    /// Returns the corner positions of a zone as CGPoints for geometry calculations
+    /// - Parameter zone: The zone to get corners for
+    /// - Returns: Array of 4 CGPoints, or empty array if corners can't be resolved
+    private func cornerPositions(for zone: Zone) -> [CGPoint] {
+        guard let mapPointStore = mapPointStore else {
+            print("⚠️ [ZoneStore] No MapPointStore reference for corner lookup")
+            return []
+        }
+        
+        var positions: [CGPoint] = []
+        for cornerID in zone.cornerMapPointIDs {
+            if let mapPoint = mapPointStore.points.first(where: { $0.id.uuidString == cornerID }) {
+                positions.append(mapPoint.mapPoint)
+            }
+        }
+        
+        if positions.count != 4 {
+            print("⚠️ [ZoneStore] Zone '\(zone.displayName)' has \(positions.count) resolved corners (expected 4)")
+        }
+        
+        return positions
     }
     
     // MARK: - Geometry Helpers
@@ -611,6 +646,45 @@ public class ZoneStore: ObservableObject {
         }
         
         return false
+    }
+    
+    // MARK: - Neighbor Relationship Computation
+    
+    /// Recomputes neighbor relationships for all zones based on boundary overlap
+    /// Called when Zone Drawer opens — cheap enough to run every time (~1ms for 50 zones)
+    public func recomputeAllNeighborRelationships() {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        // Clear all existing neighbor lists
+        for i in zones.indices {
+            zones[i].neighborZoneIDs = []
+        }
+        
+        // Compare every pair of zones
+        var pairsChecked = 0
+        var neighborsFound = 0
+        
+        for i in 0..<zones.count {
+            let cornersA = cornerPositions(for: zones[i])
+            guard cornersA.count == 4 else { continue }
+            
+            for j in (i + 1)..<zones.count {
+                let cornersB = cornerPositions(for: zones[j])
+                guard cornersB.count == 4 else { continue }
+                
+                pairsChecked += 1
+                
+                if QuadrilateralGeometry.quadrilateralsIntersect(cornersA, cornersB) {
+                    // Mutual neighbors — add each to the other's list
+                    zones[i].neighborZoneIDs.append(zones[j].id)
+                    zones[j].neighborZoneIDs.append(zones[i].id)
+                    neighborsFound += 1
+                }
+            }
+        }
+        
+        let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+        print("📐 [ZoneStore] Neighbor computation: \(pairsChecked) pairs checked, \(neighborsFound) neighbor relationships found in \(String(format: "%.2f", elapsed))ms")
     }
     
     // MARK: - Triangle Membership Editing Helpers

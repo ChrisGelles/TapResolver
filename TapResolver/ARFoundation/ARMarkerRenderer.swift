@@ -20,6 +20,7 @@ struct MarkerOptions {
     var isGhost: Bool = false  // Ghost markers are semi-transparent and pulsing
     var isSurveyMarker: Bool = false  // Survey markers get gradient inner sphere; others get solid
     var isOriginMarker: Bool = false  // Origin marker: 2m tall, large sphere, RGB cycling
+    var isZoneCorner: Bool = false  // Diamond-cube head for zone corner markers
 }
 
 class ARMarkerRenderer {
@@ -62,50 +63,73 @@ class ARMarkerRenderer {
         lineNode.position = SCNVector3(0, 0, 0)
         markerNode.addChildNode(lineNode)
         
-        // Sphere top - positioned at top of rod
-        let sphere = SCNSphere(radius: effectiveRadius)
-        sphere.firstMaterial?.diffuse.contents = options.color
-        sphere.firstMaterial?.specular.contents = UIColor.white
-        sphere.firstMaterial?.shininess = 0.8
+        // Head geometry - sphere or diamond-cube depending on marker type
+        let headNode: SCNNode
+        let headNodeName: String
         
-        // Ghost marker styling: semi-transparent and pulsing
-        // Note: We'll animate node opacity instead of material transparency for smoother pulsing
-        if options.isGhost {
-            // Set initial opacity on the node (will be animated)
-            markerNode.opacity = 0.5  // Start at 50% opacity
-        }
-        
-        let sphereNode = SCNNode(geometry: sphere)
-        // Position sphere at top of rod (resting on top)
-        sphereNode.position = SCNVector3(0, effectiveHeight, 0)
-        sphereNode.name = "arMarkerSphere_\(options.markerID.uuidString)"
-        markerNode.addChildNode(sphereNode)
-        
-        // Inner sphere - visible from inside (flipped normals)
-        let innerSphere = SCNSphere(radius: effectiveRadius - 0.002)
-        
-        if options.isSurveyMarker {
-            // Survey markers: gradient texture for visibility when inside
-            let poleColor = UIColor(red: 0.05, green: 0.08, blue: 0.2, alpha: 1.0)      // Dark blue-black
-            let equatorColor = UIColor(red: 0.8, green: 0.4, blue: 0.1, alpha: 1.0)    // Orange equator band
-            let gradientTexture = createEquatorGradientTexture(
-                poleColor: poleColor,
-                equatorColor: equatorColor,
-                falloff: 0.5  // Slightly sharper than linear - nice visible band
-            )
-            innerSphere.firstMaterial?.diffuse.contents = gradientTexture
+        if options.isZoneCorner {
+            // Zone corner markers: Diamond-cube head (slightly larger than spheres)
+            let cubeSize = effectiveRadius * 2.5  // Larger for visibility
+            headNode = createDiamondCubeHead(size: cubeSize, markerID: options.markerID)
+            
+            // Position so bottom corner aligns with rod top
+            // Distance from cube center to corner = size * √3 / 2
+            let cornerOffset = Float(cubeSize) * sqrt(3.0) / 2.0
+            headNode.position = SCNVector3(0, effectiveHeight + cornerOffset, 0)
+            headNodeName = "arMarkerDiamond_\(options.markerID.uuidString)"
+            markerNode.addChildNode(headNode)
+            
+            // Ghost marker styling for zone corners: semi-transparent and pulsing
+            if options.isGhost {
+                markerNode.opacity = 0.5
+            }
         } else {
-            // All other markers: solid color matching exterior
-            innerSphere.firstMaterial?.diffuse.contents = options.color
+            // Standard markers: Sphere head
+            let sphere = SCNSphere(radius: effectiveRadius)
+            sphere.firstMaterial?.diffuse.contents = options.color
+            sphere.firstMaterial?.specular.contents = UIColor.white
+            sphere.firstMaterial?.shininess = 0.8
+            
+            // Ghost marker styling: semi-transparent and pulsing
+            // Note: We'll animate node opacity instead of material transparency for smoother pulsing
+            if options.isGhost {
+                // Set initial opacity on the node (will be animated)
+                markerNode.opacity = 0.5  // Start at 50% opacity
+            }
+            
+            let sphereNode = SCNNode(geometry: sphere)
+            sphereNode.position = SCNVector3(0, effectiveHeight, 0)
+            sphereNode.name = "arMarkerSphere_\(options.markerID.uuidString)"
+            markerNode.addChildNode(sphereNode)
+            headNode = sphereNode
+            headNodeName = "arMarkerSphere_\(options.markerID.uuidString)"
+            
+            // Inner sphere - visible from inside (flipped normals) - ONLY for sphere heads
+            let innerSphere = SCNSphere(radius: effectiveRadius - 0.002)
+            
+            if options.isSurveyMarker {
+                // Survey markers: gradient texture for visibility when inside
+                let poleColor = UIColor(red: 0.05, green: 0.08, blue: 0.2, alpha: 1.0)      // Dark blue-black
+                let equatorColor = UIColor(red: 0.8, green: 0.4, blue: 0.1, alpha: 1.0)    // Orange equator band
+                let gradientTexture = createEquatorGradientTexture(
+                    poleColor: poleColor,
+                    equatorColor: equatorColor,
+                    falloff: 0.5  // Slightly sharper than linear - nice visible band
+                )
+                innerSphere.firstMaterial?.diffuse.contents = gradientTexture
+            } else {
+                // All other markers: solid color matching exterior
+                innerSphere.firstMaterial?.diffuse.contents = options.color
+            }
+            
+            innerSphere.firstMaterial?.cullMode = .front  // Flip normals - visible from inside
+            innerSphere.firstMaterial?.isDoubleSided = false
+            innerSphere.firstMaterial?.lightingModel = .constant  // Ignore scene lighting for consistent color
+            let innerSphereNode = SCNNode(geometry: innerSphere)
+            innerSphereNode.position = SCNVector3(0, effectiveHeight, 0)
+            innerSphereNode.name = "arMarkerInnerSphere_\(options.markerID.uuidString)"
+            markerNode.addChildNode(innerSphereNode)
         }
-        
-        innerSphere.firstMaterial?.cullMode = .front  // Flip normals - visible from inside
-        innerSphere.firstMaterial?.isDoubleSided = false
-        innerSphere.firstMaterial?.lightingModel = .constant  // Ignore scene lighting for consistent color
-        let innerSphereNode = SCNNode(geometry: innerSphere)
-        innerSphereNode.position = SCNVector3(0, effectiveHeight, 0)
-        innerSphereNode.name = "arMarkerInnerSphere_\(options.markerID.uuidString)"
-        markerNode.addChildNode(innerSphereNode)
         
         // Badge (optional)
         if let badgeColor = options.badgeColor {
@@ -115,7 +139,7 @@ class ARMarkerRenderer {
             let badgeNode = SCNNode(geometry: badgeSphere)
             badgeNode.position = SCNVector3(0, 0.5, 0)
             badgeNode.name = "badge_\(options.markerID.uuidString)"
-            sphereNode.addChildNode(badgeNode)
+            headNode.addChildNode(badgeNode)
         }
         
         // Apply animation if requested
@@ -123,7 +147,7 @@ class ARMarkerRenderer {
             animateMarkerPlacement(
                 ringNode: ringNode,
                 lineNode: lineNode,
-                sphereNode: sphereNode,
+                sphereNode: headNode,
                 finalHeight: effectiveHeight,
                 overshoot: options.animationOvershoot
             )
@@ -139,20 +163,22 @@ class ARMarkerRenderer {
             markerNode.runAction(pulseForever)
         }
         
-        // Origin marker RGB cycling animation
-        if options.isOriginMarker {
+        // Origin marker RGB cycling animation (only for sphere markers)
+        if options.isOriginMarker && !options.isZoneCorner {
             // Animate sphere color through RGB cycle
-            let sphereMaterial = sphere.firstMaterial
-            
-            let colorCycle = SCNAction.customAction(duration: 3.0) { node, elapsedTime in
-                let phase = elapsedTime / 3.0  // 0.0 to 1.0 over 3 seconds
-                let hue = CGFloat(phase)
-                let color = UIColor(hue: hue, saturation: 1.0, brightness: 1.0, alpha: 1.0)
-                sphereMaterial?.diffuse.contents = color
-                sphereMaterial?.emission.contents = color.withAlphaComponent(0.3)  // Slight glow
+            if let sphereGeometry = headNode.geometry as? SCNSphere {
+                let sphereMaterial = sphereGeometry.firstMaterial
+                
+                let colorCycle = SCNAction.customAction(duration: 3.0) { node, elapsedTime in
+                    let phase = elapsedTime / 3.0  // 0.0 to 1.0 over 3 seconds
+                    let hue = CGFloat(phase)
+                    let color = UIColor(hue: hue, saturation: 1.0, brightness: 1.0, alpha: 1.0)
+                    sphereMaterial?.diffuse.contents = color
+                    sphereMaterial?.emission.contents = color.withAlphaComponent(0.3)  // Slight glow
+                }
+                let cycleForever = SCNAction.repeatForever(colorCycle)
+                headNode.runAction(cycleForever)
             }
-            let cycleForever = SCNAction.repeatForever(colorCycle)
-            sphereNode.runAction(cycleForever)
         }
         
         return markerNode
@@ -288,6 +314,79 @@ class ARMarkerRenderer {
             sphereFinalSettle, 
             ensureFinalPosition
         ]))
+    }
+    
+    // MARK: - Diamond-Cube Head (Zone Corner Markers)
+    
+    /// Creates a diamond-cube head for zone corner markers
+    /// - Parameters:
+    ///   - size: Width/height/length of the cube
+    ///   - markerID: UUID for node naming
+    /// - Returns: SCNNode containing the rotated cube with 6-color faces
+    private static func createDiamondCubeHead(size: CGFloat, markerID: UUID) -> SCNNode {
+        let cube = SCNBox(width: size, height: size, length: size, chamferRadius: 0)
+        
+        // Helper to create a material with the given color
+        func makeFaceMaterial(_ color: UIColor) -> SCNMaterial {
+            let material = SCNMaterial()
+            material.diffuse.contents = color
+            material.specular.contents = UIColor.white
+            material.shininess = 0.6
+            return material
+        }
+        
+        // 6 materials for 6 faces (SCNBox order: +X, -X, +Y, -Y, +Z, -Z)
+        // Using complementary pairs on opposite faces
+        cube.materials = [
+            makeFaceMaterial(.red),      // +X
+            makeFaceMaterial(.cyan),     // -X (opposite of red)
+            makeFaceMaterial(.green),    // +Y
+            makeFaceMaterial(.magenta),  // -Y (opposite of green)
+            makeFaceMaterial(.blue),     // +Z
+            makeFaceMaterial(.yellow)    // -Z (opposite of blue)
+        ]
+        
+        let cubeNode = SCNNode(geometry: cube)
+        cubeNode.name = "arMarkerDiamond_\(markerID.uuidString)"
+        
+        // Rotate so opposing corners are vertical (space diagonal along Y axis)
+        // This aligns the cube's (1,1,1) direction with the vertical (0,1,0)
+        // Rotation axis: (-1, 0, 1) normalized — perpendicular to both vectors
+        // Rotation angle: arccos(1/√3) ≈ 54.74° — angle between space diagonal and Y axis
+        let angle = Float(acos(1.0 / sqrt(3.0)))  // ~0.9553 radians
+        cubeNode.rotation = SCNVector4(
+            -1.0 / sqrt(2.0),  // axis X component
+            0,                  // axis Y component
+            1.0 / sqrt(2.0),   // axis Z component
+            angle               // rotation angle
+        )
+        
+        return cubeNode
+    }
+    
+    /// Transitions a diamond-cube marker to confirmed state (all faces blue)
+    /// - Parameters:
+    ///   - node: The marker's root node
+    ///   - markerID: UUID to find the diamond child node
+    static func transitionDiamondToConfirmed(node: SCNNode, markerID: UUID) {
+        let diamondName = "arMarkerDiamond_\(markerID.uuidString)"
+        guard let diamondNode = node.childNode(withName: diamondName, recursively: true),
+              let box = diamondNode.geometry as? SCNBox else {
+            print("⚠️ [ARMarkerRenderer] Could not find diamond node: \(diamondName)")
+            return
+        }
+        
+        // Create blue material for all faces
+        let blueMaterial = SCNMaterial()
+        blueMaterial.diffuse.contents = UIColor.ARPalette.markerBase  // Standard blue
+        blueMaterial.specular.contents = UIColor.white
+        blueMaterial.shininess = 0.6
+        
+        // Apply to all 6 faces
+        box.materials = [blueMaterial, blueMaterial, blueMaterial,
+                         blueMaterial, blueMaterial, blueMaterial]
+        
+        print("✅ [ARMarkerRenderer] Diamond marker transitioned to confirmed (blue)")
     }
     
     // MARK: - Texture Generation

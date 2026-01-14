@@ -34,6 +34,9 @@ public struct Zone: Identifiable, Codable, Equatable {
     /// Prevents deletion when true
     public var isLocked: Bool
     
+    /// IDs of zones whose boundaries overlap with this zone (computed, not persisted)
+    public var neighborZoneIDs: [String] = []
+    
     public var createdAt: Date
     public var modifiedAt: Date
     
@@ -57,6 +60,7 @@ public struct Zone: Identifiable, Codable, Equatable {
         memberTriangleIDs: [String] = [],
         lastStartingCornerIndex: Int? = nil,
         isLocked: Bool = false,
+        neighborZoneIDs: [String] = [],
         createdAt: Date = Date(),
         modifiedAt: Date = Date()
     ) {
@@ -67,6 +71,7 @@ public struct Zone: Identifiable, Codable, Equatable {
         self.memberTriangleIDs = memberTriangleIDs
         self.lastStartingCornerIndex = lastStartingCornerIndex
         self.isLocked = isLocked
+        self.neighborZoneIDs = neighborZoneIDs
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
     }

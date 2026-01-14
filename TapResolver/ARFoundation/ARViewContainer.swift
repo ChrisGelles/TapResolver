@@ -262,6 +262,14 @@ struct ARViewContainer: UIViewRepresentable {
                 object: nil
             )
             
+            // Listen for PlaceTestZoneCornerMarker notification (generic AR view testing)
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handlePlaceTestZoneCornerMarker),
+                name: NSNotification.Name("PlaceTestZoneCornerMarker"),
+                object: nil
+            )
+            
             // Listen for FloodZoneWithSurveyMarkers (Zone Mode)
             NotificationCenter.default.addObserver(
                 forName: NSNotification.Name("FloodZoneWithSurveyMarkers"),
@@ -592,6 +600,44 @@ struct ARViewContainer: UIViewRepresentable {
             
             print("🧪 [TEST_SURVEY_MARKER] Placed at (\(String(format: "%.2f, %.2f, %.2f", position.x, position.y, position.z)))")
             print("   Total survey markers in scene: \(surveyMarkers.count)")
+        }
+        
+        @objc func handlePlaceTestZoneCornerMarker(_ notification: Notification) {
+            print("💎 [TEST_CORNER_MARKER] Button tapped")
+            
+            guard let sceneView = sceneView else {
+                print("⚠️ [TEST_CORNER_MARKER] No sceneView available")
+                return
+            }
+            
+            // Use live position, or fall back to lingered position within 200ms window
+            let lingerDuration: TimeInterval = 0.2
+            let position: simd_float3
+            if let livePosition = currentCursorPosition {
+                position = livePosition
+            } else if let lingeredPosition = lastValidCursorPosition,
+                      let timestamp = lastValidCursorTimestamp,
+                      Date().timeIntervalSince(timestamp) < lingerDuration {
+                position = lingeredPosition
+                print("💎 [TEST_CORNER_MARKER] Using lingered position (age: \(String(format: "%.0f", Date().timeIntervalSince(timestamp) * 1000))ms)")
+            } else {
+                print("⚠️ [TEST_CORNER_MARKER] No cursor position available (live: nil, lingered: expired)")
+                return
+            }
+            
+            // Create zone corner marker - position is already at floor level from raycast
+            let options = MarkerOptions(
+                color: .blue,
+                markerID: UUID(),
+                userDeviceHeight: userDeviceHeight,
+                animateOnAppearance: true,
+                isZoneCorner: true
+            )
+            
+            let markerNode = ARMarkerRenderer.createNode(at: position, options: options)
+            sceneView.scene.rootNode.addChildNode(markerNode)
+            
+            print("💎 [TEST_CORNER_MARKER] Placed at (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
         }
         
         @objc func handlePlaceManualSurveyMarker(_ notification: Notification) {

@@ -36,6 +36,7 @@ final class HUDPanelsState: ObservableObject {
         isMapPointOpen = false
         isZoneOpen = true
         print("🔷 Zone Drawer: OPEN")
+        NotificationCenter.default.post(name: NSNotification.Name("ZoneDrawerOpened"), object: nil)
     }
     func closeAll() { isBeaconOpen = false; isSquareOpen = false; isMorgueOpen = false; isMapPointOpen = false; isZoneOpen = false }
     

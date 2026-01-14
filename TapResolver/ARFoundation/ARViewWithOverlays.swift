@@ -1433,85 +1433,50 @@ struct ARViewWithOverlays: View {
                 VStack {
                     Spacer()
                     
-                    // Test Survey Marker button - for development testing
-                    Button(action: {
-                        print("🧪 [TEST_SURVEY_BTN] Button tapped")
-                        NotificationCenter.default.post(
-                            name: NSNotification.Name("PlaceTestSurveyMarker"),
-                            object: nil
-                        )
-                    }) {
-                        HStack {
-                            Image(systemName: "mappin.circle.fill")
-                                .font(.title2)
-                            Text("Place Test Survey Marker")
-                                .font(.headline)
-                        }
-                        .foregroundColor(.white)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color.red.opacity(0.85))
-                        .cornerRadius(12)
-                    }
-                    .padding(.horizontal, 40)
-                    .padding(.bottom, 12)
-                    
-                    // Haptic Test Buttons Row
+                    // Test Marker Buttons Row
                     HStack(spacing: 12) {
-                        // 1. Hard knock
-                        Button(action: { playHardKnock() }) {
+                        // Place Test Survey Marker button
+                        Button(action: {
+                            print("🧪 [TEST_SURVEY_BTN] Button tapped")
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("PlaceTestSurveyMarker"),
+                                object: nil
+                            )
+                        }) {
                             VStack(spacing: 4) {
-                                Image(systemName: "hand.point.up.fill")
+                                Image(systemName: "mappin.circle.fill")
                                     .font(.title2)
-                                Text("Hard")
-                                    .font(.caption2)
+                                Text("Survey")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
                             }
                             .foregroundColor(.white)
-                            .frame(width: 70, height: 60)
-                            .background(Color.orange.opacity(0.85))
-                            .cornerRadius(10)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.red.opacity(0.85))
+                            .cornerRadius(12)
                         }
                         
-                        // 2. Buzz
-                        Button(action: { playBuzz() }) {
+                        // Place Test Zone Corner Marker button
+                        Button(action: {
+                            print("💎 [TEST_CORNER_BTN] Button tapped")
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("PlaceTestZoneCornerMarker"),
+                                object: nil
+                            )
+                        }) {
                             VStack(spacing: 4) {
-                                Image(systemName: "waveform")
+                                Image(systemName: "cube.fill")
                                     .font(.title2)
-                                Text("Buzz")
-                                    .font(.caption2)
+                                Text("Corner")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
                             }
                             .foregroundColor(.white)
-                            .frame(width: 70, height: 60)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
                             .background(Color.purple.opacity(0.85))
-                            .cornerRadius(10)
-                        }
-                        
-                        // 3. Fading buzz
-                        Button(action: { playFadingBuzz() }) {
-                            VStack(spacing: 4) {
-                                Image(systemName: "waveform.path.ecg")
-                                    .font(.title2)
-                                Text("Fade")
-                                    .font(.caption2)
-                            }
-                            .foregroundColor(.white)
-                            .frame(width: 70, height: 60)
-                            .background(Color.blue.opacity(0.85))
-                            .cornerRadius(10)
-                        }
-                        
-                        // 4. Gentle knock
-                        Button(action: { playGentleKnock() }) {
-                            VStack(spacing: 4) {
-                                Image(systemName: "hand.tap.fill")
-                                    .font(.title2)
-                                Text("Soft")
-                                    .font(.caption2)
-                            }
-                            .foregroundColor(.white)
-                            .frame(width: 70, height: 60)
-                            .background(Color.green.opacity(0.85))
-                            .cornerRadius(10)
+                            .cornerRadius(12)
                         }
                     }
                     .padding(.horizontal, 40)
