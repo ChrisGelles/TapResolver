@@ -2050,6 +2050,13 @@ final class ARCalibrationCoordinator: ObservableObject {
         demotedGhostMapPointIDs.insert(mapPointID)
         print("🔄 [DEMOTE] Added \(String(mapPointID.uuidString.prefix(8))) to demotedGhostMapPointIDs")
         
+        // Clean up from diamond marker tracking if applicable
+        let mapPointIDString = mapPointID.uuidString
+        if spawnedNeighborCornerIDs.contains(mapPointIDString) {
+            spawnedNeighborCornerIDs.remove(mapPointIDString)
+            print("🔷 [DEMOTE] Removed \(String(mapPointIDString.prefix(8))) from spawnedNeighborCornerIDs")
+        }
+        
         // Set activeTriangleID to a calibrated triangle containing this MapPoint
         if let triangleStore = triangleStore {
             let containingTriangles = triangleStore.triangles.filter { triangle in

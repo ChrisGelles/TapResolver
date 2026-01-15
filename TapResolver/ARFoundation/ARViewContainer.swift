@@ -303,6 +303,19 @@ struct ARViewContainer: UIViewRepresentable {
                 markerNode.name = "neighborCorner_\(mapPointID)"
                 sceneView.scene.rootNode.addChildNode(markerNode)
                 
+                // Register diamond marker for demotion support
+                let markerID = options.markerID
+                let markerIDString = markerID.uuidString
+                if let mapPointUUID = UUID(uuidString: mapPointID) {
+                    self.arCalibrationCoordinator?.sessionMarkerToMapPoint[markerIDString] = mapPointUUID
+                    print("📝 [DIAMOND_REGISTER] Registered marker \(String(markerIDString.prefix(8))) → MapPoint \(String(mapPointID.prefix(8)))")
+                } else {
+                    print("⚠️ [DIAMOND_REGISTER] Could not parse MapPoint ID: \(mapPointID)")
+                }
+                
+                // Track node for removal during demotion
+                self.placedMarkers[markerID] = markerNode
+                
                 print("💎 [DIAMOND_SPAWN] Created diamond marker for '\(zoneName)' corner at (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
             }
             
@@ -1542,8 +1555,22 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
-            // Get the marker's current position
-            let currentPosition = node.simdWorldPosition
+            // For diamond markers found by searching, get parent container position and remove it
+            var containerNodeToRemove: SCNNode? = nil
+            if node.name?.hasPrefix("arMarkerDiamond_") == true,
+               let parentNode = node.parent,
+               parentNode.name?.hasPrefix("neighborCorner_") == true {
+                containerNodeToRemove = parentNode
+            }
+            
+            // Get the marker's current position (use container if it's a diamond)
+            let currentPosition = (containerNodeToRemove ?? node).simdWorldPosition
+            
+            // Remove parent container for diamond markers
+            if let containerNode = containerNodeToRemove {
+                print("🔷 [DEMOTE] Removing parent container: \(containerNode.name ?? "unnamed")")
+                containerNode.removeFromParentNode()
+            }
             
             // Post notification with marker ID and let coordinator resolve
             print("🔄 [DEMOTE] Posting DemoteMarkerToGhost notification")
