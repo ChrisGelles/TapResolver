@@ -34,11 +34,10 @@ struct SVGExportPanel: View {
     
     // MARK: - Import State
     @State private var showingImportFilePicker = false
-    @State private var importResult: SVGImportResult?
-    @State private var showingImportResult = false
-    @State private var showTriangleImportPicker = false
-    @State private var triangleImportMessage: String? = nil
-    @State private var showTriangleImportAlert = false
+    @State private var importTrianglesEnabled = true
+    @State private var importZonesEnabled = true
+    @State private var importResultMessage: String? = nil
+    @State private var showingImportResultAlert = false
     
     var body: some View {
         NavigationView {
@@ -178,39 +177,24 @@ struct SVGExportPanel: View {
                 }
                 
                 // MARK: - Import Section
-                Section("Import") {
+                Section("Import from SVG") {
+                    Toggle("Triangles", isOn: $importTrianglesEnabled)
+                    Toggle("Zones", isOn: $importZonesEnabled)
+                    
                     Button {
                         print("🔘 [SVGExportPanel] Import button tapped")
+                        print("   Triangles: \(importTrianglesEnabled), Zones: \(importZonesEnabled)")
                         showingImportFilePicker = true
                     } label: {
-                        Label("Import Zones from SVG", systemImage: "square.and.arrow.down")
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(pixelsPerMeter == nil)
-                    .onAppear {
-                        print("🔍 [SVGExportPanel] pixelsPerMeter = \(String(describing: pixelsPerMeter))")
-                        print("🔍 [SVGExportPanel] metricSquareStore.squares.count = \(metricSquareStore.squares.count)")
-                        if let square = metricSquareStore.squares.first {
-                            print("🔍 [SVGExportPanel] First square: side=\(square.side), meters=\(square.meters)")
-                        }
-                    }
-                    
-                    if pixelsPerMeter == nil {
-                        Text("MetricSquare calibration required for import")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    Button(action: {
-                        showTriangleImportPicker = true
-                    }) {
                         HStack {
+                            Spacer()
                             Image(systemName: "square.and.arrow.down")
-                            Text("Import Triangles from SVG")
+                            Text("Import from SVG")
+                            Spacer()
                         }
                     }
                     .buttonStyle(.plain)
-                    .disabled(getPixelsPerMeter() == nil)
+                    .disabled(getPixelsPerMeter() == nil || (!importTrianglesEnabled && !importZonesEnabled))
                     
                     if getPixelsPerMeter() == nil {
                         Text("MetricSquare calibration required for import")
@@ -252,65 +236,18 @@ struct SVGExportPanel: View {
             switch result {
             case .success(let urls):
                 guard let url = urls.first else { return }
-                
-                // Start security-scoped access
-                guard url.startAccessingSecurityScopedResource() else {
-                    print("❌ [SVGImport] Failed to access security-scoped resource")
-                    return
-                }
-                
-                // Ensure we stop access when done
-                defer { url.stopAccessingSecurityScopedResource() }
-                
-                handleImportResult(from: url)
+                handleUnifiedImport(from: url)
                 
             case .failure(let error):
                 print("❌ [SVGImport] File picker error: \(error.localizedDescription)")
+                importResultMessage = "File picker error: \(error.localizedDescription)"
+                showingImportResultAlert = true
             }
         }
-        .fileImporter(
-            isPresented: $showTriangleImportPicker,
-            allowedContentTypes: [.svg],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                
-                // Start security-scoped access
-                guard url.startAccessingSecurityScopedResource() else {
-                    print("❌ [SVGImport] Failed to access security-scoped resource")
-                    triangleImportMessage = "Could not access file"
-                    showTriangleImportAlert = true
-                    return
-                }
-                
-                // Ensure we stop access when done
-                defer { url.stopAccessingSecurityScopedResource() }
-                
-                importTrianglesFromSVG(url: url)
-                
-            case .failure(let error):
-                print("❌ [SVGImport] File picker error: \(error.localizedDescription)")
-                triangleImportMessage = "File picker error: \(error.localizedDescription)"
-                showTriangleImportAlert = true
-            }
-        }
-        .alert("Import Complete", isPresented: $showingImportResult) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            if let result = importResult {
-                if result.success {
-                    Text("Created \(result.groupsCreated) groups, \(result.zonesCreated) zones.\n\(result.mapPointsCreated) new MapPoints, \(result.mapPointsReused) reused.")
-                } else {
-                    Text("Import failed:\n\(result.errors.joined(separator: "\n"))")
-                }
-            }
-        }
-        .alert("Triangle Import", isPresented: $showTriangleImportAlert) {
+        .alert("Import Complete", isPresented: $showingImportResultAlert) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text(triangleImportMessage ?? "")
+            Text(importResultMessage ?? "Import finished.")
         }
         .alert("Enter Your Initials", isPresented: $showInitialsPrompt) {
             TextField("Initials (e.g., CG)", text: $tempInitials)
@@ -852,77 +789,77 @@ struct SVGExportPanel: View {
     
     // MARK: - Import Handler
     
-    private func handleImportResult(from url: URL) {
-        guard let ppm = pixelsPerMeter else {
-            print("⚠️ [SVGExportPanel] Cannot import: no MetricSquare calibration")
-            return
-        }
-        
-        let importer = SVGImporter(
-            mapPointStore: mapPointStore,
-            zoneStore: zoneStore,
-            zoneGroupStore: zoneGroupStore,
-            pixelsPerMeter: CGFloat(ppm)
-        )
-        
-        importResult = importer.importZones(from: url)
-        showingImportResult = true
-    }
+    // MARK: - Unified Import Handler
     
-    private func importTrianglesFromSVG(url: URL) {
+    private func handleUnifiedImport(from url: URL) {
         guard url.startAccessingSecurityScopedResource() else {
-            triangleImportMessage = "Could not access file"
-            showTriangleImportAlert = true
+            print("❌ [SVGImport] Failed to access security-scoped resource")
+            importResultMessage = "Could not access file"
+            showingImportResultAlert = true
             return
         }
         defer { url.stopAccessingSecurityScopedResource() }
         
         guard let data = try? Data(contentsOf: url) else {
-            triangleImportMessage = "Could not read file"
-            showTriangleImportAlert = true
+            importResultMessage = "Could not read file"
+            showingImportResultAlert = true
             return
         }
         
-        guard let pixelsPerMeter = getPixelsPerMeter() else {
-            triangleImportMessage = "MetricSquare calibration required"
-            showTriangleImportAlert = true
+        guard let ppm = getPixelsPerMeter() else {
+            importResultMessage = "MetricSquare calibration required"
+            showingImportResultAlert = true
             return
         }
         
-        let importer = SVGImporter(
-            mapPointStore: mapPointStore,
-            zoneStore: zoneStore,
-            zoneGroupStore: zoneGroupStore,
-            pixelsPerMeter: pixelsPerMeter
-        )
-        let result = importer.importTriangles(
-            from: data,
-            triangleStore: triangleStore,
-            mapPointStore: mapPointStore,
-            zoneStore: zoneStore,
-            pixelsPerMeter: Float(pixelsPerMeter)
-        )
+        var resultLines: [String] = []
         
-        if !result.errors.isEmpty {
-            triangleImportMessage = "Errors:\n" + result.errors.joined(separator: "\n")
-        } else {
-            var message = "Created \(result.trianglesCreated) triangles"
-            if result.trianglesSkipped > 0 {
-                message += "\nSkipped \(result.trianglesSkipped) (invalid/overlapping)"
+        // Triangle Import
+        if importTrianglesEnabled {
+            let importer = SVGImporter(
+                mapPointStore: mapPointStore,
+                zoneStore: zoneStore,
+                zoneGroupStore: zoneGroupStore,
+                pixelsPerMeter: ppm
+            )
+            let triResult = importer.importTriangles(
+                from: data,
+                triangleStore: triangleStore,
+                mapPointStore: mapPointStore,
+                zoneStore: zoneStore,
+                pixelsPerMeter: Float(ppm)
+            )
+            
+            if !triResult.errors.isEmpty {
+                resultLines.append("⚠️ Triangle Errors:")
+                resultLines.append(contentsOf: triResult.errors.prefix(3))
+            } else {
+                resultLines.append("✅ Triangles: \(triResult.trianglesCreated) created, \(triResult.trianglesSkipped) skipped")
+                resultLines.append("   MapPoints: \(triResult.mapPointsCreated) new, \(triResult.mapPointsReused) reused")
             }
-            message += "\n\nMapPoints: \(result.mapPointsCreated) new, \(result.mapPointsReused) reused"
-            if result.zonesUpdated > 0 {
-                message += "\n\(result.zonesUpdated) zones updated"
-            }
-            if !result.warnings.isEmpty {
-                message += "\n\nWarnings:\n" + result.warnings.prefix(5).joined(separator: "\n")
-                if result.warnings.count > 5 {
-                    message += "\n...and \(result.warnings.count - 5) more"
-                }
-            }
-            triangleImportMessage = message
         }
-        showTriangleImportAlert = true
+        
+        // Zone Import
+        if importZonesEnabled {
+            let importer = SVGImporter(
+                mapPointStore: mapPointStore,
+                zoneStore: zoneStore,
+                zoneGroupStore: zoneGroupStore,
+                pixelsPerMeter: ppm
+            )
+            let zoneResult = importer.importZones(from: url)
+            
+            if !zoneResult.success {
+                resultLines.append("⚠️ Zone Errors:")
+                resultLines.append(contentsOf: zoneResult.errors.prefix(3))
+            } else {
+                resultLines.append("✅ Zones: \(zoneResult.zonesCreated) created, \(zoneResult.groupsCreated) groups")
+                resultLines.append("   MapPoints: \(zoneResult.mapPointsCreated) new, \(zoneResult.mapPointsReused) reused")
+            }
+        }
+        
+        importResultMessage = resultLines.joined(separator: "\n")
+        showingImportResultAlert = true
     }
 }
 

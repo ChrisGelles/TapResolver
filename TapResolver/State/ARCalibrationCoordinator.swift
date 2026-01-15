@@ -79,6 +79,9 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Estimated position of the selected ghost (for distortion calculation)
     @Published var selectedGhostEstimatedPosition: simd_float3? = nil
     
+    /// MapPoint ID for selected zone corner diamond marker (for adjustment)
+    var selectedDiamondMapPointID: String?
+    
     /// Ghost marker that is nearby (<2m) but not visible in camera view
     /// When set, UI should show "Unconfirmed Marker Nearby" instead of action buttons
     @Published var nearbyButNotVisibleGhostID: UUID? = nil
@@ -4081,6 +4084,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         calibrationState = .idle
         selectedGhostMapPointID = nil
         selectedGhostEstimatedPosition = nil
+        selectedDiamondMapPointID = nil
         nearbyButNotVisibleGhostID = nil
         demotedGhostMapPointIDs.removeAll()
         adjustedGhostMapPoints.removeAll()
@@ -4310,6 +4314,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         // Clear ghost selection state
         selectedGhostMapPointID = nil
         selectedGhostEstimatedPosition = nil
+        selectedDiamondMapPointID = nil
         
         print("✅ [ADJACENT_ACTIVATE] Adjacent triangle \(String(adjacentTriangle.id.uuidString.prefix(8))) now calibrated and ready to fill")
         
@@ -4404,6 +4409,7 @@ final class ARCalibrationCoordinator: ObservableObject {
                 }
                 selectedGhostMapPointID = nil
                 selectedGhostEstimatedPosition = nil
+                selectedDiamondMapPointID = nil
                 nearbyButNotVisibleGhostID = closestID
             }
         } else {
@@ -4416,6 +4422,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             }
             selectedGhostMapPointID = nil
             selectedGhostEstimatedPosition = nil
+            selectedDiamondMapPointID = nil
             nearbyButNotVisibleGhostID = nil
         }
     }

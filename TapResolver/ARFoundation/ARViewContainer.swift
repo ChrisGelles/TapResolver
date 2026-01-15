@@ -1471,6 +1471,28 @@ struct ARViewContainer: UIViewRepresentable {
                                 print("🎯 [HIT_TEST_DIAG] ⚠️ UUID parse failed for ghost marker: '\(uuidString)'")
                             }
                         }
+                        // Check for diamond marker (zone corners)
+                        if name.hasPrefix("arMarkerDiamond_") {
+                            let markerIDString = String(name.dropFirst("arMarkerDiamond_".count))
+                            print("🎯 [HIT_TEST_DIAG]   Found arMarkerDiamond_ prefix, UUID string: '\(markerIDString)'")
+                            if let markerID = UUID(uuidString: markerIDString) {
+                                // Get MapPoint ID from parent neighborCorner_ node
+                                if let parentNode = current.parent,
+                                   let parentName = parentNode.name,
+                                   parentName.hasPrefix("neighborCorner_") {
+                                    let mapPointIDString = String(parentName.dropFirst("neighborCorner_".count))
+                                    print("🎯 [HIT_TEST] Diamond marker tapped — MapPoint: \(mapPointIDString)")
+                                    // Store MapPoint ID for zone corner adjustment
+                                    if let coordinator = self.arCalibrationCoordinator {
+                                        coordinator.selectedDiamondMapPointID = mapPointIDString
+                                    }
+                                }
+                                print("🎯 [HIT_TEST] Found diamond marker: \(markerID)")
+                                return markerID
+                            } else {
+                                print("🎯 [HIT_TEST_DIAG] ⚠️ UUID parse failed for diamond marker: '\(markerIDString)'")
+                            }
+                        }
                     }
                     node = current.parent
                     depth += 1
@@ -1490,14 +1512,29 @@ struct ARViewContainer: UIViewRepresentable {
             }
             
             // Find the marker node - check placedMarkers dictionary first
-            let markerNode: SCNNode?
+            var markerNode: SCNNode?
             if let node = placedMarkers[markerID] {
                 markerNode = node
             } else {
                 // Fallback: search scene for node with matching name
-                markerNode = sceneView.scene.rootNode.childNodes.first(where: {
-                    $0.name == "arMarker_\(markerID.uuidString)"
-                })
+                // Check both regular and diamond marker prefixes
+                let regularName = "arMarker_\(markerID.uuidString)"
+                let diamondName = "arMarkerDiamond_\(markerID.uuidString)"
+                
+                markerNode = sceneView.scene.rootNode.childNode(
+                    withName: regularName,
+                    recursively: true
+                )
+                
+                if markerNode == nil {
+                    markerNode = sceneView.scene.rootNode.childNode(
+                        withName: diamondName,
+                        recursively: true
+                    )
+                    if markerNode != nil {
+                        print("🔷 [DEMOTE] Found diamond marker to demote: \(markerID)")
+                    }
+                }
             }
             
             guard let node = markerNode else {

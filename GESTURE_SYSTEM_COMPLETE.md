@@ -458,6 +458,35 @@ ScrollView {
 
 ```
 
+#### For Buttons in Forms with simultaneousGesture
+
+When a Form (or List) has a `.simultaneousGesture(DragGesture...)` modifier for touch claiming, **all buttons inside that Form must use `.buttonStyle(.plain)`** to prevent tap conflicts.
+
+**Problem**: Without `.buttonStyle(.plain)`, SwiftUI's default button behavior in a Form conflicts with the `DragGesture`, causing button taps to be swallowed and not trigger their actions.
+
+**Solution**: Always add `.buttonStyle(.plain)` before `.disabled()` or other modifiers:
+
+```swift
+Form {
+    // ... content
+    
+    Button {
+        // Action
+    } label: {
+        // Label
+    }
+    .buttonStyle(.plain)  // ← REQUIRED when parent Form has simultaneousGesture
+    .disabled(...)
+}
+.simultaneousGesture(
+    DragGesture(minimumDistance: 0)
+        .onChanged { _ in mapTransform.isHUDInteracting = true }
+        .onEnded { _ in mapTransform.isHUDInteracting = false }
+)
+```
+
+**Example**: `SVGExportPanel.swift` uses this pattern for both Export and Import buttons to ensure they work correctly with the panel's gesture handling.
+
 #### For UIKit Components (UISlider)
 
 UIKit components can't directly access SwiftUI environment objects, so they use NotificationCenter:
