@@ -270,6 +270,42 @@ struct ARViewContainer: UIViewRepresentable {
                 object: nil
             )
             
+            // Listen for SpawnNeighborCornerMarker notification (wavefront diamond spawning)
+            NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("SpawnNeighborCornerMarker"),
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self,
+                      let sceneView = self.sceneView,
+                      let userInfo = notification.userInfo,
+                      let positionArray = userInfo["position"] as? [Float],
+                      positionArray.count == 3,
+                      let mapPointID = userInfo["mapPointID"] as? String else {
+                    print("⚠️ [DIAMOND_SPAWN] Invalid notification data")
+                    return
+                }
+                
+                let position = simd_float3(positionArray[0], positionArray[1], positionArray[2])
+                let zoneName = userInfo["zoneName"] as? String ?? "Unknown"
+                
+                // Create diamond marker options
+                let options = MarkerOptions(
+                    color: .blue,  // Not used for zone corners
+                    markerID: UUID(),
+                    userDeviceHeight: self.userDeviceHeight,
+                    animateOnAppearance: true,
+                    isGhost: true,  // Pulsing effect
+                    isZoneCorner: true
+                )
+                
+                let markerNode = ARMarkerRenderer.createNode(at: position, options: options)
+                markerNode.name = "neighborCorner_\(mapPointID)"
+                sceneView.scene.rootNode.addChildNode(markerNode)
+                
+                print("💎 [DIAMOND_SPAWN] Created diamond marker for '\(zoneName)' corner at (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
+            }
+            
             // Listen for FloodZoneWithSurveyMarkers (Zone Mode)
             NotificationCenter.default.addObserver(
                 forName: NSNotification.Name("FloodZoneWithSurveyMarkers"),
@@ -1993,6 +2029,7 @@ struct ARViewContainer: UIViewRepresentable {
             crosshairUpdateTimer?.invalidate()
             crosshairUpdateTimer = nil
             NotificationCenter.default.removeObserver(self)
+            NotificationCenter.default.removeObserver(self, name: NSNotification.Name("SpawnNeighborCornerMarker"), object: nil)
             sceneView?.session.pause()
             print("🔧 AR session paused and torn down.")
         }

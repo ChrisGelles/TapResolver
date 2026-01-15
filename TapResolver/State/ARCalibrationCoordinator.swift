@@ -158,6 +158,10 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Resets when AR session ends
     private(set) var plantedZoneIDs: Set<String> = []
     
+    /// MapPoint IDs of neighbor corners that have been spawned as diamond markers
+    /// Prevents duplicate spawning when multiple planted zones share a neighbor
+    private(set) var spawnedNeighborCornerIDs: Set<String> = []
+    
     /// Callback triggered when a zone becomes fully planted
     /// Used to spawn neighbor corner predictions
     var onZonePlanted: ((String) -> Void)?
@@ -1348,9 +1352,10 @@ final class ARCalibrationCoordinator: ObservableObject {
             if let zoneID = activeZoneID, totalCorners == 4 {
                 markZoneAsPlanted(zoneID)
                 
-                // Log neighbor count for wavefront (neighbor spawning comes in C4)
+                // Spawn neighbor corner markers
                 if let zone = safeZoneStore?.zone(withID: zoneID) {
                     print("🌊 [WAVEFRONT] Zone '\(zone.displayName)' planted — \(zone.neighborZoneIDs.count) neighbors ready for prediction")
+                    spawnNeighborCornerMarkers(for: zoneID)
                 }
             }
             
@@ -1484,9 +1489,11 @@ final class ARCalibrationCoordinator: ObservableObject {
     
     /// Reset planted zone tracking (called on session start/end)
     func resetPlantedZones() {
-        let count = plantedZoneIDs.count
+        let zoneCount = plantedZoneIDs.count
+        let cornerCount = spawnedNeighborCornerIDs.count
         plantedZoneIDs.removeAll()
-        print("🔄 [ARCalibrationCoordinator] Reset planted zones (was \(count))")
+        spawnedNeighborCornerIDs.removeAll()
+        print("🔄 [ARCalibrationCoordinator] Reset planted zones (was \(zoneCount) zones, \(cornerCount) spawned corners)")
     }
     
     // MARK: - Neighbor Corner Prediction
@@ -1549,6 +1556,85 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
         
         return predictions.isEmpty ? nil : predictions
+    }
+    
+    // MARK: - Neighbor Diamond Marker Spawning
+    
+    /// Spawns diamond markers for all unplanted neighbor zone corners
+    /// - Parameter plantedZoneID: The zone that was just planted
+    func spawnNeighborCornerMarkers(for plantedZoneID: String) {
+        guard let zoneStore = safeZoneStore,
+              let plantedZone = zoneStore.zone(withID: plantedZoneID) else {
+            print("⚠️ [WAVEFRONT] Cannot spawn neighbors: zone not found")
+            return
+        }
+        
+        print("🌊 [WAVEFRONT] Spawning neighbor corners for '\(plantedZone.displayName)'")
+        
+        var totalSpawned = 0
+        
+        for neighborID in plantedZone.neighborZoneIDs {
+            // Skip already-planted zones
+            if plantedZoneIDs.contains(neighborID) {
+                print("   ⏭️ Neighbor '\(String(neighborID.prefix(8)))' already planted, skipping")
+                continue
+            }
+            
+            guard let neighborZone = zoneStore.zone(withID: neighborID) else {
+                print("   ⚠️ Neighbor zone '\(String(neighborID.prefix(8)))' not found")
+                continue
+            }
+            
+            // Predict corner positions
+            guard let predictions = predictNeighborCornerPositions(
+                neighborZone: neighborZone,
+                plantedZoneID: plantedZoneID
+            ) else {
+                print("   ⚠️ Failed to predict corners for '\(neighborZone.displayName)'")
+                continue
+            }
+            
+            // Spawn diamond markers for each corner
+            for prediction in predictions {
+                // Skip if already spawned (from another planted zone)
+                if spawnedNeighborCornerIDs.contains(prediction.mapPointID) {
+                    print("   ⏭️ Corner \(String(prediction.mapPointID.prefix(8))) already spawned")
+                    continue
+                }
+                
+                // Spawn the diamond marker
+                spawnDiamondMarker(
+                    at: prediction.arPosition,
+                    forMapPointID: prediction.mapPointID,
+                    zoneName: neighborZone.displayName
+                )
+                
+                spawnedNeighborCornerIDs.insert(prediction.mapPointID)
+                totalSpawned += 1
+            }
+        }
+        
+        print("🌊 [WAVEFRONT] Spawned \(totalSpawned) neighbor corner markers")
+    }
+    
+    /// Spawns a single diamond marker at the predicted position
+    private func spawnDiamondMarker(
+        at position: simd_float3,
+        forMapPointID mapPointID: String,
+        zoneName: String
+    ) {
+        // Post notification to AR view to create the marker
+        NotificationCenter.default.post(
+            name: NSNotification.Name("SpawnNeighborCornerMarker"),
+            object: nil,
+            userInfo: [
+                "position": [position.x, position.y, position.z],
+                "mapPointID": mapPointID,
+                "zoneName": zoneName
+            ]
+        )
+        
+        print("   💎 Spawned diamond at (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z))) for \(zoneName)")
     }
     
     /// Register a fill point marker in Zone Corner mode (non-corner ghost confirmation)
