@@ -28,6 +28,14 @@ struct BlockedPlacementInfo {
     let marker: ARMarker  // The marker that was blocked, for override recording
 }
 
+/// Represents a marker to be spawned, collected before unified spawning
+struct PendingMarker {
+    let mapPointID: UUID
+    let position: simd_float3
+    let isNeighborCorner: Bool  // true = diamond marker, false = ghost sphere
+    let zoneName: String?       // For neighbor corners only
+}
+
 final class ARCalibrationCoordinator: ObservableObject {
     @Published var activeTriangleID: UUID?
     @Published var placedMarkers: [UUID] = []  // MapPoint IDs that have been calibrated
@@ -56,6 +64,9 @@ final class ARCalibrationCoordinator: ObservableObject {
     
     /// Ghost marker positions tracked by the coordinator (set by ARViewContainer)
     var ghostMarkerPositions: [UUID: simd_float3] = [:]
+    
+    /// Collected markers awaiting unified spawning (cleared after each spawn cycle)
+    var pendingMarkers: [UUID: PendingMarker] = [:]
     
     // MARK: - Preloaded Historical Position Index
     
@@ -1454,6 +1465,9 @@ final class ARCalibrationCoordinator: ObservableObject {
                 }
             }
             
+            // Unified marker spawning with deduplication
+            spawnCollectedMarkers()
+            
             // Transition to crawl mode
             calibrationState = .readyToFill
             statusText = "Zone corners complete - adjust ghosts as needed"
@@ -1597,22 +1611,27 @@ final class ARCalibrationCoordinator: ObservableObject {
                 continue
             }
             
-            // Spawn diamond markers for each corner
+            // Collect neighbor corner markers for unified spawning
             for prediction in predictions {
-                // Skip if already spawned (from another planted zone)
-                if spawnedNeighborCornerIDs.contains(prediction.mapPointID) {
-                    print("   ⏭️ Corner \(String(prediction.mapPointID.prefix(8))) already spawned")
+                guard let mapPointUUID = UUID(uuidString: prediction.mapPointID) else {
+                    print("   ⚠️ Invalid UUID string: \(prediction.mapPointID)")
                     continue
                 }
                 
-                // Spawn the diamond marker
-                spawnDiamondMarker(
-                    at: prediction.arPosition,
-                    forMapPointID: prediction.mapPointID,
+                // Skip if already collected or spawned
+                if pendingMarkers[mapPointUUID] != nil {
+                    print("   ⏭️ Corner \(String(prediction.mapPointID.prefix(8))) already collected")
+                    continue
+                }
+                
+                // Collect for unified spawning
+                pendingMarkers[mapPointUUID] = PendingMarker(
+                    mapPointID: mapPointUUID,
+                    position: prediction.arPosition,
+                    isNeighborCorner: true,
                     zoneName: neighborZone.displayName
                 )
-                
-                spawnedNeighborCornerIDs.insert(prediction.mapPointID)
+                print("   📥 Collected neighbor corner \(String(prediction.mapPointID.prefix(8))) for '\(neighborZone.displayName)'")
                 totalSpawned += 1
             }
         }
@@ -1683,6 +1702,72 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("🔥 [FILL_POINT] Updated baked canonical position")
         
         print("✅ [FILL_POINT] Registered fill point marker with position history and baked update")
+    }
+    
+    /// Unified deduplication check for marker spawning
+    /// Returns true if the marker should be spawned
+    private func shouldSpawnMarker(mapPointID: UUID) -> Bool {
+        // Already has confirmed AR position
+        if mapPointARPositions[mapPointID] != nil { return false }
+        // Already adjusted from ghost
+        if adjustedGhostMapPoints.contains(mapPointID) { return false }
+        // Already spawned as ghost
+        if ghostMarkerPositions[mapPointID] != nil { return false }
+        // Already spawned as neighbor corner
+        if spawnedNeighborCornerIDs.contains(mapPointID.uuidString) { return false }
+        return true
+    }
+    
+    /// Spawns all collected markers with unified deduplication
+    /// Called once after both collection functions complete
+    private func spawnCollectedMarkers() {
+        print("🎯 [UNIFIED_SPAWN] Spawning \(pendingMarkers.count) collected marker(s)...")
+        
+        var spawnedCount = 0
+        var skippedCount = 0
+        
+        for (mapPointID, marker) in pendingMarkers {
+            // Unified deduplication check
+            guard shouldSpawnMarker(mapPointID: mapPointID) else {
+                print("   ⏭️ \(String(mapPointID.uuidString.prefix(8))): Skipped (dedup)")
+                skippedCount += 1
+                continue
+            }
+            
+            if marker.isNeighborCorner {
+                // Spawn diamond marker for neighbor corner
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("SpawnNeighborCornerMarker"),
+                    object: nil,
+                    userInfo: [
+                        "position": [marker.position.x, marker.position.y, marker.position.z],
+                        "mapPointID": mapPointID.uuidString,
+                        "zoneName": marker.zoneName ?? "Unknown"
+                    ]
+                )
+                spawnedNeighborCornerIDs.insert(mapPointID.uuidString)
+                print("   💎 Spawned neighbor corner \(String(mapPointID.uuidString.prefix(8)))")
+            } else {
+                // Spawn ghost marker for triangle vertex
+                ghostMarkerPositions[mapPointID] = marker.position
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("PlaceGhostMarker"),
+                    object: nil,
+                    userInfo: [
+                        "mapPointID": mapPointID,
+                        "position": marker.position
+                    ]
+                )
+                print("   👻 Spawned ghost \(String(mapPointID.uuidString.prefix(8)))")
+            }
+            
+            spawnedCount += 1
+        }
+        
+        print("🎯 [UNIFIED_SPAWN] Complete: \(spawnedCount) spawned, \(skippedCount) skipped")
+        
+        // Clear pending markers for next cycle
+        pendingMarkers.removeAll()
     }
     
     /// Plants ghost markers for all triangle vertices that have baked canonical positions
@@ -1865,17 +1950,19 @@ final class ARCalibrationCoordinator: ObservableObject {
                 ghostsBilinearOnly += 1
             }
             
-            // Track ghost position
-            ghostMarkerPositions[vertexID] = finalGhostPosition
+            // Skip if already collected as neighbor corner
+            if pendingMarkers[vertexID] != nil {
+                print("📐 [ZONE_CORNER_GHOSTS_BILINEAR] \(String(vertexID.uuidString.prefix(8))): Already collected as neighbor corner")
+                skippedHasPosition += 1
+                continue
+            }
             
-            // Post notification to render ghost in AR view
-            NotificationCenter.default.post(
-                name: NSNotification.Name("PlaceGhostMarker"),
-                object: nil,
-                userInfo: [
-                    "mapPointID": vertexID,
-                    "position": finalGhostPosition
-                ]
+            // Collect for unified spawning
+            pendingMarkers[vertexID] = PendingMarker(
+                mapPointID: vertexID,
+                position: finalGhostPosition,
+                isNeighborCorner: false,
+                zoneName: nil
             )
             
             ghostsPlanted += 1
