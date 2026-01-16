@@ -45,6 +45,14 @@ struct MapNavigationView: View {
 
                 HUDContainer()
                     .opacity(overlaysReady ? 1 : 0)
+                
+                // Zone triangle membership editing toolbar
+                VStack {
+                    Spacer()
+                    ZoneTriangleMembershipToolbar()
+                        .transition(.move(edge: .bottom))
+                        .animation(.easeInOut(duration: 0.2), value: zoneStore.isEditingTriangleMembership)
+                }
             }
             .ignoresSafeArea()
             // Keep the same bootstrap wiring as before (moved here verbatim).

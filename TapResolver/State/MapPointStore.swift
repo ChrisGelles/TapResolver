@@ -1264,6 +1264,9 @@ public final class MapPointStore: ObservableObject {
             let pointsWithDistortion = points.filter { $0.consensusDistortionVector != nil }
             print("📖 [POST_LOAD_DIAG] Loaded \(points.count) points, \(pointsWithDistortion.count) have distortion vectors")
             
+            // Run role distribution diagnostic
+            diagnoseRoleDistribution()
+            
             // Verbose per-point logging disabled for performance
             // To re-enable, uncomment the following:
             // for point in pointsWithDistortion {
@@ -2545,6 +2548,101 @@ public final class MapPointStore: ObservableObject {
         
         print("✅ [DUPLICATE_MERGE] Merged \(removedCount) duplicate MapPoint(s)")
         return removedCount
+    }
+    
+    // MARK: - Diagnostics
+    
+    /// Diagnose role distribution and potential duplicates
+    func diagnoseRoleDistribution(pixelsPerMeter: CGFloat? = nil) {
+        let zoneCornerOnly = points.filter { 
+            $0.roles.contains(.zoneCorner) && !$0.roles.contains(.triangleEdge) 
+        }
+        let triangleEdgeOnly = points.filter { 
+            $0.roles.contains(.triangleEdge) && !$0.roles.contains(.zoneCorner) 
+        }
+        let bothRoles = points.filter { 
+            $0.roles.contains(.zoneCorner) && $0.roles.contains(.triangleEdge) 
+        }
+        
+        print("📊 [ROLE_DIAG] ═══════════════════════════════════")
+        print("📊 [ROLE_DIAG] MapPoint Role Distribution:")
+        print("   .zoneCorner only: \(zoneCornerOnly.count)")
+        print("   .triangleEdge only: \(triangleEdgeOnly.count)")
+        print("   Both roles: \(bothRoles.count)")
+        print("   Total: \(points.count)")
+        
+        // Fetch pixelsPerMeter from MetricSquare in UserDefaults
+        let ppm: CGFloat
+        let locationID = PersistenceContext.shared.locationID
+        let metricSquareKey = "locations.\(locationID).MetricSquares_v1"
+        
+        // Define SquareDTO structure to decode (matches MetricSquareStore)
+        struct ColorHSBA: Codable {
+            var h: CGFloat
+            var s: CGFloat
+            var b: CGFloat
+            var a: CGFloat
+        }
+        struct SquareDTO: Codable {
+            let id: UUID
+            let color: ColorHSBA
+            let cx: CGFloat
+            let cy: CGFloat
+            let side: CGFloat
+            let locked: Bool
+            let meters: Double
+        }
+        
+        if let data = UserDefaults.standard.data(forKey: metricSquareKey),
+           let squares = try? JSONDecoder().decode([SquareDTO].self, from: data),
+           let firstSquare = squares.first,
+           firstSquare.meters > 0 {
+            // Calculate pixels per meter from the metric square
+            // pixelsPerMeter = side (pixels) / meters (real-world)
+            ppm = CGFloat(firstSquare.side / firstSquare.meters)
+            print("📊 [ROLE_DIAG] Using pixelsPerMeter: \(String(format: "%.2f", ppm)) (from MetricSquare)")
+        } else if let passedPPM = pixelsPerMeter, passedPPM > 0 {
+            ppm = passedPPM
+            print("📊 [ROLE_DIAG] Using passed pixelsPerMeter: \(String(format: "%.2f", ppm))")
+        } else {
+            print("📊 [ROLE_DIAG] Skipping proximity check (no MetricSquare or pixelsPerMeter)")
+            print("📊 [ROLE_DIAG] ═══════════════════════════════════")
+            return
+        }
+        
+        let thresholdPixels = 0.5 * ppm  // 0.5 meters
+        var potentialDuplicates: [(String, String, CGFloat)] = []
+        
+        // Compare zone-corner-only points against triangle-edge-only points
+        for zc in zoneCornerOnly {
+            for te in triangleEdgeOnly {
+                let dx = zc.mapPoint.x - te.mapPoint.x
+                let dy = zc.mapPoint.y - te.mapPoint.y
+                let distancePixels = sqrt(dx*dx + dy*dy)
+                
+                if distancePixels < thresholdPixels {
+                    let distanceMeters = distancePixels / ppm
+                    potentialDuplicates.append((
+                        String(zc.id.uuidString.prefix(8)),
+                        String(te.id.uuidString.prefix(8)),
+                        distanceMeters
+                    ))
+                }
+            }
+        }
+        
+        if potentialDuplicates.isEmpty {
+            print("📊 [ROLE_DIAG] ✅ No potential duplicates found within 0.5m")
+        } else {
+            print("📊 [ROLE_DIAG] ⚠️ Found \(potentialDuplicates.count) potential duplicate pairs:")
+            for (zcID, teID, dist) in potentialDuplicates.prefix(10) {
+                print("   • zoneCorner \(zcID) ↔ triangleEdge \(teID): \(String(format: "%.3f", dist))m apart")
+            }
+            if potentialDuplicates.count > 10 {
+                print("   ... and \(potentialDuplicates.count - 10) more")
+            }
+        }
+        print("📊 [ROLE_DIAG] ═══════════════════════════════════")
     }
     
 }

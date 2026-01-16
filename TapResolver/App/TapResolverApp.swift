@@ -149,7 +149,7 @@ struct TapResolverApp: App {
                     )
                     
                     // Configure ZoneStore with dependencies and load zones
-                    zoneStore.configure(mapPointStore: mapPointStore, triangleStore: trianglePatchStore)
+                    zoneStore.configure(mapPointStore: mapPointStore, triangleStore: trianglePatchStore, zoneGroupStore: zoneGroupStore)
                     zoneStore.load()
                     
                     LocationMigration.runIfNeeded()

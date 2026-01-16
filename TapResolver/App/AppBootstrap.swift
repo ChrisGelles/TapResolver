@@ -31,12 +31,17 @@ struct AppBootstrap: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onAppear {
-                let bootstrapStart = CFAbsoluteTimeGetCurrent()
-                print("⏱️ [BOOTSTRAP] AppBootstrap.onAppear STARTED")
+                let now = Date()
+                let formatter = DateFormatter()
+                formatter.dateFormat = "HH:mm:ss.SSS"
+                print("⏱️ [\(formatter.string(from: now))] [BOOTSTRAP] AppBootstrap.onAppear STARTED")
                 
                 // Prevent double running on scene activations
                 guard !Self.hasBootstrapped else {
-                    print("⏱️ [BOOTSTRAP] Skipping — already bootstrapped")
+                    let skipNow = Date()
+                    let skipFormatter = DateFormatter()
+                    skipFormatter.dateFormat = "HH:mm:ss.SSS"
+                    print("⏱️ [\(skipFormatter.string(from: skipNow))] [BOOTSTRAP] Skipping — already bootstrapped")
                     return
                 }
                 Self.hasBootstrapped = true
@@ -65,8 +70,10 @@ struct AppBootstrap: ViewModifier {
                     scanner.startContinuous()
                 }
                 
-                let bootstrapEnd = CFAbsoluteTimeGetCurrent()
-                print("⏱️ [BOOTSTRAP] AppBootstrap.onAppear COMPLETE — \(String(format: "%.1f", (bootstrapEnd - bootstrapStart) * 1000))ms")
+                let endNow = Date()
+                let endFormatter = DateFormatter()
+                endFormatter.dateFormat = "HH:mm:ss.SSS"
+                print("⏱️ [\(endFormatter.string(from: endNow))] [BOOTSTRAP] AppBootstrap.onAppear COMPLETE")
             }
     }
     

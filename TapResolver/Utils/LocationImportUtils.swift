@@ -575,9 +575,35 @@ enum LocationImportUtils {
     
     /// Ensure a stub exists; create it if missing by probing assets images.
     private static func ensureStubForLocation(at dir: URL, id: String) -> LocationStub? {
-        // Check if location.json already exists
-        let stubURL = dir.appendingPathComponent("location.json")
+        let fm = FileManager.default
         
+        // FAST VALIDATION: Skip directories that lack essential files
+        // This prevents expensive image operations on orphaned/corrupted locations
+        let stubURL = dir.appendingPathComponent("location.json")
+        let assetsDir = dir.appendingPathComponent("assets", isDirectory: true)
+        let hasStub = fm.fileExists(atPath: stubURL.path)
+        let hasAssets = fm.fileExists(atPath: assetsDir.path)
+        
+        // If no stub AND no assets folder, this is likely an orphaned directory
+        if !hasStub && !hasAssets {
+            print("⚠️ Skipping orphaned location (no stub, no assets): \(id)")
+            return nil
+        }
+        
+        // If assets folder exists but is empty, also skip
+        if hasAssets && !hasStub {
+            let assetContents = (try? fm.contentsOfDirectory(at: assetsDir, includingPropertiesForKeys: nil)) ?? []
+            let hasMapImages = assetContents.contains { url in
+                let name = url.lastPathComponent.lowercased()
+                return name.hasPrefix("map_display") || name.hasPrefix("map_original")
+            }
+            if !hasMapImages {
+                print("⚠️ Skipping location with empty/invalid assets: \(id)")
+                return nil
+            }
+        }
+        
+        // Check if location.json already exists
         if let data = try? Data(contentsOf: stubURL),
            let stub = try? JSONDecoder().decode(LocationStub.self, from: data) {
             // Stub exists and is complete
@@ -589,7 +615,6 @@ enum LocationImportUtils {
         
         // Look for existing image assets in the location folder
         let assets = dir.appendingPathComponent("assets", isDirectory: true)
-        let fm = FileManager.default
         
         if !fm.fileExists(atPath: assets.path) {
             try? fm.createDirectory(at: assets, withIntermediateDirectories: true)

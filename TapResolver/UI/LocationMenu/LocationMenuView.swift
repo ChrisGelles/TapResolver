@@ -246,7 +246,12 @@ struct LocationMenuView: View {
     }
 
     var body: some View {
-        let _ = print("⏱️ [LOCATION_MENU] body EVALUATING")
+        let _ = {
+            let now = Date()
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm:ss.SSS"
+            print("⏱️ [\(formatter.string(from: now))] [LOCATION_MENU] body")
+        }()
         
         NavigationStack {
             ZStack {
@@ -289,22 +294,41 @@ struct LocationMenuView: View {
                 }
             }
             .onAppear {
+                let appearTime = Date()
+                let fmt = DateFormatter()
+                fmt.dateFormat = "HH:mm:ss.SSS"
+                print("⏱️ [\(fmt.string(from: appearTime))] [LOCATION_MENU] onAppear FIRED")
+                
                 DispatchQueue.main.async {
+                    let asyncStart = Date()
+                    print("⏱️ [\(fmt.string(from: asyncStart))] [LOCATION_MENU] async block STARTED")
+                    
                     // Seed both hard-coded locations idempotently.
+                    print("⏱️ [\(fmt.string(from: Date()))] [LOCATION_MENU] seedIfNeeded(home) START")
                     seedIfNeeded(id: homeID,
                                  title: homeTitle,
                                  mapAsset: defaultMapAsset,
                                  thumbAsset: defaultThumbAsset)
+                    print("⏱️ [\(fmt.string(from: Date()))] [LOCATION_MENU] seedIfNeeded(home) END")
+                    
+                    print("⏱️ [\(fmt.string(from: Date()))] [LOCATION_MENU] seedIfNeeded(museum) START")
                     seedIfNeeded(id: museumID,
                                  title: museumTitle,
                                  mapAsset: museumMapAsset,
                                  thumbAsset: museumThumbAsset)
+                    print("⏱️ [\(fmt.string(from: Date()))] [LOCATION_MENU] seedIfNeeded(museum) END")
                     
                     // Ensure correct names are set
+                    print("⏱️ [\(fmt.string(from: Date()))] [LOCATION_MENU] renameLocation START")
                     try? LocationImportUtils.renameLocation(id: homeID, newName: homeTitle)
                     try? LocationImportUtils.renameLocation(id: museumID, newName: museumTitle)
+                    print("⏱️ [\(fmt.string(from: Date()))] [LOCATION_MENU] renameLocation END")
                     
+                    print("⏱️ [\(fmt.string(from: Date()))] [LOCATION_MENU] loadLocationSummaries START")
                     loadLocationSummaries()
+                    print("⏱️ [\(fmt.string(from: Date()))] [LOCATION_MENU] loadLocationSummaries END")
+                    
+                    print("⏱️ [\(fmt.string(from: Date()))] [LOCATION_MENU] async block COMPLETE")
                 }
             }
             .sheet(isPresented: $showingImportSheet) {

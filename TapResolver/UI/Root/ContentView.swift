@@ -7,25 +7,31 @@ extension Notification.Name {
     static let rssiStateChanged  = Notification.Name("RSSIStateChanged")
 }
 
+// Timestamp helper - uses app launch time if available
+private func cvLog(_ message: String) {
+    let now = Date()
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm:ss.SSS"
+    print("⏱️ [\(formatter.string(from: now))] \(message)")
+}
+
 struct ContentView: View {
-    // State ownership unchanged:
-    @StateObject private var beaconDotStore = BeaconDotStore()
+    // Use app-level instances (injected from TapResolverApp)
+    @EnvironmentObject private var beaconDotStore: BeaconDotStore  // Changed from @StateObject
     @EnvironmentObject private var mapTransform: MapTransformStore
     @EnvironmentObject private var squareMetrics: SquareMetrics
     @EnvironmentObject private var metricSquares: MetricSquareStore
     @EnvironmentObject private var beaconLists: BeaconListsStore
     @EnvironmentObject private var btScanner: BluetoothScanner
-    @StateObject private var hudPanels     = HUDPanelsState()
-    @StateObject private var locationManager = LocationManager()
+    @EnvironmentObject private var hudPanels: HUDPanelsState       // Changed from @StateObject
+    @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var mapPointStore: MapPointStore  // ✅ USE APP-LEVEL INSTANCE
-    @StateObject private var transformProcessor = TransformProcessor()
+    @EnvironmentObject private var transformProcessor: TransformProcessor
     @EnvironmentObject private var trianglePatchStore: TrianglePatchStore
     @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
     @EnvironmentObject private var surveySelectionCoordinator: SurveySelectionCoordinator
 
     var body: some View {
-        let _ = print("⏱️ [CONTENT_VIEW] body EVALUATING — showLocationMenu=\(locationManager.showLocationMenu)")
-        
         Group {
             if locationManager.showLocationMenu {
                 LocationMenuView()
@@ -34,10 +40,10 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            print("⏱️ [CONTENT_VIEW] onAppear STARTED")
+            cvLog("[CONTENT_VIEW] onAppear STARTED")
             transformProcessor.bind(to: mapTransform)
             transformProcessor.passThrough = true   // keep UX identical for now
-            print("⏱️ [CONTENT_VIEW] onAppear COMPLETE")
+            cvLog("[CONTENT_VIEW] onAppear COMPLETE")
         }
         // Unified AR View presentation (single location)
         .fullScreenCover(isPresented: Binding(
@@ -59,12 +65,8 @@ struct ContentView: View {
             )
             .environmentObject(arViewLaunchContext)
         }
-        // Provide environments exactly as before + new locationManager
-        .environmentObject(beaconDotStore)
-        .environmentObject(hudPanels)
-        .environmentObject(locationManager)
+        // Provide mapPointStore (locationManager and transformProcessor now come from app level)
         .environmentObject(mapPointStore)
-        .environmentObject(transformProcessor)
         // trianglePatchStore and arViewLaunchContext are already injected from TapResolverApp
     }
 }

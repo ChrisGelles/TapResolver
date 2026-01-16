@@ -106,8 +106,12 @@ final class BluetoothScanner: NSObject, ObservableObject {
     
     /// Start continuous scanning (won't auto-stop)
     func startContinuous() {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        print("⏱️ [BluetoothScanner] startContinuous() STARTED")
         continuousMode = true
         start()
+        let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+        print("⏱️ [BluetoothScanner] startContinuous() COMPLETE — \(String(format: "%.2f", elapsed))ms")
     }
     
     /// Stop continuous scanning
