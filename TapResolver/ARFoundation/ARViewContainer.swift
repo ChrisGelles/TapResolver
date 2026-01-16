@@ -1080,6 +1080,17 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
+            // Check if this MapPoint has the .zoneCorner role
+            let isZoneCornerPoint: Bool
+            if let mapPoint = mapPointStore?.points.first(where: { $0.id == mapPointID }) {
+                isZoneCornerPoint = mapPoint.roles.contains(.zoneCorner)
+                if isZoneCornerPoint {
+                    print("🔷 [GHOST_RENDER] MapPoint \(String(mapPointID.uuidString.prefix(8))) has .zoneCorner role → composite ghost")
+                }
+            } else {
+                isZoneCornerPoint = false
+            }
+            
             // Create ghost marker node (REUSE existing ARMarkerRenderer)
             let ghostNode = ARMarkerRenderer.createNode(
                 at: position,
@@ -1091,7 +1102,8 @@ struct ARViewContainer: UIViewRepresentable {
                     radius: 0.03,
                     animateOnAppearance: true,  // Smooth appearance animation
                     animationOvershoot: 0.04,
-                    isGhost: true  // CRITICAL: Enables pulsing animation and transparency
+                    isGhost: true,  // CRITICAL: Enables pulsing animation and transparency
+                    isZoneCorner: isZoneCornerPoint
                 )
             )
             
@@ -1120,6 +1132,17 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
+            // Check if this MapPoint has the .zoneCorner role
+            let isZoneCornerPoint: Bool
+            if let mapPoint = mapPointStore?.points.first(where: { $0.id == mapPointID }) {
+                isZoneCornerPoint = mapPoint.roles.contains(.zoneCorner)
+                if isZoneCornerPoint {
+                    print("🔷 [GHOST_CREATE] MapPoint \(String(mapPointID.uuidString.prefix(8))) has .zoneCorner role → composite ghost")
+                }
+            } else {
+                isZoneCornerPoint = false
+            }
+            
             // Create ghost marker node
             let ghostNode = ARMarkerRenderer.createNode(
                 at: position,
@@ -1131,7 +1154,8 @@ struct ARViewContainer: UIViewRepresentable {
                     radius: 0.03,
                     animateOnAppearance: true,
                     animationOvershoot: 0.04,
-                    isGhost: true
+                    isGhost: true,
+                    isZoneCorner: isZoneCornerPoint
                 )
             )
             
