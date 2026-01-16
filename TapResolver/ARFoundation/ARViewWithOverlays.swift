@@ -77,6 +77,8 @@ struct ARViewWithOverlays: View {
     @EnvironmentObject private var surveySessionCollector: SurveySessionCollector
     @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
     @EnvironmentObject private var btScanner: BluetoothScanner
+    @EnvironmentObject private var zoneStore: ZoneStore
+    @EnvironmentObject private var zoneGroupStore: ZoneGroupStore
     
     // Relocalization coordinator for strategy selection (developer UI)
     @StateObject private var relocalizationCoordinator: RelocalizationCoordinator
@@ -635,6 +637,8 @@ struct ARViewWithOverlays: View {
                     .environmentObject(mapPointStore)
                     .environmentObject(locationManager)
                     .environmentObject(arCalibrationCoordinator)
+                    .environmentObject(zoneStore)
+                    .environmentObject(zoneGroupStore)
                     .allowsHitTesting(false)  // Prevent PiP map from intercepting gestures
                     .frame(width: 280, height: 220)
                     .onChange(of: arCalibrationCoordinator.calibrationState) { oldState, newState in
@@ -1927,6 +1931,8 @@ struct ARPiPMapView: View {
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
     @EnvironmentObject private var metricSquares: MetricSquareStore
     @EnvironmentObject private var arViewLaunchContext: ARViewLaunchContext
+    @EnvironmentObject private var zoneStore: ZoneStore
+    @EnvironmentObject private var zoneGroupStore: ZoneGroupStore
     
     // Focused point ID for zoom/center (nil = show full map or frame triangle)
     // Computed reactively from arCalibrationCoordinator to respond to currentVertexIndex changes
@@ -2535,26 +2541,72 @@ struct ARPiPMapView: View {
     
     @ViewBuilder
     private func focusedPointIndicator(pointID: UUID, point: MapPointStore.MapPoint) -> some View {
-        ZStack {
-            // Outer ring for visibility
-            Circle()
-                .fill(Color.cyan.opacity(0.3))
-                .frame(width: 20, height: 20)
-            
-            // Inner circle
-            Circle()
-                .fill(Color.cyan)
-                .frame(width: 12, height: 12)
-            
-            // White border
-            Circle()
-                .stroke(Color.white, lineWidth: 2)
-                .frame(width: 12, height: 12)
+        let isZoneCorner = point.roles.contains(.zoneCorner)
+        let indicatorColor = zoneCornerColor(for: point) ?? Color.cyan
+        
+        return ZStack {
+            if isZoneCorner {
+                // Diamond shape for zone corners (rotated square)
+                // Outer glow
+                Rectangle()
+                    .fill(indicatorColor.opacity(0.3))
+                    .frame(width: 18, height: 18)
+                    .rotationEffect(.degrees(45))
+                
+                // Inner diamond
+                Rectangle()
+                    .fill(indicatorColor)
+                    .frame(width: 12, height: 12)
+                    .rotationEffect(.degrees(45))
+                
+                // White border
+                Rectangle()
+                    .stroke(Color.white, lineWidth: 2)
+                    .frame(width: 12, height: 12)
+                    .rotationEffect(.degrees(45))
+            } else {
+                // Circle for non-zone-corner points
+                // Outer ring for visibility
+                Circle()
+                    .fill(indicatorColor.opacity(0.3))
+                    .frame(width: 20, height: 20)
+                
+                // Inner circle
+                Circle()
+                    .fill(indicatorColor)
+                    .frame(width: 12, height: 12)
+                
+                // White border
+                Circle()
+                    .stroke(Color.white, lineWidth: 2)
+                    .frame(width: 12, height: 12)
+            }
         }
         .position(point.mapPoint)
         .onAppear {
-            print("📍 PiP Map: Displaying focused point \(String(pointID.uuidString.prefix(8))) at (\(Int(point.mapPoint.x)), \(Int(point.mapPoint.y)))")
+            let shapeType = isZoneCorner ? "diamond" : "circle"
+            print("📍 PiP Map: Displaying focused point \(String(pointID.uuidString.prefix(8))) as \(shapeType) at (\(Int(point.mapPoint.x)), \(Int(point.mapPoint.y)))")
         }
+    }
+    
+    /// Returns the zone group color for a zone corner MapPoint, or nil if not a zone corner or ungrouped
+    private func zoneCornerColor(for point: MapPointStore.MapPoint) -> Color? {
+        guard point.roles.contains(.zoneCorner) else { return nil }
+        
+        // Find zone(s) that have this MapPoint as a corner
+        let pointIDString = point.id.uuidString
+        for zone in zoneStore.zones {
+            if zone.cornerMapPointIDs.contains(pointIDString) {
+                // Found a zone with this corner - get its group color
+                if let groupID = zone.groupID,
+                   let group = zoneGroupStore.group(withID: groupID) {
+                    return Color(hex: group.colorHex)
+                }
+            }
+        }
+        
+        // Zone corner but ungrouped - use default purple (matches MapPointRole.zoneCorner.color)
+        return Color.purple
     }
     
     @ViewBuilder

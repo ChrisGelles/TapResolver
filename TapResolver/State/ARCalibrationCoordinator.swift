@@ -1624,6 +1624,12 @@ final class ARCalibrationCoordinator: ObservableObject {
                     continue
                 }
                 
+                // Skip if already has AR position (shared corner from planted zone)
+                if mapPointARPositions[mapPointUUID] != nil {
+                    print("   ⏭️ Corner \(String(prediction.mapPointID.prefix(8))) already placed")
+                    continue
+                }
+                
                 // Collect for unified spawning
                 pendingMarkers[mapPointUUID] = PendingMarker(
                     mapPointID: mapPointUUID,
