@@ -68,21 +68,51 @@ class ARMarkerRenderer {
         let headNodeName: String
         
         if options.isZoneCorner {
-            // Zone corner markers: Diamond-cube head (slightly larger than spheres)
-            let cubeSize = effectiveRadius * 2.5  // Larger for visibility
-            headNode = createDiamondCubeHead(size: cubeSize, markerID: options.markerID)
+            // === ZONE CORNER: Composite marker (sphere + floating diamond cube) ===
             
-            // Position so bottom corner aligns with rod top
-            // Distance from cube center to corner = size * √3 / 2
+            // 1. Create sphere (state indicator: orange for ghost, blue for confirmed)
+            let sphere = SCNSphere(radius: effectiveRadius)
+            sphere.firstMaterial?.diffuse.contents = options.color
+            sphere.firstMaterial?.specular.contents = UIColor.white
+            sphere.firstMaterial?.shininess = 0.8
+            
+            let sphereNode = SCNNode(geometry: sphere)
+            sphereNode.position = SCNVector3(0, effectiveHeight, 0)
+            sphereNode.name = "arMarkerSphere_\(options.markerID.uuidString)"
+            markerNode.addChildNode(sphereNode)
+            
+            // Inner sphere for visibility from inside
+            let innerSphere = SCNSphere(radius: effectiveRadius - 0.002)
+            innerSphere.firstMaterial?.diffuse.contents = options.color
+            innerSphere.firstMaterial?.cullMode = .front
+            innerSphere.firstMaterial?.isDoubleSided = false
+            innerSphere.firstMaterial?.lightingModel = .constant
+            let innerSphereNode = SCNNode(geometry: innerSphere)
+            innerSphereNode.position = SCNVector3(0, effectiveHeight, 0)
+            innerSphereNode.name = "arMarkerInnerSphere_\(options.markerID.uuidString)"
+            markerNode.addChildNode(innerSphereNode)
+            
+            // 2. Create diamond cube (type indicator: always multicolored)
+            let cubeSize = effectiveRadius * 2.5
             let cornerOffset = Float(cubeSize) * sqrt(3.0) / 2.0
-            headNode.position = SCNVector3(0, effectiveHeight + cornerOffset, 0)
-            headNodeName = "arMarkerDiamond_\(options.markerID.uuidString)"
-            markerNode.addChildNode(headNode)
+            let sphereTopY = effectiveHeight + Float(effectiveRadius)
+            let cubeGap: Float = 0.03  // 3cm gap between sphere top and cube bottom corner
+            let cubePositionY = sphereTopY + cubeGap + cornerOffset
             
-            // Ghost marker styling for zone corners: semi-transparent and pulsing
+            let cubeNode = createDiamondCubeHead(size: cubeSize, markerID: options.markerID)
+            cubeNode.position = SCNVector3(0, cubePositionY, 0)
+            markerNode.addChildNode(cubeNode)
+            
+            // headNode = sphere (for badge attachment and animation compatibility)
+            headNode = sphereNode
+            headNodeName = "arMarkerSphere_\(options.markerID.uuidString)"
+            
+            // Ghost marker styling
             if options.isGhost {
                 markerNode.opacity = 0.5
             }
+            
+            print("🔷 [MARKER] Created composite zone corner: sphere at \(effectiveHeight)m, cube at \(cubePositionY)m")
         } else {
             // Standard markers: Sphere head
             let sphere = SCNSphere(radius: effectiveRadius)
@@ -364,29 +394,33 @@ class ARMarkerRenderer {
         return cubeNode
     }
     
-    /// Transitions a diamond-cube marker to confirmed state (all faces blue)
-    /// - Parameters:
-    ///   - node: The marker's root node
-    ///   - markerID: UUID to find the diamond child node
+    /// Transitions a zone corner marker to confirmed state
+    /// - Sphere changes to blue (state indicator)
+    /// - Diamond cube stays multicolored (type indicator)
     static func transitionDiamondToConfirmed(node: SCNNode, markerID: UUID) {
-        let diamondName = "arMarkerDiamond_\(markerID.uuidString)"
-        guard let diamondNode = node.childNode(withName: diamondName, recursively: true),
-              let box = diamondNode.geometry as? SCNBox else {
-            print("⚠️ [ARMarkerRenderer] Could not find diamond node: \(diamondName)")
-            return
+        let confirmedColor = UIColor.ARPalette.markerBase
+        
+        // Update sphere to blue
+        let sphereName = "arMarkerSphere_\(markerID.uuidString)"
+        if let sphereNode = node.childNode(withName: sphereName, recursively: true),
+           let sphere = sphereNode.geometry as? SCNSphere {
+            sphere.firstMaterial?.diffuse.contents = confirmedColor
+            sphere.firstMaterial?.specular.contents = UIColor.white
+            sphere.firstMaterial?.shininess = 0.8
+            print("🔵 [ARMarkerRenderer] Sphere transitioned to confirmed (blue)")
+        } else {
+            print("⚠️ [ARMarkerRenderer] Could not find sphere node: \(sphereName)")
         }
         
-        // Create blue material for all faces
-        let blueMaterial = SCNMaterial()
-        blueMaterial.diffuse.contents = UIColor.ARPalette.markerBase  // Standard blue
-        blueMaterial.specular.contents = UIColor.white
-        blueMaterial.shininess = 0.6
+        // Update inner sphere to blue
+        let innerSphereName = "arMarkerInnerSphere_\(markerID.uuidString)"
+        if let innerSphereNode = node.childNode(withName: innerSphereName, recursively: true),
+           let innerSphere = innerSphereNode.geometry as? SCNSphere {
+            innerSphere.firstMaterial?.diffuse.contents = confirmedColor
+        }
         
-        // Apply to all 6 faces
-        box.materials = [blueMaterial, blueMaterial, blueMaterial,
-                         blueMaterial, blueMaterial, blueMaterial]
-        
-        print("✅ [ARMarkerRenderer] Diamond marker transitioned to confirmed (blue)")
+        // Diamond cube stays multicolored
+        print("🔷 [ARMarkerRenderer] Diamond cube remains multicolored")
     }
     
     // MARK: - Texture Generation

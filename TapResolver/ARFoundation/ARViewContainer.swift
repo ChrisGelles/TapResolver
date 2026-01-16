@@ -291,7 +291,7 @@ struct ARViewContainer: UIViewRepresentable {
                 
                 // Create diamond marker options
                 let options = MarkerOptions(
-                    color: .blue,  // Not used for zone corners
+                    color: .orange,  // Ghost zone corners use orange sphere
                     markerID: UUID(),
                     userDeviceHeight: self.userDeviceHeight,
                     animateOnAppearance: true,
@@ -1265,6 +1265,10 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
+            // Check if this MapPoint is a zone corner (by role OR by current mode)
+            let isZoneCornerPoint = mapPoint.roles.contains(.zoneCorner) ||
+                                    arCalibrationCoordinator?.isZoneCornerMode == true
+            
             // Create visual marker at ghost position
             // Use blue (markerBase) since this is a confirmed marker, not a ghost
             let markerNode = ARMarkerRenderer.createNode(
@@ -1277,9 +1281,14 @@ struct ARViewContainer: UIViewRepresentable {
                     radius: 0.03,
                     animateOnAppearance: true,
                     animationOvershoot: 0.04,
-                    isGhost: false
+                    isGhost: false,
+                    isZoneCorner: isZoneCornerPoint  // Preserve zone corner status
                 )
             )
+            
+            if isZoneCornerPoint {
+                print("🔷 [GHOST_CONFIRM] Confirmed as zone corner marker (composite sphere + cube)")
+            }
             
             markerNode.name = "arMarker_\(markerID.uuidString)"
             sceneView?.scene.rootNode.addChildNode(markerNode)
@@ -1608,13 +1617,21 @@ struct ARViewContainer: UIViewRepresentable {
                 shouldAnimate = false
             }
             
+            // Check if we're in zone corner mode
+            let isZoneCornerMode = arCalibrationCoordinator?.isZoneCornerMode == true
+            
             // Create marker using centralized renderer
             let options = MarkerOptions(
                 color: markerColor,
                 markerID: markerID,
                 userDeviceHeight: userDeviceHeight,
-                animateOnAppearance: shouldAnimate
+                animateOnAppearance: shouldAnimate,
+                isZoneCorner: isZoneCornerMode
             )
+            
+            if isZoneCornerMode {
+                print("🔷 [PLACE_MARKER] Creating zone corner marker (composite sphere + cube)")
+            }
             let markerNode = ARMarkerRenderer.createNode(at: position, options: options)
             
             sceneView.scene.rootNode.addChildNode(markerNode)
