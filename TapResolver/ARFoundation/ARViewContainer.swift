@@ -503,6 +503,19 @@ struct ARViewContainer: UIViewRepresentable {
                 return
             }
             
+            // Determine MapPoint ID for this placement
+            // Priority: ghostMapPointID from notification, OR current vertex if in zone corner mode
+            let targetMapPointID: UUID?
+            if let ghostID = notification.userInfo?["ghostMapPointID"] as? UUID {
+                targetMapPointID = ghostID
+            } else if arCalibrationCoordinator?.isZoneCornerMode == true,
+                      let currentVertexID = arCalibrationCoordinator?.getCurrentVertexID() {
+                targetMapPointID = currentVertexID
+                print("🔷 [PLACE_MARKER_CROSSHAIR] Initial placement for zone corner vertex \(String(currentVertexID.uuidString.prefix(8)))")
+            } else {
+                targetMapPointID = nil
+            }
+            
             // Check if this is crawl mode (adjusting ghost position)
             let isCrawlMode = notification.userInfo?["isCrawlMode"] as? Bool ?? false
             
@@ -523,7 +536,7 @@ struct ARViewContainer: UIViewRepresentable {
                 )
                 
                 // Place the real marker at crosshair position
-                let markerID = placeMarker(at: position)
+                let markerID = placeMarker(at: position, forMapPointID: targetMapPointID)
                 print("📍 [CRAWL_CROSSHAIR] Placed adjustment marker \(String(markerID.uuidString.prefix(8)))")
                 
                 // Register marker→MapPoint association for demote support
@@ -583,7 +596,7 @@ struct ARViewContainer: UIViewRepresentable {
                 }
                 
                 // Place the real marker at crosshair position (this posts ARMarkerPlaced)
-                let markerID = placeMarker(at: position)
+                let markerID = placeMarker(at: position, forMapPointID: targetMapPointID)
                 
                 // Register marker→MapPoint association for demote support
                 arCalibrationCoordinator?.sessionMarkerToMapPoint[markerID.uuidString] = ghostMapPointID
@@ -608,8 +621,8 @@ struct ARViewContainer: UIViewRepresentable {
                 )
                 print("📍 [GHOST_ADJUST_NOTIFY] Re-posted ARMarkerPlaced with isGhostConfirm=true for MapPoint \(String(ghostMapPointID.uuidString.prefix(8)))")
             } else {
-                // Normal marker placement
-                let _ = placeMarker(at: position)
+                // Normal marker placement (use targetMapPointID if available)
+                let _ = placeMarker(at: position, forMapPointID: targetMapPointID)
             }
         }
         
@@ -1594,7 +1607,7 @@ struct ARViewContainer: UIViewRepresentable {
         }
 
         @discardableResult
-        func placeMarker(at position: simd_float3) -> UUID {
+        func placeMarker(at position: simd_float3, forMapPointID: UUID? = nil) -> UUID {
             guard let sceneView = sceneView else { return UUID() }
             
             let markerID = UUID()
@@ -1617,8 +1630,17 @@ struct ARViewContainer: UIViewRepresentable {
                 shouldAnimate = false
             }
             
-            // Check if we're in zone corner mode
-            let isZoneCornerMode = arCalibrationCoordinator?.isZoneCornerMode == true
+            // Check if this MapPoint has the .zoneCorner role
+            let isZoneCornerPoint: Bool
+            if let mapPointID = forMapPointID,
+               let mapPoint = mapPointStore?.points.first(where: { $0.id == mapPointID }) {
+                isZoneCornerPoint = mapPoint.roles.contains(.zoneCorner)
+                if isZoneCornerPoint {
+                    print("🔷 [PLACE_MARKER] MapPoint \(String(mapPointID.uuidString.prefix(8))) has .zoneCorner role → composite marker")
+                }
+            } else {
+                isZoneCornerPoint = false
+            }
             
             // Create marker using centralized renderer
             let options = MarkerOptions(
@@ -1626,12 +1648,8 @@ struct ARViewContainer: UIViewRepresentable {
                 markerID: markerID,
                 userDeviceHeight: userDeviceHeight,
                 animateOnAppearance: shouldAnimate,
-                isZoneCorner: isZoneCornerMode
+                isZoneCorner: isZoneCornerPoint
             )
-            
-            if isZoneCornerMode {
-                print("🔷 [PLACE_MARKER] Creating zone corner marker (composite sphere + cube)")
-            }
             let markerNode = ARMarkerRenderer.createNode(at: position, options: options)
             
             sceneView.scene.rootNode.addChildNode(markerNode)
