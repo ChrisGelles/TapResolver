@@ -1946,11 +1946,16 @@ struct ARPiPMapView: View {
             return nil
         }
         
-        // ZONE CORNER CALIBRATION MODE: Focus on current zone corner vertex during placement
+        // ZONE CORNER CALIBRATION MODE: Focus on current zone corner vertex during placement or adjustment
         if arViewLaunchContext.launchMode == .zoneCornerCalibration {
-            // During vertex placement, focus on current zone corner (same as Calibration Crawl)
+            // During vertex placement, focus on current zone corner
             if case .placingVertices = arCalibrationCoordinator.calibrationState {
                 return arCalibrationCoordinator.getCurrentVertexID()
+            }
+            // During ghost adjustment (readyToFill), focus on selected ghost
+            if case .readyToFill = arCalibrationCoordinator.calibrationState,
+               let selectedGhostID = arCalibrationCoordinator.selectedGhostMapPointID {
+                return selectedGhostID
             }
             return nil
         }
