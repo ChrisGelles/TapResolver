@@ -11,6 +11,10 @@ import simd
 import ARKit
 import SceneKit
 
+extension Notification.Name {
+    static let groundPlaneEstablished = Notification.Name("GroundPlaneEstablished")
+}
+
 /// Represents the distinct phases of triangle calibration
 enum CalibrationState: Equatable {
     case placingVertices(currentIndex: Int)  // Placing vertex AR markers (0, 1, or 2)
@@ -171,6 +175,17 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Zones that have been fully planted (all 4 corners confirmed) in this AR session
     /// Resets when AR session ends
     private(set) var plantedZoneIDs: Set<String> = []
+    
+    // MARK: - Ground Plane Management
+    
+    /// Provisional ground Y from first corner (used during corners 1-3)
+    private var provisionalGroundY: Float?
+    
+    /// Authoritative ground Y computed from all 4 corners (used after corner 4)
+    private(set) var establishedGroundY: Float?
+    
+    /// Tolerance for clamping corners to provisional ground (meters)
+    private let groundClampTolerance: Float = 0.15
     
     /// MapPoint IDs of neighbor corners that have been spawned as diamond markers
     /// Prevents duplicate spawning when multiple planted zones share a neighbor
@@ -1310,21 +1325,52 @@ final class ARCalibrationCoordinator: ObservableObject {
             return
         }
         
+        // --- Ground Plane Management ---
+        var correctedPosition = marker.arPosition
+        
+        // Track which corner this is (1-4)
+        let cornerCount = (mapPointARPositions.values.filter { $0 != .zero }.count) + 1
+        
+        if cornerCount == 1 {
+            // First corner: establish provisional ground
+            provisionalGroundY = correctedPosition.y
+            print("🏠 [GROUND] Provisional ground Y = \(String(format: "%.2f", correctedPosition.y))m (from corner 1)")
+        } else if cornerCount < 4, let provisionalY = provisionalGroundY {
+            // Corners 2-3: clamp to provisional ground within tolerance
+            let delta = correctedPosition.y - provisionalY
+            if abs(delta) > groundClampTolerance {
+                correctedPosition.y = provisionalY
+                print("⚡️ [GROUND] Clamped corner \(cornerCount) Y: \(String(format: "%.2f", marker.arPosition.y)) → \(String(format: "%.2f", provisionalY))m (Δ\(String(format: "%.2f", delta))m)")
+            } else if abs(delta) > 0.02 {
+                // Small variance, just log it
+                print("📐 [GROUND] Corner \(cornerCount) Y variance: Δ\(String(format: "%.2f", delta))m (within tolerance)")
+            }
+        } else if cornerCount == 4 {
+            // Fourth corner: compute authoritative ground from all 4
+            correctedPosition = finalizeGroundPlane(fourthCornerPosition: marker.arPosition, mapPointID: mapPointID)
+        }
+        
+        // Use correctedPosition for all subsequent operations
+        let finalPosition = correctedPosition
+        
         // Save to ARWorldMapStore
         do {
-            let worldMapMarker = convertToWorldMapMarker(marker)
+            // Create a corrected marker with the ground-plane-adjusted position
+            var correctedMarker = marker
+            correctedMarker.arPosition = finalPosition
+            let worldMapMarker = convertToWorldMapMarker(correctedMarker)
             try safeARStore.saveMarker(worldMapMarker)
             print("💾 [ZONE_CORNER] Saved marker to ARWorldMapStore")
             
             // Track position for transform computation
-            sessionMarkerPositions[marker.id.uuidString] = marker.arPosition
-            mapPointARPositions[mapPointID] = marker.arPosition
+            sessionMarkerPositions[marker.id.uuidString] = finalPosition
+            mapPointARPositions[mapPointID] = finalPosition
             sessionMarkerToMapPoint[marker.id.uuidString] = mapPointID
             print("📍 [ZONE_CORNER] Stored position for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
             
             // Record in position history
             let record = ARPositionRecord(
-                position: marker.arPosition,
+                position: finalPosition,
                 sessionID: safeARStore.currentSessionID,
                 sourceType: .calibration,
                 distortionVector: nil,
@@ -1477,6 +1523,78 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("📍 [ZONE_CORNER] registerZoneCornerAnchor END: \(formatter.string(from: Date()))")
     }
     
+    /// Computes authoritative ground Y from all 4 corners and posts notification
+    /// - Returns: The 4th corner position with corrected Y
+    private func finalizeGroundPlane(fourthCornerPosition: simd_float3, mapPointID: UUID) -> simd_float3 {
+        // Gather Y values from corners 1-3 (already stored)
+        var yValues: [Float] = []
+        
+        for (_, pos) in mapPointARPositions where pos != .zero {
+            yValues.append(pos.y)
+        }
+        
+        // Add the 4th corner
+        yValues.append(fourthCornerPosition.y)
+        
+        guard yValues.count == 4 else {
+            print("⚠️ [GROUND] Expected 4 Y values, got \(yValues.count)")
+            establishedGroundY = fourthCornerPosition.y
+            return fourthCornerPosition
+        }
+        
+        // Compute median (robust to one outlier)
+        let sorted = yValues.sorted()
+        let median = (sorted[1] + sorted[2]) / 2.0
+        
+        establishedGroundY = median
+        provisionalGroundY = nil  // No longer needed
+        
+        print("🏠 [GROUND] ═══════════════════════════════════════")
+        print("🏠 [GROUND] Established ground Y = \(String(format: "%.2f", median))m")
+        print("🏠 [GROUND]   Corner Y values: \(yValues.map { String(format: "%.2f", $0) }.joined(separator: ", "))")
+        print("🏠 [GROUND]   Median: \(String(format: "%.2f", median))m")
+        print("🏠 [GROUND] ═══════════════════════════════════════")
+        
+        // Compute corrections for corners 1-3
+        var corrections: [[String: Any]] = []
+        let correctionThreshold: Float = 0.02  // 2cm
+        
+        for (mpID, oldPos) in mapPointARPositions where oldPos != .zero {
+            let delta = oldPos.y - median
+            if abs(delta) > correctionThreshold {
+                // Update stored position
+                let newPos = simd_float3(oldPos.x, median, oldPos.z)
+                mapPointARPositions[mpID] = newPos
+                
+                corrections.append([
+                    "mapPointID": mpID,
+                    "oldY": oldPos.y,
+                    "newY": median,
+                    "delta": delta
+                ])
+                print("⚡️ [GROUND] Correcting corner \(String(mpID.uuidString.prefix(8))): Y \(String(format: "%.2f", oldPos.y)) → \(String(format: "%.2f", median))m")
+            }
+        }
+        
+        // Post notification for ARView to animate corrections
+        if !corrections.isEmpty {
+            NotificationCenter.default.post(
+                name: .groundPlaneEstablished,
+                object: nil,
+                userInfo: [
+                    "groundY": median,
+                    "corrections": corrections
+                ]
+            )
+            print("📣 [GROUND] Posted GroundPlaneEstablished with \(corrections.count) correction(s)")
+        } else {
+            print("✅ [GROUND] All corners within tolerance, no corrections needed")
+        }
+        
+        // Return 4th corner with established ground Y
+        return simd_float3(fourthCornerPosition.x, median, fourthCornerPosition.z)
+    }
+    
     /// Check if a MapPoint is one of the zone corner vertices
     func isZoneCorner(mapPointID: UUID) -> Bool {
         return triangleVertices.contains(mapPointID)
@@ -1510,7 +1628,10 @@ final class ARCalibrationCoordinator: ObservableObject {
         let cornerCount = spawnedNeighborCornerIDs.count
         plantedZoneIDs.removeAll()
         spawnedNeighborCornerIDs.removeAll()
+        provisionalGroundY = nil
+        establishedGroundY = nil
         print("🔄 [ARCalibrationCoordinator] Reset planted zones (was \(zoneCount) zones, \(cornerCount) spawned corners)")
+        print("🏠 [GROUND] Ground plane reset")
     }
     
     // MARK: - Neighbor Corner Prediction
@@ -1566,10 +1687,17 @@ final class ARCalibrationCoordinator: ObservableObject {
                 continue
             }
             
-            let predictedAR = projection.project(mapPoint.mapPoint)
-            predictions.append((mapPointID: cornerID, arPosition: predictedAR))
+            let projectedPosition = projection.project(mapPoint.mapPoint)
             
-            print("📍 [WAVEFRONT] Predicted corner \(String(cornerID.prefix(8))): map(\(Int(mapPoint.mapPoint.x)), \(Int(mapPoint.mapPoint.y))) → AR(\(String(format: "%.2f", predictedAR.x)), \(String(format: "%.2f", predictedAR.y)), \(String(format: "%.2f", predictedAR.z)))")
+            // Enforce established ground plane
+            var finalARPosition = projectedPosition
+            if let groundY = establishedGroundY {
+                finalARPosition.y = groundY
+            }
+            
+            predictions.append((mapPointID: cornerID, arPosition: finalARPosition))
+            
+            print("📍 [WAVEFRONT] Predicted corner \(String(cornerID.prefix(8))): map(\(Int(mapPoint.mapPoint.x)), \(Int(mapPoint.mapPoint.y))) → AR(\(String(format: "%.2f", finalARPosition.x)), \(String(format: "%.2f", finalARPosition.y)), \(String(format: "%.2f", finalARPosition.z)))")
         }
         
         return predictions.isEmpty ? nil : predictions
@@ -1904,9 +2032,6 @@ final class ARCalibrationCoordinator: ObservableObject {
         var ghostsWithCorrection = 0
         var ghostsBilinearOnly = 0
         
-        // Get ground Y from first placed corner for consistent height
-        let groundY: Float = placedMarkers.first.flatMap { mapPointARPositions[$0]?.y } ?? -1.0
-        
         for vertexID in allVertexIDs {
             // Skip if already has AR position (placed as corner or already confirmed)
             if mapPointARPositions[vertexID] != nil {
@@ -1940,9 +2065,6 @@ final class ARCalibrationCoordinator: ObservableObject {
                 continue
             }
             
-            // Ground the ghost to floor level
-            finalGhostPosition.y = groundY
-            
             // Apply distortion correction if available from previous calibrations
             // Only apply horizontal correction (X, Z) - Y is handled by grounding
             if let distortion = mapPoint.consensusDistortionVector {
@@ -1954,6 +2076,11 @@ final class ARCalibrationCoordinator: ObservableObject {
                 ghostsWithCorrection += 1
             } else {
                 ghostsBilinearOnly += 1
+            }
+            
+            // Enforce established ground plane
+            if let groundY = establishedGroundY {
+                finalGhostPosition.y = groundY
             }
             
             // Skip if already collected as neighbor corner
