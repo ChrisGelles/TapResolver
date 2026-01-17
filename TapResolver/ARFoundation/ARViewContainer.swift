@@ -477,6 +477,15 @@ struct ARViewContainer: UIViewRepresentable {
                 print("📐 Triangle calibration complete - drawing lines for \(String(triangleID.uuidString.prefix(8)))")
                 self.drawTriangleLines(triangleID: triangleID)
             }
+            
+            // Ground plane established - animate marker corrections
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleGroundPlaneEstablished),
+                name: .groundPlaneEstablished,
+                object: nil
+            )
+            print("🏠 Ground plane correction listener registered")
         }
         
         @objc func handlePlaceMarkerAtCursor(_ notification: Notification) {
@@ -1062,6 +1071,93 @@ struct ARViewContainer: UIViewRepresentable {
             
             print("🧹 [CLEAR_TRIANGLE] Clearing markers for triangle \(String(triangleID.uuidString.prefix(8)))")
             clearSurveyMarkersForTriangle(triangleID)
+        }
+        
+        /// Handles ground plane establishment by animating marker corrections
+        @objc func handleGroundPlaneEstablished(_ notification: Notification) {
+            guard let userInfo = notification.userInfo,
+                  let groundY = userInfo["groundY"] as? Float,
+                  let corrections = userInfo["corrections"] as? [[String: Any]] else {
+                print("⚠️ [GROUND_ANIM] Missing data in GroundPlaneEstablished notification")
+                return
+            }
+            
+            guard !corrections.isEmpty else {
+                print("✅ [GROUND_ANIM] No corrections needed")
+                return
+            }
+            
+            print("🏠 [GROUND_ANIM] Animating \(corrections.count) marker correction(s) to Y=\(String(format: "%.2f", groundY))m")
+            
+            // Play haptic feedback on main thread
+            DispatchQueue.main.async {
+                let generator = UIImpactFeedbackGenerator(style: .light)
+                generator.prepare()
+                generator.impactOccurred()
+            }
+            
+            // Animate each correction
+            for correction in corrections {
+                guard let mapPointID = correction["mapPointID"] as? UUID,
+                      let oldY = correction["oldY"] as? Float,
+                      let newY = correction["newY"] as? Float else {
+                    continue
+                }
+                
+                let delta = newY - oldY
+                print("🏠 [GROUND_ANIM] Correcting \(String(mapPointID.uuidString.prefix(8))): Y \(String(format: "%.2f", oldY)) → \(String(format: "%.2f", newY))m (Δ\(String(format: "%.2f", delta))m)")
+                
+                // Find marker node by MapPoint ID (reverse lookup)
+                guard let markerNode = findMarkerNode(forMapPointID: mapPointID) else {
+                    print("⚠️ [GROUND_ANIM] Could not find marker node for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+                    continue
+                }
+                
+                // Animate with settle motion
+                animateMarkerYCorrection(node: markerNode, from: oldY, to: newY)
+            }
+        }
+        
+        /// Finds a placed marker node by its associated MapPoint ID
+        private func findMarkerNode(forMapPointID mapPointID: UUID) -> SCNNode? {
+            // Reverse lookup: find marker ID that maps to this MapPoint ID
+            guard let markerIDString = arCalibrationCoordinator?.sessionMarkerToMapPoint.first(where: { $0.value == mapPointID })?.key,
+                  let markerID = UUID(uuidString: markerIDString) else {
+                return nil
+            }
+            
+            return placedMarkers[markerID]
+        }
+        
+        /// Animates a marker node's Y position with a settle motion
+        private func animateMarkerYCorrection(node: SCNNode, from oldY: Float, to newY: Float) {
+            let delta = newY - oldY
+            let overshoot: Float = delta * 0.15  // 15% overshoot
+            
+            // Phase 1: Quick move to target + overshoot (0.15s)
+            let phase1 = SCNAction.customAction(duration: 0.15) { node, elapsedTime in
+                let progress = Float(elapsedTime / 0.15)
+                let easeOut = 1 - pow(1 - progress, 3)  // Cubic ease-out
+                let intermediateY = oldY + (delta + overshoot) * easeOut
+                node.position.y = intermediateY
+            }
+            
+            // Phase 2: Settle back to target (0.15s)
+            let phase2 = SCNAction.customAction(duration: 0.15) { node, elapsedTime in
+                let progress = Float(elapsedTime / 0.15)
+                let easeInOut = progress < 0.5 
+                    ? 2 * progress * progress 
+                    : 1 - pow(-2 * progress + 2, 2) / 2  // Ease-in-out
+                let settleY = (newY + overshoot) - overshoot * easeInOut
+                node.position.y = settleY
+            }
+            
+            let sequence = SCNAction.sequence([phase1, phase2])
+            node.runAction(sequence) {
+                // Ensure final position is exact
+                node.position.y = newY
+                print("✅ [GROUND_ANIM] Settled marker to Y=\(String(format: "%.2f", newY))m")
+            }
         }
         
         @objc func handlePlaceGhostMarker(notification: Notification) {
