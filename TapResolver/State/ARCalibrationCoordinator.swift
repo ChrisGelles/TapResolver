@@ -233,6 +233,33 @@ final class ARCalibrationCoordinator: ObservableObject {
         }
     }
     
+    /// Result of computing a similarity transform from corner correspondences
+    struct MapToSessionTransform {
+        let scale: Float                    // Uniform scale factor
+        let rotation: Float                 // Rotation angle in radians (around Y axis)
+        let translation: simd_float2        // Translation in AR XZ plane
+        let rmsError: Float                 // Root mean square residual error
+        let cornerCount: Int                // Number of correspondences used
+        
+        /// Apply transform to a map position (pixels) to get AR XZ position
+        func project(_ mapPixels: CGPoint, metersPerPixel: Float) -> simd_float2 {
+            // Convert to meters
+            let mapMeters = simd_float2(Float(mapPixels.x) * metersPerPixel,
+                                         Float(mapPixels.y) * metersPerPixel)
+            
+            // Apply rotation
+            let cosR = cos(rotation)
+            let sinR = sin(rotation)
+            let rotated = simd_float2(
+                cosR * mapMeters.x - sinR * mapMeters.y,
+                sinR * mapMeters.x + cosR * mapMeters.y
+            )
+            
+            // Apply scale and translation
+            return scale * rotated + translation
+        }
+    }
+    
     // MARK: - Initialization
     
     init() {
@@ -463,6 +490,129 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // Apply translation
         return rotated + translation
+    }
+    
+    /// Compute N-point similarity transform from corner correspondences
+    /// Maps 2D map pixels → AR session XZ plane
+    /// - Parameters:
+    ///   - correspondences: Array of (mapPixels: CGPoint, arPosition: simd_float3) pairs
+    ///   - metersPerPixel: Scale factor from map pixels to meters
+    /// - Returns: MapToSessionTransform if successful, nil if < 2 correspondences
+    private func computeCornerMeshTransform(
+        correspondences: [(mapPixels: CGPoint, arPosition: simd_float3)],
+        metersPerPixel: Float
+    ) -> MapToSessionTransform? {
+        let n = correspondences.count
+        
+        guard n >= 2 else {
+            print("⚠️ [CORNER_MESH] Need at least 2 correspondences, have \(n)")
+            return nil
+        }
+        
+        // Convert to 2D arrays (map in meters, AR in XZ)
+        var mapPoints: [simd_float2] = []
+        var arPoints: [simd_float2] = []
+        
+        for c in correspondences {
+            let mapMeters = simd_float2(Float(c.mapPixels.x) * metersPerPixel,
+                                         Float(c.mapPixels.y) * metersPerPixel)
+            let arXZ = simd_float2(c.arPosition.x, c.arPosition.z)
+            mapPoints.append(mapMeters)
+            arPoints.append(arXZ)
+        }
+        
+        // Compute centroids
+        var mapCentroid = simd_float2(0, 0)
+        var arCentroid = simd_float2(0, 0)
+        for i in 0..<n {
+            mapCentroid += mapPoints[i]
+            arCentroid += arPoints[i]
+        }
+        mapCentroid /= Float(n)
+        arCentroid /= Float(n)
+        
+        // Center the points
+        var mapCentered: [simd_float2] = []
+        var arCentered: [simd_float2] = []
+        for i in 0..<n {
+            mapCentered.append(mapPoints[i] - mapCentroid)
+            arCentered.append(arPoints[i] - arCentroid)
+        }
+        
+        // Compute rotation using Procrustes (sum of cross and dot products)
+        var sumCross: Float = 0  // Σ(map.x * ar.y - map.y * ar.x)
+        var sumDot: Float = 0    // Σ(map.x * ar.x + map.y * ar.y)
+        
+        for i in 0..<n {
+            sumCross += mapCentered[i].x * arCentered[i].y - mapCentered[i].y * arCentered[i].x
+            sumDot += mapCentered[i].x * arCentered[i].x + mapCentered[i].y * arCentered[i].y
+        }
+        
+        let rotation = atan2(sumCross, sumDot)
+        
+        // Compute scale
+        var mapVariance: Float = 0  // Σ||mapCentered||²
+        var arVariance: Float = 0   // Σ||arCentered||²
+        
+        for i in 0..<n {
+            mapVariance += simd_length_squared(mapCentered[i])
+            arVariance += simd_length_squared(arCentered[i])
+        }
+        
+        let scale: Float
+        if mapVariance > 0.0001 {
+            // scale = sqrt(arVariance / mapVariance) — but we use ratio of projected lengths
+            let cosR = cos(rotation)
+            let sinR = sin(rotation)
+            
+            var numerator: Float = 0
+            for i in 0..<n {
+                let rotatedMap = simd_float2(
+                    cosR * mapCentered[i].x - sinR * mapCentered[i].y,
+                    sinR * mapCentered[i].x + cosR * mapCentered[i].y
+                )
+                numerator += simd_dot(rotatedMap, arCentered[i])
+            }
+            scale = numerator / mapVariance
+        } else {
+            scale = 1.0
+        }
+        
+        // Compute translation: t = arCentroid - scale * R * mapCentroid
+        let cosR = cos(rotation)
+        let sinR = sin(rotation)
+        let rotatedMapCentroid = simd_float2(
+            cosR * mapCentroid.x - sinR * mapCentroid.y,
+            sinR * mapCentroid.x + cosR * mapCentroid.y
+        )
+        let translation = arCentroid - scale * rotatedMapCentroid
+        
+        // Compute RMS error
+        var sumSquaredError: Float = 0
+        for i in 0..<n {
+            let rotatedMap = simd_float2(
+                cosR * mapPoints[i].x - sinR * mapPoints[i].y,
+                sinR * mapPoints[i].x + cosR * mapPoints[i].y
+            )
+            let predicted = scale * rotatedMap + translation
+            let error = predicted - arPoints[i]
+            sumSquaredError += simd_length_squared(error)
+        }
+        let rmsError = sqrt(sumSquaredError / Float(n))
+        
+        print("📐 [CORNER_MESH] Computed transform from \(n) correspondences:")
+        print("   Scale: \(String(format: "%.4f", scale))")
+        print("   Rotation: \(String(format: "%.2f", rotation * 180 / .pi))°")
+        print("   Translation: (\(String(format: "%.2f", translation.x)), \(String(format: "%.2f", translation.y)))")
+        print("   RMS Error: \(String(format: "%.3f", rmsError))m")
+        
+        return MapToSessionTransform(
+            scale: scale,
+            rotation: rotation,
+            translation: translation,
+            rmsError: rmsError,
+            cornerCount: n
+        )
     }
     
     func startCalibration(for triangleID: UUID) {
@@ -4878,8 +5028,54 @@ final class ARCalibrationCoordinator: ObservableObject {
         return nil
     }
     
-    /// Start zone corner calibration for the next eligible zone, with current point as corner #1
-    /// Start zone corner calibration for the next eligible zone, spawning remaining corners as ghosts
+    /// Gather all confirmed zone corner correspondences for Corner Mesh transform
+    /// - Returns: Array of (mapPixels, arPosition) pairs from all planted zone corners
+    private func gatherCornerCorrespondences() -> [(mapPixels: CGPoint, arPosition: simd_float3)] {
+        var correspondences: [(mapPixels: CGPoint, arPosition: simd_float3)] = []
+        
+        guard let zoneStore = safeZoneStore else {
+            print("⚠️ [CORNER_MESH] No zone store available")
+            return correspondences
+        }
+        
+        // Iterate through all planted zones
+        for zoneID in plantedZoneIDs {
+            guard let zone = zoneStore.zone(withID: zoneID) else { continue }
+            
+            for cornerIDString in zone.cornerMapPointIDs {
+                guard let cornerID = UUID(uuidString: cornerIDString) else { continue }
+                
+                // Get map position
+                guard let mapPoint = safeMapStore.points.first(where: { $0.id == cornerID }) else { continue }
+                
+                // Get AR position
+                guard let arPosition = mapPointARPositions[cornerID] else { continue }
+                
+                correspondences.append((mapPixels: mapPoint.position, arPosition: arPosition))
+            }
+        }
+        
+        // Also include any confirmed neighbor corners (from ghost confirmations)
+        for (_, cornerIDs) in confirmedNeighborCorners {
+            for cornerID in cornerIDs {
+                // Skip if already included from planted zones
+                if correspondences.contains(where: { pair in
+                    safeMapStore.points.first(where: { $0.id == cornerID })?.position == pair.mapPixels
+                }) {
+                    continue
+                }
+                
+                guard let mapPoint = safeMapStore.points.first(where: { $0.id == cornerID }) else { continue }
+                guard let arPosition = mapPointARPositions[cornerID] else { continue }
+                
+                correspondences.append((mapPixels: mapPoint.position, arPosition: arPosition))
+            }
+        }
+        
+        print("📐 [CORNER_MESH] Gathered \(correspondences.count) corner correspondences")
+        return correspondences
+    }
+    
     func startNextZoneCalibration() {
         guard let triggerMapPointID = nextZoneEligibleMapPointID,
               let zoneID = nextZoneEligibleZoneID,
@@ -4910,21 +5106,37 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         print("🌊 [WAVEFRONT_V2] Corner #1 (trigger): \(String(triggerMapPointID.uuidString.prefix(8))) at index \(triggerCornerIndex)")
         
-        // Spawn ghost markers for the other 3 corners
+        // Gather all confirmed corner correspondences
+        let correspondences = gatherCornerCorrespondences()
+        
+        // Compute Corner Mesh similarity transform
+        guard let metersPerPixel = cachedMetersPerPixel else {
+            print("⚠️ [WAVEFRONT_V2] metersPerPixel not cached")
+            return
+        }
+        
+        guard let transform = computeCornerMeshTransform(correspondences: correspondences, metersPerPixel: metersPerPixel) else {
+            print("⚠️ [WAVEFRONT_V2] Could not compute Corner Mesh transform")
+            return
+        }
+        
+        // Warn if high error
+        if transform.rmsError > 0.5 {
+            print("⚠️ [WAVEFRONT_V2] High RMS error (\(String(format: "%.2f", transform.rmsError))m) — predictions may be inaccurate")
+        }
+        
+        // Spawn ghost markers for the other 3 corners using Corner Mesh transform
         var spawnedCornerGhosts = 0
         
         for (index, cornerIDString) in zone.cornerMapPointIDs.enumerated() {
-            guard let cornerID = UUID(uuidString: cornerIDString) else {
-                print("⚠️ [WAVEFRONT_V2] Invalid corner ID: \(cornerIDString)")
-                continue
-            }
+            guard let cornerID = UUID(uuidString: cornerIDString) else { continue }
             
             // Skip the trigger corner (already confirmed)
             if cornerID == triggerMapPointID {
                 continue
             }
             
-            // Skip if already has an AR position (shouldn't happen, but safety check)
+            // Skip if already has an AR position
             if mapPointARPositions[cornerID] != nil {
                 print("🌊 [WAVEFRONT_V2] Corner \(index + 1) already has AR position, counting as confirmed")
                 confirmedCornerIDs.insert(cornerID)
@@ -4933,62 +5145,33 @@ final class ARCalibrationCoordinator: ObservableObject {
             
             // Get MapPoint for this corner
             guard let mapPoint = safeMapStore.points.first(where: { $0.id == cornerID }) else {
-                print("⚠️ [WAVEFRONT_V2] Corner MapPoint \(String(cornerID.uuidString.prefix(8))) not found")
+                print("⚠️ [WAVEFRONT_V2] Corner MapPoint \(String(cornerIDString.prefix(8))) not found")
                 continue
             }
             
-            // Compute ghost position from stored data
-            var ghostPosition: simd_float3?
+            // Project via Corner Mesh transform
+            let predictedXZ = transform.project(mapPoint.position, metersPerPixel: metersPerPixel)
             
-            // Try to use canonical position + session transform
-            if let canonical = mapPoint.canonicalPosition {
-                let projected = projectBakedToSession(canonical)
-                print("🔍 [WAVEFRONT_V2] Corner \(index + 1): canonical=\(canonical), projected=\(projected != nil ? String(describing: projected!) : "nil")")
-                ghostPosition = projected
-            } else {
-                print("🔍 [WAVEFRONT_V2] Corner \(index + 1): NO canonical position stored")
-            }
+            // Construct 3D position with ground plane Y
+            var ghostPosition = simd_float3(predictedXZ.x, 0, predictedXZ.y)
             
-            // Fallback: compute from map coordinates (less accurate but better than nothing)
-            if ghostPosition == nil {
-                print("🔍 [WAVEFRONT_V2] Corner \(index + 1): primary failed, trying fallback. mapSize=\(cachedMapSize != nil), metersPerPixel=\(cachedMetersPerPixel != nil)")
-                if let mapSize = cachedMapSize,
-                   let metersPerPixel = cachedMetersPerPixel {
-                    let idealCanonical = computeIdealCanonicalPosition(
-                        from: mapPoint.position,
-                        mapSize: mapSize,
-                        metersPerPixel: metersPerPixel
-                    )
-                    let projected = projectBakedToSession(idealCanonical)
-                    print("🔍 [WAVEFRONT_V2] Corner \(index + 1): idealCanonical=\(idealCanonical), projected=\(projected != nil ? String(describing: projected!) : "nil")")
-                    ghostPosition = projected
-                    print("🌊 [WAVEFRONT_V2] Corner \(index + 1) (\(String(cornerID.uuidString.prefix(8)))): fallback to ideal canonical")
-                } else {
-                    print("🔍 [WAVEFRONT_V2] Corner \(index + 1): Fallback blocked - missing mapSize or metersPerPixel")
-                }
-            }
-            
-            guard let finalPosition = ghostPosition else {
-                print("⚠️ [WAVEFRONT_V2] Could not compute position for corner \(index + 1)")
-                continue
-            }
-            
-            // Apply ground plane if established
-            var groundedPosition = finalPosition
             if let groundY = establishedGroundY {
-                groundedPosition.y = groundY
+                ghostPosition.y = groundY
+            } else {
+                ghostPosition.y = triggerPosition.y
             }
             
-            // Add to pending markers for unified spawning
+            print("🌊 [WAVEFRONT_V2] Corner \(index + 1) (\(String(cornerIDString.prefix(8)))): predicted at \(ghostPosition)")
+            
+            // Add to pending markers
             pendingMarkers[cornerID] = PendingMarker(
                 mapPointID: cornerID,
-                position: groundedPosition,
+                position: ghostPosition,
                 isNeighborCorner: true,
                 zoneName: zone.displayName
             )
             
             spawnedCornerGhosts += 1
-            print("🌊 [WAVEFRONT_V2] Corner \(index + 1) (\(String(cornerID.uuidString.prefix(8)))): ghost queued at \(groundedPosition)")
         }
         
         // Store confirmed corners for tracking
