@@ -544,6 +544,11 @@ struct ARViewContainer: UIViewRepresentable {
                     userInfo: ["mapPointID": ghostMapPointID]
                 )
                 
+                // Track that this ghost was converted to AR marker (prevents re-spawning duplicates)
+                arCalibrationCoordinator?.adjustedGhostMapPoints.insert(ghostMapPointID)
+                arCalibrationCoordinator?.mapPointARPositions[ghostMapPointID] = position
+                print("📍 [CRAWL_CROSSHAIR] Marked \(String(ghostMapPointID.uuidString.prefix(8))) as adjusted, recorded AR position")
+                
                 // Place the real marker at crosshair position
                 let markerID = placeMarker(at: position, forMapPointID: targetMapPointID)
                 print("📍 [CRAWL_CROSSHAIR] Placed adjustment marker \(String(markerID.uuidString.prefix(8)))")
