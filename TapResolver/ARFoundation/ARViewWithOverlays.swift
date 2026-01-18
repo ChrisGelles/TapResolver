@@ -68,6 +68,9 @@ struct ARViewWithOverlays: View {
     @State private var showShareSheet = false
     @State private var svgFileURL: URL? = nil
     
+    // Wavefront V2: "Plot Next Zone" button visibility
+    @State private var showNextZoneButton: Bool = false
+    
     @EnvironmentObject private var mapPointStore: MapPointStore
     @EnvironmentObject private var locationManager: LocationManager
     @EnvironmentObject private var arCalibrationCoordinator: ARCalibrationCoordinator
@@ -208,14 +211,43 @@ struct ARViewWithOverlays: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UpdateGhostSelection"))) { notification in
-                if let cameraPosition = notification.userInfo?["cameraPosition"] as? simd_float3,
-                   let ghostPositions = notification.userInfo?["ghostPositions"] as? [UUID: simd_float3] {
-                    let visibleGhostIDs = notification.userInfo?["visibleGhostIDs"] as? Set<UUID>
+                // Decode camera position from array
+                var cameraPosition: simd_float3?
+                if let posArray = notification.userInfo?["cameraPosition"] as? [Float], posArray.count == 3 {
+                    cameraPosition = simd_float3(posArray[0], posArray[1], posArray[2])
+                }
+                
+                // Decode ghost positions from dictionary of arrays
+                var ghostPositions: [UUID: simd_float3] = [:]
+                if let ghostPosDict = notification.userInfo?["ghostPositions"] as? [String: [Float]] {
+                    for (key, posArray) in ghostPosDict {
+                        if let uuid = UUID(uuidString: key), posArray.count == 3 {
+                            ghostPositions[uuid] = simd_float3(posArray[0], posArray[1], posArray[2])
+                        }
+                    }
+                }
+                
+                let visibleGhostIDs = notification.userInfo?["visibleGhostIDs"] as? Set<UUID>
+                
+                if let cameraPos = cameraPosition {
                     arCalibrationCoordinator.updateGhostSelection(
-                        cameraPosition: cameraPosition,
+                        cameraPosition: cameraPos,
                         ghostPositions: ghostPositions,
                         visibleGhostIDs: visibleGhostIDs
                     )
+                    
+                    // Check proximity to "Plot Next Zone" eligible marker
+                    let nearNextZone = arCalibrationCoordinator.checkNextZoneEligibleProximity(cameraPosition: cameraPos) != nil
+                    
+                    // DIAGNOSTIC
+                    if arCalibrationCoordinator.nextZoneEligibleMapPointID != nil {
+                        print("🔍 [NEXT_ZONE_DIAG] Eligible marker exists, nearNextZone=\(nearNextZone), showNextZoneButton=\(showNextZoneButton)")
+                    }
+                    
+                    if nearNextZone != showNextZoneButton {
+                        showNextZoneButton = nearNextZone
+                        print("🔍 [NEXT_ZONE_DIAG] showNextZoneButton changed to \(nearNextZone)")
+                    }
                 }
             }
             .onDisappear {
@@ -885,6 +917,29 @@ struct ARViewWithOverlays: View {
                     // Show ghost interaction buttons only when:
                     // - A ghost is selected AND
                     // - We're not in reposition mode (waiting for free placement)
+                    // "Plot Next Zone" button for wavefront expansion
+                    if showNextZoneButton && arCalibrationCoordinator.selectedGhostMapPointID == nil {
+                        VStack {
+                            Spacer()
+                            Button(action: {
+                                arCalibrationCoordinator.startNextZoneCalibration()
+                                showNextZoneButton = false
+                            }) {
+                                HStack {
+                                    Image(systemName: "arrow.triangle.branch")
+                                    Text("Plot Next Zone")
+                                }
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(Color.blue)
+                                .cornerRadius(10)
+                            }
+                            .padding(.bottom, 100)
+                        }
+                    }
+                    
                     if shouldShowGhostButtons {
                         GhostInteractionButtons(
                             arCalibrationCoordinator: arCalibrationCoordinator,

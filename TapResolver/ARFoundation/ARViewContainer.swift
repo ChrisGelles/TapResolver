@@ -3274,6 +3274,22 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
                 ghostPositions: self.ghostMarkerPositions,
                 visibleGhostIDs: visibleGhostIDs
             )
+            
+            // Post notification for ARViewWithOverlays to check next zone proximity
+            var ghostPositionsDict: [String: [Float]] = [:]
+            for (uuid, position) in self.ghostMarkerPositions {
+                ghostPositionsDict[uuid.uuidString] = [position.x, position.y, position.z]
+            }
+            
+            NotificationCenter.default.post(
+                name: NSNotification.Name("UpdateGhostSelection"),
+                object: nil,
+                userInfo: [
+                    "cameraPosition": [cameraPosition.x, cameraPosition.y, cameraPosition.z],
+                    "ghostPositions": ghostPositionsDict,
+                    "visibleGhostIDs": visibleGhostIDs
+                ]
+            )
         }
         
         let ghostDuration = (CACurrentMediaTime() - ghostStart) * 1000

@@ -196,6 +196,12 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// When a zone has at least one confirmed corner, it's eligible for wavefront expansion
     private(set) var confirmedNeighborCorners: [String: Set<UUID>] = [:]
     
+    /// MapPoint ID eligible for "Plot Next Zone" action (set after confirming a neighbor corner ghost)
+    private(set) var nextZoneEligibleMapPointID: UUID?
+    
+    /// Zone ID that would be started if user taps "Plot Next Zone"
+    private(set) var nextZoneEligibleZoneID: String?
+    
     /// Callback triggered when a zone becomes fully planted
     /// Used to spawn neighbor corner predictions
     var onZonePlanted: ((String) -> Void)?
@@ -1637,6 +1643,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         plantedZoneIDs.removeAll()
         spawnedNeighborCornerIDs.removeAll()
         confirmedNeighborCorners.removeAll()
+        nextZoneEligibleMapPointID = nil
+        nextZoneEligibleZoneID = nil
         provisionalGroundY = nil
         establishedGroundY = nil
         print("🔄 [ARCalibrationCoordinator] Reset planted zones (was \(zoneCount) zones, \(cornerCount) spawned corners, \(pendingNeighborCount) pending neighbors)")
@@ -1834,6 +1842,14 @@ final class ARCalibrationCoordinator: ObservableObject {
                 
                 let confirmedCount = confirmedNeighborCorners[zone.id]?.count ?? 0
                 print("🌊 [WAVEFRONT_V2] Confirmed corner for neighbor zone '\(zone.displayName)' (\(confirmedCount)/4)")
+            }
+            
+            // Check if this point qualifies for "Plot Next Zone" prompt
+            // Find the first unplanted neighbor zone where this is a corner
+            if let eligibleZone = zonesContainingCorner.first(where: { !plantedZoneIDs.contains($0.id) }) {
+                nextZoneEligibleMapPointID = mapPointID
+                nextZoneEligibleZoneID = eligibleZone.id
+                print("🌊 [WAVEFRONT_V2] Marker \(String(mapPointID.uuidString.prefix(8))) eligible for 'Plot Next Zone' → '\(eligibleZone.displayName)'")
             }
         }
         
@@ -4699,6 +4715,66 @@ final class ARCalibrationCoordinator: ObservableObject {
             selectedDiamondMapPointID = nil
             nearbyButNotVisibleGhostID = nil
         }
+    }
+    
+    /// Check if user is within proximity of the "Plot Next Zone" eligible marker
+    /// Returns the marker's AR position if within threshold, nil otherwise
+    func checkNextZoneEligibleProximity(cameraPosition: simd_float3, threshold: Float = 1.5) -> simd_float3? {
+        guard let mapPointID = nextZoneEligibleMapPointID,
+              let markerPosition = mapPointARPositions[mapPointID] else {
+            return nil
+        }
+        
+        let distance = simd_distance(cameraPosition, markerPosition)
+        if distance <= threshold {
+            return markerPosition
+        }
+        return nil
+    }
+    
+    /// Start zone corner calibration for the next eligible zone, with current point as corner #1
+    func startNextZoneCalibration() {
+        guard let mapPointID = nextZoneEligibleMapPointID,
+              let zoneID = nextZoneEligibleZoneID,
+              let zone = safeZoneStore?.zone(withID: zoneID),
+              let markerPosition = mapPointARPositions[mapPointID],
+              let mapPoint = safeMapStore.points.first(where: { $0.id == mapPointID }) else {
+            print("⚠️ [WAVEFRONT_V2] Cannot start next zone calibration - missing data")
+            return
+        }
+        
+        print("🌊 [WAVEFRONT_V2] Starting calibration for '\(zone.displayName)' with pre-planted corner")
+        
+        // Clear eligibility state
+        let presetMapPointID = mapPointID
+        let presetPosition = markerPosition
+        nextZoneEligibleMapPointID = nil
+        nextZoneEligibleZoneID = nil
+        
+        // Create ARMarker for the pre-planted corner
+        let presetMarker = ARMarker(
+            id: UUID(),
+            linkedMapPointID: presetMapPointID,
+            arPosition: presetPosition,
+            mapCoordinates: mapPoint.mapPoint,
+            isAnchor: false
+        )
+        
+        // Start zone corner calibration with the zone's corner IDs
+        guard let cornerIDs = zone.cornerMapPointIDs.compactMap({ UUID(uuidString: $0) }) as [UUID]?,
+              cornerIDs.count == 4 else {
+            print("⚠️ [WAVEFRONT_V2] Zone '\(zone.displayName)' does not have 4 valid corner IDs")
+            return
+        }
+        
+        // Start zone corner calibration (this sets up state and currentVertexIndex = 0)
+        startZoneCornerCalibration(zoneCornerIDs: cornerIDs, zoneID: zoneID, startingCornerIndex: 0)
+        
+        // Register the pre-planted corner (corner #1)
+        // This will advance currentVertexIndex to 1, so next corner will be #2
+        registerZoneCornerAnchor(mapPointID: presetMapPointID, marker: presetMarker)
+        
+        print("✅ [WAVEFRONT_V2] Zone '\(zone.displayName)' started with corner #1 pre-planted, awaiting corner #2")
     }
     
     // MARK: - Helper: Convert ARMarker to ARWorldMapStore.ARMarker
