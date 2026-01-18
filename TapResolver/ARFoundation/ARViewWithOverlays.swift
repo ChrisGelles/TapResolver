@@ -239,11 +239,6 @@ struct ARViewWithOverlays: View {
                     // Check proximity to "Plot Next Zone" eligible marker
                     let nearNextZone = arCalibrationCoordinator.checkNextZoneEligibleProximity(cameraPosition: cameraPos) != nil
                     
-                    // DIAGNOSTIC
-                    if arCalibrationCoordinator.nextZoneEligibleMapPointID != nil {
-                        print("🔍 [NEXT_ZONE_DIAG] Eligible marker exists, nearNextZone=\(nearNextZone), showNextZoneButton=\(showNextZoneButton)")
-                    }
-                    
                     if nearNextZone != showNextZoneButton {
                         showNextZoneButton = nearNextZone
                         print("🔍 [NEXT_ZONE_DIAG] showNextZoneButton changed to \(nearNextZone)")

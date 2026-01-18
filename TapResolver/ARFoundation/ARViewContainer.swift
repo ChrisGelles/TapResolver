@@ -3281,6 +3281,7 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
                 ghostPositionsDict[uuid.uuidString] = [position.x, position.y, position.z]
             }
             
+            print("🔍 [NOTIFICATION] Posting UpdateGhostSelection (ghostCount=\(ghostPositionsDict.count))")
             NotificationCenter.default.post(
                 name: NSNotification.Name("UpdateGhostSelection"),
                 object: nil,

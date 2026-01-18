@@ -1823,20 +1823,72 @@ final class ARCalibrationCoordinator: ObservableObject {
         sessionMarkerPositions[markerID.uuidString] = position
         mapPointARPositions[mapPointID] = position
         
+        // Check if this is a corner confirmation for the active wavefront zone
+        if let activeZone = activeZoneID,
+           let zone = safeZoneStore?.zone(withID: activeZone),
+           zone.cornerMapPointIDs.contains(mapPointID.uuidString) {
+            
+            // Add to confirmed corners
+            if confirmedNeighborCorners[activeZone] == nil {
+                confirmedNeighborCorners[activeZone] = Set<UUID>()
+            }
+            confirmedNeighborCorners[activeZone]?.insert(mapPointID)
+            
+            let confirmedCount = confirmedNeighborCorners[activeZone]?.count ?? 0
+            print("🌊 [WAVEFRONT_V2] Corner confirmed for active zone '\(zone.displayName)' (\(confirmedCount)/4)")
+            
+            // Check if all 4 corners are now confirmed
+            if confirmedCount >= 4 {
+                print("✅ [WAVEFRONT_V2] All 4 corners confirmed for '\(zone.displayName)' — ready for triangle ghosts")
+                
+                // Set up bilinear frame from the 4 confirmed corners
+                setupBilinearCornersFromZone(zoneID: activeZone)
+                
+                // Spawn triangle ghosts for this zone
+                plantGhostsForAllTriangleVerticesBilinear()
+                
+                print("🌊 [WAVEFRONT_V2] Triangle ghosts planted for '\(zone.displayName)'")
+            }
+        }
+        
         // WAVEFRONT V2: Check if this confirmed point is a corner of any unplanted neighbor zones
         if let zoneStore = safeZoneStore {
+            print("🔍 [ELIGIBILITY_DEBUG] Checking mapPointID: \(String(mapPointID.uuidString.prefix(8)))")
+            print("🔍 [ELIGIBILITY_DEBUG] plantedZoneIDs: \(plantedZoneIDs)")
+            print("🔍 [ELIGIBILITY_DEBUG] activeZoneID: \(activeZoneID ?? "nil")")
+            
+            // Log all zones and their corner IDs
+            print("🔍 [ELIGIBILITY_DEBUG] All zones in store:")
+            for zone in zoneStore.zones {
+                let cornerPrefixes = zone.cornerMapPointIDs.map { String($0.prefix(8)) }
+                print("🔍 [ELIGIBILITY_DEBUG] Zone '\(zone.displayName)' (id: \(String(zone.id.prefix(8)))) corners: \(cornerPrefixes)")
+            }
+            
             let zonesContainingCorner = zoneStore.zones(containingCorner: mapPointID.uuidString)
+            print("🔍 [ELIGIBILITY_DEBUG] zonesContainingCorner returned \(zonesContainingCorner.count) zone(s)")
             
             for zone in zonesContainingCorner {
+                print("🔍 [ELIGIBILITY_DEBUG] Found zone '\(zone.displayName)' containing corner - checking filters...")
+                print("🔍 [ELIGIBILITY_DEBUG]   Is planted? \(plantedZoneIDs.contains(zone.id))")
+                print("🔍 [ELIGIBILITY_DEBUG]   Is active? \(zone.id == activeZoneID)")
+                
                 // Skip already-planted zones
-                guard !plantedZoneIDs.contains(zone.id) else { continue }
+                guard !plantedZoneIDs.contains(zone.id) else {
+                    print("🔍 [ELIGIBILITY_DEBUG]   → SKIPPED (already planted)")
+                    continue
+                }
                 
                 // Skip the currently active zone (we're filling it, not triggering it)
-                guard zone.id != activeZoneID else { continue }
+                guard zone.id != activeZoneID else {
+                    print("🔍 [ELIGIBILITY_DEBUG]   → SKIPPED (is active zone)")
+                    continue
+                }
+                
+                print("🔍 [ELIGIBILITY_DEBUG]   → PASSED filters")
                 
                 // Track this confirmed corner for the neighbor zone
                 if confirmedNeighborCorners[zone.id] == nil {
-                    confirmedNeighborCorners[zone.id] = []
+                    confirmedNeighborCorners[zone.id] = Set<UUID>()
                 }
                 confirmedNeighborCorners[zone.id]?.insert(mapPointID)
                 
@@ -1847,9 +1899,31 @@ final class ARCalibrationCoordinator: ObservableObject {
             // Check if this point qualifies for "Plot Next Zone" prompt
             // Find the first unplanted neighbor zone where this is a corner
             if let eligibleZone = zonesContainingCorner.first(where: { !plantedZoneIDs.contains($0.id) }) {
-                nextZoneEligibleMapPointID = mapPointID
-                nextZoneEligibleZoneID = eligibleZone.id
-                print("🌊 [WAVEFRONT_V2] Marker \(String(mapPointID.uuidString.prefix(8))) eligible for 'Plot Next Zone' → '\(eligibleZone.displayName)'")
+                // Ensure thread safety - UI properties must be updated on main thread
+                if Thread.isMainThread {
+                    nextZoneEligibleMapPointID = mapPointID
+                    nextZoneEligibleZoneID = eligibleZone.id
+                    print("🌊 [WAVEFRONT_V2] Marker \(String(mapPointID.uuidString.prefix(8))) eligible for 'Plot Next Zone' → '\(eligibleZone.displayName)'")
+                    print("🔍 [ELIGIBILITY] Set nextZoneEligibleZoneID=\(eligibleZone.id), mapPointID=\(String(mapPointID.uuidString.prefix(8)))")
+                } else {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self else { return }
+                        self.nextZoneEligibleMapPointID = mapPointID
+                        self.nextZoneEligibleZoneID = eligibleZone.id
+                        print("🌊 [WAVEFRONT_V2] Marker \(String(mapPointID.uuidString.prefix(8))) eligible for 'Plot Next Zone' → '\(eligibleZone.displayName)'")
+                        print("🔍 [ELIGIBILITY] Set nextZoneEligibleZoneID=\(eligibleZone.id), mapPointID=\(String(mapPointID.uuidString.prefix(8))) (async)")
+                    }
+                }
+            } else {
+                print("🔍 [ELIGIBILITY] No eligible zone found - zonesContainingCorner.count=\(zonesContainingCorner.count), all planted or active")
+                if zonesContainingCorner.isEmpty {
+                    print("🔍 [ELIGIBILITY_DEBUG] zonesContainingCorner is EMPTY - lookup failed or MapPoint ID mismatch")
+                } else {
+                    print("🔍 [ELIGIBILITY_DEBUG] zonesContainingCorner has \(zonesContainingCorner.count) zone(s) but all were filtered out")
+                    for zone in zonesContainingCorner {
+                        print("🔍 [ELIGIBILITY_DEBUG]   Zone '\(zone.displayName)': planted=\(plantedZoneIDs.contains(zone.id)), active=\(zone.id == activeZoneID)")
+                    }
+                }
             }
         }
         
@@ -2094,6 +2168,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         var skippedNoMapPoint = 0
         var ghostsWithCorrection = 0
         var ghostsBilinearOnly = 0
+        var hasDistortion = 0
+        var noDistortion = 0
         
         for vertexID in allVertexIDs {
             // Skip if already has AR position (placed as corner or already confirmed)
@@ -2117,8 +2193,10 @@ final class ARCalibrationCoordinator: ObservableObject {
             
             // DIAGNOSTIC: Log distortion vector state for each vertex
             if let distortion = mapPoint.consensusDistortionVector {
+                hasDistortion += 1
                 print("📐 [GHOST_DIAG] \(String(vertexID.uuidString.prefix(8))): HAS distortion (\(String(format: "%.3f", distortion.x)), \(String(format: "%.3f", distortion.z)))m")
             } else {
+                noDistortion += 1
                 print("📐 [GHOST_DIAG] \(String(vertexID.uuidString.prefix(8))): NO distortion (nil)")
             }
             
@@ -2170,6 +2248,7 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("      ↳ Bilinear only: \(ghostsBilinearOnly)")
         print("   Skipped (has position): \(skippedHasPosition)")
         print("   Skipped (calc failed): \(skippedOutsideQuad)")
+        print("📊 [GHOST_DIAG] Distortion vectors: \(hasDistortion) have, \(noDistortion) missing")
     }
     
     /// Projects a 2D map point to AR space using bilinear interpolation from zone corners
@@ -2183,6 +2262,72 @@ final class ARCalibrationCoordinator: ObservableObject {
             corners2D: sortedZoneCorners2D,
             corners3D: sortedZoneCorners3D
         )
+    }
+    
+    /// Set up bilinear corners from a zone's confirmed corner positions
+    private func setupBilinearCornersFromZone(zoneID: String) {
+        guard let zone = safeZoneStore?.zone(withID: zoneID) else {
+            print("⚠️ [BILINEAR_SETUP] Zone not found: \(zoneID)")
+            return
+        }
+        
+        print("📐 [BILINEAR_SETUP] Setting up bilinear frame from zone '\(zone.displayName)' corners")
+        
+        // Gather corner data: (ID, 2D map position, 3D AR position)
+        var cornerData: [(id: UUID, pos2D: CGPoint, pos3D: simd_float3)] = []
+        for cornerIDString in zone.cornerMapPointIDs {
+            guard let cornerID = UUID(uuidString: cornerIDString) else {
+                print("⚠️ [BILINEAR_SETUP] Invalid corner ID: \(cornerIDString)")
+                continue
+            }
+            
+            guard let mapPoint = safeMapStore.points.first(where: { $0.id == cornerID }),
+                  let arPosition = mapPointARPositions[cornerID] else {
+                print("⚠️ [BILINEAR_SETUP] Missing data for corner \(String(cornerID.uuidString.prefix(8)))")
+                continue
+            }
+            
+            cornerData.append((id: cornerID, pos2D: mapPoint.mapPoint, pos3D: arPosition))
+        }
+        
+        guard cornerData.count == 4 else {
+            print("❌ [BILINEAR_SETUP] Expected 4 corners, got \(cornerData.count)")
+            return
+        }
+        
+        // Sort corners into CCW order using 2D positions
+        let cornersForSorting: [(id: UUID, position: CGPoint)] = cornerData.map { ($0.id, $0.pos2D) }
+        guard let sortedCorners = sortCornersCounterClockwise(cornersForSorting) else {
+            print("❌ [BILINEAR_SETUP] Failed to sort corners")
+            return
+        }
+        
+        // Extract sorted 2D and 3D arrays in matching order
+        sortedZoneCorners2D = sortedCorners.map { $0.position }
+        sortedZoneCorners3D = sortedCorners.compactMap { sortedCorner in
+            cornerData.first(where: { $0.id == sortedCorner.id })?.pos3D
+        }
+        
+        guard sortedZoneCorners3D.count == 4 else {
+            print("❌ [BILINEAR_SETUP] Failed to match 3D positions to sorted order")
+            sortedZoneCorners2D = []
+            sortedZoneCorners3D = []
+            return
+        }
+        
+        // Validate quad (check for self-intersection)
+        guard isValidQuad(corners: sortedZoneCorners2D) else {
+            print("❌ [BILINEAR_SETUP] Invalid quad - corners form self-intersecting shape")
+            sortedZoneCorners2D = []
+            sortedZoneCorners3D = []
+            return
+        }
+        
+        print("✅ [BILINEAR_SETUP] Bilinear frame established from zone corners")
+        for (i, corner) in sortedCorners.enumerated() {
+            let label = ["A (0,0)", "B (1,0)", "C (1,1)", "D (0,1)"][i]
+            print("   \(label): \(String(corner.id.uuidString.prefix(8))) at 2D\(corner.position) → AR(\(String(format: "%.2f", sortedZoneCorners3D[i].x)), \(String(format: "%.2f", sortedZoneCorners3D[i].y)), \(String(format: "%.2f", sortedZoneCorners3D[i].z)))")
+        }
     }
     
     // MARK: - Drift Detection
@@ -3692,6 +3837,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Returns nil if no valid transform is cached
     public func projectBakedToSession(_ bakedPosition: SIMD3<Float>) -> SIMD3<Float>? {
         guard let transform = cachedCanonicalToSessionTransform else {
+            print("🔍 [WAVEFRONT_V2] projectBakedToSession failed - cachedCanonicalToSessionTransform is nil")
             return nil
         }
         
@@ -4719,7 +4865,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     
     /// Check if user is within proximity of the "Plot Next Zone" eligible marker
     /// Returns the marker's AR position if within threshold, nil otherwise
-    func checkNextZoneEligibleProximity(cameraPosition: simd_float3, threshold: Float = 1.5) -> simd_float3? {
+    func checkNextZoneEligibleProximity(cameraPosition: simd_float3, threshold: Float = 2.0) -> simd_float3? {
         guard let mapPointID = nextZoneEligibleMapPointID,
               let markerPosition = mapPointARPositions[mapPointID] else {
             return nil
@@ -4733,48 +4879,129 @@ final class ARCalibrationCoordinator: ObservableObject {
     }
     
     /// Start zone corner calibration for the next eligible zone, with current point as corner #1
+    /// Start zone corner calibration for the next eligible zone, spawning remaining corners as ghosts
     func startNextZoneCalibration() {
-        guard let mapPointID = nextZoneEligibleMapPointID,
+        guard let triggerMapPointID = nextZoneEligibleMapPointID,
               let zoneID = nextZoneEligibleZoneID,
               let zone = safeZoneStore?.zone(withID: zoneID),
-              let markerPosition = mapPointARPositions[mapPointID],
-              let mapPoint = safeMapStore.points.first(where: { $0.id == mapPointID }) else {
+              let triggerPosition = mapPointARPositions[triggerMapPointID] else {
             print("⚠️ [WAVEFRONT_V2] Cannot start next zone calibration - missing data")
             return
         }
         
-        print("🌊 [WAVEFRONT_V2] Starting calibration for '\(zone.displayName)' with pre-planted corner")
+        print("🌊 [WAVEFRONT_V2] Starting calibration for '\(zone.displayName)' via ghost corner spawning")
         
         // Clear eligibility state
-        let presetMapPointID = mapPointID
-        let presetPosition = markerPosition
         nextZoneEligibleMapPointID = nil
         nextZoneEligibleZoneID = nil
         
-        // Create ARMarker for the pre-planted corner
-        let presetMarker = ARMarker(
-            id: UUID(),
-            linkedMapPointID: presetMapPointID,
-            arPosition: presetPosition,
-            mapCoordinates: mapPoint.mapPoint,
-            isAnchor: false
-        )
+        // Set up zone tracking
+        activeZoneID = zoneID
+        plantedZoneIDs.insert(zoneID)
         
-        // Start zone corner calibration with the zone's corner IDs
-        guard let cornerIDs = zone.cornerMapPointIDs.compactMap({ UUID(uuidString: $0) }) as [UUID]?,
-              cornerIDs.count == 4 else {
-            print("⚠️ [WAVEFRONT_V2] Zone '\(zone.displayName)' does not have 4 valid corner IDs")
-            return
+        // Register the trigger point as corner #1
+        let triggerCornerIndex = zone.cornerMapPointIDs.firstIndex(of: triggerMapPointID.uuidString) ?? 0
+        
+        // Track confirmed corners for this zone
+        var confirmedCornerIDs = Set<UUID>([triggerMapPointID])
+        
+        // Record the trigger corner's position
+        mapPointARPositions[triggerMapPointID] = triggerPosition
+        
+        print("🌊 [WAVEFRONT_V2] Corner #1 (trigger): \(String(triggerMapPointID.uuidString.prefix(8))) at index \(triggerCornerIndex)")
+        
+        // Spawn ghost markers for the other 3 corners
+        var spawnedCornerGhosts = 0
+        
+        for (index, cornerIDString) in zone.cornerMapPointIDs.enumerated() {
+            guard let cornerID = UUID(uuidString: cornerIDString) else {
+                print("⚠️ [WAVEFRONT_V2] Invalid corner ID: \(cornerIDString)")
+                continue
+            }
+            
+            // Skip the trigger corner (already confirmed)
+            if cornerID == triggerMapPointID {
+                continue
+            }
+            
+            // Skip if already has an AR position (shouldn't happen, but safety check)
+            if mapPointARPositions[cornerID] != nil {
+                print("🌊 [WAVEFRONT_V2] Corner \(index + 1) already has AR position, counting as confirmed")
+                confirmedCornerIDs.insert(cornerID)
+                continue
+            }
+            
+            // Get MapPoint for this corner
+            guard let mapPoint = safeMapStore.points.first(where: { $0.id == cornerID }) else {
+                print("⚠️ [WAVEFRONT_V2] Corner MapPoint \(String(cornerID.uuidString.prefix(8))) not found")
+                continue
+            }
+            
+            // Compute ghost position from stored data
+            var ghostPosition: simd_float3?
+            
+            // Try to use canonical position + session transform
+            if let canonical = mapPoint.canonicalPosition {
+                let projected = projectBakedToSession(canonical)
+                print("🔍 [WAVEFRONT_V2] Corner \(index + 1): canonical=\(canonical), projected=\(projected != nil ? String(describing: projected!) : "nil")")
+                ghostPosition = projected
+            } else {
+                print("🔍 [WAVEFRONT_V2] Corner \(index + 1): NO canonical position stored")
+            }
+            
+            // Fallback: compute from map coordinates (less accurate but better than nothing)
+            if ghostPosition == nil {
+                print("🔍 [WAVEFRONT_V2] Corner \(index + 1): primary failed, trying fallback. mapSize=\(cachedMapSize != nil), metersPerPixel=\(cachedMetersPerPixel != nil)")
+                if let mapSize = cachedMapSize,
+                   let metersPerPixel = cachedMetersPerPixel {
+                    let idealCanonical = computeIdealCanonicalPosition(
+                        from: mapPoint.position,
+                        mapSize: mapSize,
+                        metersPerPixel: metersPerPixel
+                    )
+                    let projected = projectBakedToSession(idealCanonical)
+                    print("🔍 [WAVEFRONT_V2] Corner \(index + 1): idealCanonical=\(idealCanonical), projected=\(projected != nil ? String(describing: projected!) : "nil")")
+                    ghostPosition = projected
+                    print("🌊 [WAVEFRONT_V2] Corner \(index + 1) (\(String(cornerID.uuidString.prefix(8)))): fallback to ideal canonical")
+                } else {
+                    print("🔍 [WAVEFRONT_V2] Corner \(index + 1): Fallback blocked - missing mapSize or metersPerPixel")
+                }
+            }
+            
+            guard let finalPosition = ghostPosition else {
+                print("⚠️ [WAVEFRONT_V2] Could not compute position for corner \(index + 1)")
+                continue
+            }
+            
+            // Apply ground plane if established
+            var groundedPosition = finalPosition
+            if let groundY = establishedGroundY {
+                groundedPosition.y = groundY
+            }
+            
+            // Add to pending markers for unified spawning
+            pendingMarkers[cornerID] = PendingMarker(
+                mapPointID: cornerID,
+                position: groundedPosition,
+                isNeighborCorner: true,
+                zoneName: zone.displayName
+            )
+            
+            spawnedCornerGhosts += 1
+            print("🌊 [WAVEFRONT_V2] Corner \(index + 1) (\(String(cornerID.uuidString.prefix(8)))): ghost queued at \(groundedPosition)")
         }
         
-        // Start zone corner calibration (this sets up state and currentVertexIndex = 0)
-        startZoneCornerCalibration(zoneCornerIDs: cornerIDs, zoneID: zoneID, startingCornerIndex: 0)
+        // Store confirmed corners for tracking
+        confirmedNeighborCorners[zoneID] = confirmedCornerIDs
         
-        // Register the pre-planted corner (corner #1)
-        // This will advance currentVertexIndex to 1, so next corner will be #2
-        registerZoneCornerAnchor(mapPointID: presetMapPointID, marker: presetMarker)
+        // Enter ghost crawl mode
+        calibrationState = .readyToFill
         
-        print("✅ [WAVEFRONT_V2] Zone '\(zone.displayName)' started with corner #1 pre-planted, awaiting corner #2")
+        // Spawn the corner ghosts
+        spawnCollectedMarkers()
+        
+        print("✅ [WAVEFRONT_V2] Zone '\(zone.displayName)' corner ghost spawning complete")
+        print("   Confirmed: \(confirmedCornerIDs.count)/4, Ghost spawned: \(spawnedCornerGhosts)")
     }
     
     // MARK: - Helper: Convert ARMarker to ARWorldMapStore.ARMarker
