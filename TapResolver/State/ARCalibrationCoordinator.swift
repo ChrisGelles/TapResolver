@@ -191,6 +191,11 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Prevents duplicate spawning when multiple planted zones share a neighbor
     private(set) var spawnedNeighborCornerIDs: Set<String> = []
     
+    /// Tracks confirmed corners for unplanted neighbor zones
+    /// Key: Zone ID, Value: Set of confirmed corner MapPoint UUIDs
+    /// When a zone has at least one confirmed corner, it's eligible for wavefront expansion
+    private(set) var confirmedNeighborCorners: [String: Set<UUID>] = [:]
+    
     /// Callback triggered when a zone becomes fully planted
     /// Used to spawn neighbor corner predictions
     var onZonePlanted: ((String) -> Void)?
@@ -1412,10 +1417,12 @@ final class ARCalibrationCoordinator: ObservableObject {
             if let zoneID = activeZoneID, totalCorners == 4 {
                 markZoneAsPlanted(zoneID)
                 
-                // Spawn neighbor corner markers
+                // WAVEFRONT V2: Log neighbor count but don't spawn all corners
+                // Corners will spawn individually as user confirms triangle ghosts that are also neighbor corners
                 if let zone = safeZoneStore?.zone(withID: zoneID) {
-                    print("🌊 [WAVEFRONT] Zone '\(zone.displayName)' planted — \(zone.neighborZoneIDs.count) neighbors ready for prediction")
-                    spawnNeighborCornerMarkers(for: zoneID)
+                    print("🌊 [WAVEFRONT_V2] Zone '\(zone.displayName)' planted — \(zone.neighborZoneIDs.count) neighbor zone(s)")
+                    print("🌊 [WAVEFRONT_V2] Triangle ghosts spawned; neighbor corners will trigger on confirmation")
+                    // NOTE: spawnNeighborCornerMarkers() intentionally NOT called
                 }
             }
             
@@ -1626,11 +1633,13 @@ final class ARCalibrationCoordinator: ObservableObject {
     func resetPlantedZones() {
         let zoneCount = plantedZoneIDs.count
         let cornerCount = spawnedNeighborCornerIDs.count
+        let pendingNeighborCount = confirmedNeighborCorners.count
         plantedZoneIDs.removeAll()
         spawnedNeighborCornerIDs.removeAll()
+        confirmedNeighborCorners.removeAll()
         provisionalGroundY = nil
         establishedGroundY = nil
-        print("🔄 [ARCalibrationCoordinator] Reset planted zones (was \(zoneCount) zones, \(cornerCount) spawned corners)")
+        print("🔄 [ARCalibrationCoordinator] Reset planted zones (was \(zoneCount) zones, \(cornerCount) spawned corners, \(pendingNeighborCount) pending neighbors)")
         print("🏠 [GROUND] Ground plane reset")
     }
     
@@ -1805,6 +1814,28 @@ final class ARCalibrationCoordinator: ObservableObject {
         sessionMarkerToMapPoint[markerID.uuidString] = mapPointID
         sessionMarkerPositions[markerID.uuidString] = position
         mapPointARPositions[mapPointID] = position
+        
+        // WAVEFRONT V2: Check if this confirmed point is a corner of any unplanted neighbor zones
+        if let zoneStore = safeZoneStore {
+            let zonesContainingCorner = zoneStore.zones(containingCorner: mapPointID.uuidString)
+            
+            for zone in zonesContainingCorner {
+                // Skip already-planted zones
+                guard !plantedZoneIDs.contains(zone.id) else { continue }
+                
+                // Skip the currently active zone (we're filling it, not triggering it)
+                guard zone.id != activeZoneID else { continue }
+                
+                // Track this confirmed corner for the neighbor zone
+                if confirmedNeighborCorners[zone.id] == nil {
+                    confirmedNeighborCorners[zone.id] = []
+                }
+                confirmedNeighborCorners[zone.id]?.insert(mapPointID)
+                
+                let confirmedCount = confirmedNeighborCorners[zone.id]?.count ?? 0
+                print("🌊 [WAVEFRONT_V2] Confirmed corner for neighbor zone '\(zone.displayName)' (\(confirmedCount)/4)")
+            }
+        }
         
         // Calculate distortion vector if original ghost position available
         let distortionVector: simd_float3?
@@ -2015,15 +2046,31 @@ final class ARCalibrationCoordinator: ObservableObject {
             return
         }
         
-        // Collect all unique vertex IDs from all triangles
+        // Determine which triangles to process
+        let trianglesToProcess: [TrianglePatch]
+        let triangleSource: String
+        
+        if let zoneID = activeZoneID,
+           let zone = safeZoneStore?.zone(withID: zoneID) {
+            // Zone Corner mode: filter to zone's member triangles only
+            let memberIDs = Set(zone.memberTriangleIDs)
+            trianglesToProcess = safeTriangleStore.triangles.filter { memberIDs.contains($0.id.uuidString) }
+            triangleSource = "zone '\(zone.displayName)'"
+        } else {
+            // Fallback: all triangles (legacy behavior)
+            trianglesToProcess = safeTriangleStore.triangles
+            triangleSource = "all triangles"
+        }
+        
+        // Collect unique vertex IDs from selected triangles
         var allVertexIDs = Set<UUID>()
-        for triangle in safeTriangleStore.triangles {
+        for triangle in trianglesToProcess {
             for vertexID in triangle.vertexIDs {
                 allVertexIDs.insert(vertexID)
             }
         }
         
-        print("👻 [ZONE_CORNER_GHOSTS_BILINEAR] Found \(allVertexIDs.count) unique vertices across \(safeTriangleStore.triangles.count) triangles")
+        print("👻 [ZONE_CORNER_GHOSTS_BILINEAR] Found \(allVertexIDs.count) unique vertices across \(trianglesToProcess.count) triangles (\(triangleSource))")
         
         var ghostsPlanted = 0
         var skippedHasPosition = 0

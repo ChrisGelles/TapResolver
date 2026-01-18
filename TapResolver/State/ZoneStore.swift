@@ -453,6 +453,21 @@ public class ZoneStore: ObservableObject {
             zones = dtos.map { $0.toZone() }
             updateNameCounter()
             print("📂 [ZoneStore] Loaded \(zones.count) zones from UserDefaults")
+            
+            // DIAGNOSTIC: List zone membership
+            print("📊 [ZONE_MEMBERSHIP_DIAG] ════════════════════════════════════════")
+            for zone in zones {
+                let triangleCount = zone.memberTriangleIDs.count
+                let cornerCount = zone.cornerMapPointIDs.count
+                print("📊 [ZONE_MEMBERSHIP_DIAG] '\(zone.displayName)' (id: \(String(zone.id.prefix(8))))")
+                print("   Corners: \(cornerCount), Member Triangles: \(triangleCount)")
+                if triangleCount > 0 {
+                    let preview = zone.memberTriangleIDs.prefix(5).map { String($0.prefix(8)) }.joined(separator: ", ")
+                    let suffix = triangleCount > 5 ? " ... and \(triangleCount - 5) more" : ""
+                    print("   Triangle IDs: \(preview)\(suffix)")
+                }
+            }
+            print("📊 [ZONE_MEMBERSHIP_DIAG] ════════════════════════════════════════")
         } catch {
             print("❌ [ZoneStore] Failed to load: \(error)")
             zones = []
