@@ -1997,6 +1997,9 @@ final class ARCalibrationCoordinator: ObservableObject {
                 // Set up bilinear frame from the 4 confirmed corners
                 setupBilinearCornersFromZone(zoneID: activeZone)
                 
+                // Spawn zone corners from OTHER zones that lie inside this zone
+                spawnInteriorZoneCorners(forZoneID: activeZone)
+                
                 // Spawn triangle ghosts for this zone
                 plantGhostsForAllTriangleVerticesBilinear()
                 spawnCollectedMarkers()
@@ -2122,6 +2125,38 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("🔥 [FILL_POINT] Updated baked canonical position")
         
         print("✅ [FILL_POINT] Registered fill point marker with position history and baked update")
+    }
+    
+    /// Check if ANY marker (ghost, placed, adjusted, or pending) already exists for this MapPoint
+    /// - Parameter mapPointID: The MapPoint UUID to check
+    /// - Returns: true if a marker already exists in the scene or is pending spawn
+    private func markerExistsForMapPoint(_ mapPointID: UUID) -> Bool {
+        // Check 1: Already has confirmed AR position (placed marker)
+        if mapPointARPositions[mapPointID] != nil {
+            return true
+        }
+        
+        // Check 2: Already adjusted from ghost state
+        if adjustedGhostMapPoints.contains(mapPointID) {
+            return true
+        }
+        
+        // Check 3: Currently exists as ghost marker
+        if ghostMarkerPositions[mapPointID] != nil {
+            return true
+        }
+        
+        // Check 4: Already spawned as neighbor corner diamond
+        if spawnedNeighborCornerIDs.contains(mapPointID.uuidString) {
+            return true
+        }
+        
+        // Check 5: Pending spawn (collected but not yet rendered)
+        if pendingMarkers[mapPointID] != nil {
+            return true
+        }
+        
+        return false
     }
     
     /// Unified deduplication check for marker spawning
@@ -2418,6 +2453,79 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("   Skipped (has position): \(skippedHasPosition)")
         print("   Skipped (calc failed): \(skippedOutsideQuad)")
         print("📊 [GHOST_DIAG] Distortion vectors: \(hasDistortion) have, \(noDistortion) missing")
+    }
+    
+    /// Spawn ghost markers for zone corners from other zones that lie inside the specified zone's polygon
+    /// These become reachable neighbor zone entry points
+    private func spawnInteriorZoneCorners(forZoneID zoneID: String) {
+        guard let zoneStore = safeZoneStore,
+              let metersPerPixel = cachedMetersPerPixel else {
+            print("⚠️ [INTERIOR_CORNERS] Missing zoneStore or metersPerPixel")
+            return
+        }
+        
+        // Find corners from other zones inside this zone
+        let interiorCornerIDs = zoneStore.cornerPointsInsideZone(zoneID, excludeZoneIDs: plantedZoneIDs)
+        
+        if interiorCornerIDs.isEmpty {
+            print("📐 [INTERIOR_CORNERS] No interior zone corners found in '\(zoneID)'")
+            return
+        }
+        
+        print("📐 [INTERIOR_CORNERS] Found \(interiorCornerIDs.count) interior zone corner(s) in '\(zoneID)'")
+        
+        // Gather correspondences for Corner Mesh transform
+        let correspondences = gatherCornerCorrespondences()
+        
+        guard let transform = computeCornerMeshTransform(correspondences: correspondences, metersPerPixel: metersPerPixel) else {
+            print("⚠️ [INTERIOR_CORNERS] Could not compute Corner Mesh transform")
+            return
+        }
+        
+        var spawnedCount = 0
+        
+        for cornerID in interiorCornerIDs {
+            // Skip if marker already exists
+            if markerExistsForMapPoint(cornerID) {
+                print("📐 [INTERIOR_CORNERS] Skipping \(String(cornerID.uuidString.prefix(8))) — marker exists")
+                continue
+            }
+            
+            // Get MapPoint for position
+            guard let mapPoint = safeMapStore.points.first(where: { $0.id == cornerID }) else {
+                continue
+            }
+            
+            // Project via Corner Mesh transform
+            let predictedXZ = transform.project(mapPoint.position, metersPerPixel: metersPerPixel)
+            
+            // Construct 3D position with ground plane Y
+            var ghostPosition = simd_float3(predictedXZ.x, 0, predictedXZ.y)
+            if let groundY = establishedGroundY {
+                ghostPosition.y = groundY
+            }
+            
+            // Find which zone this corner belongs to (for logging)
+            let ownerZones = zoneStore.zones(containingCorner: cornerID.uuidString)
+            let ownerZoneName = ownerZones.first(where: { $0.id != zoneID })?.displayName ?? "unknown"
+            
+            print("📐 [INTERIOR_CORNERS] \(String(cornerID.uuidString.prefix(8))) (\(ownerZoneName) corner) → predicted at \(ghostPosition)")
+            
+            // Add to pending markers as neighbor corner (gets diamond)
+            pendingMarkers[cornerID] = PendingMarker(
+                mapPointID: cornerID,
+                position: ghostPosition,
+                isNeighborCorner: true,
+                zoneName: ownerZoneName
+            )
+            
+            spawnedCount += 1
+        }
+        
+        if spawnedCount > 0 {
+            print("📐 [INTERIOR_CORNERS] Spawning \(spawnedCount) interior zone corner ghost(s)")
+            spawnCollectedMarkers()
+        }
     }
     
     /// Projects a 2D map point to AR space using bilinear interpolation from zone corners
@@ -5165,9 +5273,9 @@ final class ARCalibrationCoordinator: ObservableObject {
                 continue
             }
             
-            // Skip if already has an AR position
-            if mapPointARPositions[cornerID] != nil {
-                print("🌊 [WAVEFRONT_V2] Corner \(index + 1) already has AR position, counting as confirmed")
+            // Skip if any marker already exists for this MapPoint
+            if markerExistsForMapPoint(cornerID) {
+                print("🌊 [WAVEFRONT_V2] Corner \(index + 1) (\(String(cornerIDString.prefix(8)))) already has marker, counting as confirmed")
                 confirmedCornerIDs.insert(cornerID)
                 continue
             }

@@ -226,6 +226,63 @@ public class ZoneStore: ObservableObject {
         zones.filter { $0.memberTriangleIDs.contains(triangleID) }
     }
     
+    /// Find all zone corner MapPoints from OTHER zones that lie inside this zone's polygon
+    /// - Parameters:
+    ///   - zoneID: The zone to check inside
+    ///   - excludeZoneIDs: Zone IDs to exclude (typically already planted zones)
+    /// - Returns: Array of MapPoint IDs that are corners of other zones but lie inside this zone
+    func cornerPointsInsideZone(_ zoneID: String, excludeZoneIDs: Set<String> = []) -> [UUID] {
+        guard let zone = zone(withID: zoneID),
+              let mapPointStore = mapPointStore else {
+            return []
+        }
+        
+        // Get the zone's corner positions to form the polygon
+        var polygonPoints: [CGPoint] = []
+        for cornerIDString in zone.cornerMapPointIDs {
+            guard let cornerID = UUID(uuidString: cornerIDString),
+                  let mapPoint = mapPointStore.points.first(where: { $0.id == cornerID }) else {
+                continue
+            }
+            polygonPoints.append(mapPoint.position)
+        }
+        
+        guard polygonPoints.count >= 3 else { return [] }
+        
+        // Find corners from other zones that lie inside this polygon
+        var cornersInside: [UUID] = []
+        
+        for otherZone in zones {
+            // Skip self
+            if otherZone.id == zoneID { continue }
+            
+            // Skip excluded zones
+            if excludeZoneIDs.contains(otherZone.id) { continue }
+            
+            for cornerIDString in otherZone.cornerMapPointIDs {
+                guard let cornerID = UUID(uuidString: cornerIDString),
+                      let mapPoint = mapPointStore.points.first(where: { $0.id == cornerID }) else {
+                    continue
+                }
+                
+                // Skip if this corner is also a corner of the zone we're checking
+                if zone.cornerMapPointIDs.contains(cornerIDString) {
+                    continue
+                }
+                
+                // Check if inside polygon
+                if pointInPolygon(point: mapPoint.position, polygon: polygonPoints) {
+                    // Avoid duplicates
+                    if !cornersInside.contains(cornerID) {
+                        cornersInside.append(cornerID)
+                    }
+                }
+            }
+        }
+        
+        return cornersInside
+    }
+    
     // MARK: - Triangle Membership
     
     /// Recompute triangle membership for a specific zone
@@ -359,7 +416,7 @@ public class ZoneStore: ObservableObject {
     }
     
     /// Point-in-polygon test using ray casting
-    private func pointInPolygon(point: CGPoint, polygon: [CGPoint]) -> Bool {
+    func pointInPolygon(point: CGPoint, polygon: [CGPoint]) -> Bool {
         var inside = false
         var j = polygon.count - 1
         
