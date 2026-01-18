@@ -263,8 +263,20 @@ struct ARViewWithOverlays: View {
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ARMarkerPlaced"))) { notification in
                 print("🔍 [REGISTER_MARKER_TRACE] ARMarkerPlaced notification received")
                 print("   Calibration state: \(arCalibrationCoordinator.stateDescription)")
-                print("   Call stack trace:")
-                Thread.callStackSymbols.prefix(5).forEach { print("      \($0)") }
+                print("   📍 BREADCRUMB 1: Handler entry")
+                
+                // Type validation of userInfo
+                if let userInfo = notification.userInfo {
+                    for (key, value) in userInfo {
+                        let typeStr = String(describing: type(of: value))
+                        print("   📦 userInfo[\"\(key)\"] = \(typeStr)")
+                        if typeStr.contains("NSNumber") || typeStr.contains("Int") || typeStr.contains("Float") {
+                            if let numValue = value as? NSNumber {
+                                print("      ⚠️ NUMERIC VALUE: \(numValue)")
+                            }
+                        }
+                    }
+                }
                 
                 // Check if this is a ghost confirmation
                 let isGhostConfirm = notification.userInfo?["isGhostConfirm"] as? Bool ?? false
@@ -322,6 +334,8 @@ struct ARViewWithOverlays: View {
                    let positionArray = notification.userInfo?["position"] as? [Float],
                    positionArray.count == 3 {
                     
+                    print("   📍 BREADCRUMB 2: Entered zone corner path")
+                    
                     // Determine if we're in a valid state for zone corner processing
                     let isPlacingVertices: Bool
                     if case .placingVertices = arCalibrationCoordinator.calibrationState {
@@ -331,6 +345,7 @@ struct ARViewWithOverlays: View {
                     } else {
                         // Not in a valid zone corner state, skip this handler
                         print("⚠️ [ZONE_CORNER_TRACE] Skipping - not in placingVertices or readyToFill state")
+                        print("   📍 BREADCRUMB 2a: Exiting - invalid state")
                         // Don't return here - let it fall through to other handlers
                         return
                     }
@@ -339,6 +354,8 @@ struct ARViewWithOverlays: View {
                     let isZoneCornerGhostConfirm = notification.userInfo?["isGhostConfirm"] as? Bool ?? false
                     // Accept either "mapPointID" (Zone Corner uses this) or "ghostMapPointID" (crawl mode uses this)
                     let zoneCornerGhostMapPointID = notification.userInfo?["mapPointID"] as? UUID ?? notification.userInfo?["ghostMapPointID"] as? UUID
+                    
+                    print("   📍 BREADCRUMB 3: isPlacingVertices=\(isPlacingVertices), isZoneCornerGhostConfirm=\(isZoneCornerGhostConfirm)")
                     
                     if isPlacingVertices {
                         // Original flow: placing initial zone corners

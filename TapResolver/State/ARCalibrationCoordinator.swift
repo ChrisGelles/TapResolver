@@ -1683,7 +1683,17 @@ final class ARCalibrationCoordinator: ObservableObject {
             // Transition to crawl mode
             calibrationState = .readyToFill
             statusText = "Zone corners complete - adjust ghosts as needed"
-            print("🎯 [ZONE_CORNER] Entering crawl mode with \(ghostMarkerPositions.count) ghost(s)")
+            
+            // Defensive type check before .count call
+            let ghostCount: Int
+            if let dict = ghostMarkerPositions as? [UUID: simd_float3] {
+                ghostCount = dict.count
+            } else {
+                print("❌ [ZONE_CORNER] CRITICAL: ghostMarkerPositions is not [UUID: simd_float3]!")
+                print("   Actual type: \(type(of: ghostMarkerPositions))")
+                ghostCount = 0
+            }
+            print("🎯 [ZONE_CORNER] Entering crawl mode with \(ghostCount) ghost(s)")
         }
         
         print("📍 [ZONE_CORNER] registerZoneCornerAnchor END: \(formatter.string(from: Date()))")
@@ -1971,6 +1981,25 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("   MapPointID: \(String(mapPointID.uuidString.prefix(8)))")
         print("   Position: (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
         
+        // Guard: Skip complex processing if all zones are already planted
+        let allZonesPlanted = plantedZoneIDs.count >= 5  // Adjust count as needed
+        if allZonesPlanted {
+            print("ℹ️ [FILL_POINT] All zones planted - simplified processing")
+            // Still record position but skip eligibility checking
+            mapPointARPositions[mapPointID] = position
+            
+            // Record to position history
+            let record = ARPositionRecord(
+                position: position,
+                sessionID: safeARStore.currentSessionID,
+                sourceType: .ghostAdjust,
+                confidenceScore: 0.8
+            )
+            safeMapStore.addPositionRecord(mapPointID: mapPointID, record: record)
+            print("📍 [FILL_POINT] Recorded position for \(String(mapPointID.uuidString.prefix(8))) (all zones complete mode)")
+            return
+        }
+        
         // Register marker→MapPoint mapping for tap-to-demote functionality
         sessionMarkerToMapPoint[markerID.uuidString] = mapPointID
         sessionMarkerPositions[markerID.uuidString] = position
@@ -2010,6 +2039,9 @@ final class ARCalibrationCoordinator: ObservableObject {
         
         // WAVEFRONT V2: Check if this confirmed point is a corner of any unplanted neighbor zones
         if let zoneStore = safeZoneStore {
+            print("📍 BREADCRUMB E1: checkNextZoneEligibility called for \(String(mapPointID.uuidString.prefix(8)))")
+            print("   plantedZoneIDs.count = \(plantedZoneIDs.count)")
+            
             print("🔍 [ELIGIBILITY_DEBUG] Checking mapPointID: \(String(mapPointID.uuidString.prefix(8)))")
             print("🔍 [ELIGIBILITY_DEBUG] plantedZoneIDs: \(plantedZoneIDs)")
             print("🔍 [ELIGIBILITY_DEBUG] activeZoneID: \(activeZoneID ?? "nil")")
@@ -2071,6 +2103,7 @@ final class ARCalibrationCoordinator: ObservableObject {
                 if Thread.isMainThread {
                     nextZoneEligibleMapPointID = mapPointID
                     nextZoneEligibleZoneID = eligibleZone.id
+                    print("📍 BREADCRUMB E2: Setting eligibility - zoneID=\(eligibleZone.id), mapPointID=\(String(mapPointID.uuidString.prefix(8)))")
                     print("🌊 [WAVEFRONT_V2] Marker \(String(mapPointID.uuidString.prefix(8))) eligible for 'Plot Next Zone' → '\(eligibleZone.displayName)'")
                     print("🔍 [ELIGIBILITY] Set nextZoneEligibleZoneID=\(eligibleZone.id), mapPointID=\(String(mapPointID.uuidString.prefix(8)))")
                 } else {
@@ -2078,11 +2111,13 @@ final class ARCalibrationCoordinator: ObservableObject {
                         guard let self = self else { return }
                         self.nextZoneEligibleMapPointID = mapPointID
                         self.nextZoneEligibleZoneID = eligibleZone.id
+                        print("📍 BREADCRUMB E2: Setting eligibility - zoneID=\(eligibleZone.id), mapPointID=\(String(mapPointID.uuidString.prefix(8)))")
                         print("🌊 [WAVEFRONT_V2] Marker \(String(mapPointID.uuidString.prefix(8))) eligible for 'Plot Next Zone' → '\(eligibleZone.displayName)'")
                         print("🔍 [ELIGIBILITY] Set nextZoneEligibleZoneID=\(eligibleZone.id), mapPointID=\(String(mapPointID.uuidString.prefix(8))) (async)")
                     }
                 }
             } else {
+                print("📍 BREADCRUMB E3: No eligible zone found")
                 print("🔍 [ELIGIBILITY] No eligible zone found - zonesContainingCorner.count=\(zonesContainingCorner.count), all planted or active")
                 if zonesContainingCorner.isEmpty {
                     print("🔍 [ELIGIBILITY_DEBUG] zonesContainingCorner is EMPTY - lookup failed or MapPoint ID mismatch")
@@ -5275,9 +5310,49 @@ final class ARCalibrationCoordinator: ObservableObject {
             
             // Skip if any marker already exists for this MapPoint
             if markerExistsForMapPoint(cornerID) {
-                print("🌊 [WAVEFRONT_V2] Corner \(index + 1) (\(String(cornerIDString.prefix(8)))) already has marker, counting as confirmed")
-                confirmedCornerIDs.insert(cornerID)
-                continue
+                // Verify we have the AR position - if not, try to recover it
+                if mapPointARPositions[cornerID] == nil {
+                    print("⚠️ [WAVEFRONT_V2] Corner \(index + 1) (\(String(cornerIDString.prefix(8)))) has marker but missing AR position — attempting recovery")
+                    
+                    var recoveredPosition: simd_float3? = nil
+                    
+                    // Recovery attempt 1: Check ghostMarkerPositions
+                    if let ghostPos = ghostMarkerPositions[cornerID] {
+                        recoveredPosition = ghostPos
+                        print("   ↳ Recovered from ghostMarkerPositions")
+                    }
+                    
+                    // Recovery attempt 2: Reverse lookup via sessionMarkerToMapPoint
+                    if recoveredPosition == nil {
+                        for (markerIDString, mapPointID) in sessionMarkerToMapPoint {
+                            if mapPointID == cornerID, let pos = sessionMarkerPositions[markerIDString] {
+                                recoveredPosition = pos
+                                print("   ↳ Recovered from sessionMarkerPositions via marker \(String(markerIDString.prefix(8)))")
+                                break
+                            }
+                        }
+                    }
+                    
+                    // Apply recovered position or skip confirmation
+                    if let position = recoveredPosition {
+                        mapPointARPositions[cornerID] = position
+                        print("   ↳ AR position recovered: (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
+                        confirmedCornerIDs.insert(cornerID)
+                    } else {
+                        // Recovery failed — don't count as confirmed, spawn ghost instead
+                        print("❌ [WAVEFRONT_V2] Corner \(index + 1) (\(String(cornerIDString.prefix(8)))) position unrecoverable — will spawn ghost")
+                        // Don't add to confirmedCornerIDs, don't continue — let it fall through to spawn logic
+                    }
+                } else {
+                    // Position already exists, count as confirmed
+                    print("🌊 [WAVEFRONT_V2] Corner \(index + 1) (\(String(cornerIDString.prefix(8)))) already has marker, counting as confirmed")
+                    confirmedCornerIDs.insert(cornerID)
+                }
+                
+                // Only skip spawning if we successfully confirmed
+                if confirmedCornerIDs.contains(cornerID) {
+                    continue
+                }
             }
             
             // Get MapPoint for this corner
