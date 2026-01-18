@@ -170,6 +170,9 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Maps marker ID (UUID string) to MapPoint ID for drift detection
     var sessionMarkerToMapPoint: [String: UUID] = [:]
     
+    /// Last logged proximity distance (for throttling logs)
+    private var lastLoggedProximityDistance: Float = -1
+    
     // MARK: - Wavefront Zone Calibration State (Session-Scoped)
     
     /// Zones that have been fully planted (all 4 corners confirmed) in this AR session
@@ -1996,6 +1999,7 @@ final class ARCalibrationCoordinator: ObservableObject {
                 
                 // Spawn triangle ghosts for this zone
                 plantGhostsForAllTriangleVerticesBilinear()
+                spawnCollectedMarkers()
                 
                 print("🌊 [WAVEFRONT_V2] Triangle ghosts planted for '\(zone.displayName)'")
             }
@@ -2010,8 +2014,19 @@ final class ARCalibrationCoordinator: ObservableObject {
             // Log all zones and their corner IDs
             print("🔍 [ELIGIBILITY_DEBUG] All zones in store:")
             for zone in zoneStore.zones {
-                let cornerPrefixes = zone.cornerMapPointIDs.map { String($0.prefix(8)) }
-                print("🔍 [ELIGIBILITY_DEBUG] Zone '\(zone.displayName)' (id: \(String(zone.id.prefix(8)))) corners: \(cornerPrefixes)")
+                // Build corner descriptions with positions
+                var cornerDescriptions: [String] = []
+                for cornerIDString in zone.cornerMapPointIDs {
+                    let prefix = String(cornerIDString.prefix(8))
+                    if let cornerUUID = UUID(uuidString: cornerIDString),
+                       let mapPoint = safeMapStore.points.first(where: { $0.id == cornerUUID }) {
+                        let pos = mapPoint.position
+                        cornerDescriptions.append("\(prefix)@(\(Int(pos.x)),\(Int(pos.y)))")
+                    } else {
+                        cornerDescriptions.append(prefix)
+                    }
+                }
+                print("🔍 [ELIGIBILITY_DEBUG] Zone '\(zone.displayName)' corners: \(cornerDescriptions)")
             }
             
             let zonesContainingCorner = zoneStore.zones(containingCorner: mapPointID.uuidString)
@@ -2141,6 +2156,10 @@ final class ARCalibrationCoordinator: ObservableObject {
             
             if marker.isNeighborCorner {
                 // Spawn diamond marker for neighbor corner
+                let mapPoint = safeMapStore.points.first(where: { $0.id == mapPointID })
+                let roleDescription = mapPoint?.roles.isEmpty == false ? "\(mapPoint!.roles)" : "no roles"
+                print("💎 [DIAMOND] MapPoint \(String(mapPointID.uuidString.prefix(8))) gets diamond: isNeighborCorner=\(marker.isNeighborCorner), roles=\(roleDescription)")
+                
                 NotificationCenter.default.post(
                     name: NSNotification.Name("SpawnNeighborCornerMarker"),
                     object: nil,
@@ -5021,7 +5040,17 @@ final class ARCalibrationCoordinator: ObservableObject {
             return nil
         }
         
-        let distance = simd_distance(cameraPosition, markerPosition)
+        // Use horizontal distance only (consistent with ghost selection)
+        let dx = markerPosition.x - cameraPosition.x
+        let dz = markerPosition.z - cameraPosition.z
+        let distance = sqrt(dx * dx + dz * dz)
+        
+        // Throttled logging: only log when distance changes by >0.1m
+        if abs(distance - lastLoggedProximityDistance) > 0.1 {
+            lastLoggedProximityDistance = distance
+            print("📏 [PROXIMITY] Distance to eligible marker (\(String(mapPointID.uuidString.prefix(8)))): \(String(format: "%.2f", distance))m (threshold: \(threshold)m)")
+        }
+        
         if distance <= threshold {
             return markerPosition
         }
