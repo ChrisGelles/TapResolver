@@ -167,6 +167,9 @@ struct ARViewContainer: UIViewRepresentable {
         /// These stay hidden until survey markers are cleared (not restored on sphere exit)
         private var hiddenARMarkersForSurveyProximity: Set<UUID> = []
         
+        /// Last logged ghost count for throttled UpdateGhostSelection logging
+        private var lastLoggedGhostCount: Int = -1
+        
         // Timer for updating crosshair
         private var crosshairUpdateTimer: Timer?
         
@@ -3286,7 +3289,12 @@ extension ARViewContainer.ARViewCoordinator: ARSCNViewDelegate {
                 ghostPositionsDict[uuid.uuidString] = [position.x, position.y, position.z]
             }
             
-            print("🔍 [NOTIFICATION] Posting UpdateGhostSelection (ghostCount=\(ghostPositionsDict.count))")
+            // Throttled logging: only print when ghost count changes
+            if ghostPositionsDict.count != self.lastLoggedGhostCount {
+                self.lastLoggedGhostCount = ghostPositionsDict.count
+                print("🔍 [NOTIFICATION] UpdateGhostSelection ghostCount changed → \(ghostPositionsDict.count)")
+            }
+            
             NotificationCenter.default.post(
                 name: NSNotification.Name("UpdateGhostSelection"),
                 object: nil,
