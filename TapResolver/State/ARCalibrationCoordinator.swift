@@ -1576,7 +1576,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             if let zoneID = activeZoneID, totalCorners == 4 {
                 markZoneAsPlanted(zoneID)
                 
-                // Spawn ALL zone corner ghosts (simplified wavefront - all corners visible at once)
+                // Spawn ALL zone corner ghosts using Similarity Transform
                 if let zone = safeZoneStore?.zone(withID: zoneID) {
                     print("🌊 [ALL_CORNERS] Zone '\(zone.displayName)' planted — spawning all remaining zone corners")
                     spawnAllZoneCornerGhosts()
@@ -1951,75 +1951,91 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("🌊 [WAVEFRONT] Spawned \(totalSpawned) neighbor corner markers")
     }
     
-    /// Spawns ghost markers for ALL zone corners (not just neighbors)
-    /// Called after first zone is planted to show all corners as ghosts
+    /// Spawns ghost markers for ALL zone corners across the entire map
+    /// Uses Similarity Transform (not bilinear) to project corners outside the planted zone
     func spawnAllZoneCornerGhosts() {
         guard let zoneStore = safeZoneStore else {
             print("⚠️ [ALL_CORNERS] No zone store available")
             return
         }
         
-        print("🌊 [ALL_CORNERS] Spawning ALL zone corner ghosts...")
+        // Need metersPerPixel for projection
+        guard let metersPerPixel = cachedMetersPerPixel else {
+            print("⚠️ [ALL_CORNERS] metersPerPixel not cached")
+            return
+        }
+        
+        // Need ground Y for 3D position
+        guard let groundY = establishedGroundY else {
+            print("⚠️ [ALL_CORNERS] Ground Y not established")
+            return
+        }
+        
+        // Gather corner correspondences from planted zone(s)
+        let correspondences = gatherCornerCorrespondences()
+        guard correspondences.count >= 2 else {
+            print("⚠️ [ALL_CORNERS] Need at least 2 correspondences, have \(correspondences.count)")
+            return
+        }
+        
+        // Compute similarity transform
+        guard let transform = computeCornerMeshTransform(correspondences: correspondences, metersPerPixel: metersPerPixel) else {
+            print("⚠️ [ALL_CORNERS] Failed to compute similarity transform")
+            return
+        }
+        
+        print("🌊 [ALL_CORNERS] Spawning ALL zone corner ghosts using Similarity Transform")
+        print("   Transform: scale=\(String(format: "%.4f", transform.scale)), rotation=\(String(format: "%.1f", transform.rotation * 180 / .pi))°, RMS=\(String(format: "%.3f", transform.rmsError))m")
         
         var totalCollected = 0
         var skippedAlreadyPlaced = 0
-        var skippedProjectionFailed = 0
         
         for zone in zoneStore.zones {
             // Skip already-planted zones
             if plantedZoneIDs.contains(zone.id) {
-                print("   ⏭️ Zone '\(zone.displayName)' already planted, skipping")
                 continue
             }
             
-            // Process each corner of this zone
             for cornerIDString in zone.cornerMapPointIDs {
                 guard let cornerUUID = UUID(uuidString: cornerIDString) else { continue }
                 
-                // Skip if already has AR position (shared corner from planted zone)
+                // Skip if already has AR position
                 if mapPointARPositions[cornerUUID] != nil {
                     skippedAlreadyPlaced += 1
                     continue
                 }
                 
-                // Skip if already collected as pending
-                if pendingMarkers[cornerUUID] != nil {
-                    continue
-                }
-                
-                // Skip if already a ghost
-                if ghostMarkerPositions[cornerUUID] != nil {
-                    continue
-                }
+                // Skip if already collected or spawned
+                if pendingMarkers[cornerUUID] != nil { continue }
+                if ghostMarkerPositions[cornerUUID] != nil { continue }
                 
                 // Get MapPoint for 2D position
                 guard let mapPoint = safeMapStore.points.first(where: { $0.id == cornerUUID }) else {
-                    print("   ⚠️ Corner \(String(cornerIDString.prefix(8))) not found in MapPointStore")
                     continue
                 }
                 
-                // Project via bilinear to get AR position
-                guard let projectedPosition = projectPointViaBilinear(mapPoint: mapPoint.mapPoint) else {
-                    skippedProjectionFailed += 1
-                    continue
-                }
+                // Project using Similarity Transform (works for ANY point on map)
+                let projectedXZ = transform.project(mapPoint.mapPoint, metersPerPixel: metersPerPixel)
+                let projectedPosition = simd_float3(projectedXZ.x, groundY, projectedXZ.y)
                 
                 // Collect for unified spawning
                 pendingMarkers[cornerUUID] = PendingMarker(
                     mapPointID: cornerUUID,
                     position: projectedPosition,
-                    isNeighborCorner: true,  // Triggers 👻💎 logging and diamond cube
+                    isNeighborCorner: true,
                     zoneName: zone.displayName
                 )
-                print("   📥 Collected corner \(String(cornerIDString.prefix(8))) for '\(zone.displayName)'")
+                print("   📥 Corner \(String(cornerIDString.prefix(8))) for '\(zone.displayName)' → (\(String(format: "%.2f", projectedPosition.x)), \(String(format: "%.2f", projectedPosition.z)))")
                 totalCollected += 1
             }
         }
         
-        print("🌊 [ALL_CORNERS] Collected \(totalCollected) corners (\(skippedAlreadyPlaced) already placed, \(skippedProjectionFailed) outside projection)")
+        print("🌊 [ALL_CORNERS] Collected \(totalCollected) corners (\(skippedAlreadyPlaced) already placed)")
         
         // Spawn all collected markers
-        spawnCollectedMarkers()
+        if totalCollected > 0 {
+            spawnCollectedMarkers()
+        }
     }
     
     /// Spawns a single diamond marker at the predicted position
