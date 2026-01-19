@@ -115,6 +115,35 @@ class SVGDocument {
         addLayer(id: id, content: content)
     }
     
+    // MARK: - Manifest Layer
+    
+    /// Add the export manifest as a hidden text layer
+    /// - Parameter jsonString: Pretty-printed JSON manifest content
+    func addManifestLayer(_ jsonString: String) {
+        // Register hidden style for data layer
+        registerStyle(className: "dataClass", css: "display: none;")
+        
+        // Escape JSON for XML text content
+        let escapedJSON = jsonString
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+        
+        // Build text element with tspan lines for readability
+        let lines = escapedJSON.components(separatedBy: "\n")
+        var textContent = "<text class=\"dataClass\" x=\"10\" y=\"20\">\n"
+        
+        for (index, line) in lines.enumerated() {
+            let yOffset = 20 + (index * 14)  // 14px line height
+            textContent += "      <tspan x=\"10\" y=\"\(yOffset)\">\(line)</tspan>\n"
+        }
+        
+        textContent += "    </text>"
+        
+        addLayer(id: "data", content: textContent)
+        print("📋 [SVGDocument] Added manifest layer (\(lines.count) lines)")
+    }
+    
     // MARK: - SVG Generation
     
     /// Generate the complete SVG string

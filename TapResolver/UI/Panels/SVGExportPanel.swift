@@ -321,6 +321,25 @@ struct SVGExportPanel: View {
                 self.addZonesLayer(to: doc, zones: zones, points: points)
             }
             
+            // Add export manifest layer (for round-trip editing)
+            if exportOptions.includeTriangles || exportOptions.includeZones {
+                let manifest = SVGManifest.build(
+                    locationID: locationID,
+                    mapWidth: Int(mapImage.size.width),
+                    mapHeight: Int(mapImage.size.height),
+                    pixelsPerMeter: pixelsPerMeter.map { Float($0) },
+                    mapPoints: points,
+                    triangles: exportOptions.includeTriangles ? triangles : [],
+                    zones: exportOptions.includeZones ? zones : []
+                )
+                
+                if let manifestJSON = manifest.encodeToJSON() {
+                    doc.addManifestLayer(manifestJSON)
+                } else {
+                    print("⚠️ [SVGExport] Failed to encode manifest")
+                }
+            }
+            
             // Phase 2: Add calibration mesh layers (mappoints on top)
             if exportOptions.includeCalibrationMesh {
                 self.addCalibrationMeshLayers(to: doc, mapSize: mapImage.size, points: points, pixelsPerMeter: pixelsPerMeter)

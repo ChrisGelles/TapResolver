@@ -115,8 +115,12 @@ struct SVGIllustratorFormatter {
         let fullStyleRange = styleStart.lowerBound..<styleEnd.upperBound
         result.replaceSubrange(fullStyleRange, with: "<style>\(newStyleContent)    </style>")
         
-        // Replace all class references in the document
+        // Replace all class references in the document, but preserve dataClass
         for (oldClass, newClass) in classMapping {
+            // Skip dataClass - preserve it for manifest layer
+            if oldClass == "dataClass" {
+                continue
+            }
             result = result.replacingOccurrences(
                 of: "class=\"\(oldClass)\"",
                 with: "class=\"\(newClass)\""
@@ -221,6 +225,14 @@ struct SVGIllustratorFormatter {
     private static func transformPolygonPoints(_ svg: String) -> String {
         var result = svg
         
+        // Find the data layer bounds to exclude it from transformation
+        var dataLayerRange: Range<String.Index>? = nil
+        if let dataStart = result.range(of: "<g id=\"data\">") {
+            if let dataEnd = result.range(of: "</g>", range: dataStart.upperBound..<result.endIndex) {
+                dataLayerRange = dataStart.lowerBound..<dataEnd.upperBound
+            }
+        }
+        
         // Find all polygon points attributes
         let pattern = #"<polygon([^>]*)\s+points="([^"]+)"([^>]*)>"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
@@ -232,8 +244,19 @@ struct SVGIllustratorFormatter {
         
         // Process in reverse order to preserve indices
         for match in matches.reversed() {
-            guard let fullRange = Range(match.range, in: result),
-                  let beforeRange = Range(match.range(at: 1), in: result),
+            guard let fullRange = Range(match.range, in: result) else {
+                continue
+            }
+            
+            // Skip polygons inside the data layer
+            if let dataRange = dataLayerRange {
+                let matchStart = fullRange.lowerBound
+                if matchStart >= dataRange.lowerBound && matchStart < dataRange.upperBound {
+                    continue
+                }
+            }
+            
+            guard let beforeRange = Range(match.range(at: 1), in: result),
                   let pointsRange = Range(match.range(at: 2), in: result),
                   let afterRange = Range(match.range(at: 3), in: result) else {
                 continue
