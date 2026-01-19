@@ -724,50 +724,100 @@ struct SVGExportPanel: View {
     private func addZonesLayer(to doc: SVGDocument, zones: [Zone], points: [MapPointStore.MapPoint]) {
         guard !zones.isEmpty else { return }
         
-        // Register CSS classes for zones
-        for zone in zones {
-            let zoneID = String(zone.id.prefix(8))
-            let quadCss = "fill: none; stroke: #ffa500; stroke-opacity: 0.90; stroke-width: 3; stroke-dasharray: 10,5;"
-            let cornerCss = "fill: #ffa500; stroke: #000000; stroke-width: 1;"
-            let labelCss = "fill: #ffa500; font-family: sans-serif; font-size: 14px;"
-            doc.registerStyle(className: "zone-quad-\(zoneID)", css: quadCss)
-            doc.registerStyle(className: "zone-corner-\(zoneID)", css: cornerCss)
-            doc.registerStyle(className: "zone-label-\(zoneID)", css: labelCss)
+        // Collect all zone groups that have zones
+        let groupIDs = Set(zones.compactMap { $0.groupID })
+        let groupsWithZones = zoneGroupStore.groups.filter { groupIDs.contains($0.id) }
+        
+        // Also collect zones without a group
+        let ungroupedZones = zones.filter { $0.groupID == nil }
+        
+        // Register CSS classes for each zone group (fill color + 20% opacity)
+        for group in groupsWithZones {
+            let className = sanitizeZoneGroupClassName(group.id)
+            let css = "fill: \(group.colorHex); opacity: 0.2;"
+            doc.registerStyle(className: className, css: css)
+        }
+        
+        // Register a default class for ungrouped zones
+        if !ungroupedZones.isEmpty {
+            doc.registerStyle(className: "zone-ungrouped", css: "fill: #888888; opacity: 0.2;")
         }
         
         var content = ""
         
-        for zone in zones {
-            // Get corner positions
-            var cornerPositions: [CGPoint] = []
-            for cornerID in zone.cornerMapPointIDs {
-                if let point = points.first(where: { $0.id.uuidString == cornerID }) {
-                    cornerPositions.append(point.mapPoint)
+        // Export zones grouped by their ZoneGroup
+        for group in groupsWithZones {
+            let groupZones = zones.filter { $0.groupID == group.id }
+            guard !groupZones.isEmpty else { continue }
+            
+            let className = sanitizeZoneGroupClassName(group.id)
+            
+            // Open group container
+            content += "    <g id=\"\(group.id)\">\n"
+            
+            for zone in groupZones {
+                if let polygonSVG = renderZonePolygon(zone: zone, points: points, className: className) {
+                    content += "      \(polygonSVG)\n"
                 }
             }
             
-            guard cornerPositions.count == 4 else { continue }
-            
-            let zoneID = String(zone.id.prefix(8))
-            
-            // Draw zone quadrilateral with CSS class
-            let pointsStr = cornerPositions.map { "\(String(format: "%.1f", $0.x)),\(String(format: "%.1f", $0.y))" }.joined(separator: " ")
-            content += "    <polygon id=\"zone-\(zoneID)\" class=\"zone-quad-\(zoneID)\" points=\"\(pointsStr)\"/>\n"
-            
-            // Add corner markers (squares) with CSS class
-            for (cIdx, pos) in cornerPositions.enumerated() {
-                let size: CGFloat = 10
-                content += "    <rect id=\"zone-\(zoneID)-corner-\(cIdx)\" class=\"zone-corner-\(zoneID)\" x=\"\(String(format: "%.1f", pos.x - size/2))\" y=\"\(String(format: "%.1f", pos.y - size/2))\" width=\"\(size)\" height=\"\(size)\"/>\n"
+            // Close group container
+            content += "    </g>\n"
+        }
+        
+        // Export ungrouped zones (if any) directly under zones layer
+        for zone in ungroupedZones {
+            if let polygonSVG = renderZonePolygon(zone: zone, points: points, className: "zone-ungrouped") {
+                content += "    \(polygonSVG)\n"
             }
-            
-            // Add zone name label at centroid with CSS class
-            let centroidX = cornerPositions.reduce(0) { $0 + $1.x } / 4
-            let centroidY = cornerPositions.reduce(0) { $0 + $1.y } / 4
-            content += "    <text id=\"zone-\(zoneID)-label\" class=\"zone-label-\(zoneID)\" x=\"\(String(format: "%.1f", centroidX))\" y=\"\(String(format: "%.1f", centroidY))\" text-anchor=\"middle\" dominant-baseline=\"middle\">\(zone.name)</text>\n"
         }
         
         doc.addLayer(id: "zones", content: content)
-        print("🔷 [SVGExport] Added zones layer with \(zones.count) zone(s)")
+        print("🔷 [SVGExport] Added zones layer with \(zones.count) zone(s) in \(groupsWithZones.count) group(s)")
+    }
+    
+    /// Render a single zone polygon as an SVG string
+    private func renderZonePolygon(zone: Zone, points: [MapPointStore.MapPoint], className: String) -> String? {
+        // Get corner positions
+        var cornerPositions: [CGPoint] = []
+        for cornerID in zone.cornerMapPointIDs {
+            if let point = points.first(where: { $0.id.uuidString == cornerID }) {
+                cornerPositions.append(point.mapPoint)
+            }
+        }
+        
+        guard cornerPositions.count == 4 else { return nil }
+        
+        // Use zone's display name as the polygon ID (fall back to zone.id if no displayName)
+        let polygonID = zone.displayName.isEmpty ? zone.id : zone.displayName
+        
+        // Format points string
+        let pointsStr = cornerPositions.map { "\(String(format: "%.1f", $0.x)),\(String(format: "%.1f", $0.y))" }.joined(separator: " ")
+        
+        return "<polygon id=\"\(escapeXMLAttribute(polygonID))\" class=\"\(className)\" points=\"\(pointsStr)\"/>"
+    }
+    
+    /// Sanitize a zone group ID for use as a CSS class name
+    private func sanitizeZoneGroupClassName(_ input: String) -> String {
+        // Remove "-zones" suffix if present, lowercase, replace spaces with hyphens
+        var result = input
+        if result.hasSuffix("-zones") {
+            result = String(result.dropLast(6))
+        }
+        return result
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+            .filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+    }
+    
+    /// Escape special characters for XML attribute values
+    private func escapeXMLAttribute(_ input: String) -> String {
+        return input
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
     }
     
     /// Get pixels per meter from MetricSquareStore (prefers locked squares)
