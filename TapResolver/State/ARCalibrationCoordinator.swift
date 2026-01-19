@@ -1576,12 +1576,10 @@ final class ARCalibrationCoordinator: ObservableObject {
             if let zoneID = activeZoneID, totalCorners == 4 {
                 markZoneAsPlanted(zoneID)
                 
-                // WAVEFRONT V2: Log neighbor count but don't spawn all corners
-                // Corners will spawn individually as user confirms triangle ghosts that are also neighbor corners
+                // Spawn ALL zone corner ghosts (simplified wavefront - all corners visible at once)
                 if let zone = safeZoneStore?.zone(withID: zoneID) {
-                    print("🌊 [WAVEFRONT_V2] Zone '\(zone.displayName)' planted — \(zone.neighborZoneIDs.count) neighbor zone(s)")
-                    print("🌊 [WAVEFRONT_V2] Triangle ghosts spawned; neighbor corners will trigger on confirmation")
-                    // NOTE: spawnNeighborCornerMarkers() intentionally NOT called
+                    print("🌊 [ALL_CORNERS] Zone '\(zone.displayName)' planted — spawning all remaining zone corners")
+                    spawnAllZoneCornerGhosts()
                 }
             }
             
@@ -1953,6 +1951,77 @@ final class ARCalibrationCoordinator: ObservableObject {
         print("🌊 [WAVEFRONT] Spawned \(totalSpawned) neighbor corner markers")
     }
     
+    /// Spawns ghost markers for ALL zone corners (not just neighbors)
+    /// Called after first zone is planted to show all corners as ghosts
+    func spawnAllZoneCornerGhosts() {
+        guard let zoneStore = safeZoneStore else {
+            print("⚠️ [ALL_CORNERS] No zone store available")
+            return
+        }
+        
+        print("🌊 [ALL_CORNERS] Spawning ALL zone corner ghosts...")
+        
+        var totalCollected = 0
+        var skippedAlreadyPlaced = 0
+        var skippedProjectionFailed = 0
+        
+        for zone in zoneStore.zones {
+            // Skip already-planted zones
+            if plantedZoneIDs.contains(zone.id) {
+                print("   ⏭️ Zone '\(zone.displayName)' already planted, skipping")
+                continue
+            }
+            
+            // Process each corner of this zone
+            for cornerIDString in zone.cornerMapPointIDs {
+                guard let cornerUUID = UUID(uuidString: cornerIDString) else { continue }
+                
+                // Skip if already has AR position (shared corner from planted zone)
+                if mapPointARPositions[cornerUUID] != nil {
+                    skippedAlreadyPlaced += 1
+                    continue
+                }
+                
+                // Skip if already collected as pending
+                if pendingMarkers[cornerUUID] != nil {
+                    continue
+                }
+                
+                // Skip if already a ghost
+                if ghostMarkerPositions[cornerUUID] != nil {
+                    continue
+                }
+                
+                // Get MapPoint for 2D position
+                guard let mapPoint = safeMapStore.points.first(where: { $0.id == cornerUUID }) else {
+                    print("   ⚠️ Corner \(String(cornerIDString.prefix(8))) not found in MapPointStore")
+                    continue
+                }
+                
+                // Project via bilinear to get AR position
+                guard let projectedPosition = projectPointViaBilinear(mapPoint: mapPoint.mapPoint) else {
+                    skippedProjectionFailed += 1
+                    continue
+                }
+                
+                // Collect for unified spawning
+                pendingMarkers[cornerUUID] = PendingMarker(
+                    mapPointID: cornerUUID,
+                    position: projectedPosition,
+                    isNeighborCorner: true,  // Triggers 👻💎 logging and diamond cube
+                    zoneName: zone.displayName
+                )
+                print("   📥 Collected corner \(String(cornerIDString.prefix(8))) for '\(zone.displayName)'")
+                totalCollected += 1
+            }
+        }
+        
+        print("🌊 [ALL_CORNERS] Collected \(totalCollected) corners (\(skippedAlreadyPlaced) already placed, \(skippedProjectionFailed) outside projection)")
+        
+        // Spawn all collected markers
+        spawnCollectedMarkers()
+    }
+    
     /// Spawns a single diamond marker at the predicted position
     private func spawnDiamondMarker(
         at position: simd_float3,
@@ -2224,34 +2293,19 @@ final class ARCalibrationCoordinator: ObservableObject {
                 continue
             }
             
+            // ALL markers spawn as ghosts - the ghost handler checks .zoneCorner role for diamond cube
+            ghostMarkerPositions[mapPointID] = marker.position
+            NotificationCenter.default.post(
+                name: NSNotification.Name("PlaceGhostMarker"),
+                object: nil,
+                userInfo: [
+                    "mapPointID": mapPointID,
+                    "position": marker.position
+                ]
+            )
             if marker.isNeighborCorner {
-                // Spawn diamond marker for neighbor corner
-                let mapPoint = safeMapStore.points.first(where: { $0.id == mapPointID })
-                let roleDescription = mapPoint?.roles.isEmpty == false ? "\(mapPoint!.roles)" : "no roles"
-                print("💎 [DIAMOND] MapPoint \(String(mapPointID.uuidString.prefix(8))) gets diamond: isNeighborCorner=\(marker.isNeighborCorner), roles=\(roleDescription)")
-                
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("SpawnNeighborCornerMarker"),
-                    object: nil,
-                    userInfo: [
-                        "position": [marker.position.x, marker.position.y, marker.position.z],
-                        "mapPointID": mapPointID.uuidString,
-                        "zoneName": marker.zoneName ?? "Unknown"
-                    ]
-                )
-                spawnedNeighborCornerIDs.insert(mapPointID.uuidString)
-                print("   💎 Spawned neighbor corner \(String(mapPointID.uuidString.prefix(8)))")
+                print("   👻💎 Spawned neighbor corner ghost \(String(mapPointID.uuidString.prefix(8))) (will have diamond cube)")
             } else {
-                // Spawn ghost marker for triangle vertex
-                ghostMarkerPositions[mapPointID] = marker.position
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("PlaceGhostMarker"),
-                    object: nil,
-                    userInfo: [
-                        "mapPointID": mapPointID,
-                        "position": marker.position
-                    ]
-                )
                 print("   👻 Spawned ghost \(String(mapPointID.uuidString.prefix(8)))")
             }
             

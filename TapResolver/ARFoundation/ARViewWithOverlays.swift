@@ -236,13 +236,13 @@ struct ARViewWithOverlays: View {
                         visibleGhostIDs: visibleGhostIDs
                     )
                     
-                    // Check proximity to "Plot Next Zone" eligible marker
-                    let nearNextZone = arCalibrationCoordinator.checkNextZoneEligibleProximity(cameraPosition: cameraPos) != nil
-                    
-                    if nearNextZone != showNextZoneButton {
-                        showNextZoneButton = nearNextZone
-                        print("🔍 [NEXT_ZONE_DIAG] showNextZoneButton changed to \(nearNextZone)")
-                    }
+                    // SIMPLIFIED: Neighbor corners now spawn as regular ghosts with standard selection
+                    // let nearNextZone = arCalibrationCoordinator.checkNextZoneEligibleProximity(cameraPosition: cameraPos) != nil
+                    // 
+                    // if nearNextZone != showNextZoneButton {
+                    //     showNextZoneButton = nearNextZone
+                    //     print("🔍 [NEXT_ZONE_DIAG] showNextZoneButton changed to \(nearNextZone)")
+                    // }
                 }
             }
             .onDisappear {
@@ -929,28 +929,28 @@ struct ARViewWithOverlays: View {
                     // Show ghost interaction buttons only when:
                     // - A ghost is selected AND
                     // - We're not in reposition mode (waiting for free placement)
-                    // "Plot Next Zone" button for wavefront expansion
-                    if showNextZoneButton && arCalibrationCoordinator.selectedGhostMapPointID == nil {
-                        VStack {
-                            Spacer()
-                            Button(action: {
-                                arCalibrationCoordinator.startNextZoneCalibration()
-                                showNextZoneButton = false
-                            }) {
-                                HStack {
-                                    Image(systemName: "arrow.triangle.branch")
-                                    Text("Plot Next Zone")
-                                }
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 12)
-                                .background(Color.blue)
-                                .cornerRadius(10)
-                            }
-                            .padding(.bottom, 100)
-                        }
-                    }
+                    // SIMPLIFIED: Disabled - neighbor corners use standard ghost selection now
+                    // if showNextZoneButton && arCalibrationCoordinator.selectedGhostMapPointID == nil {
+                    //     VStack {
+                    //         Spacer()
+                    //         Button(action: {
+                    //             arCalibrationCoordinator.startNextZoneCalibration()
+                    //             showNextZoneButton = false
+                    //         }) {
+                    //             HStack {
+                    //                 Image(systemName: "arrow.triangle.branch")
+                    //                 Text("Plot Next Zone")
+                    //             }
+                    //             .font(.headline)
+                    //             .foregroundColor(.white)
+                    //             .padding(.horizontal, 20)
+                    //             .padding(.vertical, 12)
+                    //             .background(Color.blue)
+                    //             .cornerRadius(10)
+                    //         }
+                    //         .padding(.bottom, 100)
+                    //     }
+                    // }
                     
                     if shouldShowGhostButtons {
                         GhostInteractionButtons(
