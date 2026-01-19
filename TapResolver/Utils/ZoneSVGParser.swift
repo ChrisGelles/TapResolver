@@ -33,6 +33,40 @@ public struct SVGParseResult {
     public let errors: [String]
 }
 
+// MARK: - Deterministic Color Assignment
+
+/// 12-color palette for zone groups (deterministic assignment via name hash)
+private let zoneGroupColorPalette: [String] = [
+    "#E63946",  // Red
+    "#F4A261",  // Orange
+    "#E9C46A",  // Yellow
+    "#2A9D8F",  // Teal
+    "#264653",  // Dark blue-green
+    "#457B9D",  // Steel blue
+    "#1D3557",  // Navy
+    "#A8DADC",  // Light cyan
+    "#6D597A",  // Purple
+    "#B56576",  // Mauve
+    "#355070",  // Slate blue
+    "#83C5BE",  // Seafoam
+]
+
+/// Stable hash function (djb2) - consistent across app launches
+private func stableHash(_ string: String) -> Int {
+    var hash: UInt64 = 5381
+    for char in string.utf8 {
+        hash = ((hash << 5) &+ hash) &+ UInt64(char)  // hash * 33 + c
+    }
+    return Int(hash & 0x7FFFFFFF)  // Ensure positive
+}
+
+/// Get deterministic color for a zone group name
+private func colorForGroupName(_ name: String) -> String {
+    let hash = stableHash(name.lowercased())
+    let index = hash % zoneGroupColorPalette.count
+    return zoneGroupColorPalette[index]
+}
+
 /// XMLParser delegate for extracting zones from SVG
 public class ZoneSVGParser: NSObject, XMLParserDelegate {
     
@@ -40,17 +74,19 @@ public class ZoneSVGParser: NSObject, XMLParserDelegate {
     
     private var groups: [String: RawZoneGroup] = [:]  // id → group
     private var zones: [RawZone] = []
-    private var cssStyles: [String: String] = [:]     // class → color
+    private var cssStyles: [String: String] = [:]     // class → color (legacy, kept for compatibility)
     private var errors: [String] = []
     
-    // Element stack for tracking hierarchy
-    private var elementStack: [String] = []  // Stack of element names
-    private var groupStack: [String] = []    // Stack of group IDs (only -zones groups)
+    // Hierarchy tracking for zone detection
+    private var insideZonesGroup: Bool = false        // True when inside <g id="zones">
+    private var currentZoneGroupID: String?           // Set when inside a direct child of zones
+    private var zoneGroupDepth: Int = 0               // 0 = not in zone group, 1 = in zone group, 2+ = nested
     
-    // Current element state
-    private var currentGroupID: String? {
-        groupStack.last
-    }
+    // Auto-ID generation for unnamed polygons
+    private var unnamedCountPerGroup: [String: Int] = [:]  // groupID → count of unnamed polygons
+    
+    // Legacy state (kept for element tracking)
+    private var elementStack: [String] = []           // Stack of element names
     
     // Style parsing state
     private var inStyleElement = false
@@ -68,7 +104,10 @@ public class ZoneSVGParser: NSObject, XMLParserDelegate {
         cssStyles = [:]
         errors = []
         elementStack = []
-        groupStack = []
+        insideZonesGroup = false
+        currentZoneGroupID = nil
+        zoneGroupDepth = 0
+        unnamedCountPerGroup = [:]
         inStyleElement = false
         styleContent = ""
         
@@ -135,7 +174,10 @@ public class ZoneSVGParser: NSObject, XMLParserDelegate {
                        namespaceURI: String?, qualifiedName qName: String?,
                        attributes attributeDict: [String: String]) {
         
-        elementStack.append(elementName)
+        // Skip elementStack management for "g" elements - handleGroupStart manages it with IDs
+        if elementName.lowercased() != "g" {
+            elementStack.append(elementName)
+        }
         
         switch elementName.lowercased() {
         case "g":
@@ -168,7 +210,8 @@ public class ZoneSVGParser: NSObject, XMLParserDelegate {
             break
         }
         
-        if !elementStack.isEmpty {
+        // Skip elementStack management for "g" elements - handleGroupEnd manages it
+        if elementName.lowercased() != "g" && !elementStack.isEmpty {
             elementStack.removeLast()
         }
     }
@@ -186,42 +229,97 @@ public class ZoneSVGParser: NSObject, XMLParserDelegate {
     // MARK: - Element Handlers
     
     private func handleGroupStart(attributes: [String: String]) {
-        guard let id = attributes["id"] else { return }
+        let id = attributes["id"]
+        elementStack.append(id ?? "")
         
-        // Only track groups that end with "-zones"
-        if id.hasSuffix("-zones") {
-            groupStack.append(id)
+        // Check if entering the top-level "zones" container (case-insensitive)
+        if id?.lowercased() == "zones" {
+            insideZonesGroup = true
+            print("📂 [ZoneSVGParser] Entered zones container")
+            return
+        }
+        
+        // Check if this is a zone group (direct child of "zones")
+        if insideZonesGroup && zoneGroupDepth == 0, let groupID = id {
+            currentZoneGroupID = groupID
+            zoneGroupDepth = 1
             
-            // Create group if not exists
-            if groups[id] == nil {
-                let displayName = id
-                    .replacingOccurrences(of: "-zones", with: "")
-                    .asDisplayName
-                
-                groups[id] = RawZoneGroup(
-                    id: id,
-                    displayName: displayName,
-                    colorHex: "#808080",  // Default, will be updated from CSS
-                    zoneIDs: []
-                )
-                
-                print("📁 [ZoneSVGParser] Found group: \(id) → '\(displayName)'")
+            // Derive display name: strip "-zones" suffix if present, otherwise use as-is
+            let displayName: String
+            if groupID.hasSuffix("-zones") {
+                displayName = String(groupID.dropLast(6))
+            } else {
+                displayName = groupID
+            }
+            
+            // Get deterministic color from group name
+            let colorHex = colorForGroupName(displayName)
+            
+            let group = RawZoneGroup(
+                id: groupID,
+                displayName: displayName,
+                colorHex: colorHex,
+                zoneIDs: []
+            )
+            groups[groupID] = group
+            print("📁 [ZoneSVGParser] Found zone group: '\(groupID)' → display: '\(displayName)', color: \(colorHex)")
+            return
+        }
+        
+        // Track nesting depth within a zone group
+        if zoneGroupDepth >= 1 {
+            zoneGroupDepth += 1
+            if zoneGroupDepth == 2 {
+                print("⚠️ [ZoneSVGParser] Warning: Nested group detected inside '\(currentZoneGroupID ?? "unknown")' - content will be skipped")
             }
         }
     }
     
     private func handleGroupEnd() {
-        // Pop from group stack if we're leaving a -zones group
-        if let currentID = groupStack.last,
-           currentID.hasSuffix("-zones") {
-            groupStack.removeLast()
+        guard !elementStack.isEmpty else { return }
+        let closedID = elementStack.removeLast()
+        
+        // Exiting the top-level "zones" container (case-insensitive)
+        if closedID.lowercased() == "zones" {
+            insideZonesGroup = false
+            print("📂 [ZoneSVGParser] Exited zones container")
+            return
+        }
+        
+        // Exiting a zone group or nested group
+        if zoneGroupDepth > 0 {
+            zoneGroupDepth -= 1
+            if zoneGroupDepth == 0 {
+                print("📁 [ZoneSVGParser] Exited zone group: '\(currentZoneGroupID ?? "unknown")'")
+                currentZoneGroupID = nil
+            }
         }
     }
     
     private func handlePolygon(attributes: [String: String]) {
-        guard let id = attributes["id"],
-              let pointsStr = attributes["points"] else {
+        // Only process polygons inside the zones container, at zone group level
+        guard insideZonesGroup else {
+            return  // Not inside <g id="zones"> - ignore (e.g., triangles layer)
+        }
+        
+        guard zoneGroupDepth == 1 else {
+            return  // Not a direct child of a zone group - ignore
+        }
+        
+        guard let pointsStr = attributes["points"] else {
             return
+        }
+        
+        // Generate ID if not provided
+        let id: String
+        if let providedID = attributes["id"], !providedID.isEmpty {
+            id = providedID
+        } else {
+            let groupKey = currentZoneGroupID ?? "ungrouped"
+            let count = (unnamedCountPerGroup[groupKey] ?? 0) + 1
+            unnamedCountPerGroup[groupKey] = count
+            id = String(format: "%@-%02d", groupKey, count)
+            print("🏷️ [ZoneSVGParser] Generated ID '\(id)' for unnamed polygon")
         }
         
         // Parse points
@@ -254,12 +352,12 @@ public class ZoneSVGParser: NSObject, XMLParserDelegate {
             id: id,
             displayName: id,
             corners: corners,
-            groupID: currentGroupID,
+            groupID: currentZoneGroupID,
             cssClass: cssClass
         )
         
         zones.append(zone)
-        print("🔷 [ZoneSVGParser] Found zone: '\(id)' with \(corners.count) corners in group: \(currentGroupID ?? "none")")
+        print("🔷 [ZoneSVGParser] Found zone: '\(id)' with \(corners.count) corners in group: \(currentZoneGroupID ?? "none")")
     }
     
     // MARK: - Parsing Helpers
