@@ -13,7 +13,7 @@ import UIKit
 // MARK: - Manifest Root
 
 /// Complete manifest embedded in SVG exports
-struct SVGManifest: Codable {
+public struct SVGManifest: Codable {
     let tapResolver: SVGManifestMetadata
     let location: SVGManifestLocation
     let mapPoints: [String: SVGManifestMapPoint]  // UUID string → point data
@@ -24,14 +24,14 @@ struct SVGManifest: Codable {
 // MARK: - Metadata
 
 /// Export metadata for versioning and conflict detection
-struct SVGManifestMetadata: Codable {
+public struct SVGManifestMetadata: Codable {
     let version: String
     let exportedAt: String  // ISO8601
     let app: String
     let device: String
     
     /// Create metadata for current export
-    static func current() -> SVGManifestMetadata {
+    public static func current() -> SVGManifestMetadata {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         
@@ -47,7 +47,7 @@ struct SVGManifestMetadata: Codable {
 // MARK: - Location
 
 /// Location context for the export
-struct SVGManifestLocation: Codable {
+public struct SVGManifestLocation: Codable {
     let id: String
     let mapDimensions: [Int]  // [width, height] in pixels
     let pixelsPerMeter: Float?
@@ -56,7 +56,7 @@ struct SVGManifestLocation: Codable {
 // MARK: - MapPoint
 
 /// MapPoint state at export time
-struct SVGManifestMapPoint: Codable {
+public struct SVGManifestMapPoint: Codable {
     let position: [Float]  // [x, y] in pixels
     let name: String?
     let roles: [String]    // MapPointRole raw values
@@ -65,14 +65,14 @@ struct SVGManifestMapPoint: Codable {
 // MARK: - Triangle
 
 /// Triangle vertex references
-struct SVGManifestTriangle: Codable {
+public struct SVGManifestTriangle: Codable {
     let vertices: [String]  // 3 MapPoint UUID strings
 }
 
 // MARK: - Zone
 
 /// Zone corner references and group membership
-struct SVGManifestZone: Codable {
+public struct SVGManifestZone: Codable {
     let displayName: String
     let groupID: String?
     let corners: [String]  // 4 MapPoint UUID strings
@@ -84,7 +84,7 @@ extension SVGManifest {
     
     /// Encode manifest to JSON string for embedding in SVG
     /// - Returns: Pretty-printed JSON string, or nil if encoding fails
-    func encodeToJSON() -> String? {
+    public func encodeToJSON() -> String? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         
@@ -104,7 +104,7 @@ extension SVGManifest {
     /// Decode manifest from JSON string extracted from SVG
     /// - Parameter json: JSON string from SVG text layer
     /// - Returns: Parsed manifest, or nil if decoding fails
-    static func decode(from json: String) -> SVGManifest? {
+    public static func decode(from json: String) -> SVGManifest? {
         guard let data = json.data(using: .utf8) else {
             print("❌ [SVGManifest] Failed to convert JSON string to data")
             return nil
@@ -189,5 +189,69 @@ extension SVGManifest {
             triangles: trianglesDict,
             zones: zonesDict
         )
+    }
+}
+
+// MARK: - SVG Extraction
+
+extension SVGManifest {
+    
+    /// Extract manifest JSON from SVG data layer
+    /// Handles both app-exported format and Illustrator-reformatted format
+    /// - Parameter svgString: Complete SVG file content
+    /// - Returns: Parsed manifest, or nil if no manifest found or parsing fails
+    static func extract(from svgString: String) -> SVGManifest? {
+        // Find the data layer
+        guard let dataLayerStart = svgString.range(of: "<g id=\"data\">"),
+              let dataLayerEnd = svgString.range(of: "</g>", range: dataLayerStart.upperBound..<svgString.endIndex) else {
+            print("📋 [SVGManifest] No data layer found in SVG")
+            return nil
+        }
+        
+        let dataLayerContent = String(svgString[dataLayerStart.upperBound..<dataLayerEnd.lowerBound])
+        
+        // Extract all text content from <tspan> elements
+        // Pattern matches content between > and < within tspans
+        var jsonLines: [String] = []
+        
+        let tspanPattern = #"<tspan[^>]*>([^<]*)</tspan>"#
+        guard let regex = try? NSRegularExpression(pattern: tspanPattern, options: []) else {
+            print("❌ [SVGManifest] Failed to create tspan regex")
+            return nil
+        }
+        
+        let range = NSRange(dataLayerContent.startIndex..<dataLayerContent.endIndex, in: dataLayerContent)
+        let matches = regex.matches(in: dataLayerContent, options: [], range: range)
+        
+        for match in matches {
+            guard let contentRange = Range(match.range(at: 1), in: dataLayerContent) else {
+                continue
+            }
+            
+            var line = String(dataLayerContent[contentRange])
+            
+            // Decode XML entities back to JSON characters
+            line = line
+                .replacingOccurrences(of: "&quot;", with: "\"")
+                .replacingOccurrences(of: "&apos;", with: "'")
+                .replacingOccurrences(of: "&lt;", with: "<")
+                .replacingOccurrences(of: "&gt;", with: ">")
+                .replacingOccurrences(of: "&amp;", with: "&")
+            
+            jsonLines.append(line)
+        }
+        
+        guard !jsonLines.isEmpty else {
+            print("📋 [SVGManifest] Data layer found but no text content extracted")
+            return nil
+        }
+        
+        // Reconstruct JSON (join lines, they may have leading whitespace from pretty-print)
+        let jsonString = jsonLines.joined(separator: "\n")
+        
+        print("📋 [SVGManifest] Extracted \(jsonLines.count) lines from data layer")
+        
+        // Parse the JSON
+        return decode(from: jsonString)
     }
 }

@@ -18,6 +18,7 @@ struct TriangleSVGParseResult {
     let triangles: [RawTriangle]
     let errors: [String]
     let warnings: [String]
+    let manifest: SVGManifest?  // Extracted manifest (if present)
 }
 
 // MARK: - Parser
@@ -55,10 +56,19 @@ class TriangleSVGParser: NSObject, XMLParserDelegate {
             print("📐 [TriangleSVGParser] ❌ No triangles found - was triangles layer detected? Check logs above for '✅ FOUND triangles layer'")
         }
         
+        // Extract manifest from SVG (if present)
+        let manifest: SVGManifest?
+        if let svgString = String(data: data, encoding: .utf8) {
+            manifest = SVGManifest.extract(from: svgString)
+        } else {
+            manifest = nil
+        }
+        
         return TriangleSVGParseResult(
             triangles: triangles,
             errors: errors,
-            warnings: warnings
+            warnings: warnings,
+            manifest: manifest
         )
     }
     

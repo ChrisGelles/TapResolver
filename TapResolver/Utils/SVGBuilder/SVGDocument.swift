@@ -128,17 +128,20 @@ class SVGDocument {
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
         
-        // Build text element with tspan lines for readability
+        // Build single text element with tspan lines (Illustrator-compatible format)
         let lines = escapedJSON.components(separatedBy: "\n")
-        var textContent = "<text class=\"dataClass\" x=\"10\" y=\"20\">\n"
+        let lineHeight: Double = 14.4
         
+        var tspans: [String] = []
         for (index, line) in lines.enumerated() {
-            let yOffset = 20 + (index * 14)  // 14px line height
-            textContent += "      <tspan x=\"10\" y=\"\(yOffset)\">\(line)</tspan>\n"
+            let yOffset = Double(index) * lineHeight
+            tspans.append("<tspan x=\"0\" y=\"\(String(format: "%.1f", yOffset))\">\(line)</tspan>")
         }
         
-        textContent += "    </text>"
+        let textContent = "<text class=\"dataClass\" transform=\"translate(10 20)\">" + tspans.joined() + "</text>"
         
         addLayer(id: "data", content: textContent)
         print("📋 [SVGDocument] Added manifest layer (\(lines.count) lines)")

@@ -93,6 +93,16 @@ public class SVGImporter {
         
         print("📥 [SVGImporter] Parsed \(parseResult.groups.count) groups, \(parseResult.zones.count) zones")
         
+        // Log manifest status
+        if let manifest = parseResult.manifest {
+            print("📋 [SVGImporter] Found manifest v\(manifest.tapResolver.version)")
+            print("   Exported: \(manifest.tapResolver.exportedAt)")
+            print("   MapPoints in manifest: \(manifest.mapPoints.count)")
+            print("   Zones in manifest: \(manifest.zones.count)")
+        } else {
+            print("📋 [SVGImporter] No manifest found - using legacy import mode")
+        }
+        
         // 2. Create MapPoint resolver
         let resolver = MapPointResolver(
             mapPointStore: mapPointStore,
@@ -230,6 +240,14 @@ public class SVGImporter {
                 errors: parseResult.errors,
                 warnings: parseResult.warnings
             )
+        }
+        
+        // Log manifest status
+        if let manifest = parseResult.manifest {
+            print("📋 [SVGImporter] Found manifest v\(manifest.tapResolver.version)")
+            print("   Triangles in manifest: \(manifest.triangles.count)")
+        } else {
+            print("📋 [SVGImporter] No manifest found - using legacy import mode")
         }
         
         // Step 2: Setup MapPoint resolver

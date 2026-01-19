@@ -31,6 +31,7 @@ public struct SVGParseResult {
     public let zones: [RawZone]
     public let cssStyles: [String: String]  // class name → color hex
     public let errors: [String]
+    public let manifest: SVGManifest?  // Extracted manifest (if present)
 }
 
 // MARK: - Deterministic Color Assignment
@@ -160,11 +161,20 @@ public class ZoneSVGParser: NSObject, XMLParserDelegate {
         
         print("📄 [ZoneSVGParser] Parsed \(groupsArray.count) groups, \(zones.count) zones")
         
+        // Extract manifest from SVG (if present)
+        let manifest: SVGManifest?
+        if let svgString = String(data: data, encoding: .utf8) {
+            manifest = SVGManifest.extract(from: svgString)
+        } else {
+            manifest = nil
+        }
+        
         return SVGParseResult(
             groups: groupsArray,
             zones: zones,
             cssStyles: cssStyles,
-            errors: errors
+            errors: errors,
+            manifest: manifest
         )
     }
     
