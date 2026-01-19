@@ -255,3 +255,239 @@ extension SVGManifest {
         return decode(from: jsonString)
     }
 }
+
+// MARK: - Diff Detection
+
+/// Represents a detected vertex position change
+public struct VertexDiff {
+    public let mapPointID: String        // UUID string from manifest
+    public let originalPosition: CGPoint // Position at export time (from manifest)
+    public let newPosition: CGPoint      // Position in imported SVG
+    public let sourcePolygonID: String   // Zone or triangle ID
+    public let sourceType: PolygonSourceType
+    
+    public enum PolygonSourceType {
+        case zone
+        case triangle
+    }
+    
+    /// Distance moved in pixels
+    public var deltaPixels: CGFloat {
+        let dx = newPosition.x - originalPosition.x
+        let dy = newPosition.y - originalPosition.y
+        return sqrt(dx * dx + dy * dy)
+    }
+}
+
+/// Result of analyzing diffs for a single MapPoint
+public struct MapPointDiffAnalysis {
+    public let mapPointID: String
+    public let originalPosition: CGPoint
+    public let diffs: [VertexDiff]
+    
+    /// All polygons agree on the new position (within threshold)
+    public var isUnanimousMove: Bool {
+        guard let firstNew = diffs.first?.newPosition else { return false }
+        let threshold: CGFloat = 1.0  // 1 pixel tolerance for "same position"
+        return diffs.allSatisfy { diff in
+            let dx = diff.newPosition.x - firstNew.x
+            let dy = diff.newPosition.y - firstNew.y
+            return sqrt(dx * dx + dy * dy) < threshold
+        }
+    }
+    
+    /// The unanimous new position (only valid if isUnanimousMove is true)
+    public var unanimousNewPosition: CGPoint? {
+        guard isUnanimousMove else { return nil }
+        return diffs.first?.newPosition
+    }
+    
+    /// Some polygons moved, others didn't - requires split
+    public var requiresSplit: Bool {
+        return !isUnanimousMove && diffs.count > 0
+    }
+}
+
+/// Complete diff report for an import operation
+public struct ImportDiffReport {
+    public let manifestVersion: String
+    public let exportedAt: String
+    public let analyses: [String: MapPointDiffAnalysis]  // mapPointID -> analysis
+    
+    /// MapPoints that moved unanimously (all references agree)
+    public var unanimousMoves: [MapPointDiffAnalysis] {
+        analyses.values.filter { $0.isUnanimousMove }
+    }
+    
+    /// MapPoints that need splitting (references disagree)
+    public var splits: [MapPointDiffAnalysis] {
+        analyses.values.filter { $0.requiresSplit }
+    }
+    
+    /// MapPoints with no changes
+    public var unchangedCount: Int {
+        analyses.values.filter { $0.diffs.isEmpty }.count
+    }
+}
+
+extension SVGManifest {
+    
+    /// Detect vertex position changes between manifest and imported polygons
+    /// - Parameters:
+    ///   - zones: Parsed zones from SVG
+    ///   - triangles: Parsed triangles from SVG  
+    ///   - thresholdPixels: Minimum movement to count as a change
+    /// - Returns: Diff report with all detected changes
+    func detectChanges(
+        zones: [RawZone],
+        triangles: [RawTriangle],
+        thresholdPixels: CGFloat
+    ) -> ImportDiffReport {
+        var allDiffs: [String: [VertexDiff]] = [:]  // mapPointID -> diffs
+        
+        // Check zones
+        for rawZone in zones {
+            let zoneID = rawZone.id.asCodeID
+            guard let manifestZone = self.zones[zoneID] else {
+                print("📋 [DiffDetect] Zone '\(zoneID)' not in manifest - new zone")
+                continue
+            }
+            
+            // Compare each corner
+            for (index, cornerID) in manifestZone.corners.enumerated() {
+                guard index < rawZone.corners.count,
+                      let manifestPoint = self.mapPoints[cornerID] else {
+                    continue
+                }
+                
+                let originalPos = CGPoint(
+                    x: CGFloat(manifestPoint.position[0]),
+                    y: CGFloat(manifestPoint.position[1])
+                )
+                let newPos = rawZone.corners[index]
+                
+                let dx = newPos.x - originalPos.x
+                let dy = newPos.y - originalPos.y
+                let distance = sqrt(dx * dx + dy * dy)
+                
+                if distance >= thresholdPixels {
+                    let diff = VertexDiff(
+                        mapPointID: cornerID,
+                        originalPosition: originalPos,
+                        newPosition: newPos,
+                        sourcePolygonID: zoneID,
+                        sourceType: .zone
+                    )
+                    allDiffs[cornerID, default: []].append(diff)
+                    print("📋 [DiffDetect] Zone '\(zoneID)' corner \(index): moved \(String(format: "%.1f", distance))px")
+                }
+            }
+        }
+        
+        // Check triangles
+        for rawTriangle in triangles {
+            // Find matching triangle in manifest by vertex positions
+            // Triangle IDs in manifest are like "tri-E325D867"
+            guard let (triangleID, manifestTriangle) = findMatchingTriangle(rawTriangle) else {
+                print("📋 [DiffDetect] Triangle not found in manifest - new triangle")
+                continue
+            }
+            
+            // Compare each vertex
+            for (index, vertexID) in manifestTriangle.vertices.enumerated() {
+                guard index < rawTriangle.vertices.count,
+                      let manifestPoint = self.mapPoints[vertexID] else {
+                    continue
+                }
+                
+                let originalPos = CGPoint(
+                    x: CGFloat(manifestPoint.position[0]),
+                    y: CGFloat(manifestPoint.position[1])
+                )
+                let newPos = rawTriangle.vertices[index]
+                
+                let dx = newPos.x - originalPos.x
+                let dy = newPos.y - originalPos.y
+                let distance = sqrt(dx * dx + dy * dy)
+                
+                if distance >= thresholdPixels {
+                    let diff = VertexDiff(
+                        mapPointID: vertexID,
+                        originalPosition: originalPos,
+                        newPosition: newPos,
+                        sourcePolygonID: triangleID,
+                        sourceType: .triangle
+                    )
+                    allDiffs[vertexID, default: []].append(diff)
+                    print("📋 [DiffDetect] Triangle '\(triangleID)' vertex \(index): moved \(String(format: "%.1f", distance))px")
+                }
+            }
+        }
+        
+        // Build analyses
+        var analyses: [String: MapPointDiffAnalysis] = [:]
+        
+        for (mapPointID, diffs) in allDiffs {
+            guard let manifestPoint = self.mapPoints[mapPointID] else { continue }
+            
+            let originalPos = CGPoint(
+                x: CGFloat(manifestPoint.position[0]),
+                y: CGFloat(manifestPoint.position[1])
+            )
+            
+            analyses[mapPointID] = MapPointDiffAnalysis(
+                mapPointID: mapPointID,
+                originalPosition: originalPos,
+                diffs: diffs
+            )
+        }
+        
+        return ImportDiffReport(
+            manifestVersion: tapResolver.version,
+            exportedAt: tapResolver.exportedAt,
+            analyses: analyses
+        )
+    }
+    
+    /// Find a triangle in the manifest that matches the raw triangle's vertices
+    private func findMatchingTriangle(_ rawTriangle: RawTriangle) -> (String, SVGManifestTriangle)? {
+        // Try to match by comparing vertex positions
+        for (triangleID, manifestTriangle) in self.triangles {
+            guard manifestTriangle.vertices.count == rawTriangle.vertices.count else { continue }
+            
+            // Check if vertices match (allowing for vertex order rotation)
+            var allMatch = true
+            for (index, vertexID) in manifestTriangle.vertices.enumerated() {
+                guard let manifestPoint = self.mapPoints[vertexID],
+                      index < rawTriangle.vertices.count else {
+                    allMatch = false
+                    break
+                }
+                
+                let manifestPos = CGPoint(
+                    x: CGFloat(manifestPoint.position[0]),
+                    y: CGFloat(manifestPoint.position[1])
+                )
+                let rawPos = rawTriangle.vertices[index]
+                
+                // If ANY vertex is close to its original position, this might be the right triangle
+                // (moved vertices will be detected as diffs)
+                let dx = rawPos.x - manifestPos.x
+                let dy = rawPos.y - manifestPos.y
+                let distance = sqrt(dx * dx + dy * dy)
+                
+                // Use a generous threshold for matching (500px) - we just need to identify the triangle
+                if distance > 500 {
+                    allMatch = false
+                    break
+                }
+            }
+            
+            if allMatch {
+                return (triangleID, manifestTriangle)
+            }
+        }
+        
+        return nil
+    }
+}

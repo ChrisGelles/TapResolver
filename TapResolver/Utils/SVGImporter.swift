@@ -93,12 +93,38 @@ public class SVGImporter {
         
         print("📥 [SVGImporter] Parsed \(parseResult.groups.count) groups, \(parseResult.zones.count) zones")
         
-        // Log manifest status
+        // Log manifest status and detect changes
         if let manifest = parseResult.manifest {
             print("📋 [SVGImporter] Found manifest v\(manifest.tapResolver.version)")
             print("   Exported: \(manifest.tapResolver.exportedAt)")
             print("   MapPoints in manifest: \(manifest.mapPoints.count)")
             print("   Zones in manifest: \(manifest.zones.count)")
+            
+            // Detect vertex changes
+            let thresholdPixels = CGFloat(deduplicationThresholdMeters) * pixelsPerMeter
+            let diffReport = manifest.detectChanges(
+                zones: parseResult.zones,
+                triangles: [],  // Zone import doesn't process triangles
+                thresholdPixels: thresholdPixels
+            )
+            
+            print("📋 [SVGImporter] Diff Report:")
+            print("   Unanimous moves: \(diffReport.unanimousMoves.count)")
+            print("   Splits required: \(diffReport.splits.count)")
+            
+            for analysis in diffReport.unanimousMoves {
+                if let newPos = analysis.unanimousNewPosition {
+                    print("   ➡️ MapPoint \(analysis.mapPointID.prefix(8)): move to (\(String(format: "%.1f", newPos.x)), \(String(format: "%.1f", newPos.y)))")
+                }
+            }
+            
+            for analysis in diffReport.splits {
+                print("   ⚠️ MapPoint \(analysis.mapPointID.prefix(8)): SPLIT required (\(analysis.diffs.count) conflicting references)")
+            }
+            
+            // TODO: Phase 3c will apply these changes
+            // For now, fall through to legacy import behavior
+            
         } else {
             print("📋 [SVGImporter] No manifest found - using legacy import mode")
         }
@@ -242,10 +268,36 @@ public class SVGImporter {
             )
         }
         
-        // Log manifest status
+        // Log manifest status and detect changes
         if let manifest = parseResult.manifest {
             print("📋 [SVGImporter] Found manifest v\(manifest.tapResolver.version)")
             print("   Triangles in manifest: \(manifest.triangles.count)")
+            
+            // Detect vertex changes
+            let thresholdPixels = CGFloat(0.5) * CGFloat(pixelsPerMeter)  // 0.5 meters
+            let diffReport = manifest.detectChanges(
+                zones: [],  // Triangle import doesn't process zones
+                triangles: parseResult.triangles,
+                thresholdPixels: thresholdPixels
+            )
+            
+            print("📋 [SVGImporter] Diff Report:")
+            print("   Unanimous moves: \(diffReport.unanimousMoves.count)")
+            print("   Splits required: \(diffReport.splits.count)")
+            
+            for analysis in diffReport.unanimousMoves {
+                if let newPos = analysis.unanimousNewPosition {
+                    print("   ➡️ MapPoint \(analysis.mapPointID.prefix(8)): move to (\(String(format: "%.1f", newPos.x)), \(String(format: "%.1f", newPos.y)))")
+                }
+            }
+            
+            for analysis in diffReport.splits {
+                print("   ⚠️ MapPoint \(analysis.mapPointID.prefix(8)): SPLIT required (\(analysis.diffs.count) conflicting references)")
+            }
+            
+            // TODO: Phase 3c will apply these changes
+            // For now, fall through to legacy import behavior
+            
         } else {
             print("📋 [SVGImporter] No manifest found - using legacy import mode")
         }
