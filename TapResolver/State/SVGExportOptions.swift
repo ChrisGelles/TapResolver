@@ -18,6 +18,11 @@ class SVGExportOptions: ObservableObject {
     @Published var includeTriangles: Bool = false
     @Published var includeZones: Bool = false
     
+    // MARK: - Format Options
+    
+    /// When enabled, transforms SVG output to match Adobe Illustrator conventions
+    @Published var formatForIllustrator: Bool = true
+    
     // Future options (Phase 2+)
     // @Published var includeCompassVectors: Bool = false
     // @Published var includeUserFacingVectors: Bool = false

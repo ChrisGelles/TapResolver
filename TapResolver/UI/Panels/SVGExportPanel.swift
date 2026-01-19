@@ -88,6 +88,10 @@ struct SVGExportPanel: View {
                     Toggle("Zones", isOn: $exportOptions.includeZones)
                 }
                 
+                Section(header: Text("Format Options")) {
+                    Toggle("Optimize for Illustrator", isOn: $exportOptions.formatForIllustrator)
+                }
+                
                 // MARK: - Preview Info
                 Section(header: Text("Export Info")) {
                     HStack {
@@ -327,18 +331,34 @@ struct SVGExportPanel: View {
                 self.addRSSIHeatmapLayers(to: doc, mapSize: mapImage.size, surveyPoints: surveyPoints, beaconDots: beaconDots, pixelsPerMeter: pixelsPerMeter)
             }
             
-            // Write to file
-            if let url = doc.writeToTempFile(filename: filename) {
+            // Generate SVG content
+            var svgContent = doc.generateSVG()
+            
+            // Apply Illustrator formatting if enabled
+            if exportOptions.formatForIllustrator {
+                svgContent = SVGIllustratorFormatter.format(svgContent)
+                print("🎨 [SVGExport] Applied Illustrator formatting")
+            }
+            
+            // Write to temp file
+            let tempDir = FileManager.default.temporaryDirectory
+            let fileURL = tempDir.appendingPathComponent(filename)
+            
+            do {
+                try svgContent.write(to: fileURL, atomically: true, encoding: .utf8)
+                print("📄 [SVGExport] Wrote SVG to: \(fileURL.lastPathComponent)")
+                
                 DispatchQueue.main.async {
-                    exportedFileURL = url
-                    exportOptions.lastExportURL = url
-                    exportOptions.isExporting = false
-                    showShareSheet = true
+                    self.exportedFileURL = fileURL
+                    self.exportOptions.lastExportURL = fileURL
+                    self.exportOptions.isExporting = false
+                    self.showShareSheet = true
                     print("✅ [SVGExport] Export complete: \(filename)")
                 }
-            } else {
+            } catch {
+                print("❌ [SVGExport] Failed to write SVG: \(error)")
                 DispatchQueue.main.async {
-                    exportOptions.isExporting = false
+                    self.exportOptions.isExporting = false
                 }
             }
         }
