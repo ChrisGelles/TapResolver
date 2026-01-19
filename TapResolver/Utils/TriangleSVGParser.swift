@@ -11,6 +11,7 @@ import CoreGraphics
 // MARK: - Parse Result Types
 
 struct RawTriangle {
+    let id: String?          // Polygon ID from SVG (e.g., "tri-E325D867")
     let vertices: [CGPoint]  // Exactly 3 points
 }
 
@@ -150,7 +151,8 @@ class TriangleSVGParser: NSObject, XMLParserDelegate {
             return
         }
         
-        triangles.append(RawTriangle(vertices: vertices))
+        let polygonID = attributes["id"]
+        triangles.append(RawTriangle(id: polygonID, vertices: vertices))
     }
     
     /// Parse SVG points attribute into CGPoint array

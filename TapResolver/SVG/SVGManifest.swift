@@ -348,13 +348,40 @@ extension SVGManifest {
         // Check zones
         for rawZone in zones {
             let zoneID = rawZone.id.asCodeID
-            guard let manifestZone = self.zones[zoneID] else {
-                print("📋 [DiffDetect] Zone '\(zoneID)' not in manifest - new zone")
-                continue
+            
+            // Try exact match first, then fallback matches
+            let manifestZone: SVGManifestZone?
+            let matchedZoneID: String
+            
+            if let exact = self.zones[zoneID] {
+                manifestZone = exact
+                matchedZoneID = zoneID
+            } else if let exact = self.zones[rawZone.id] {
+                // Try raw ID without asCodeID transform
+                manifestZone = exact
+                matchedZoneID = rawZone.id
+                print("📋 [DiffDetect] Zone matched by raw ID: '\(rawZone.id)'")
+            } else {
+                // Try case-insensitive match
+                let altMatch = self.zones.first { (key, _) in
+                    key.lowercased() == zoneID.lowercased() ||
+                    key.lowercased() == rawZone.id.lowercased()
+                }
+                if let altMatch = altMatch {
+                    manifestZone = altMatch.value
+                    matchedZoneID = altMatch.key
+                    print("📋 [DiffDetect] Zone matched case-insensitive: '\(rawZone.id)' → '\(altMatch.key)'")
+                } else {
+                    print("📋 [DiffDetect] Zone '\(zoneID)' (raw: '\(rawZone.id)') not in manifest - new zone")
+                    print("   Available manifest zones: \(Array(self.zones.keys).sorted())")
+                    continue
+                }
             }
             
+            guard let zone = manifestZone else { continue }
+            
             // Compare each corner
-            for (index, cornerID) in manifestZone.corners.enumerated() {
+            for (index, cornerID) in zone.corners.enumerated() {
                 guard index < rawZone.corners.count,
                       let manifestPoint = self.mapPoints[cornerID] else {
                     continue
@@ -375,20 +402,39 @@ extension SVGManifest {
                         mapPointID: cornerID,
                         originalPosition: originalPos,
                         newPosition: newPos,
-                        sourcePolygonID: zoneID,
+                        sourcePolygonID: matchedZoneID,
                         sourceType: .zone
                     )
                     allDiffs[cornerID, default: []].append(diff)
-                    print("📋 [DiffDetect] Zone '\(zoneID)' corner \(index): moved \(String(format: "%.1f", distance))px")
+                    print("📋 [DiffDetect] Zone '\(matchedZoneID)' corner \(index): moved \(String(format: "%.1f", distance))px")
                 }
             }
         }
         
         // Check triangles
         for rawTriangle in triangles {
-            // Find matching triangle in manifest by vertex positions
-            // Triangle IDs in manifest are like "tri-E325D867"
-            guard let (triangleID, manifestTriangle) = findMatchingTriangle(rawTriangle) else {
+            // Try to match by ID first (more reliable), fall back to vertex matching
+            let matchResult: (String, SVGManifestTriangle)?
+            
+            if let rawID = rawTriangle.id, let manifestTriangle = self.triangles[rawID] {
+                matchResult = (rawID, manifestTriangle)
+                print("📋 [DiffDetect] Matched triangle by ID: '\(rawID)'")
+            } else if let rawID = rawTriangle.id {
+                // Try without the ID having exact match (maybe prefix difference)
+                let found = self.triangles.first { (key, _) in
+                    key == rawID || key.contains(rawID) || rawID.contains(key)
+                }
+                if let found = found {
+                    matchResult = found
+                    print("📋 [DiffDetect] Matched triangle by partial ID: '\(rawID)' → '\(found.0)'")
+                } else {
+                    matchResult = findMatchingTriangle(rawTriangle)
+                }
+            } else {
+                matchResult = findMatchingTriangle(rawTriangle)
+            }
+            
+            guard let (triangleID, manifestTriangle) = matchResult else {
                 print("📋 [DiffDetect] Triangle not found in manifest - new triangle")
                 continue
             }
