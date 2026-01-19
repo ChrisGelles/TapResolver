@@ -122,8 +122,26 @@ public class SVGImporter {
                 print("   ⚠️ MapPoint \(analysis.mapPointID.prefix(8)): SPLIT required (\(analysis.diffs.count) conflicting references)")
             }
             
-            // TODO: Phase 3c will apply these changes
-            // For now, fall through to legacy import behavior
+            // Apply detected changes
+            var mapPointsUpdated = 0
+            var mapPointsSplit = 0
+            
+            if !diffReport.unanimousMoves.isEmpty {
+                mapPointsUpdated = applyUnanimousMoves(diffReport.unanimousMoves, mapPointStore: mapPointStore)
+            }
+            
+            if !diffReport.splits.isEmpty {
+                mapPointsSplit = applySplits(
+                    diffReport.splits,
+                    mapPointStore: mapPointStore,
+                    zoneStore: zoneStore,
+                    triangleStore: nil  // Zone import doesn't have triangle store access
+                )
+            }
+            
+            if mapPointsUpdated > 0 || mapPointsSplit > 0 {
+                print("📋 [SVGImporter] Applied changes: \(mapPointsUpdated) moved, \(mapPointsSplit) split")
+            }
             
         } else {
             print("📋 [SVGImporter] No manifest found - using legacy import mode")
@@ -295,8 +313,26 @@ public class SVGImporter {
                 print("   ⚠️ MapPoint \(analysis.mapPointID.prefix(8)): SPLIT required (\(analysis.diffs.count) conflicting references)")
             }
             
-            // TODO: Phase 3c will apply these changes
-            // For now, fall through to legacy import behavior
+            // Apply detected changes
+            var mapPointsUpdated = 0
+            var mapPointsSplit = 0
+            
+            if !diffReport.unanimousMoves.isEmpty {
+                mapPointsUpdated = applyUnanimousMoves(diffReport.unanimousMoves, mapPointStore: mapPointStore)
+            }
+            
+            if !diffReport.splits.isEmpty {
+                mapPointsSplit = applySplits(
+                    diffReport.splits,
+                    mapPointStore: mapPointStore,
+                    zoneStore: zoneStore,
+                    triangleStore: triangleStore
+                )
+            }
+            
+            if mapPointsUpdated > 0 || mapPointsSplit > 0 {
+                print("📋 [SVGImporter] Applied changes: \(mapPointsUpdated) moved, \(mapPointsSplit) split")
+            }
             
         } else {
             print("📋 [SVGImporter] No manifest found - using legacy import mode")
@@ -387,5 +423,196 @@ public class SVGImporter {
         // Cross product of vectors (p2-p1) and (p3-p1)
         let cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x)
         return abs(cross) < 1.0  // Threshold for floating point comparison
+    }
+    
+    // MARK: - Apply Diff Changes
+    
+    /// Apply unanimous moves - update MapPoint positions and clear calibration
+    /// - Parameters:
+    ///   - moves: Array of unanimous move analyses
+    ///   - mapPointStore: Store to update
+    /// - Returns: Number of MapPoints updated
+    private func applyUnanimousMoves(
+        _ moves: [MapPointDiffAnalysis],
+        mapPointStore: MapPointStore
+    ) -> Int {
+        var updatedCount = 0
+        
+        for analysis in moves {
+            guard let newPosition = analysis.unanimousNewPosition,
+                  let uuid = UUID(uuidString: analysis.mapPointID),
+                  let index = mapPointStore.points.firstIndex(where: { $0.id == uuid }) else {
+                print("⚠️ [SVGImporter] Could not find MapPoint \(analysis.mapPointID.prefix(8)) for move")
+                continue
+            }
+            
+            let oldPosition = mapPointStore.points[index].position
+            
+            // Update position
+            mapPointStore.points[index].position = newPosition
+            
+            // Clear calibration data
+            mapPointStore.points[index].arPositionHistory = []
+            mapPointStore.points[index].canonicalPosition = nil
+            mapPointStore.points[index].canonicalConfidence = nil
+            mapPointStore.points[index].canonicalSampleCount = 0
+            
+            print("✅ [SVGImporter] Moved MapPoint \(analysis.mapPointID.prefix(8)): (\(String(format: "%.1f", oldPosition.x)), \(String(format: "%.1f", oldPosition.y))) → (\(String(format: "%.1f", newPosition.x)), \(String(format: "%.1f", newPosition.y)))")
+            
+            updatedCount += 1
+        }
+        
+        if updatedCount > 0 {
+            mapPointStore.save()
+            print("💾 [SVGImporter] Saved \(updatedCount) moved MapPoint(s)")
+        }
+        
+        return updatedCount
+    }
+    
+    /// Apply splits - create new MapPoints and update polygon references
+    /// - Parameters:
+    ///   - splits: Array of split analyses
+    ///   - mapPointStore: Store to create new points in
+    ///   - zoneStore: Store to update zone references
+    ///   - triangleStore: Store to update triangle references (optional)
+    /// - Returns: Number of new MapPoints created
+    private func applySplits(
+        _ splits: [MapPointDiffAnalysis],
+        mapPointStore: MapPointStore,
+        zoneStore: ZoneStore,
+        triangleStore: TrianglePatchStore?
+    ) -> Int {
+        var createdCount = 0
+        
+        for analysis in splits {
+            // Group diffs by their new position
+            var positionGroups: [String: [VertexDiff]] = [:]  // "x,y" -> diffs
+            
+            for diff in analysis.diffs {
+                let key = "\(Int(diff.newPosition.x)),\(Int(diff.newPosition.y))"
+                positionGroups[key, default: []].append(diff)
+            }
+            
+            // Find which position is the "original" (matches manifest) vs "moved"
+            let originalKey = "\(Int(analysis.originalPosition.x)),\(Int(analysis.originalPosition.y))"
+            
+            for (posKey, diffs) in positionGroups {
+                // Skip the group at the original position - those keep the original MapPoint
+                if posKey == originalKey {
+                    continue
+                }
+                
+                guard let firstDiff = diffs.first else { continue }
+                
+                // Create new MapPoint at the new position
+                let newPoint = MapPointStore.MapPoint(
+                    mapPoint: firstDiff.newPosition,
+                    roles: [.zoneCorner, .triangleEdge],  // Assign both roles to be safe
+                    isLocked: true
+                )
+                mapPointStore.points.append(newPoint)
+                
+                print("🆕 [SVGImporter] Created split MapPoint \(newPoint.id.uuidString.prefix(8)) at (\(String(format: "%.1f", firstDiff.newPosition.x)), \(String(format: "%.1f", firstDiff.newPosition.y)))")
+                
+                // Update references for all polygons that moved to this position
+                for diff in diffs {
+                    switch diff.sourceType {
+                    case .zone:
+                        updateZoneReference(
+                            zoneID: diff.sourcePolygonID,
+                            oldMapPointID: diff.mapPointID,
+                            newMapPointID: newPoint.id.uuidString,
+                            zoneStore: zoneStore
+                        )
+                    case .triangle:
+                        if let triangleStore = triangleStore {
+                            updateTriangleReference(
+                                triangleID: diff.sourcePolygonID,
+                                oldMapPointID: diff.mapPointID,
+                                newMapPointID: newPoint.id,
+                                triangleStore: triangleStore
+                            )
+                        }
+                    }
+                }
+                
+                createdCount += 1
+            }
+        }
+        
+        if createdCount > 0 {
+            mapPointStore.save()
+            zoneStore.save()
+            triangleStore?.save()
+            print("💾 [SVGImporter] Saved \(createdCount) split MapPoint(s)")
+        }
+        
+        return createdCount
+    }
+    
+    /// Update a zone's corner reference from old MapPoint to new MapPoint
+    private func updateZoneReference(
+        zoneID: String,
+        oldMapPointID: String,
+        newMapPointID: String,
+        zoneStore: ZoneStore
+    ) {
+        guard let index = zoneStore.zones.firstIndex(where: { $0.id == zoneID }) else {
+            print("⚠️ [SVGImporter] Zone '\(zoneID)' not found for reference update")
+            return
+        }
+        
+        var updatedCorners = zoneStore.zones[index].cornerMapPointIDs
+        if let cornerIndex = updatedCorners.firstIndex(of: oldMapPointID) {
+            updatedCorners[cornerIndex] = newMapPointID
+            zoneStore.zones[index].cornerMapPointIDs = updatedCorners
+            print("   📝 Updated zone '\(zoneID)' corner: \(oldMapPointID.prefix(8)) → \(newMapPointID.prefix(8))")
+        }
+    }
+    
+    /// Update a triangle's vertex reference from old MapPoint to new MapPoint
+    private func updateTriangleReference(
+        triangleID: String,
+        oldMapPointID: String,
+        newMapPointID: UUID,
+        triangleStore: TrianglePatchStore
+    ) {
+        // Triangle IDs in manifest are like "tri-E325D867", need to match
+        guard let index = triangleStore.triangles.firstIndex(where: { triangle in
+            let manifestID = "tri-\(triangle.id.uuidString.prefix(8))"
+            return manifestID == triangleID
+        }) else {
+            print("⚠️ [SVGImporter] Triangle '\(triangleID)' not found for reference update")
+            return
+        }
+        
+        guard let oldUUID = UUID(uuidString: oldMapPointID) else {
+            print("⚠️ [SVGImporter] Invalid UUID: \(oldMapPointID)")
+            return
+        }
+        
+        var updatedTriangle = triangleStore.triangles[index]
+        var updatedVertices = updatedTriangle.vertexIDs
+        if let vertexIndex = updatedVertices.firstIndex(of: oldUUID) {
+            updatedVertices[vertexIndex] = newMapPointID
+            updatedTriangle = TrianglePatch(
+                id: updatedTriangle.id,
+                vertexIDs: updatedVertices,
+                isCalibrated: updatedTriangle.isCalibrated,
+                calibrationQuality: updatedTriangle.calibrationQuality,
+                transform: updatedTriangle.transform,
+                createdAt: updatedTriangle.createdAt,
+                lastCalibratedAt: updatedTriangle.lastCalibratedAt,
+                arMarkerIDs: updatedTriangle.arMarkerIDs,
+                userPositionWhenCalibrated: updatedTriangle.userPositionWhenCalibrated,
+                legMeasurements: updatedTriangle.legMeasurements,
+                worldMapFilename: updatedTriangle.worldMapFilename,
+                worldMapFilesByStrategy: updatedTriangle.worldMapFilesByStrategy,
+                lastStartingVertexIndex: updatedTriangle.lastStartingVertexIndex
+            )
+            triangleStore.triangles[index] = updatedTriangle
+            print("   📝 Updated triangle '\(triangleID)' vertex: \(oldMapPointID.prefix(8)) → \(newMapPointID.uuidString.prefix(8))")
+        }
     }
 }

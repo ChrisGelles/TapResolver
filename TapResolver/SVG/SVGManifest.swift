@@ -201,14 +201,50 @@ extension SVGManifest {
     /// - Parameter svgString: Complete SVG file content
     /// - Returns: Parsed manifest, or nil if no manifest found or parsing fails
     static func extract(from svgString: String) -> SVGManifest? {
-        // Find the data layer
-        guard let dataLayerStart = svgString.range(of: "<g id=\"data\">"),
-              let dataLayerEnd = svgString.range(of: "</g>", range: dataLayerStart.upperBound..<svgString.endIndex) else {
+        // Find the data layer - use flexible pattern since Illustrator may add attributes
+        guard let dataLayerStart = svgString.range(of: "<g id=\"data\"") else {
             print("📋 [SVGManifest] No data layer found in SVG")
             return nil
         }
-        
-        let dataLayerContent = String(svgString[dataLayerStart.upperBound..<dataLayerEnd.lowerBound])
+
+        // Find the opening tag's closing bracket
+        guard let openTagEnd = svgString.range(of: ">", range: dataLayerStart.upperBound..<svgString.endIndex) else {
+            print("📋 [SVGManifest] Malformed data layer - no closing bracket")
+            return nil
+        }
+
+        // Find the matching </g> - need to handle nested groups
+        // Count opening and closing g tags to find the correct one
+        var depth = 1
+        var searchStart = openTagEnd.upperBound
+        var dataLayerEnd: Range<String.Index>? = nil
+
+        while depth > 0 {
+            let nextOpen = svgString.range(of: "<g", range: searchStart..<svgString.endIndex)
+            let nextClose = svgString.range(of: "</g>", range: searchStart..<svgString.endIndex)
+            
+            guard let close = nextClose else { break }
+            
+            if let open = nextOpen, open.lowerBound < close.lowerBound {
+                // Found an opening tag before the next closing tag
+                depth += 1
+                searchStart = open.upperBound
+            } else {
+                // Found a closing tag
+                depth -= 1
+                if depth == 0 {
+                    dataLayerEnd = close
+                }
+                searchStart = close.upperBound
+            }
+        }
+
+        guard let layerEnd = dataLayerEnd else {
+            print("📋 [SVGManifest] Could not find matching </g> for data layer")
+            return nil
+        }
+
+        let dataLayerContent = String(svgString[openTagEnd.upperBound..<layerEnd.lowerBound])
         
         // Extract all text content from <tspan> elements
         // Pattern matches content between > and < within tspans
