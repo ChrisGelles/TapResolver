@@ -502,7 +502,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     ///   - metersPerPixel: Scale factor from map pixels to meters
     /// - Returns: MapToSessionTransform if successful, nil if < 2 correspondences
     private func computeCornerMeshTransform(
-        correspondences: [(mapPixels: CGPoint, arPosition: simd_float3)],
+        correspondences: [(mapPosition: CGPoint, arPosition: simd_float3)],
         metersPerPixel: Float
     ) -> MapToSessionTransform? {
         let n = correspondences.count
@@ -517,8 +517,8 @@ final class ARCalibrationCoordinator: ObservableObject {
         var arPoints: [simd_float2] = []
         
         for c in correspondences {
-            let mapMeters = simd_float2(Float(c.mapPixels.x) * metersPerPixel,
-                                         Float(c.mapPixels.y) * metersPerPixel)
+            let mapMeters = simd_float2(Float(c.mapPosition.x) * metersPerPixel,
+                                         Float(c.mapPosition.y) * metersPerPixel)
             let arXZ = simd_float2(c.arPosition.x, c.arPosition.z)
             mapPoints.append(mapMeters)
             arPoints.append(arXZ)
@@ -1532,15 +1532,28 @@ final class ARCalibrationCoordinator: ObservableObject {
             sessionMarkerToMapPoint[marker.id.uuidString] = mapPointID
             print("📍 [ZONE_CORNER] Stored position for MapPoint \(String(mapPointID.uuidString.prefix(8)))")
             
-            // Record in position history
-            let record = ARPositionRecord(
-                position: finalPosition,
-                sessionID: safeARStore.currentSessionID,
-                sourceType: .calibration,
-                distortionVector: nil,
-                confidenceScore: 0.95
-            )
-            safeMapStore.addPositionRecord(mapPointID: mapPointID, record: record)
+            // Only record to position history if we have enough Zone Corners for meaningful mesh
+            // Threshold: 6 corners (~2 zones, accounting for shared corners)
+            let totalConfirmedCorners = mapPointARPositions.count
+            let historyThreshold = 6
+
+            if totalConfirmedCorners >= historyThreshold {
+                let record = ARPositionRecord(
+                    position: finalPosition,
+                    sessionID: safeARStore.currentSessionID,
+                    sourceType: .calibration,
+                    distortionVector: nil,
+                    confidenceScore: 0.95
+                )
+                safeMapStore.addPositionRecord(mapPointID: mapPointID, record: record)
+                if let mapPoint = safeMapStore.points.first(where: { $0.id == mapPointID }) {
+                    print("📍 [POSITION_HISTORY] calibration → MapPoint \(String(mapPointID.uuidString.prefix(8))) (#\(mapPoint.arPositionHistory.count + 1))")
+                    print("   ↳ pos: (\(String(format: "%.2f", finalPosition.x)), \(String(format: "%.2f", finalPosition.y)), \(String(format: "%.2f", finalPosition.z))) @ \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short))")
+                }
+            } else {
+                print("📍 [POSITION_HISTORY] calibration → MapPoint \(String(mapPointID.uuidString.prefix(8))) DEFERRED")
+                print("   ↳ Only \(totalConfirmedCorners) corners confirmed, need ≥\(historyThreshold) for meaningful mesh")
+            }
             
         } catch {
             print("❌ [ZONE_CORNER] Failed to save marker: \(error)")
@@ -2225,16 +2238,25 @@ final class ARCalibrationCoordinator: ObservableObject {
             distortionVector = nil
         }
         
-        // Record in position history
-        let record = ARPositionRecord(
-            position: position,
-            sessionID: safeARStore.currentSessionID,
-            sourceType: .ghostAdjust,  // Changed from .ghostConfirm to reflect adjustment
-            distortionVector: distortionVector,
-            confidenceScore: 0.90
-        )
-        safeMapStore.addPositionRecord(mapPointID: mapPointID, record: record)
-        print("📝 [FILL_POINT] Added position record to history")
+        // Only record to position history if we have enough Zone Corners for meaningful mesh
+        let totalConfirmedCorners = mapPointARPositions.count
+        let historyThreshold = 6
+
+        if totalConfirmedCorners >= historyThreshold {
+            let record = ARPositionRecord(
+                position: position,
+                sessionID: safeARStore.currentSessionID,
+                sourceType: .ghostAdjust,  // Changed from .ghostConfirm to reflect adjustment
+                distortionVector: distortionVector,
+                confidenceScore: 0.90
+            )
+            safeMapStore.addPositionRecord(mapPointID: mapPointID, record: record)
+            print("📍 [POSITION_HISTORY] ghostAdjust → MapPoint \(String(mapPointID.uuidString.prefix(8)))")
+            print("   ↳ pos: (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
+        } else {
+            print("📍 [POSITION_HISTORY] ghostAdjust → MapPoint \(String(mapPointID.uuidString.prefix(8))) DEFERRED")
+            print("   ↳ Only \(totalConfirmedCorners) corners confirmed, need ≥\(historyThreshold) for meaningful mesh")
+        }
         
         // Update baked canonical position for persistence across sessions
         updateBakedPositionIncrementally(
@@ -5272,49 +5294,65 @@ final class ARCalibrationCoordinator: ObservableObject {
     
     /// Gather all confirmed zone corner correspondences for Corner Mesh transform
     /// - Returns: Array of (mapPixels, arPosition) pairs from all planted zone corners
-    private func gatherCornerCorrespondences() -> [(mapPixels: CGPoint, arPosition: simd_float3)] {
-        var correspondences: [(mapPixels: CGPoint, arPosition: simd_float3)] = []
+    /// Gathers map↔AR correspondences from planted zone corners
+    /// Priority 1: Current session positions (most accurate)
+    /// Priority 2: Baked positions projected to current session (historical data)
+    func gatherCornerCorrespondences() -> [(mapPosition: CGPoint, arPosition: simd_float3)] {
+        var correspondences: [(mapPosition: CGPoint, arPosition: simd_float3)] = []
         
-        guard let zoneStore = safeZoneStore else {
-            print("⚠️ [CORNER_MESH] No zone store available")
-            return correspondences
-        }
-        
-        // Iterate through all planted zones
+        // Gather all zone corner IDs from planted zones
+        var allCornerIDs = Set<UUID>()
         for zoneID in plantedZoneIDs {
-            guard let zone = zoneStore.zone(withID: zoneID) else { continue }
-            
-            for cornerIDString in zone.cornerMapPointIDs {
-                guard let cornerID = UUID(uuidString: cornerIDString) else { continue }
-                
-                // Get map position
-                guard let mapPoint = safeMapStore.points.first(where: { $0.id == cornerID }) else { continue }
-                
-                // Get AR position
-                guard let arPosition = mapPointARPositions[cornerID] else { continue }
-                
-                correspondences.append((mapPixels: mapPoint.position, arPosition: arPosition))
-            }
-        }
-        
-        // Also include any confirmed neighbor corners (from ghost confirmations)
-        for (_, cornerIDs) in confirmedNeighborCorners {
-            for cornerID in cornerIDs {
-                // Skip if already included from planted zones
-                if correspondences.contains(where: { pair in
-                    safeMapStore.points.first(where: { $0.id == cornerID })?.position == pair.mapPixels
-                }) {
-                    continue
+            if let zone = safeZoneStore?.zone(withID: zoneID) {
+                for cornerIDString in zone.cornerMapPointIDs {
+                    if let uuid = UUID(uuidString: cornerIDString) {
+                        allCornerIDs.insert(uuid)
+                    }
                 }
-                
-                guard let mapPoint = safeMapStore.points.first(where: { $0.id == cornerID }) else { continue }
-                guard let arPosition = mapPointARPositions[cornerID] else { continue }
-                
-                correspondences.append((mapPixels: mapPoint.position, arPosition: arPosition))
             }
         }
         
-        print("📐 [CORNER_MESH] Gathered \(correspondences.count) corner correspondences")
+        // Also include confirmed neighbor corners
+        for (_, confirmedSet) in confirmedNeighborCorners {
+            allCornerIDs.formUnion(confirmedSet)
+        }
+        
+        var fromCurrentSession = 0
+        var fromBakedProjection = 0
+        var skippedNoData = 0
+        
+        for cornerID in allCornerIDs {
+            guard let mapPoint = safeMapStore.points.first(where: { $0.id == cornerID }) else {
+                skippedNoData += 1
+                continue
+            }
+            
+            // Priority 1: Current session position (most accurate for this session)
+            if let arPosition = mapPointARPositions[cornerID] {
+                correspondences.append((mapPosition: mapPoint.mapPoint, arPosition: arPosition))
+                fromCurrentSession += 1
+                continue
+            }
+            
+            // Priority 2: Project baked position to current session (historical data)
+            if hasValidSessionTransform,
+               let bakedPosition = mapPoint.canonicalPosition,
+               let projectedPosition = projectBakedToSession(bakedPosition) {
+                correspondences.append((mapPosition: mapPoint.mapPoint, arPosition: projectedPosition))
+                fromBakedProjection += 1
+                continue
+            }
+            
+            skippedNoData += 1
+        }
+        
+        print("📐 [CORRESPONDENCES] Gathered \(correspondences.count) correspondences:")
+        print("   Current session: \(fromCurrentSession)")
+        print("   Baked projection: \(fromBakedProjection)")
+        if skippedNoData > 0 {
+            print("   Skipped (no data): \(skippedNoData)")
+        }
+        
         return correspondences
     }
     
