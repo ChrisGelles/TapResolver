@@ -2515,6 +2515,7 @@ public final class MapPointStore: ObservableObject {
                         // Create updated triangle (vertexIDs is let, so we rebuild)
                         triangleStore.triangles[triIndex] = TrianglePatch(
                             id: triangle.id,
+                            displayName: triangle.displayName,
                             vertexIDs: updatedVertexIDs,
                             isCalibrated: triangle.isCalibrated,
                             calibrationQuality: triangle.calibrationQuality,

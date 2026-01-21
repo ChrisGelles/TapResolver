@@ -66,7 +66,9 @@ public struct SVGManifestMapPoint: Codable {
 
 /// Triangle vertex references
 public struct SVGManifestTriangle: Codable {
-    let vertices: [String]  // 3 MapPoint UUID strings
+    let id: String           // Full UUID string (36 characters)
+    let displayName: String? // User-assigned name, if any
+    let vertices: [String]   // 3 MapPoint UUID strings (full)
 }
 
 // MARK: - Zone
@@ -160,12 +162,16 @@ extension SVGManifest {
             )
         }
         
-        // Build Triangles dictionary
+        // Build Triangles dictionary - key is displayName if present, else "tri-" + full UUID
         var trianglesDict: [String: SVGManifestTriangle] = [:]
         for triangle in triangles {
-            let triangleID = "tri-\(triangle.id.uuidString.prefix(8))"
-            let vertices = triangle.vertexIDs.map { $0.uuidString }
-            trianglesDict[triangleID] = SVGManifestTriangle(vertices: vertices)
+            let triangleKey = triangle.displayName ?? "tri-\(triangle.id.uuidString)"
+            let vertices = triangle.vertexIDs.map { $0.uuidString }  // Full UUIDs
+            trianglesDict[triangleKey] = SVGManifestTriangle(
+                id: triangle.id.uuidString,
+                displayName: triangle.displayName,
+                vertices: vertices
+            )
         }
         
         // Build Zones dictionary
@@ -201,8 +207,31 @@ extension SVGManifest {
     /// - Parameter svgString: Complete SVG file content
     /// - Returns: Parsed manifest, or nil if no manifest found or parsing fails
     static func extract(from svgString: String) -> SVGManifest? {
+        // DIAGNOSTIC: Log what we're searching
+        let svgLength = svgString.count
+        let containsDataString = svgString.contains("id=\"data\"")
+        let containsGTag = svgString.contains("<g")
+        let first200 = String(svgString.prefix(200))
+        
+        print("📋 [SVGManifest] extract() called:")
+        print("   SVG length: \(svgLength) characters")
+        print("   Contains '<g': \(containsGTag)")
+        print("   Contains 'id=\"data\"': \(containsDataString)")
+        print("   First 200 chars: \(first200.replacingOccurrences(of: "\n", with: "↵"))")
+        
         // Find the data layer - use flexible pattern since Illustrator may add attributes
         guard let dataLayerStart = svgString.range(of: "<g id=\"data\"") else {
+            // Additional diagnostic if search fails but string exists
+            if containsDataString {
+                // Find where it actually is
+                if let idRange = svgString.range(of: "id=\"data\"") {
+                    let startIdx = svgString.index(idRange.lowerBound, offsetBy: -30, limitedBy: svgString.startIndex) ?? svgString.startIndex
+                    let endIdx = svgString.index(idRange.upperBound, offsetBy: 30, limitedBy: svgString.endIndex) ?? svgString.endIndex
+                    let context = String(svgString[startIdx..<endIdx])
+                    print("📋 [SVGManifest] ⚠️ 'id=\"data\"' found but '<g id=\"data\"' pattern failed!")
+                    print("   Context around 'id=\"data\"': \(context.replacingOccurrences(of: "\n", with: "↵"))")
+                }
+            }
             print("📋 [SVGManifest] No data layer found in SVG")
             return nil
         }

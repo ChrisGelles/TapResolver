@@ -25,6 +25,8 @@ struct TriangleLegMeasurement: Codable {
 
 struct TrianglePatch: Codable, Identifiable {
     let id: UUID
+    /// User-assigned display name (e.g., "tri-rooster"). If nil, export uses UUID prefix.
+    var displayName: String?
     let vertexIDs: [UUID]  // Exactly 3 MapPoint IDs (must have triangle-edge role)
     var isCalibrated: Bool
     var calibrationQuality: Float  // 0.0 (red) to 1.0 (green)
@@ -41,8 +43,9 @@ struct TrianglePatch: Codable, Identifiable {
     /// nil means never calibrated with rotation tracking.
     var lastStartingVertexIndex: Int?
     
-    init(vertexIDs: [UUID]) {
+    init(vertexIDs: [UUID], displayName: String? = nil) {
         self.id = UUID()
+        self.displayName = displayName
         self.vertexIDs = vertexIDs
         self.isCalibrated = false
         self.calibrationQuality = 0.0
@@ -54,6 +57,7 @@ struct TrianglePatch: Codable, Identifiable {
     /// Full initializer for rebuilding triangles (used during merge operations)
     init(
         id: UUID,
+        displayName: String? = nil,
         vertexIDs: [UUID],
         isCalibrated: Bool,
         calibrationQuality: Float,
@@ -68,6 +72,7 @@ struct TrianglePatch: Codable, Identifiable {
         lastStartingVertexIndex: Int?
     ) {
         self.id = id
+        self.displayName = displayName
         self.vertexIDs = vertexIDs
         self.isCalibrated = isCalibrated
         self.calibrationQuality = calibrationQuality
@@ -104,7 +109,7 @@ struct TrianglePatch: Codable, Identifiable {
 // MARK: - Custom Codable Support for Backward Compatibility
 extension TrianglePatch {
     enum CodingKeys: String, CodingKey {
-        case id, vertexIDs, arMarkerIDs, calibrationQuality, isCalibrated, createdAt, lastCalibratedAt
+        case id, displayName, vertexIDs, arMarkerIDs, calibrationQuality, isCalibrated, createdAt, lastCalibratedAt
         case transform, userPositionWhenCalibrated, legMeasurements, worldMapFilename, worldMapFilesByStrategy
         case lastStartingVertexIndex
     }
@@ -113,6 +118,7 @@ extension TrianglePatch {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
         id = try container.decode(UUID.self, forKey: .id)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
         vertexIDs = try container.decode([UUID].self, forKey: .vertexIDs)
         arMarkerIDs = try container.decodeIfPresent([String].self, forKey: .arMarkerIDs) ?? []
         calibrationQuality = try container.decodeIfPresent(Float.self, forKey: .calibrationQuality) ?? 0.0
@@ -179,6 +185,7 @@ extension TrianglePatch {
         var container = encoder.container(keyedBy: CodingKeys.self)
         
         try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(displayName, forKey: .displayName)
         try container.encode(vertexIDs, forKey: .vertexIDs)
         try container.encode(arMarkerIDs, forKey: .arMarkerIDs)
         try container.encode(calibrationQuality, forKey: .calibrationQuality)

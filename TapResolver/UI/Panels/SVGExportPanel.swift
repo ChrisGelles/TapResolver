@@ -747,11 +747,11 @@ struct SVGExportPanel: View {
             
             guard vertexPositions.count == 3 else { continue }
             
-            let triID = String(triangle.id.uuidString.prefix(8))
+            let triID = triangle.displayName ?? "tri-\(triangle.id.uuidString)"
             
             // Draw triangle polygon with CSS class
             let pointsStr = vertexPositions.map { "\(String(format: "%.1f", $0.x)),\(String(format: "%.1f", $0.y))" }.joined(separator: " ")
-            content += "    <polygon id=\"tri-\(triID)\" class=\"triangle-\(triID)\" points=\"\(pointsStr)\"/>\n"
+            content += "    <polygon id=\"\(triID)\" class=\"triangle-\(String(triangle.id.uuidString.prefix(8)))\" points=\"\(pointsStr)\"/>\n"
         }
         
         doc.addLayer(id: "triangles", content: content)
