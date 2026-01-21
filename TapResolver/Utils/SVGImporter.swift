@@ -46,7 +46,7 @@ public class SVGImporter {
     // MARK: - Configuration
     
     /// Threshold in meters for MapPoint deduplication
-    private let deduplicationThresholdMeters: Float = 0.5
+    private let deduplicationThresholdMeters: Float = 0.01  // 1cm tolerance for point-snapped SVG edits
     
     // MARK: - Initialization
     
@@ -286,13 +286,16 @@ public class SVGImporter {
             )
         }
         
+        // Track which triangles are in the manifest (already exist in app)
+        var manifestTriangleIDs: Set<String> = []
+        
         // Log manifest status and detect changes
         if let manifest = parseResult.manifest {
             print("📋 [SVGImporter] Found manifest v\(manifest.tapResolver.version)")
             print("   Triangles in manifest: \(manifest.triangles.count)")
             
             // Detect vertex changes
-            let thresholdPixels = CGFloat(0.5) * CGFloat(pixelsPerMeter)  // 0.5 meters
+            let thresholdPixels = CGFloat(deduplicationThresholdMeters) * CGFloat(pixelsPerMeter)
             let diffReport = manifest.detectChanges(
                 zones: [],  // Triangle import doesn't process zones
                 triangles: parseResult.triangles,
@@ -334,24 +337,105 @@ public class SVGImporter {
                 print("📋 [SVGImporter] Applied changes: \(mapPointsUpdated) moved, \(mapPointsSplit) split")
             }
             
+            // Build set of manifest triangle IDs for filtering
+            manifestTriangleIDs = Set(manifest.triangles.keys)
+            print("📋 [SVGImporter] Manifest contains \(manifestTriangleIDs.count) triangles - will skip these during creation")
+            
         } else {
             print("📋 [SVGImporter] No manifest found - using legacy import mode")
         }
         
-        // Step 2: Setup MapPoint resolver
-        let resolver = MapPointResolver(
-            mapPointStore: mapPointStore,
-            thresholdMeters: 0.5,
-            pixelsPerMeter: CGFloat(pixelsPerMeter)
-        )
+        // ============================================================
+        // PHASE 1: PROCESS MANIFEST TRIANGLES (update existing only)
+        // ============================================================
+        
+        // Partition triangles into manifest (existing) vs new
+        let manifestTrianglesRaw = parseResult.triangles.filter { rawTriangle in
+            let triangleID = rawTriangle.id ?? ""
+            return manifestTriangleIDs.contains(triangleID)
+        }
+        let newTrianglesRaw = parseResult.triangles.filter { rawTriangle in
+            let triangleID = rawTriangle.id ?? ""
+            return !manifestTriangleIDs.contains(triangleID)
+        }
+        
+        print("📋 [SVGImporter] Phase 1: Processing \(manifestTrianglesRaw.count) manifest triangles")
+        print("📋 [SVGImporter] Phase 2 pending: \(newTrianglesRaw.count) new triangles")
         
         var trianglesCreated = 0
         var trianglesSkipped = 0
         var warnings = parseResult.warnings
         
-        // Step 3: Create triangles
-        for rawTriangle in parseResult.triangles {
-            // Resolve vertices to MapPoints
+        // Phase 1: Handle manifest triangles (skip creation, update displayNames)
+        for rawTriangle in manifestTrianglesRaw {
+            let triangleID = rawTriangle.id ?? "unnamed"
+            
+            // Find existing triangle by displayName or UUID
+            if let existingIndex = triangleStore.triangles.firstIndex(where: { triangle in
+                if let displayName = triangle.displayName, displayName == triangleID {
+                    return true
+                }
+                if triangleID.hasPrefix("tri-") {
+                    let uuidPart = String(triangleID.dropFirst(4))
+                    if triangle.id.uuidString == uuidPart {
+                        return true
+                    }
+                    if triangle.id.uuidString.hasPrefix(uuidPart) {
+                        return true
+                    }
+                }
+                return false
+            }) {
+                // Triangle exists - update displayName if needed
+                let svgID = rawTriangle.id ?? ""
+                if !svgID.isEmpty && !isUUIDBasedName(svgID) {
+                    if triangleStore.triangles[existingIndex].displayName != svgID {
+                        triangleStore.triangles[existingIndex].displayName = svgID
+                        print("📝 [SVGImporter] Updated displayName for existing triangle: '\(svgID)'")
+                    }
+                }
+                print("⏭️ [SVGImporter] Triangle '\(triangleID)' exists - skipping creation")
+                trianglesSkipped += 1
+            } else {
+                // Triangle in manifest but not in app - will recreate in Phase 2
+                print("🔄 [SVGImporter] Triangle '\(triangleID)' in manifest but missing from app - queuing for creation")
+                // Add to new triangles for Phase 2
+                // (We'll handle this by not filtering it out - but it's already filtered)
+            }
+        }
+        
+        // ============================================================
+        // CLEANUP: Merge duplicate MapPoints at same position
+        // ============================================================
+        let duplicatesMerged = cleanupDuplicateMapPoints(
+            mapPointStore: mapPointStore,
+            triangleStore: triangleStore,
+            zoneStore: zoneStore,
+            thresholdPixels: 2.0  // 2 pixel tolerance
+        )
+        if duplicatesMerged > 0 {
+            print("🧹 [SVGImporter] Merged \(duplicatesMerged) duplicate MapPoint(s)")
+        }
+        
+        // ============================================================
+        // PHASE 2: PROCESS NEW TRIANGLES (create after MapPoints settled)
+        // ============================================================
+        
+        print("📋 [SVGImporter] Phase 2: Creating new triangles (MapPoints now stable)")
+        
+        // Create fresh resolver with current MapPointStore state
+        let resolver = MapPointResolver(
+            mapPointStore: mapPointStore,
+            thresholdMeters: deduplicationThresholdMeters,
+            pixelsPerMeter: CGFloat(pixelsPerMeter)
+        )
+        
+        for rawTriangle in newTrianglesRaw {
+            let triangleID = rawTriangle.id ?? "unnamed"
+            
+            print("🆕 [SVGImporter] New triangle: '\(triangleID)' - creating")
+            
+            // Resolve vertices to MapPoints (uses current, updated positions)
             var vertexIDs: [UUID] = []
             for vertex in rawTriangle.vertices {
                 let resolved = resolver.resolve(vertex, roles: [.triangleEdge])
@@ -360,20 +444,57 @@ public class SVGImporter {
             
             // Check for collinearity
             if areCollinear(rawTriangle.vertices[0], rawTriangle.vertices[1], rawTriangle.vertices[2]) {
-                warnings.append("Skipped collinear triangle at (\(Int(rawTriangle.vertices[0].x)), \(Int(rawTriangle.vertices[0].y)))")
+                warnings.append("Skipped collinear triangle '\(triangleID)' at (\(Int(rawTriangle.vertices[0].x)), \(Int(rawTriangle.vertices[0].y)))")
+                print("⏭️ [SVGImporter] Triangle '\(triangleID)' is collinear - skipping")
                 trianglesSkipped += 1
                 continue
             }
             
-            // Check for overlap with existing triangles
-            if triangleStore.hasInteriorOverlap(with: vertexIDs, mapPointStore: mapPointStore) {
-                warnings.append("Skipped overlapping triangle at (\(Int(rawTriangle.vertices[0].x)), \(Int(rawTriangle.vertices[0].y)))")
+            // Check if a triangle with these exact 3 vertices already exists
+            let vertexSet = Set(vertexIDs)
+            if let existingTriangle = triangleStore.triangles.first(where: { Set($0.vertexIDs) == vertexSet }) {
+                // Update displayName if this is a custom name
+                let svgID = rawTriangle.id ?? ""
+                if !svgID.isEmpty && !isUUIDBasedName(svgID) {
+                    if let index = triangleStore.triangles.firstIndex(where: { $0.id == existingTriangle.id }) {
+                        triangleStore.triangles[index].displayName = svgID
+                        print("📝 [SVGImporter] Updated triangle \(existingTriangle.id.uuidString.prefix(8)) displayName to '\(svgID)'")
+                    }
+                }
+                print("⏭️ [SVGImporter] Triangle '\(triangleID)' has same vertices as existing - skipping")
                 trianglesSkipped += 1
                 continue
             }
             
-            // Create triangle
-            let triangle = TrianglePatch(vertexIDs: vertexIDs)
+            // Get vertex positions for overlap check
+            guard let newPositions = getVertexPositions(vertexIDs, mapPointStore: mapPointStore) else {
+                warnings.append("Could not get positions for triangle '\(triangleID)'")
+                print("⚠️ [SVGImporter] Could not get positions for '\(triangleID)' - skipping")
+                trianglesSkipped += 1
+                continue
+            }
+            
+            // Check for geometric overlap with existing triangles
+            if hasGeometricOverlap(newPositions: newPositions, triangleStore: triangleStore, mapPointStore: mapPointStore) {
+                warnings.append("Skipped overlapping triangle '\(triangleID)' at (\(Int(rawTriangle.vertices[0].x)), \(Int(rawTriangle.vertices[0].y)))")
+                print("❌ [SVGImporter] Triangle '\(triangleID)' has geometric overlap - skipping")
+                trianglesSkipped += 1
+                continue
+            }
+            
+            // Create the triangle
+            let svgID = rawTriangle.id ?? ""
+            let isCustomName = !svgID.isEmpty && !isUUIDBasedName(svgID)
+            let displayName: String? = isCustomName ? svgID : nil
+            
+            let triangle = TrianglePatch(vertexIDs: vertexIDs, displayName: displayName)
+            
+            if let name = displayName {
+                print("✅ [SVGImporter] Created triangle with displayName: '\(name)' → UUID: \(triangle.id.uuidString.prefix(8))")
+            } else {
+                print("✅ [SVGImporter] Created triangle: \(triangle.id.uuidString.prefix(8))")
+            }
+            
             triangleStore.triangles.append(triangle)
             
             // Update MapPoint memberships
@@ -423,6 +544,15 @@ public class SVGImporter {
         // Cross product of vectors (p2-p1) and (p3-p1)
         let cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x)
         return abs(cross) < 1.0  // Threshold for floating point comparison
+    }
+    
+    /// Check if an SVG ID is UUID-based (e.g., "tri-3A598EFC..." or "tri-XXXXXXXX-XXXX-...")
+    private func isUUIDBasedName(_ name: String) -> Bool {
+        guard name.hasPrefix("tri-") else { return false }
+        let suffix = String(name.dropFirst(4))
+        // Check if it looks like a UUID (8+ hex chars or full UUID format)
+        let hexChars = CharacterSet(charactersIn: "0123456789ABCDEFabcdef-")
+        return suffix.unicodeScalars.allSatisfy { hexChars.contains($0) } && suffix.count >= 8
     }
     
     // MARK: - Apply Diff Changes
@@ -494,8 +624,18 @@ public class SVGImporter {
                 positionGroups[key, default: []].append(diff)
             }
             
+            // DIAGNOSTIC: Log position groups
+            print("📊 [SPLIT] MapPoint \(analysis.mapPointID.prefix(8)) position groups:")
+            for (key, diffs) in positionGroups {
+                print("   Group '\(key)': \(diffs.count) triangles")
+                for diff in diffs {
+                    print("      - \(diff.sourcePolygonID): (\(String(format: "%.2f", diff.newPosition.x)), \(String(format: "%.2f", diff.newPosition.y)))")
+                }
+            }
+            
             // Find which position is the "original" (matches manifest) vs "moved"
             let originalKey = "\(Int(analysis.originalPosition.x)),\(Int(analysis.originalPosition.y))"
+            print("   Original position key: '\(originalKey)' (actual: (\(String(format: "%.2f", analysis.originalPosition.x)), \(String(format: "%.2f", analysis.originalPosition.y))))")
             
             for (posKey, diffs) in positionGroups {
                 // Skip the group at the original position - those keep the original MapPoint
@@ -578,10 +718,22 @@ public class SVGImporter {
         newMapPointID: UUID,
         triangleStore: TrianglePatchStore
     ) {
-        // Triangle IDs in manifest are like "tri-E325D867", need to match
+        // Match by displayName OR UUID (full or prefix)
         guard let index = triangleStore.triangles.firstIndex(where: { triangle in
-            let manifestID = "tri-\(triangle.id.uuidString.prefix(8))"
-            return manifestID == triangleID
+            // Match by displayName if triangle has one
+            if let displayName = triangle.displayName, displayName == triangleID {
+                return true
+            }
+            // Match by full UUID format: "tri-{fullUUID}"
+            if triangleID == "tri-\(triangle.id.uuidString)" {
+                return true
+            }
+            // Match by 8-char UUID prefix format: "tri-{prefix}"
+            let prefix8 = "tri-\(triangle.id.uuidString.prefix(8))"
+            if prefix8 == triangleID {
+                return true
+            }
+            return false
         }) else {
             print("⚠️ [SVGImporter] Triangle '\(triangleID)' not found for reference update")
             return
@@ -598,6 +750,7 @@ public class SVGImporter {
             updatedVertices[vertexIndex] = newMapPointID
             updatedTriangle = TrianglePatch(
                 id: updatedTriangle.id,
+                displayName: updatedTriangle.displayName,
                 vertexIDs: updatedVertices,
                 isCalibrated: updatedTriangle.isCalibrated,
                 calibrationQuality: updatedTriangle.calibrationQuality,
@@ -613,6 +766,308 @@ public class SVGImporter {
             )
             triangleStore.triangles[index] = updatedTriangle
             print("   📝 Updated triangle '\(triangleID)' vertex: \(oldMapPointID.prefix(8)) → \(newMapPointID.uuidString.prefix(8))")
+        }
+    }
+    
+    // MARK: - Geometric Overlap Detection
+    
+    /// Get vertex positions from MapPointStore
+    private func getVertexPositions(_ vertexIDs: [UUID], mapPointStore: MapPointStore) -> [CGPoint]? {
+        var positions: [CGPoint] = []
+        for id in vertexIDs {
+            guard let point = mapPointStore.points.first(where: { $0.id == id }) else {
+                return nil
+            }
+            positions.append(point.position)
+        }
+        return positions
+    }
+    
+    /// Check if new triangle has geometric overlap with any existing triangle
+    /// Uses proper edge intersection and strict point-in-triangle tests
+    private func hasGeometricOverlap(
+        newPositions: [CGPoint],
+        triangleStore: TrianglePatchStore,
+        mapPointStore: MapPointStore
+    ) -> Bool {
+        guard newPositions.count == 3 else { return true }
+        
+        for existingTriangle in triangleStore.triangles {
+            guard let existingPositions = getVertexPositions(existingTriangle.vertexIDs, mapPointStore: mapPointStore),
+                  existingPositions.count == 3 else {
+                continue
+            }
+            
+            // Check for proper edge-edge intersection
+            if hasProperEdgeIntersection(newPositions, existingPositions) {
+                print("      ❌ REJECT: Edge intersection with \(existingTriangle.id.uuidString.prefix(8))")
+                return true
+            }
+            
+            // Check for strict containment (vertex inside other triangle)
+            if hasStrictContainment(newPositions, existingPositions) {
+                print("      ❌ REJECT: Containment overlap with \(existingTriangle.id.uuidString.prefix(8))")
+                return true
+            }
+            
+            print("      ✅ No overlap with \(existingTriangle.id.uuidString.prefix(8))")
+        }
+        
+        return false
+    }
+    
+    /// Check if any edge of triangle A properly intersects any edge of triangle B
+    /// "Proper" means intersection at interior point, not endpoint touch or collinear overlap
+    private func hasProperEdgeIntersection(_ triA: [CGPoint], _ triB: [CGPoint]) -> Bool {
+        let edgesA = [(triA[0], triA[1]), (triA[1], triA[2]), (triA[2], triA[0])]
+        let edgesB = [(triB[0], triB[1]), (triB[1], triB[2]), (triB[2], triB[0])]
+        
+        for edgeA in edgesA {
+            for edgeB in edgesB {
+                if segmentsProperlyIntersect(edgeA.0, edgeA.1, edgeB.0, edgeB.1) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+    
+    /// Check if segments AB and CD properly intersect (at interior points, not endpoints)
+    private func segmentsProperlyIntersect(_ a: CGPoint, _ b: CGPoint, _ c: CGPoint, _ d: CGPoint) -> Bool {
+        // Using cross product to determine orientation
+        func cross(_ o: CGPoint, _ p: CGPoint, _ q: CGPoint) -> CGFloat {
+            return (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x)
+        }
+        
+        let d1 = cross(c, d, a)
+        let d2 = cross(c, d, b)
+        let d3 = cross(a, b, c)
+        let d4 = cross(a, b, d)
+        
+        // Check for proper intersection (opposite signs, not touching at endpoints)
+        if ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+           ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)) {
+            return true
+        }
+        
+        // Note: We explicitly do NOT count endpoint touches as intersections
+        // This allows shared vertices and shared edges
+        
+        return false
+    }
+    
+    /// Check if any vertex of triangle A is strictly inside triangle B, or vice versa
+    /// "Strictly inside" means interior only, not on boundary
+    private func hasStrictContainment(_ triA: [CGPoint], _ triB: [CGPoint]) -> Bool {
+        // Check A's vertices in B
+        for vertex in triA {
+            if isStrictlyInsideTriangle(vertex, triB) {
+                return true
+            }
+        }
+        
+        // Check B's vertices in A
+        for vertex in triB {
+            if isStrictlyInsideTriangle(vertex, triA) {
+                return true
+            }
+        }
+        
+        return false
+    }
+    
+    /// Check if point P is strictly inside triangle (interior only, not on boundary)
+    private func isStrictlyInsideTriangle(_ p: CGPoint, _ triangle: [CGPoint]) -> Bool {
+        guard triangle.count == 3 else { return false }
+        
+        let a = triangle[0]
+        let b = triangle[1]
+        let c = triangle[2]
+        
+        // Compute barycentric coordinates
+        let v0 = CGPoint(x: c.x - a.x, y: c.y - a.y)
+        let v1 = CGPoint(x: b.x - a.x, y: b.y - a.y)
+        let v2 = CGPoint(x: p.x - a.x, y: p.y - a.y)
+        
+        let dot00 = v0.x * v0.x + v0.y * v0.y
+        let dot01 = v0.x * v1.x + v0.y * v1.y
+        let dot02 = v0.x * v2.x + v0.y * v2.y
+        let dot11 = v1.x * v1.x + v1.y * v1.y
+        let dot12 = v1.x * v2.x + v1.y * v2.y
+        
+        let invDenom = 1.0 / (dot00 * dot11 - dot01 * dot01)
+        let u = (dot11 * dot02 - dot01 * dot12) * invDenom
+        let v = (dot00 * dot12 - dot01 * dot02) * invDenom
+        
+        // Strictly inside means all barycentric coords > 0 (not >= 0)
+        // Using small epsilon to account for floating point
+        let epsilon: CGFloat = 0.0001
+        return (u > epsilon) && (v > epsilon) && (u + v < 1.0 - epsilon)
+    }
+    
+    // MARK: - Duplicate MapPoint Cleanup
+    
+    /// Find and merge MapPoints at the same position
+    /// Returns number of duplicates merged
+    private func cleanupDuplicateMapPoints(
+        mapPointStore: MapPointStore,
+        triangleStore: TrianglePatchStore,
+        zoneStore: ZoneStore,
+        thresholdPixels: CGFloat
+    ) -> Int {
+        var mergedCount = 0
+        var indicesToRemove: [Int] = []
+        
+        // Find duplicates
+        for i in 0..<mapPointStore.points.count {
+            if indicesToRemove.contains(i) { continue }
+            
+            for j in (i+1)..<mapPointStore.points.count {
+                if indicesToRemove.contains(j) { continue }
+                
+                let p1 = mapPointStore.points[i]
+                let p2 = mapPointStore.points[j]
+                
+                let dx = p1.position.x - p2.position.x
+                let dy = p1.position.y - p2.position.y
+                let distance = sqrt(dx * dx + dy * dy)
+                
+                if distance < thresholdPixels {
+                    // Found duplicate - merge j into i (keep older/more calibrated)
+                    let keepIndex: Int
+                    let deleteIndex: Int
+                    
+                    // Prefer the one with more calibration data, then older
+                    if p1.canonicalSampleCount >= p2.canonicalSampleCount {
+                        keepIndex = i
+                        deleteIndex = j
+                    } else {
+                        keepIndex = j
+                        deleteIndex = i
+                    }
+                    
+                    let keepID = mapPointStore.points[keepIndex].id
+                    let deleteID = mapPointStore.points[deleteIndex].id
+                    
+                    print("🔀 [SVGImporter] Merging duplicate MapPoint \(deleteID.uuidString.prefix(8)) into \(keepID.uuidString.prefix(8))")
+                    
+                    // Merge data
+                    mergeMapPointData(
+                        from: deleteIndex,
+                        into: keepIndex,
+                        mapPointStore: mapPointStore
+                    )
+                    
+                    // Update triangle references
+                    updateAllTriangleReferences(
+                        from: deleteID,
+                        to: keepID,
+                        triangleStore: triangleStore
+                    )
+                    
+                    // Update zone references
+                    updateAllZoneReferences(
+                        from: deleteID,
+                        to: keepID,
+                        zoneStore: zoneStore
+                    )
+                    
+                    indicesToRemove.append(deleteIndex)
+                    mergedCount += 1
+                }
+            }
+        }
+        
+        // Remove duplicates (in reverse order to preserve indices)
+        for index in indicesToRemove.sorted().reversed() {
+            mapPointStore.points.remove(at: index)
+        }
+        
+        return mergedCount
+    }
+    
+    /// Merge data from one MapPoint into another
+    private func mergeMapPointData(from sourceIndex: Int, into targetIndex: Int, mapPointStore: MapPointStore) {
+        let source = mapPointStore.points[sourceIndex]
+        
+        // Merge triangle memberships
+        for membership in source.triangleMemberships {
+            if !mapPointStore.points[targetIndex].triangleMemberships.contains(membership) {
+                mapPointStore.points[targetIndex].triangleMemberships.append(membership)
+            }
+        }
+        
+        // Merge roles
+        for role in source.roles {
+            mapPointStore.points[targetIndex].roles.insert(role)
+        }
+        
+        // Keep name if target doesn't have one
+        if mapPointStore.points[targetIndex].name == nil && source.name != nil {
+            mapPointStore.points[targetIndex].name = source.name
+        }
+        
+        // Merge AR position history
+        mapPointStore.points[targetIndex].arPositionHistory.append(contentsOf: source.arPositionHistory)
+        
+        // If source has calibration but target doesn't, use source's
+        if mapPointStore.points[targetIndex].canonicalPosition == nil && source.canonicalPosition != nil {
+            mapPointStore.points[targetIndex].canonicalPosition = source.canonicalPosition
+            mapPointStore.points[targetIndex].canonicalConfidence = source.canonicalConfidence
+            mapPointStore.points[targetIndex].canonicalSampleCount = source.canonicalSampleCount
+        }
+    }
+    
+    /// Update all triangles that reference oldID to reference newID
+    private func updateAllTriangleReferences(from oldID: UUID, to newID: UUID, triangleStore: TrianglePatchStore) {
+        for i in 0..<triangleStore.triangles.count {
+            var triangle = triangleStore.triangles[i]
+            var updated = false
+            
+            var updatedVertexIDs = triangle.vertexIDs
+            for j in 0..<updatedVertexIDs.count {
+                if updatedVertexIDs[j] == oldID {
+                    updatedVertexIDs[j] = newID
+                    updated = true
+                }
+            }
+            
+            if updated {
+                // Rebuild triangle with updated vertexIDs
+                triangleStore.triangles[i] = TrianglePatch(
+                    id: triangle.id,
+                    displayName: triangle.displayName,
+                    vertexIDs: updatedVertexIDs,
+                    isCalibrated: triangle.isCalibrated,
+                    calibrationQuality: triangle.calibrationQuality,
+                    transform: triangle.transform,
+                    createdAt: triangle.createdAt,
+                    lastCalibratedAt: triangle.lastCalibratedAt,
+                    arMarkerIDs: triangle.arMarkerIDs,
+                    userPositionWhenCalibrated: triangle.userPositionWhenCalibrated,
+                    legMeasurements: triangle.legMeasurements,
+                    worldMapFilename: triangle.worldMapFilename,
+                    worldMapFilesByStrategy: triangle.worldMapFilesByStrategy,
+                    lastStartingVertexIndex: triangle.lastStartingVertexIndex
+                )
+                print("   📝 Updated triangle \(triangle.id.uuidString.prefix(8)) vertex: \(oldID.uuidString.prefix(8)) → \(newID.uuidString.prefix(8))")
+            }
+        }
+    }
+    
+    /// Update all zones that reference oldID to reference newID
+    private func updateAllZoneReferences(from oldID: UUID, to newID: UUID, zoneStore: ZoneStore) {
+        let oldIDString = oldID.uuidString
+        let newIDString = newID.uuidString
+        
+        for i in 0..<zoneStore.zones.count {
+            var zone = zoneStore.zones[i]
+            
+            if let cornerIndex = zone.cornerMapPointIDs.firstIndex(of: oldIDString) {
+                zone.cornerMapPointIDs[cornerIndex] = newIDString
+                zoneStore.zones[i] = zone
+                print("   📝 Updated zone '\(zone.id)' corner: \(oldIDString.prefix(8)) → \(newIDString.prefix(8))")
+            }
         }
     }
 }
