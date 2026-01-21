@@ -1,0 +1,737 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="home-map" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" viewBox="0 0 2048 2048">
+  <!-- Generator: Adobe Illustrator 30.1.0, SVG Export Plug-In . SVG Version: 2.1.1 Build 136)  -->
+  <defs>
+    <style>
+      .st0 {
+        fill: #64ff64;
+      }
+
+      .st0, .st1, .st2, .st3, .st4, .st5 {
+        fill-opacity: .3;
+        stroke: #000;
+        stroke-opacity: .6;
+        stroke-width: 2px;
+      }
+
+      .st1 {
+        fill: #ff6464;
+      }
+
+      .st2 {
+        fill: #64ffff;
+      }
+
+      .st6 {
+        fill: #0f8a43;
+      }
+
+      .st6, .st7, .st8, .st9, .st10, .st11 {
+        isolation: isolate;
+      }
+
+      .st6, .st9, .st10, .st11 {
+        opacity: .2;
+      }
+
+      .st3 {
+        fill: #ffff64;
+      }
+
+      .st4 {
+        fill: #ff64ff;
+      }
+
+      .st8 {
+        font-family: ArialMT, Arial;
+        font-size: 12px;
+      }
+
+      .st9 {
+        fill: #25d8d3;
+      }
+
+      .st5 {
+        fill: #6464ff;
+      }
+
+      .st10 {
+        fill: #e83315;
+      }
+
+      .st11 {
+        fill: #0064ff;
+      }
+    </style>
+  </defs>
+  <image id="map-background" class="st7" width="2048" height="2048" xlink:href="home-map-newStandard-v01-1.png"/>
+  <g id="triangles">
+    <polygon id="tri-3A598EFC" class="st1" points="1617.2 530.8 1977.8 431.9 1838.9 178.4 1617.2 530.8"/>
+    <polygon id="tri-48C534F8" class="st0" points="1977.8 744.2 1977.8 431.9 1617.2 530.8 1977.8 744.2"/>
+    <polygon id="tri-0225B02B" class="st5" points="1475.1 182.9 1838.9 178.4 1617.2 530.8 1475.1 182.9"/>
+    <polygon id="tri-73666B38" class="st3" points="1838.9 910 1977.8 744.2 1617.2 530.8 1838.9 910"/>
+    <polygon id="tri-8F556E0E" class="st4" points="1555.9 1024.5 1838.9 910 1617.2 530.8 1555.9 1024.5"/>
+    <polygon id="tri-6D87E8BB" class="st2" points="1853.2 1313.5 1555.9 1024.5 1315.4 1421.9 1853.2 1313.5"/>
+    <polygon id="tri-ED076765" class="st1" points="1230.7 968.5 1555.9 1024.5 1315.4 1421.9 1230.7 968.5"/>
+    <polygon id="tri-EA91E50D" class="st0" points="1379.6 1855.8 1315.4 1421.9 1853.2 1313.5 1379.6 1855.8"/>
+    <polygon id="tri-146B9C9F" class="st5" points="1853.2 1791.1 1379.6 1855.8 1853.2 1313.5 1853.2 1791.1"/>
+    <polygon id="tri-B5DCB38B" class="st3" points="1230.7 968.5 761.7 1270.5 1315.4 1421.9 1230.7 968.5"/>
+    <polygon id="tri-8100A6CA" class="st4" points="1617.2 530.8 1230.7 968.5 1555.9 1024.5 1617.2 530.8"/>
+    <polygon id="tri-51B4A2F6" class="st2" points="805.9 457.1 1617.2 530.8 1475.1 182.9 805.9 457.1"/>
+    <polygon id="tri-B3ED6758" class="st1" points="887.2 186.2 805.9 457.1 1475.1 182.9 887.2 186.2"/>
+    <polygon id="tri-10FE8744" class="st0" points="1230.7 968.5 805.9 457.1 761.7 1270.5 1230.7 968.5"/>
+    <polygon id="tri-04C10F24" class="st5" points="805.9 457.1 1230.7 968.5 1617.2 530.8 805.9 457.1"/>
+    <polygon id="tri-1C5AFAEB" class="st3" points="1838.9 910 1853.2 1313.5 1555.9 1024.5 1838.9 910"/>
+    <polygon id="tri-3A6541B0" class="st4" points="761.7 1270.5 386 1043.8 805.9 457.1 761.7 1270.5"/>
+    <polygon id="tri-158EDC29" class="st2" points="506.1 1264.6 761.7 1270.5 386 1043.8 506.1 1264.6"/>
+    <polygon id="tri-219567C2" class="st1" points="829.7 1855.8 506.1 1264.6 761.7 1270.5 829.7 1855.8"/>
+    <polygon id="tri-43D1A89A" class="st0" points="506.1 1855.8 506.1 1264.6 829.7 1855.8 506.1 1855.8"/>
+    <polygon id="tri-AEB66C81" class="st5" points="308.8 180.7 805.9 457.1 887.2 186.2 308.8 180.7"/>
+    <polygon id="tri-5DA2AEFE" class="st3" points="66.1 988.9 308.8 180.7 386 1043.8 66.1 988.9"/>
+    <polygon id="tri-D62694C0" class="st4" points="805.9 457.1 308.8 180.7 386 1043.8 805.9 457.1"/>
+    <polygon id="tri-CC6AD66A" class="st2" points="59.4 178.4 308.8 180.7 66.1 988.9 59.4 178.4"/>
+  </g>
+  <g id="zones">
+    <g id="erin-office-zones">
+      <polygon id="office" class="st10" points="1853.2 1791.1 1379.6 1855.8 1230.7 968.5 1838.9 910 1853.2 1791.1"/>
+    </g>
+    <g id="living-room-zones">
+      <polygon id="LR-north" class="st6" points="1627.6 1033.1 769.4 1111.8 749.5 186.9 1475.1 182.9 1627.6 1033.1"/>
+      <polygon id="LR-south" class="st6" points="1977.8 744.2 1267.8 1264.6 1164.5 182.8 1838.9 178.4 1977.8 744.2"/>
+    </g>
+    <g id="dining-room-zones">
+      <polygon id="dining-room-zones-01" class="st11" points="59.4 178.4 66.1 988.9 903.6 1131 887.2 186.2 59.4 178.4"/>
+    </g>
+    <g id="kitchen-zones">
+      <polygon id="kitchen-area" class="st9" points="829.7 1855.8 506.1 1855.8 369.5 991 766.9 993.9 829.7 1855.8"/>
+    </g>
+  </g>
+  <g id="data">
+    <g class="st7">
+      <text class="st8" transform="translate(10 20)"><tspan x="0" y="0">{</tspan></text>
+      <text class="st8" transform="translate(10 34.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;location&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 48.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;id&quot; : &quot;home&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 63.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;mapDimensions&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 77.6)"><tspan x="0" y="0" xml:space="preserve"> 2048,</tspan></text>
+      <text class="st8" transform="translate(10 92)"><tspan x="0" y="0" xml:space="preserve"> 2048</tspan></text>
+      <text class="st8" transform="translate(10 106.4)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 120.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;pixelsPerMeter&quot; : 174.66667</tspan></text>
+      <text class="st8" transform="translate(10 135.2)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 149.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;mapPoints&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 164)"><tspan x="0" y="0" xml:space="preserve"> &quot;0076ECDA-B04C-458E-AC52-C73398FE0EA6&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 178.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 192.8)"><tspan x="0" y="0" xml:space="preserve"> 912.4,</tspan></text>
+      <text class="st8" transform="translate(10 207.2)"><tspan x="0" y="0" xml:space="preserve"> 1044.2</tspan></text>
+      <text class="st8" transform="translate(10 221.6)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 236)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 250.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 264.8)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 279.2)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 293.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;0491488C-FB97-4F4F-AE10-C1756E3F236F&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 308)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 322.4)"><tspan x="0" y="0" xml:space="preserve"> 903.6,</tspan></text>
+      <text class="st8" transform="translate(10 336.8)"><tspan x="0" y="0" xml:space="preserve"> 1131</tspan></text>
+      <text class="st8" transform="translate(10 351.2)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 365.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 380)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 394.4)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 408.8)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 423.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;04E28A0E-5C7C-49E1-B986-42B6FCF3071A&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 437.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 452)"><tspan x="0" y="0" xml:space="preserve"> 1379.6,</tspan></text>
+      <text class="st8" transform="translate(10 466.4)"><tspan x="0" y="0" xml:space="preserve"> 1858.4</tspan></text>
+      <text class="st8" transform="translate(10 480.8)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 495.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 509.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 524)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 538.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 552.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;0643992B-7D69-4455-A6D3-2FC5CE2CE207&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 567.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 581.6)"><tspan x="0" y="0" xml:space="preserve"> 369.5,</tspan></text>
+      <text class="st8" transform="translate(10 596)"><tspan x="0" y="0" xml:space="preserve"> 1877.6</tspan></text>
+      <text class="st8" transform="translate(10 610.4)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 624.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 639.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 653.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 668)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 682.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;0B92B12B-A6B0-4684-BD64-74B7761CC8CF&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 696.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 711.2)"><tspan x="0" y="0" xml:space="preserve"> 59.4,</tspan></text>
+      <text class="st8" transform="translate(10 725.6)"><tspan x="0" y="0" xml:space="preserve"> 178.4</tspan></text>
+      <text class="st8" transform="translate(10 740)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 754.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 768.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 783.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 797.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 812)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 826.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;27C7407A-CBD2-4D86-BF8D-9ECB2A9007F0&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 840.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 855.2)"><tspan x="0" y="0" xml:space="preserve"> 830,</tspan></text>
+      <text class="st8" transform="translate(10 869.6)"><tspan x="0" y="0" xml:space="preserve"> 1858.4</tspan></text>
+      <text class="st8" transform="translate(10 884)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 898.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 912.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 927.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 941.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 956)"><tspan x="0" y="0" xml:space="preserve"> &quot;29ADF8A9-F70A-4F90-A944-B1F60DA803D7&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 970.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 984.8)"><tspan x="0" y="0" xml:space="preserve"> 506.1,</tspan></text>
+      <text class="st8" transform="translate(10 999.2)"><tspan x="0" y="0" xml:space="preserve"> 1264.6</tspan></text>
+      <text class="st8" transform="translate(10 1013.6)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 1028)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1042.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 1056.8)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 1071.2)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 1085.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;30F49670-35EA-455B-82AA-CAE70D4FCB1C&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 1100)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1114.4)"><tspan x="0" y="0" xml:space="preserve"> 766.8,</tspan></text>
+      <text class="st8" transform="translate(10 1128.8)"><tspan x="0" y="0" xml:space="preserve"> 991</tspan></text>
+      <text class="st8" transform="translate(10 1143.2)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 1157.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1172)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 1186.4)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 1200.8)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 1215.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;34D971FE-E26B-4BA0-A1A6-06DB75CF23F1&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 1229.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1244)"><tspan x="0" y="0" xml:space="preserve"> 1617.2,</tspan></text>
+      <text class="st8" transform="translate(10 1258.4)"><tspan x="0" y="0" xml:space="preserve"> 530.8</tspan></text>
+      <text class="st8" transform="translate(10 1272.8)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 1287.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1301.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 1316)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 1330.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 1344.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;3888C2C0-C256-4D60-8236-57DBC0DA11F5&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 1359.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1373.6)"><tspan x="0" y="0" xml:space="preserve"> 805.9,</tspan></text>
+      <text class="st8" transform="translate(10 1388)"><tspan x="0" y="0" xml:space="preserve"> 457.1</tspan></text>
+      <text class="st8" transform="translate(10 1402.4)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 1416.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1431.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 1445.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 1460)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 1474.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;3FA0FB7C-6FAD-497A-8FAC-79C2AB411BDD&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 1488.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1503.2)"><tspan x="0" y="0" xml:space="preserve"> 567.75366,</tspan></text>
+      <text class="st8" transform="translate(10 1517.6)"><tspan x="0" y="0" xml:space="preserve"> -30.914455</tspan></text>
+      <text class="st8" transform="translate(10 1532)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 1546.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1560.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 1575.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 1589.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 1604)"><tspan x="0" y="0" xml:space="preserve"> &quot;45529DED-1C5E-43F9-B2F0-7C82A9674D15&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 1618.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1632.8)"><tspan x="0" y="0" xml:space="preserve"> 1379.6,</tspan></text>
+      <text class="st8" transform="translate(10 1647.2)"><tspan x="0" y="0" xml:space="preserve"> 1855.8</tspan></text>
+      <text class="st8" transform="translate(10 1661.6)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 1676)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1690.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 1704.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 1719.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 1733.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 1748)"><tspan x="0" y="0" xml:space="preserve"> &quot;491EE61D-668C-4D89-983D-0B24EFE38A71&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 1762.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1776.8)"><tspan x="0" y="0" xml:space="preserve"> 766.8,</tspan></text>
+      <text class="st8" transform="translate(10 1791.2)"><tspan x="0" y="0" xml:space="preserve"> 991</tspan></text>
+      <text class="st8" transform="translate(10 1805.6)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 1820)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1834.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 1848.8)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 1863.2)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 1877.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;4C64BCD1-365C-4DF8-99AD-4F765FDE75FA&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 1892)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1906.4)"><tspan x="0" y="0" xml:space="preserve"> 1838.9,</tspan></text>
+      <text class="st8" transform="translate(10 1920.8)"><tspan x="0" y="0" xml:space="preserve"> 910</tspan></text>
+      <text class="st8" transform="translate(10 1935.2)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 1949.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 1964)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 1978.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 1992.8)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 2007.2)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 2021.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;5775F79B-A834-4B94-BE00-5EB1F23DF1DA&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 2036)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2050.4)"><tspan x="0" y="0" xml:space="preserve"> 1838.9,</tspan></text>
+      <text class="st8" transform="translate(10 2064.8)"><tspan x="0" y="0" xml:space="preserve"> 178.4</tspan></text>
+      <text class="st8" transform="translate(10 2079.2)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 2093.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2108)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 2122.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 2136.8)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 2151.2)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 2165.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;5848DB2E-DEBD-4201-9584-597201ADF524&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 2180)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2194.4)"><tspan x="0" y="0" xml:space="preserve"> 1627.6,</tspan></text>
+      <text class="st8" transform="translate(10 2208.8)"><tspan x="0" y="0" xml:space="preserve"> 1033.1</tspan></text>
+      <text class="st8" transform="translate(10 2223.2)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 2237.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2252)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 2266.4)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 2280.8)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 2295.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;5C82C0DA-497C-4C00-AC2F-55F48FE5797B&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 2309.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2324)"><tspan x="0" y="0" xml:space="preserve"> 1977.8,</tspan></text>
+      <text class="st8" transform="translate(10 2338.4)"><tspan x="0" y="0" xml:space="preserve"> 431.9</tspan></text>
+      <text class="st8" transform="translate(10 2352.8)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 2367.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2381.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 2396)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 2410.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 2424.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;6388969A-F9C0-4D3F-89A0-C6E1F1D927F9&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 2439.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2453.6)"><tspan x="0" y="0" xml:space="preserve"> 1853.2,</tspan></text>
+      <text class="st8" transform="translate(10 2468)"><tspan x="0" y="0" xml:space="preserve"> 1313.5</tspan></text>
+      <text class="st8" transform="translate(10 2482.4)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 2496.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2511.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 2525.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 2540)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 2554.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;80BEEAD4-0252-4B4A-885C-9E59FD32645E&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 2568.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2583.2)"><tspan x="0" y="0" xml:space="preserve"> 369.5,</tspan></text>
+      <text class="st8" transform="translate(10 2597.6)"><tspan x="0" y="0" xml:space="preserve"> 991</tspan></text>
+      <text class="st8" transform="translate(10 2612)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 2626.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2640.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 2655.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 2669.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 2684)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 2698.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;831F18F9-5C74-4FCB-A709-1EEF0746A4A4&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 2712.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2727.2)"><tspan x="0" y="0" xml:space="preserve"> 66.1,</tspan></text>
+      <text class="st8" transform="translate(10 2741.6)"><tspan x="0" y="0" xml:space="preserve"> 988.9</tspan></text>
+      <text class="st8" transform="translate(10 2756)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 2770.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2784.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 2799.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 2813.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 2828)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 2842.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;84CFA6EA-AFFC-4BB3-AAB3-804B602609C9&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 2856.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2871.2)"><tspan x="0" y="0" xml:space="preserve"> 769.4,</tspan></text>
+      <text class="st8" transform="translate(10 2885.6)"><tspan x="0" y="0" xml:space="preserve"> 1111.8</tspan></text>
+      <text class="st8" transform="translate(10 2900)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 2914.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 2928.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 2943.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 2957.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 2972)"><tspan x="0" y="0" xml:space="preserve"> &quot;868B677E-C338-4003-9A60-6F5DFB9A9276&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 2986.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3000.8)"><tspan x="0" y="0" xml:space="preserve"> 1555.9,</tspan></text>
+      <text class="st8" transform="translate(10 3015.2)"><tspan x="0" y="0" xml:space="preserve"> 1024.5</tspan></text>
+      <text class="st8" transform="translate(10 3029.6)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 3044)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3058.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 3072.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 3087.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 3101.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 3116)"><tspan x="0" y="0" xml:space="preserve"> &quot;9BEF5BAD-63CC-4CE8-A445-248C890C7C6A&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 3130.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3144.8)"><tspan x="0" y="0" xml:space="preserve"> 1164.5,</tspan></text>
+      <text class="st8" transform="translate(10 3159.2)"><tspan x="0" y="0" xml:space="preserve"> 182.8</tspan></text>
+      <text class="st8" transform="translate(10 3173.6)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 3188)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3202.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 3216.8)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 3231.2)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 3245.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;B0E426FE-DD1A-4326-9D58-AF3B44EDF23D&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 3260)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3274.4)"><tspan x="0" y="0" xml:space="preserve"> 1267.8,</tspan></text>
+      <text class="st8" transform="translate(10 3288.8)"><tspan x="0" y="0" xml:space="preserve"> 1264.6</tspan></text>
+      <text class="st8" transform="translate(10 3303.2)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 3317.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3332)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 3346.4)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 3360.8)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 3375.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;B6F53104-2E83-4318-9D59-3C40E6582011&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 3389.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3404)"><tspan x="0" y="0" xml:space="preserve"> 911.4,</tspan></text>
+      <text class="st8" transform="translate(10 3418.4)"><tspan x="0" y="0" xml:space="preserve"> 1133.1</tspan></text>
+      <text class="st8" transform="translate(10 3432.8)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 3447.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3461.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 3476)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 3490.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 3504.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;B9F86013-7F47-4B57-9EC2-A21BE6159F6A&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 3519.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3533.6)"><tspan x="0" y="0" xml:space="preserve"> 506.1,</tspan></text>
+      <text class="st8" transform="translate(10 3548)"><tspan x="0" y="0" xml:space="preserve"> 1855.8</tspan></text>
+      <text class="st8" transform="translate(10 3562.4)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 3576.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3591.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 3605.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 3620)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 3634.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 3648.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;BB7B60A2-4F18-49F2-A7A5-FE5D363F5903&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 3663.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3677.6)"><tspan x="0" y="0" xml:space="preserve"> 1230.7,</tspan></text>
+      <text class="st8" transform="translate(10 3692)"><tspan x="0" y="0" xml:space="preserve"> 968.5</tspan></text>
+      <text class="st8" transform="translate(10 3706.4)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 3720.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3735.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 3749.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 3764)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 3778.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 3792.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;BEF43975-5CD0-434C-9996-C97CDAA23086&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 3807.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3821.6)"><tspan x="0" y="0" xml:space="preserve"> 749.5,</tspan></text>
+      <text class="st8" transform="translate(10 3836)"><tspan x="0" y="0" xml:space="preserve"> 186.9</tspan></text>
+      <text class="st8" transform="translate(10 3850.4)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 3864.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3879.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 3893.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 3908)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 3922.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;BFDD6729-955B-4DF2-8CE6-20DC0448CC27&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 3936.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 3951.2)"><tspan x="0" y="0" xml:space="preserve"> 829.7,</tspan></text>
+      <text class="st8" transform="translate(10 3965.6)"><tspan x="0" y="0" xml:space="preserve"> 1855.8</tspan></text>
+      <text class="st8" transform="translate(10 3980)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 3994.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4008.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 4023.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 4037.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 4052)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 4066.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;CC653A1F-249E-4078-A222-BA59E7487002&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 4080.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4095.2)"><tspan x="0" y="0" xml:space="preserve"> 1339.9,</tspan></text>
+      <text class="st8" transform="translate(10 4109.6)"><tspan x="0" y="0" xml:space="preserve"> 1270.5</tspan></text>
+      <text class="st8" transform="translate(10 4124)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 4138.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4152.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 4167.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 4181.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 4196)"><tspan x="0" y="0" xml:space="preserve"> &quot;CDC4D796-C751-4775-92DB-7EB0622A2905&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 4210.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4224.8)"><tspan x="0" y="0" xml:space="preserve"> 1315.4,</tspan></text>
+      <text class="st8" transform="translate(10 4239.2)"><tspan x="0" y="0" xml:space="preserve"> 1421.9</tspan></text>
+      <text class="st8" transform="translate(10 4253.6)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 4268)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4282.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 4296.8)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 4311.2)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 4325.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;CEC6C92A-A82C-4AA9-B75D-8A5FCC389815&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 4340)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4354.4)"><tspan x="0" y="0" xml:space="preserve"> 308.8,</tspan></text>
+      <text class="st8" transform="translate(10 4368.8)"><tspan x="0" y="0" xml:space="preserve"> 180.7</tspan></text>
+      <text class="st8" transform="translate(10 4383.2)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 4397.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4412)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 4426.4)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 4440.8)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 4455.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;D2CB2FB3-9ED5-4FA2-9E72-AE22B37B78E7&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 4469.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4484)"><tspan x="0" y="0" xml:space="preserve"> 1853.2,</tspan></text>
+      <text class="st8" transform="translate(10 4498.4)"><tspan x="0" y="0" xml:space="preserve"> 1791.1</tspan></text>
+      <text class="st8" transform="translate(10 4512.8)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 4527.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4541.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 4556)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 4570.4)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 4584.8)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 4599.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;D640E733-BDF2-4E45-8B3C-8DE2A37884BF&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 4613.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4628)"><tspan x="0" y="0" xml:space="preserve"> 168.1,</tspan></text>
+      <text class="st8" transform="translate(10 4642.4)"><tspan x="0" y="0" xml:space="preserve"> 1877.6</tspan></text>
+      <text class="st8" transform="translate(10 4656.8)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 4671.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4685.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 4700)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 4714.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 4728.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;D863D0BD-63AF-404D-91F4-2F01BFC4C049&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 4743.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4757.6)"><tspan x="0" y="0" xml:space="preserve"> 766.9,</tspan></text>
+      <text class="st8" transform="translate(10 4772)"><tspan x="0" y="0" xml:space="preserve"> 993.9</tspan></text>
+      <text class="st8" transform="translate(10 4786.4)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 4800.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4815.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 4829.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 4844)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 4858.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 4872.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;DD0C3E0E-6B3A-4620-9849-05A0275F79FD&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 4887.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4901.6)"><tspan x="0" y="0" xml:space="preserve"> 386,</tspan></text>
+      <text class="st8" transform="translate(10 4916)"><tspan x="0" y="0" xml:space="preserve"> 1043.8</tspan></text>
+      <text class="st8" transform="translate(10 4930.4)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 4944.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 4959.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 4973.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 4988)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 5002.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;DD1A2053-AB8E-40C0-B2DF-DB8D9ED9578A&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 5016.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 5031.2)"><tspan x="0" y="0" xml:space="preserve"> 761.7,</tspan></text>
+      <text class="st8" transform="translate(10 5045.6)"><tspan x="0" y="0" xml:space="preserve"> 1270.5</tspan></text>
+      <text class="st8" transform="translate(10 5060)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 5074.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 5088.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 5103.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 5117.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 5132)"><tspan x="0" y="0" xml:space="preserve"> &quot;DF686605-84F9-43F9-8CBE-13FE7711D096&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 5146.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 5160.8)"><tspan x="0" y="0" xml:space="preserve"> 1977.8,</tspan></text>
+      <text class="st8" transform="translate(10 5175.2)"><tspan x="0" y="0" xml:space="preserve"> 744.2</tspan></text>
+      <text class="st8" transform="translate(10 5189.6)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 5204)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 5218.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 5232.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 5247.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 5261.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 5276)"><tspan x="0" y="0" xml:space="preserve"> &quot;E2F05E62-0295-4F10-9ACA-9492F558D873&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 5290.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 5304.8)"><tspan x="0" y="0" xml:space="preserve"> 1475.1,</tspan></text>
+      <text class="st8" transform="translate(10 5319.2)"><tspan x="0" y="0" xml:space="preserve"> 182.9</tspan></text>
+      <text class="st8" transform="translate(10 5333.6)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 5348)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 5362.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 5376.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;</tspan></text>
+      <text class="st8" transform="translate(10 5391.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 5405.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 5420)"><tspan x="0" y="0" xml:space="preserve"> &quot;E61F0B46-B9B2-4C66-9283-5ECEACBA901A&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 5434.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 5448.8)"><tspan x="0" y="0" xml:space="preserve"> 887.2,</tspan></text>
+      <text class="st8" transform="translate(10 5463.2)"><tspan x="0" y="0" xml:space="preserve"> 186.2</tspan></text>
+      <text class="st8" transform="translate(10 5477.6)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 5492)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 5506.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangle_edge&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 5520.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 5535.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 5549.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 5564)"><tspan x="0" y="0" xml:space="preserve"> &quot;FCF17681-ED06-4AF1-869A-EC6D1A074BA0&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 5578.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;position&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 5592.8)"><tspan x="0" y="0" xml:space="preserve"> 159.1,</tspan></text>
+      <text class="st8" transform="translate(10 5607.2)"><tspan x="0" y="0" xml:space="preserve"> 21</tspan></text>
+      <text class="st8" transform="translate(10 5621.6)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 5636)"><tspan x="0" y="0" xml:space="preserve"> &quot;roles&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 5650.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;zone_corner&quot;</tspan></text>
+      <text class="st8" transform="translate(10 5664.8)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 5679.2)"><tspan x="0" y="0" xml:space="preserve"> }</tspan></text>
+      <text class="st8" transform="translate(10 5693.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 5708)"><tspan x="0" y="0" xml:space="preserve"> &quot;tapResolver&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 5722.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;app&quot; : &quot;TapResolver iOS 1.0&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 5736.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;device&quot; : &quot;iPhone&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 5751.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;exportedAt&quot; : &quot;2026-01-20T16:08:26Z&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 5765.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;version&quot; : &quot;1.0&quot;</tspan></text>
+      <text class="st8" transform="translate(10 5780)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 5794.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;triangles&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 5808.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-0225B02B&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 5823.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 5837.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;E2F05E62-0295-4F10-9ACA-9492F558D873&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 5852)"><tspan x="0" y="0" xml:space="preserve"> &quot;5775F79B-A834-4B94-BE00-5EB1F23DF1DA&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 5866.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;34D971FE-E26B-4BA0-A1A6-06DB75CF23F1&quot;</tspan></text>
+      <text class="st8" transform="translate(10 5880.8)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 5895.2)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 5909.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-04C10F24&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 5924)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 5938.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;3888C2C0-C256-4D60-8236-57DBC0DA11F5&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 5952.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;BB7B60A2-4F18-49F2-A7A5-FE5D363F5903&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 5967.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;34D971FE-E26B-4BA0-A1A6-06DB75CF23F1&quot;</tspan></text>
+      <text class="st8" transform="translate(10 5981.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 5996)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 6010.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-10FE8744&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 6024.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 6039.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;BB7B60A2-4F18-49F2-A7A5-FE5D363F5903&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6053.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;3888C2C0-C256-4D60-8236-57DBC0DA11F5&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6068)"><tspan x="0" y="0" xml:space="preserve"> &quot;DD1A2053-AB8E-40C0-B2DF-DB8D9ED9578A&quot;</tspan></text>
+      <text class="st8" transform="translate(10 6082.4)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 6096.8)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 6111.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-146B9C9F&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 6125.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 6140)"><tspan x="0" y="0" xml:space="preserve"> &quot;D2CB2FB3-9ED5-4FA2-9E72-AE22B37B78E7&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6154.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;45529DED-1C5E-43F9-B2F0-7C82A9674D15&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6168.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;6388969A-F9C0-4D3F-89A0-C6E1F1D927F9&quot;</tspan></text>
+      <text class="st8" transform="translate(10 6183.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 6197.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 6212)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-158EDC29&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 6226.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 6240.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;29ADF8A9-F70A-4F90-A944-B1F60DA803D7&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6255.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;DD1A2053-AB8E-40C0-B2DF-DB8D9ED9578A&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6269.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;DD0C3E0E-6B3A-4620-9849-05A0275F79FD&quot;</tspan></text>
+      <text class="st8" transform="translate(10 6284)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 6298.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 6312.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-1C5AFAEB&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 6327.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 6341.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;4C64BCD1-365C-4DF8-99AD-4F765FDE75FA&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6356)"><tspan x="0" y="0" xml:space="preserve"> &quot;6388969A-F9C0-4D3F-89A0-C6E1F1D927F9&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6370.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;868B677E-C338-4003-9A60-6F5DFB9A9276&quot;</tspan></text>
+      <text class="st8" transform="translate(10 6384.8)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 6399.2)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 6413.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-219567C2&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 6428)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 6442.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;BFDD6729-955B-4DF2-8CE6-20DC0448CC27&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6456.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;29ADF8A9-F70A-4F90-A944-B1F60DA803D7&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6471.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;DD1A2053-AB8E-40C0-B2DF-DB8D9ED9578A&quot;</tspan></text>
+      <text class="st8" transform="translate(10 6485.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 6500)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 6514.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-3A598EFC&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 6528.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 6543.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;34D971FE-E26B-4BA0-A1A6-06DB75CF23F1&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6557.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;5C82C0DA-497C-4C00-AC2F-55F48FE5797B&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6572)"><tspan x="0" y="0" xml:space="preserve"> &quot;5775F79B-A834-4B94-BE00-5EB1F23DF1DA&quot;</tspan></text>
+      <text class="st8" transform="translate(10 6586.4)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 6600.8)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 6615.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-3A6541B0&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 6629.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 6644)"><tspan x="0" y="0" xml:space="preserve"> &quot;DD1A2053-AB8E-40C0-B2DF-DB8D9ED9578A&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6658.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;DD0C3E0E-6B3A-4620-9849-05A0275F79FD&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6672.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;3888C2C0-C256-4D60-8236-57DBC0DA11F5&quot;</tspan></text>
+      <text class="st8" transform="translate(10 6687.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 6701.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 6716)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-43D1A89A&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 6730.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 6744.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;B9F86013-7F47-4B57-9EC2-A21BE6159F6A&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6759.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;29ADF8A9-F70A-4F90-A944-B1F60DA803D7&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6773.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;BFDD6729-955B-4DF2-8CE6-20DC0448CC27&quot;</tspan></text>
+      <text class="st8" transform="translate(10 6788)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 6802.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 6816.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-48C534F8&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 6831.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 6845.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;DF686605-84F9-43F9-8CBE-13FE7711D096&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6860)"><tspan x="0" y="0" xml:space="preserve"> &quot;5C82C0DA-497C-4C00-AC2F-55F48FE5797B&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6874.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;34D971FE-E26B-4BA0-A1A6-06DB75CF23F1&quot;</tspan></text>
+      <text class="st8" transform="translate(10 6888.8)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 6903.2)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 6917.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-51B4A2F6&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 6932)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 6946.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;3888C2C0-C256-4D60-8236-57DBC0DA11F5&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6960.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;34D971FE-E26B-4BA0-A1A6-06DB75CF23F1&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 6975.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;E2F05E62-0295-4F10-9ACA-9492F558D873&quot;</tspan></text>
+      <text class="st8" transform="translate(10 6989.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 7004)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 7018.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-5DA2AEFE&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 7032.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 7047.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;831F18F9-5C74-4FCB-A709-1EEF0746A4A4&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7061.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;CEC6C92A-A82C-4AA9-B75D-8A5FCC389815&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7076)"><tspan x="0" y="0" xml:space="preserve"> &quot;DD0C3E0E-6B3A-4620-9849-05A0275F79FD&quot;</tspan></text>
+      <text class="st8" transform="translate(10 7090.4)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 7104.8)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 7119.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-6D87E8BB&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 7133.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 7148)"><tspan x="0" y="0" xml:space="preserve"> &quot;6388969A-F9C0-4D3F-89A0-C6E1F1D927F9&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7162.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;868B677E-C338-4003-9A60-6F5DFB9A9276&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7176.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;CDC4D796-C751-4775-92DB-7EB0622A2905&quot;</tspan></text>
+      <text class="st8" transform="translate(10 7191.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 7205.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 7220)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-73666B38&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 7234.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 7248.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;4C64BCD1-365C-4DF8-99AD-4F765FDE75FA&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7263.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;DF686605-84F9-43F9-8CBE-13FE7711D096&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7277.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;34D971FE-E26B-4BA0-A1A6-06DB75CF23F1&quot;</tspan></text>
+      <text class="st8" transform="translate(10 7292)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 7306.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 7320.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-8100A6CA&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 7335.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 7349.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;34D971FE-E26B-4BA0-A1A6-06DB75CF23F1&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7364)"><tspan x="0" y="0" xml:space="preserve"> &quot;BB7B60A2-4F18-49F2-A7A5-FE5D363F5903&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7378.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;868B677E-C338-4003-9A60-6F5DFB9A9276&quot;</tspan></text>
+      <text class="st8" transform="translate(10 7392.8)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 7407.2)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 7421.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-8F556E0E&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 7436)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 7450.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;868B677E-C338-4003-9A60-6F5DFB9A9276&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7464.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;4C64BCD1-365C-4DF8-99AD-4F765FDE75FA&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7479.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;34D971FE-E26B-4BA0-A1A6-06DB75CF23F1&quot;</tspan></text>
+      <text class="st8" transform="translate(10 7493.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 7508)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 7522.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-AEB66C81&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 7536.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 7551.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;CEC6C92A-A82C-4AA9-B75D-8A5FCC389815&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7565.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;3888C2C0-C256-4D60-8236-57DBC0DA11F5&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7580)"><tspan x="0" y="0" xml:space="preserve"> &quot;E61F0B46-B9B2-4C66-9283-5ECEACBA901A&quot;</tspan></text>
+      <text class="st8" transform="translate(10 7594.4)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 7608.8)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 7623.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-B3ED6758&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 7637.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 7652)"><tspan x="0" y="0" xml:space="preserve"> &quot;E61F0B46-B9B2-4C66-9283-5ECEACBA901A&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7666.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;3888C2C0-C256-4D60-8236-57DBC0DA11F5&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7680.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;E2F05E62-0295-4F10-9ACA-9492F558D873&quot;</tspan></text>
+      <text class="st8" transform="translate(10 7695.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 7709.6)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 7724)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-B5DCB38B&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 7738.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 7752.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;BB7B60A2-4F18-49F2-A7A5-FE5D363F5903&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7767.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;DD1A2053-AB8E-40C0-B2DF-DB8D9ED9578A&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7781.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;CDC4D796-C751-4775-92DB-7EB0622A2905&quot;</tspan></text>
+      <text class="st8" transform="translate(10 7796)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 7810.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 7824.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-CC6AD66A&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 7839.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 7853.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;0B92B12B-A6B0-4684-BD64-74B7761CC8CF&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7868)"><tspan x="0" y="0" xml:space="preserve"> &quot;CEC6C92A-A82C-4AA9-B75D-8A5FCC389815&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7882.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;831F18F9-5C74-4FCB-A709-1EEF0746A4A4&quot;</tspan></text>
+      <text class="st8" transform="translate(10 7896.8)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 7911.2)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 7925.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-D62694C0&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 7940)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 7954.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;3888C2C0-C256-4D60-8236-57DBC0DA11F5&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7968.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;CEC6C92A-A82C-4AA9-B75D-8A5FCC389815&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 7983.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;DD0C3E0E-6B3A-4620-9849-05A0275F79FD&quot;</tspan></text>
+      <text class="st8" transform="translate(10 7997.6)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 8012)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 8026.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-EA91E50D&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 8040.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 8055.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;45529DED-1C5E-43F9-B2F0-7C82A9674D15&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8069.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;CDC4D796-C751-4775-92DB-7EB0622A2905&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8084)"><tspan x="0" y="0" xml:space="preserve"> &quot;6388969A-F9C0-4D3F-89A0-C6E1F1D927F9&quot;</tspan></text>
+      <text class="st8" transform="translate(10 8098.4)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 8112.8)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 8127.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;tri-ED076765&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 8141.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;vertices&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 8156)"><tspan x="0" y="0" xml:space="preserve"> &quot;BB7B60A2-4F18-49F2-A7A5-FE5D363F5903&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8170.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;868B677E-C338-4003-9A60-6F5DFB9A9276&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8184.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;CDC4D796-C751-4775-92DB-7EB0622A2905&quot;</tspan></text>
+      <text class="st8" transform="translate(10 8199.2)"><tspan x="0" y="0" xml:space="preserve"> ]</tspan></text>
+      <text class="st8" transform="translate(10 8213.6)"><tspan x="0" y="0" xml:space="preserve"> }</tspan></text>
+      <text class="st8" transform="translate(10 8228)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 8242.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;zones&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 8256.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;dining-room-zones-01&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 8271.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;corners&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 8285.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;0B92B12B-A6B0-4684-BD64-74B7761CC8CF&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8300)"><tspan x="0" y="0" xml:space="preserve"> &quot;831F18F9-5C74-4FCB-A709-1EEF0746A4A4&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8314.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;0491488C-FB97-4F4F-AE10-C1756E3F236F&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8328.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;E61F0B46-B9B2-4C66-9283-5ECEACBA901A&quot;</tspan></text>
+      <text class="st8" transform="translate(10 8343.2)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 8357.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;displayName&quot; : &quot;dining-room-zones-01&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8372)"><tspan x="0" y="0" xml:space="preserve"> &quot;groupID&quot; : &quot;dining-room-zones&quot;</tspan></text>
+      <text class="st8" transform="translate(10 8386.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 8400.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;kitchen-area&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 8415.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;corners&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 8429.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;BFDD6729-955B-4DF2-8CE6-20DC0448CC27&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8444)"><tspan x="0" y="0" xml:space="preserve"> &quot;B9F86013-7F47-4B57-9EC2-A21BE6159F6A&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8458.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;80BEEAD4-0252-4B4A-885C-9E59FD32645E&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8472.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;D863D0BD-63AF-404D-91F4-2F01BFC4C049&quot;</tspan></text>
+      <text class="st8" transform="translate(10 8487.2)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 8501.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;displayName&quot; : &quot;kitchen-area&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8516)"><tspan x="0" y="0" xml:space="preserve"> &quot;groupID&quot; : &quot;kitchen-zones&quot;</tspan></text>
+      <text class="st8" transform="translate(10 8530.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 8544.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;lr-north&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 8559.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;corners&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 8573.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;5848DB2E-DEBD-4201-9584-597201ADF524&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8588)"><tspan x="0" y="0" xml:space="preserve"> &quot;84CFA6EA-AFFC-4BB3-AAB3-804B602609C9&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8602.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;BEF43975-5CD0-434C-9996-C97CDAA23086&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8616.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;E2F05E62-0295-4F10-9ACA-9492F558D873&quot;</tspan></text>
+      <text class="st8" transform="translate(10 8631.2)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 8645.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;displayName&quot; : &quot;LR-north&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8660)"><tspan x="0" y="0" xml:space="preserve"> &quot;groupID&quot; : &quot;living-room-zones&quot;</tspan></text>
+      <text class="st8" transform="translate(10 8674.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 8688.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;lr-south&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 8703.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;corners&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 8717.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;DF686605-84F9-43F9-8CBE-13FE7711D096&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8732)"><tspan x="0" y="0" xml:space="preserve"> &quot;B0E426FE-DD1A-4326-9D58-AF3B44EDF23D&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8746.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;9BEF5BAD-63CC-4CE8-A445-248C890C7C6A&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8760.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;5775F79B-A834-4B94-BE00-5EB1F23DF1DA&quot;</tspan></text>
+      <text class="st8" transform="translate(10 8775.2)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 8789.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;displayName&quot; : &quot;LR-south&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8804)"><tspan x="0" y="0" xml:space="preserve"> &quot;groupID&quot; : &quot;living-room-zones&quot;</tspan></text>
+      <text class="st8" transform="translate(10 8818.4)"><tspan x="0" y="0" xml:space="preserve"> },</tspan></text>
+      <text class="st8" transform="translate(10 8832.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;office&quot; : {</tspan></text>
+      <text class="st8" transform="translate(10 8847.2)"><tspan x="0" y="0" xml:space="preserve"> &quot;corners&quot; : [</tspan></text>
+      <text class="st8" transform="translate(10 8861.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;D2CB2FB3-9ED5-4FA2-9E72-AE22B37B78E7&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8876)"><tspan x="0" y="0" xml:space="preserve"> &quot;45529DED-1C5E-43F9-B2F0-7C82A9674D15&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8890.4)"><tspan x="0" y="0" xml:space="preserve"> &quot;BB7B60A2-4F18-49F2-A7A5-FE5D363F5903&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8904.8)"><tspan x="0" y="0" xml:space="preserve"> &quot;4C64BCD1-365C-4DF8-99AD-4F765FDE75FA&quot;</tspan></text>
+      <text class="st8" transform="translate(10 8919.2)"><tspan x="0" y="0" xml:space="preserve"> ],</tspan></text>
+      <text class="st8" transform="translate(10 8933.6)"><tspan x="0" y="0" xml:space="preserve"> &quot;displayName&quot; : &quot;office&quot;,</tspan></text>
+      <text class="st8" transform="translate(10 8948)"><tspan x="0" y="0" xml:space="preserve"> &quot;groupID&quot; : &quot;erin-office-zones&quot;</tspan></text>
+      <text class="st8" transform="translate(10 8962.4)"><tspan x="0" y="0" xml:space="preserve"> }</tspan></text>
+      <text class="st8" transform="translate(10 8976.8)"><tspan x="0" y="0" xml:space="preserve"> }</tspan></text>
+      <text class="st8" transform="translate(10 8991.2)"><tspan x="0" y="0">}</tspan></text>
+    </g>
+  </g>
+</svg>
