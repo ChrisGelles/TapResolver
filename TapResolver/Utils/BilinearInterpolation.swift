@@ -10,6 +10,20 @@ import Foundation
 import simd
 import CoreGraphics
 
+/// Result of a bilinear projection operation
+struct BilinearProjectionResult {
+    /// The projected 3D position in AR session coordinates
+    let position: simd_float3
+    
+    /// True if the point was outside the quad (UV outside 0...1 range)
+    let isExtrapolated: Bool
+    
+    /// The UV coordinates used for interpolation
+    /// u=0 is corner 0→1 edge, u=1 is corner 3→2 edge
+    /// v=0 is corner 0→3 edge, v=1 is corner 1→2 edge
+    let uvCoordinates: (u: Float, v: Float)
+}
+
 // MARK: - Corner Sorting
 
 /// Sorts 4 corner points into counter-clockwise order starting from bottom-left.
@@ -340,7 +354,7 @@ func projectPointBilinear(
     point: CGPoint,
     corners2D: [CGPoint],
     corners3D: [simd_float3]
-) -> simd_float3? {
+) -> BilinearProjectionResult? {
     guard corners2D.count == 4, corners3D.count == 4 else {
         print("⚠️ [BILINEAR] projectPointBilinear requires exactly 4 corners in each array")
         return nil
@@ -359,6 +373,10 @@ func projectPointBilinear(
     let marker = isExtrapolated ? "📐 [BILINEAR_EXTRAP]" : "📐 [BILINEAR]"
     print("\(marker) Projected point \(point) → UV(\(String(format: "%.3f", uv.u)), \(String(format: "%.3f", uv.v))) → AR(\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
     
-    return position
+    return BilinearProjectionResult(
+        position: position,
+        isExtrapolated: isExtrapolated,
+        uvCoordinates: (u: uv.u, v: uv.v)
+    )
 }
 

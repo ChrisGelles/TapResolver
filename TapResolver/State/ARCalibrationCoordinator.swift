@@ -36,8 +36,9 @@ struct BlockedPlacementInfo {
 struct PendingMarker {
     let mapPointID: UUID
     let position: simd_float3
-    let isNeighborCorner: Bool  // true = diamond marker, false = ghost sphere
-    let zoneName: String?       // For neighbor corners only
+    let isNeighborCorner: Bool      // true = diamond marker, false = ghost sphere
+    let zoneName: String?           // For neighbor corners only
+    let isExtrapolated: Bool        // true = projected outside zone quad
 }
 
 final class ARCalibrationCoordinator: ObservableObject {
@@ -1668,7 +1669,7 @@ final class ARCalibrationCoordinator: ObservableObject {
             // Plant origin marker at map center projected via bilinear
             if let mapSize = cachedMapSize {
                 let mapCenter = CGPoint(x: mapSize.width / 2, y: mapSize.height / 2)
-                if var originPosition = projectPointViaBilinear(mapPoint: mapCenter) {
+                if var originPosition = projectPointViaBilinear(mapPoint: mapCenter)?.position {
                     // Ground the marker: use Y from first placed corner
                     if let firstPlacedID = placedMarkers.first,
                        let groundY = mapPointARPositions[firstPlacedID]?.y {
@@ -1954,7 +1955,8 @@ final class ARCalibrationCoordinator: ObservableObject {
                     mapPointID: mapPointUUID,
                     position: prediction.arPosition,
                     isNeighborCorner: true,
-                    zoneName: neighborZone.displayName
+                    zoneName: neighborZone.displayName,
+                    isExtrapolated: false  // Similarity Transform projections are not extrapolated
                 )
                 print("   📥 Collected neighbor corner \(String(prediction.mapPointID.prefix(8))) for '\(neighborZone.displayName)'")
                 totalSpawned += 1
@@ -2036,7 +2038,8 @@ final class ARCalibrationCoordinator: ObservableObject {
                     mapPointID: cornerUUID,
                     position: projectedPosition,
                     isNeighborCorner: true,
-                    zoneName: zone.displayName
+                    zoneName: zone.displayName,
+                    isExtrapolated: false  // Similarity Transform projections are not extrapolated
                 )
                 print("   📥 Corner \(String(cornerIDString.prefix(8))) for '\(zone.displayName)' → (\(String(format: "%.2f", projectedPosition.x)), \(String(format: "%.2f", projectedPosition.z)))")
                 totalCollected += 1
@@ -2532,10 +2535,12 @@ final class ARCalibrationCoordinator: ObservableObject {
             }
             
             // Project via bilinear interpolation from zone corners
-            guard var finalGhostPosition = projectPointViaBilinear(mapPoint: mapPoint.mapPoint) else {
+            guard let bilinearResult = projectPointViaBilinear(mapPoint: mapPoint.mapPoint) else {
                 skippedOutsideQuad += 1
                 continue
             }
+            var finalGhostPosition = bilinearResult.position
+            let isExtrapolated = bilinearResult.isExtrapolated
             
             // Apply distortion correction if available from previous calibrations
             // Only apply horizontal correction (X, Z) - Y is handled by grounding
@@ -2567,7 +2572,8 @@ final class ARCalibrationCoordinator: ObservableObject {
                 mapPointID: vertexID,
                 position: finalGhostPosition,
                 isNeighborCorner: false,
-                zoneName: nil
+                zoneName: nil,
+                isExtrapolated: isExtrapolated
             )
             
             ghostsPlanted += 1
@@ -2643,7 +2649,8 @@ final class ARCalibrationCoordinator: ObservableObject {
                 mapPointID: cornerID,
                 position: ghostPosition,
                 isNeighborCorner: true,
-                zoneName: ownerZoneName
+                zoneName: ownerZoneName,
+                isExtrapolated: false  // Similarity Transform projections are not extrapolated
             )
             
             spawnedCount += 1
@@ -2658,7 +2665,7 @@ final class ARCalibrationCoordinator: ObservableObject {
     /// Projects a 2D map point to AR space using bilinear interpolation from zone corners
     /// - Parameter mapPoint: The 2D map position in pixels
     /// - Returns: The AR position, or nil if bilinear corners aren't set up
-    func projectPointViaBilinear(mapPoint: CGPoint) -> simd_float3? {
+    func projectPointViaBilinear(mapPoint: CGPoint) -> BilinearProjectionResult? {
         guard hasBilinearCorners else { return nil }
         
         return projectPointBilinear(
@@ -5488,7 +5495,8 @@ final class ARCalibrationCoordinator: ObservableObject {
                 mapPointID: cornerID,
                 position: ghostPosition,
                 isNeighborCorner: true,
-                zoneName: zone.displayName
+                zoneName: zone.displayName,
+                isExtrapolated: false  // Similarity Transform projections are not extrapolated
             )
             
             spawnedCornerGhosts += 1

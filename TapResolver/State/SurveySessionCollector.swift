@@ -931,11 +931,13 @@ class SurveySessionCollector: ObservableObject {
         }
         
         // Project both points into AR space via bilinear interpolation
-        guard let northAR = coordinator.projectPointViaBilinear(mapPoint: north.position),
-              let southAR = coordinator.projectPointViaBilinear(mapPoint: south.position) else {
+        guard let northResult = coordinator.projectPointViaBilinear(mapPoint: north.position),
+              let southResult = coordinator.projectPointViaBilinear(mapPoint: south.position) else {
             print("⚠️ [AR_NORTH] Failed to project north/south MapPoints via bilinear")
             return nil
         }
+        let northAR = northResult.position
+        let southAR = southResult.position
         
         // Compute vector from south to north in AR space (XZ plane, Y is up)
         let dx = northAR.x - southAR.x

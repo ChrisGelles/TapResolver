@@ -2571,11 +2571,11 @@ struct ARViewContainer: UIViewRepresentable {
             guard coordinator.hasBilinearCorners else { return nil }
             
             // Access sorted zone corners via bilinear projection
-            guard let bilinearPosition = coordinator.projectPointViaBilinear(mapPoint: mapPoint) else {
+            guard let bilinearResult = coordinator.projectPointViaBilinear(mapPoint: mapPoint) else {
                 return nil
             }
             
-            var groundedPosition = bilinearPosition
+            var groundedPosition = bilinearResult.position
             groundedPosition.y = groundY
             return groundedPosition
         }
